@@ -39,19 +39,28 @@ STRUCTURE OBLIGATOIRE (respecte cet ordre et ces éléments strictement) :
 
 3. AVANT-PROPOS — "La Vocation de Clinicien" : Une introduction qui interpelle directement ${student.fullName}, pose l'enjeu (transformer le cours en encyclopédie clinique vivante), et explique l'esprit d'enquête ("comprendre le Comment et le Pourquoi de chaque phénomène, pas réciter un catalogue").
 
-4. CHAPITRES THÉMATIQUES (numérotés en chiffres romains) : Découpe le contenu du cours en chapitres logiques et progressifs — par exemple, selon la nature du cours : anatomophysiologie/histologie de base, définitions et pièges du diagnostic différentiel, grands mécanismes physiopathologiques, puis un chapitre par pathologie/agent/situation clinique couverte par le cours source. Pour chaque pathologie ou situation :
+4. CHAPITRES THÉMATIQUES (numérotés en chiffres romains, autant que nécessaire) : Découpe le contenu du cours en chapitres logiques et progressifs, en suivant TOUJOURS cette architecture-type (adapte les intitulés au sujet réel du cours, mais ne saute aucune de ces étapes) :
+   a. Un ou deux chapitres de fondations (anatomie/physiologie/histologie ou mécanismes de base indispensables pour comprendre la suite).
+   b. Un chapitre de définitions cliniques et de pièges du diagnostic différentiel initial.
+   c. Un ou plusieurs chapitres exposant les grands mécanismes physiopathologiques transversaux du sujet (le "triptyque" ou la classification centrale du cours).
+   d. Un chapitre par pathologie / agent causal / situation clinique couverte par le cours source, chacun structuré ainsi : présentation de l'agent ou du contexte → un "Scénario" concret et imagé → la cascade moléculaire ou physiopathologique détaillée à l'extrême → le profil clinique qui en découle logiquement.
+   e. Un chapitre de stratification du risque : les critères d'hospitalisation absolus / "Red Flags" à connaître par cœur, sous forme de liste numérotée et justifiée.
+   f. Un chapitre d'arsenal diagnostique : quels examens complémentaires demander, dans quelles situations précises, et pourquoi (jamais "à tout le monde").
+   g. Un chapitre de stratégie thérapeutique fondamentale, avec des classes thérapeutiques, des molécules et des posologies concrètes et réalistes.
+   h. Un chapitre obligatoire intitulé "Guide Pratique Contre l'Iatrogénie" détaillant une erreur médicale grave et réaliste à ne jamais commettre en lien avec ce cours (mécanisme du danger + conséquence clinique concrète).
+
+   Dans CHAQUE chapitre :
    - Utilise des métaphores fortes et mémorables pour nommer les mécanismes (ex : "Le sabotage osmotique", "Le monstre iatrogène").
    - Détaille la cascade moléculaire ou physiopathologique à l'extrême avant de décrire la clinique.
-   - Insère au moins un encadré "💡 L'Astuce du Prof" (sous forme de citation Markdown \`>\`) par chapitre pour une astuce, un piège ou une règle d'or à retenir.
+   - Insère au moins un encadré "💡 L'Astuce du Prof" (sous forme de citation Markdown \`>\`) pour une astuce, un piège ou une règle d'or à retenir.
    - Après les sections de diagnostic différentiel ou les notions les plus critiques du chapitre, insère un bref résumé d'ancrage en ARABE (quelques mots ou une courte phrase, pas une traduction complète), précédé de l'émoji 📌, pour fixer la notion-clé.
-   - Inclus systématiquement un chapitre intitulé "Guide Pratique Contre l'Iatrogénie" détaillant une erreur médicale grave et réaliste à ne jamais commettre en lien avec ce cours (mécanisme du danger + conséquence clinique concrète).
 
 5. DERNIER CHAPITRE OBLIGATOIRE — "TRAVAUX DIRIGÉS (TD) : CAS CLINIQUES COMPLEXES DÉCORTIQUÉS PAS À PAS" : Invente OBLIGATOIREMENT 3 cas cliniques réalistes et variés, directement liés au contenu du cours. Pour CHAQUE cas, respecte STRICTEMENT ce format :
    - Un paragraphe de présentation clinique réaliste et concret (âge, contexte, constantes vitales précises, chronologie des symptômes).
    - "Questions de Réflexion :" — 2 questions qui orientent la réflexion de ${student.fullName}.
    - "Décorticage pas à pas du Professeur :" — une réponse structurée avec des sous-titres en **gras** (ex : **Analyse du Syndrome**, **Analyse de la Gravité**, **Action Médicale**) qui résout le cas étape par étape, en justifiant chaque décision par la physiopathologie exposée dans les chapitres précédents.
 
-6. CONCLUSION : Un tableau récapitulatif comparatif de synthèse (Markdown), puis un court paragraphe de clôture chaleureux, motivant et personnalisé pour ${student.fullName}.
+6. CONCLUSION — "RÉCAPITULATIF" : Un tableau Markdown comparatif (colonnes = les grandes catégories/syndromes/situations opposées du cours, lignes = les paramètres clés : mécanisme, présentation clinique, signe distinctif, conduite à tenir) qui permet à ${student.fullName} de visualiser d'un coup d'œil les oppositions essentielles du cours. Termine par un court paragraphe de clôture chaleureux, motivant et personnalisé.
 
 FORMAT : Markdown riche et expert — titres ## et ###, **gras** sur les mots-clés, listes à puces, tableaux, et citations \`>\` pour les encadrés "Astuce du Prof". Ne mets JAMAIS le contenu dans un objet JSON, un bloc de code, ni aucune enveloppe technique : réponds directement en Markdown pur, du titre à la conclusion.`;
 }
