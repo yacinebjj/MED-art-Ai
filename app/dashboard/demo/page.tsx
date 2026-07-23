@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, FileText, Maximize2, Minimize2 } from "lucide-react";
 import {
   DEMO_SECTIONS,
   buildDemoAskPrompt,
@@ -15,6 +15,7 @@ import {
 } from "@/lib/demo-content";
 import { cn } from "@/lib/utils";
 import { useTextSelection } from "@/hooks/useTextSelection";
+import { useFullscreen } from "@/hooks/useFullscreen";
 import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
 import { ChatPanel } from "@/components/course/workspace/ChatPanel";
 import type { ChatMessage } from "@/lib/types";
@@ -25,6 +26,7 @@ export default function DemoWorkspacePage() {
   const activeSection = DEMO_SECTIONS.find((s) => s.id === activeId) ?? DEMO_SECTIONS[0];
 
   const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
+  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
 
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -101,13 +103,40 @@ export default function DemoWorkspacePage() {
       </aside>
 
       {/* Panneau Central — Lecture */}
-      <main className="relative flex-1 overflow-y-auto">
+      <main
+        className={cn(
+          "relative flex-1 overflow-y-auto",
+          isFullscreen && "fixed inset-0 z-40 bg-[#F9FAFB]"
+        )}
+      >
+        <div className="sticky top-0 z-50 flex justify-end p-4">
+          <button
+            onClick={toggleFullscreen}
+            className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-gray-50"
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize2 className="h-3.5 w-3.5" />
+                Quitter le plein écran
+              </>
+            ) : (
+              <>
+                <Maximize2 className="h-3.5 w-3.5" />
+                Plein écran
+              </>
+            )}
+          </button>
+        </div>
+
         <div
           ref={containerRef}
           onContextMenu={(e) => e.preventDefault()}
-          className="mx-auto my-8 max-w-3xl select-text rounded-2xl bg-white p-12 shadow-sm ring-1 ring-slate-200"
+          className="mx-auto mb-8 max-w-3xl select-text rounded-2xl bg-white p-12 shadow-sm ring-1 ring-slate-200"
         >
-          <article key={activeSection.id} className="prose prose-slate prose-lg animate-fade-in">
+          <article
+            key={activeSection.id}
+            className="prose prose-slate prose-lg prose-img:w-full prose-img:rounded-xl prose-img:shadow-sm animate-fade-in"
+          >
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeSection.content}</ReactMarkdown>
           </article>
         </div>

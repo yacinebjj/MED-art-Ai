@@ -8,7 +8,7 @@ import {
   buildProfesseurOralUserMessage,
 } from "@/lib/prompts/professeur-oral";
 import {
-  buildExplicationSystemPrompt,
+  EXPLICATION_ULTRA_DETAILLEE_SYSTEM_PROMPT,
   buildExplicationUserMessage,
 } from "@/lib/prompts/explication-ultra-detaillee";
 import type { CourseContent, StudentProfile } from "@/lib/types";
@@ -111,17 +111,15 @@ export async function generateCoursOral(courseText: string): Promise<string> {
  * course summary. Kept as its own dedicated call (raw Markdown, no JSON
  * envelope) rather than folded into the 5-section mega-prompt, because the
  * Gold Standard quality bar for this section requires far more volume than
- * a shared JSON call could reliably produce without truncation.
+ * a shared JSON call could reliably produce without truncation. The system
+ * prompt has no personalization slots, so no student profile is needed here.
  */
-export async function generateExplicationUltraDetaillee(
-  courseText: string,
-  student: StudentProfile
-): Promise<string> {
+export async function generateExplicationUltraDetaillee(courseText: string): Promise<string> {
   const truncatedText = courseText.slice(0, MAX_COURSE_CHARS);
 
   try {
     return await callOpenRouter([
-      { role: "system", content: buildExplicationSystemPrompt(student) },
+      { role: "system", content: EXPLICATION_ULTRA_DETAILLEE_SYSTEM_PROMPT },
       { role: "user", content: buildExplicationUserMessage(truncatedText) },
     ]);
   } catch (error) {

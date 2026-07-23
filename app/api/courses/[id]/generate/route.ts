@@ -94,16 +94,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ content, cached: false });
     }
 
-    const student = profileFromUser(user);
-
     if (contentType === "explication") {
-      const content = await generateExplicationUltraDetaillee(sourceText, student);
+      const content = await generateExplicationUltraDetaillee(sourceText);
       await setCachedContent(course.id, "explication", content);
       await recordGeneration(user.id);
       return NextResponse.json({ content, cached: false });
     }
 
     // Any of the remaining 5 Studio sections: one call fills all of them.
+    const student = profileFromUser(user);
     const fiveSections = await generateCourseContent(sourceText, student);
 
     await setCachedContentBatch(course.id, {
