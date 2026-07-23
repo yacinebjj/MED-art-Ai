@@ -23,6 +23,25 @@ export interface DemoSection {
   content: string;
 }
 
+export function buildDemoAskPrompt(selectedText: string): string {
+  return `L'étudiant demande une explication détaillée sur ce passage précis de son cours de médecine : "${selectedText}". Explique-le comme un professeur de manière simple et précise.`;
+}
+
+export function buildDemoTranslatePrompt(selectedText: string): string {
+  return `Traduis ce terme ou passage médical en arabe et en français courant : "${selectedText}".`;
+}
+
+const DEMO_DISCLAIMER =
+  "*(Réponse de démonstration statique — l'intégration IA (OpenRouter) est actuellement en pause.)*";
+
+export function buildDemoAskReply(selectedText: string): string {
+  return `**Excellente question, Yacine !**\n\nRevenons sur : *"${selectedText}"*\n\nEn clinique, c'est exactement le genre de détail qui fait la différence entre "je connais le cours" et "je comprends le mécanisme". Imagine ça comme une pièce d'engrenage : si tu la retires du reste de l'explication, tout le mécanisme s'arrête de tourner.\n\n> 💡 **Retiens ceci :** reformule toujours ce passage avec tes propres mots avant de passer à la suite — c'est la meilleure façon de vérifier que tu l'as vraiment compris.\n\n${DEMO_DISCLAIMER}`;
+}
+
+export function buildDemoTranslateReply(selectedText: string): string {
+  return `**Traduction de :** *"${selectedText}"*\n\n🇫🇷 **Français courant :** une reformulation simple de ce terme médical, sans jargon.\n\n🇸🇦 **العربية :** الترجمة الطبية المبسطة لهذا المصطلح.\n\n${DEMO_DISCLAIMER}`;
+}
+
 export const DEMO_SECTIONS: DemoSection[] = [
   {
     id: "explication",

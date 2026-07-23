@@ -1,17 +1,77 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, FileText } from "lucide-react";
-import { DEMO_SECTIONS, type DemoSectionId } from "@/lib/demo-content";
+import {
+  DEMO_SECTIONS,
+  buildDemoAskPrompt,
+  buildDemoAskReply,
+  buildDemoTranslatePrompt,
+  buildDemoTranslateReply,
+  type DemoSectionId,
+} from "@/lib/demo-content";
 import { cn } from "@/lib/utils";
+import { useTextSelection } from "@/hooks/useTextSelection";
+import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
+import { ChatPanel } from "@/components/course/workspace/ChatPanel";
+import type { ChatMessage } from "@/lib/types";
 
 export default function DemoWorkspacePage() {
   const [activeId, setActiveId] = useState<DemoSectionId>("explication");
   const today = new Date().toLocaleDateString("fr-FR");
   const activeSection = DEMO_SECTIONS.find((s) => s.id === activeId) ?? DEMO_SECTIONS[0];
+
+  const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
+
+  function sendDemoMessage(userContent: string, reply: string) {
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userContent };
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatOpen(true);
+    setIsTyping(true);
+
+    typingTimeoutRef.current = setTimeout(() => {
+      setChatMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: reply },
+      ]);
+      setIsTyping(false);
+    }, 900);
+  }
+
+  function handleAsk(selectedText: string) {
+    sendDemoMessage(buildDemoAskPrompt(selectedText), buildDemoAskReply(selectedText));
+    clearSelection();
+  }
+
+  function handleTranslate(selectedText: string) {
+    sendDemoMessage(buildDemoTranslatePrompt(selectedText), buildDemoTranslateReply(selectedText));
+    clearSelection();
+  }
+
+  function handleChatSubmit() {
+    const text = chatInput.trim();
+    if (!text) return;
+    setChatInput("");
+    sendDemoMessage(
+      text,
+      "Merci pour ta question ! Ceci est une démonstration statique de l'interface — les réponses réelles de MedArt arriveront une fois l'intégration IA réactivée. 🙂"
+    );
+  }
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#F9FAFB]">
@@ -41,15 +101,25 @@ export default function DemoWorkspacePage() {
       </aside>
 
       {/* Panneau Central — Lecture */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="relative flex-1 overflow-y-auto">
         <div
-          key={activeSection.id}
-          className="mx-auto my-8 max-w-3xl animate-fade-in rounded-2xl bg-white p-12 shadow-sm ring-1 ring-slate-200"
+          ref={containerRef}
+          onContextMenu={(e) => e.preventDefault()}
+          className="mx-auto my-8 max-w-3xl select-text rounded-2xl bg-white p-12 shadow-sm ring-1 ring-slate-200"
         >
-          <article className="prose prose-slate prose-lg">
+          <article key={activeSection.id} className="prose prose-slate prose-lg animate-fade-in">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeSection.content}</ReactMarkdown>
           </article>
         </div>
+
+        {selection && (
+          <SelectionTooltip
+            ref={tooltipRef}
+            selection={selection}
+            onAsk={handleAsk}
+            onTranslate={handleTranslate}
+          />
+        )}
       </main>
 
       {/* Panneau Droit — Studio */}
@@ -79,6 +149,16 @@ export default function DemoWorkspacePage() {
           })}
         </div>
       </aside>
+
+      <ChatPanel
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        messages={chatMessages}
+        isTyping={isTyping}
+        input={chatInput}
+        onInputChange={setChatInput}
+        onSend={handleChatSubmit}
+      />
     </div>
   );
 }
