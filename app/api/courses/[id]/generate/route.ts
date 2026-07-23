@@ -10,6 +10,7 @@ import {
   CourseGenerationError,
   generateCourseContent,
   generateCoursOral,
+  generateExplicationUltraDetaillee,
 } from "@/lib/ai/generate-course-content";
 import { canGenerate, recordGeneration } from "@/lib/subscription";
 import { profileFromUser } from "@/lib/auth";
@@ -17,8 +18,9 @@ import type { ContentType } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-const SECTION_TYPES: ContentType[] = [
-  "explication",
+// The 5 sections still filled together by the mega-prompt in one call.
+// "cours_oral" and "explication" each have their own dedicated generator.
+const MEGA_PROMPT_SECTION_TYPES: ContentType[] = [
   "resume",
   "pieges",
   "astuces",
@@ -27,7 +29,11 @@ const SECTION_TYPES: ContentType[] = [
 ];
 
 function isContentType(value: unknown): value is ContentType {
-  return value === "cours_oral" || SECTION_TYPES.includes(value as ContentType);
+  return (
+    value === "cours_oral" ||
+    value === "explication" ||
+    MEGA_PROMPT_SECTION_TYPES.includes(value as ContentType)
+  );
 }
 
 /**
@@ -35,10 +41,11 @@ function isContentType(value: unknown): value is ContentType {
  * (courseId, contentType) first (0 tokens on a hit); on a miss, gate behind
  * the subscription/trial check, call OpenRouter, cache the result, return it.
  *
- * For the 6 Studio sections, one AI call fills all 6 cache slots at once
- * (the mega-prompt already produces them together) — so clicking a second
- * Studio button for the same course is a free cache hit even though it was
- * never requested directly before.
+ * "cours_oral" and "explication" each get their own dedicated AI call and
+ * cache slot. The remaining 5 Studio sections (résumé, pièges, astuces, cas
+ * clinique, qcm) are still filled together by one mega-prompt call — so
+ * clicking a second of those 5 buttons for the same course is a free cache
+ * hit even though it was never requested directly before.
  */
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthenticatedUser();
@@ -87,27 +94,33 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ content, cached: false });
     }
 
-    // Any of the 6 Studio sections: one call fills all of them.
     const student = profileFromUser(user);
-    const sixSections = await generateCourseContent(sourceText, student);
+
+    if (contentType === "explication") {
+      const content = await generateExplicationUltraDetaillee(sourceText, student);
+      await setCachedContent(course.id, "explication", content);
+      await recordGeneration(user.id);
+      return NextResponse.json({ content, cached: false });
+    }
+
+    // Any of the remaining 5 Studio sections: one call fills all of them.
+    const fiveSections = await generateCourseContent(sourceText, student);
 
     await setCachedContentBatch(course.id, {
-      explication: sixSections.explication,
-      resume: sixSections.resume,
-      pieges: sixSections.pieges,
-      astuces: sixSections.astuces,
-      cas_clinique: sixSections.casClinique,
-      qcm: sixSections.qcm,
+      resume: fiveSections.resume,
+      pieges: fiveSections.pieges,
+      astuces: fiveSections.astuces,
+      cas_clinique: fiveSections.casClinique,
+      qcm: fiveSections.qcm,
     });
     await recordGeneration(user.id);
 
-    const contentByType: Record<Exclude<ContentType, "cours_oral">, string> = {
-      explication: sixSections.explication,
-      resume: sixSections.resume,
-      pieges: sixSections.pieges,
-      astuces: sixSections.astuces,
-      cas_clinique: sixSections.casClinique,
-      qcm: sixSections.qcm,
+    const contentByType: Record<Exclude<ContentType, "cours_oral" | "explication">, string> = {
+      resume: fiveSections.resume,
+      pieges: fiveSections.pieges,
+      astuces: fiveSections.astuces,
+      cas_clinique: fiveSections.casClinique,
+      qcm: fiveSections.qcm,
     };
 
     return NextResponse.json({ content: contentByType[contentType], cached: false });

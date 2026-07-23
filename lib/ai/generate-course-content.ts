@@ -7,12 +7,15 @@ import {
   PROFESSEUR_ORAL_SYSTEM_PROMPT,
   buildProfesseurOralUserMessage,
 } from "@/lib/prompts/professeur-oral";
+import {
+  buildExplicationSystemPrompt,
+  buildExplicationUserMessage,
+} from "@/lib/prompts/explication-ultra-detaillee";
 import type { CourseContent, StudentProfile } from "@/lib/types";
 
 const MAX_COURSE_CHARS = 60_000;
 
 const REQUIRED_KEYS: (keyof CourseContent)[] = [
-  "explication",
   "resume",
   "pieges",
   "astuces",
@@ -38,10 +41,12 @@ function fromOpenRouterError(error: unknown): CourseGenerationError {
 }
 
 /**
- * Generates the 6 Studio sections (Explication, Résumé, Pièges, Astuces,
- * Cas Clinique, QCM) in a single call — this is what powers every Studio
- * button except "Cours Oral". Only invoked on a cache miss (see
- * lib/course-content-cache.ts); every call here costs real tokens.
+ * Generates 5 of the Studio sections (Résumé, Pièges, Astuces, Cas Clinique,
+ * QCM) in a single call. "Explication Ultra-Détaillée" and "Cours Oral" are
+ * generated separately, each with its own dedicated prompt — see
+ * generateExplicationUltraDetaillee and generateCoursOral below. Only
+ * invoked on a cache miss (see lib/course-content-cache.ts); every call here
+ * costs real tokens.
  */
 export async function generateCourseContent(
   courseText: string,
@@ -95,6 +100,29 @@ export async function generateCoursOral(courseText: string): Promise<string> {
     return await callOpenRouter([
       { role: "system", content: PROFESSEUR_ORAL_SYSTEM_PROMPT },
       { role: "user", content: buildProfesseurOralUserMessage(truncatedText) },
+    ]);
+  } catch (error) {
+    throw fromOpenRouterError(error);
+  }
+}
+
+/**
+ * Generates "Explication Ultra-Détaillée" — a full medical treatise, not a
+ * course summary. Kept as its own dedicated call (raw Markdown, no JSON
+ * envelope) rather than folded into the 5-section mega-prompt, because the
+ * Gold Standard quality bar for this section requires far more volume than
+ * a shared JSON call could reliably produce without truncation.
+ */
+export async function generateExplicationUltraDetaillee(
+  courseText: string,
+  student: StudentProfile
+): Promise<string> {
+  const truncatedText = courseText.slice(0, MAX_COURSE_CHARS);
+
+  try {
+    return await callOpenRouter([
+      { role: "system", content: buildExplicationSystemPrompt(student) },
+      { role: "user", content: buildExplicationUserMessage(truncatedText) },
     ]);
   } catch (error) {
     throw fromOpenRouterError(error);

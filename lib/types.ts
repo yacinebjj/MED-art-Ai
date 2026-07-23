@@ -27,10 +27,11 @@ export interface Course {
 /**
  * Each field is a full Markdown block for that section, produced by the
  * "professeur" mega-prompt (see lib/prompts/course-generation.ts). One AI
- * call fills all 6 at once — see lib/course-content-cache.ts.
+ * call fills all 5 at once — see lib/course-content-cache.ts. "Explication"
+ * is generated separately (see lib/prompts/explication-ultra-detaillee.ts)
+ * since it needs its own dedicated, much longer treatise-style prompt.
  */
 export interface CourseContent {
-  explication: string;
   resume: string;
   pieges: string;
   astuces: string;
