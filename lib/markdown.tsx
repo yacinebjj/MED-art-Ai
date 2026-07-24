@@ -73,6 +73,7 @@ function hastText(node: unknown): string {
 /** Picks a callout color from the blockquote's own text — works for the static demo AND live AI output. */
 function calloutTone(text: string): CalloutTone {
   if (text.includes("🔴")) return "rose";
+  if (text.includes("🟡")) return "amber";
   if (text.includes("🟢")) return "emerald";
   if (text.includes("🔵")) return "blue";
   if (/[؀-ۿ]/.test(text)) return "emerald"; // Arabic memory anchor
