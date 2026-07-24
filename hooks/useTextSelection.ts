@@ -45,11 +45,18 @@ export function useTextSelection(): UseTextSelectionResult {
       // Ignore empty/zero-size ranges (can happen on a stray mouseup).
       if (rect.width === 0 && rect.height === 0) return;
 
-      setSelection({
-        text,
-        top: rect.top + window.scrollY - 50,
-        left: rect.left + window.scrollX + rect.width / 2,
-      });
+      // getBoundingClientRect() is ALWAYS viewport-relative, so pairing it
+      // with a position:fixed tooltip means NO scroll offset must be added.
+      // The old code added window.scrollY, but the reader scrolls inside an
+      // inner overflow container (not the window), so window.scrollY stayed 0
+      // and the tooltip was mispositioned as soon as the text was scrolled —
+      // making it seem to "only work at the top". Viewport coords fix that at
+      // any scroll depth, whichever element actually scrolls.
+      const left = rect.left + rect.width / 2;
+      let top = rect.top - 50; // just above the selection
+      if (top < 8) top = rect.bottom + 12; // flip below if too close to the top edge
+
+      setSelection({ text, top, left });
     }
 
     function handleMouseDown(event: MouseEvent) {

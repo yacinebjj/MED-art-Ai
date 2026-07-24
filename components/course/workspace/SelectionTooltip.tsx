@@ -16,7 +16,7 @@ export const SelectionTooltip = forwardRef<
     <div
       ref={ref}
       style={{ top: selection.top, left: selection.left }}
-      className="absolute z-50 flex -translate-x-1/2 gap-2 rounded-lg bg-gray-900 p-2 shadow-xl"
+      className="fixed z-[60] flex -translate-x-1/2 gap-2 rounded-lg bg-gray-900 p-2 shadow-xl"
     >
       <button
         onClick={() => onAsk(selection.text)}

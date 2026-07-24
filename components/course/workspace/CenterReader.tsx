@@ -6,6 +6,7 @@ import { Loader2, AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { cn } from "@/lib/utils";
+import { PROSE_CLASSES, MARKDOWN_COMPONENTS } from "@/lib/markdown";
 import { SelectionTooltip } from "./SelectionTooltip";
 
 export function CenterReader({
@@ -64,24 +65,28 @@ export function CenterReader({
         <div
           ref={containerRef}
           onContextMenu={(e) => e.preventDefault()}
-          className="prose prose-slate lg:prose-lg prose-img:w-full prose-img:rounded-xl prose-img:shadow-sm max-w-4xl select-text rounded-xl bg-white p-10 shadow-lg"
+          className="w-full max-w-4xl select-text rounded-xl bg-white p-10 shadow-lg"
         >
           {isLoading && (
-            <div className="flex items-center gap-3 not-prose text-gray-500">
+            <div className="flex items-center gap-3 text-gray-500">
               <Loader2 className="h-5 w-5 animate-spin" />
               Le professeur prépare ton cours…
             </div>
           )}
 
           {!isLoading && error && (
-            <div className="flex items-center gap-3 not-prose rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               {error}
             </div>
           )}
 
           {!isLoading && !error && content && (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <article className={PROSE_CLASSES}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                {content}
+              </ReactMarkdown>
+            </article>
           )}
         </div>
       </div>

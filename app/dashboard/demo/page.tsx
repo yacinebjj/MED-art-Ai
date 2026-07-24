@@ -14,6 +14,7 @@ import {
   type DemoSectionId,
 } from "@/lib/demo-content";
 import { cn } from "@/lib/utils";
+import { PROSE_CLASSES, MARKDOWN_COMPONENTS } from "@/lib/markdown";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
@@ -133,11 +134,10 @@ export default function DemoWorkspacePage() {
           onContextMenu={(e) => e.preventDefault()}
           className="mx-auto mb-8 max-w-3xl select-text rounded-2xl bg-white p-12 shadow-sm ring-1 ring-slate-200"
         >
-          <article
-            key={activeSection.id}
-            className="prose prose-slate prose-lg prose-img:w-full prose-img:rounded-xl prose-img:shadow-sm animate-fade-in"
-          >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeSection.content}</ReactMarkdown>
+          <article key={activeSection.id} className={cn(PROSE_CLASSES, "animate-fade-in")}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+              {activeSection.content}
+            </ReactMarkdown>
           </article>
         </div>
 
