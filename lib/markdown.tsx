@@ -5,43 +5,94 @@ import type { Components } from "react-markdown";
  * reader (workspace CenterReader + the static demo page). Kept in one place so
  * the two stay visually identical.
  *
- * Highlights:
- * - Navy/blue premium headings, colored bold text and list markers.
- * - Blockquotes ("L'Astuce du Prof" / "Résumés en Arabe") get a light blue
- *   background, a thick colored left border, and NO default quotation marks
- *   (the last two arbitrary variants strip the plugin's open-/close-quote).
- * - Table cells get real padding, a blue header row, row separators and
- *   zebra striping. Full-width, rounded, shadowed images.
+ * Blockquote colors and images are handled by the custom components below
+ * (not here), so this string only covers headings, bold, markers, tables and
+ * separators. It also strips the plugin's default blockquote quotation marks.
  */
 export const PROSE_CLASSES = [
   "prose prose-slate prose-lg max-w-none",
-  // Headings — premium navy/blue
+  // Headings — premium, color by importance
   "prose-headings:font-bold prose-headings:tracking-tight",
-  "prose-h1:text-slate-900 prose-h2:text-blue-800 prose-h3:text-blue-600",
+  "prose-h1:text-slate-900 prose-h2:text-blue-800 prose-h3:text-indigo-600",
   // Bold text pops in blue
   "prose-strong:text-blue-700 prose-strong:font-semibold",
   "prose-a:text-blue-600",
   // Bullet / ordered-list markers
   "marker:text-blue-500",
-  // Blockquotes — soft background + thick colored left border, quotes removed
-  "prose-blockquote:border-l-4 prose-blockquote:border-blue-500 prose-blockquote:bg-blue-50",
-  "prose-blockquote:rounded-r-lg prose-blockquote:px-5 prose-blockquote:py-3",
-  "prose-blockquote:not-italic prose-blockquote:font-normal prose-blockquote:text-slate-800",
+  // Kill the default open-/close-quote glyphs on blockquotes (components color them)
   "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",
   // Tables
   "prose-th:bg-blue-600 prose-th:text-white prose-th:font-semibold prose-th:p-3 prose-th:text-left",
   "prose-td:p-3 prose-td:border-t prose-td:border-slate-200 prose-td:align-top",
   "[&_tbody_tr:nth-child(even)]:bg-slate-50",
-  // Images
-  "prose-img:w-full prose-img:rounded-xl prose-img:shadow-md prose-img:my-6",
+  // Horizontal separators
+  "prose-hr:border-t-2 prose-hr:border-blue-100",
 ].join(" ");
 
+/** The four callout "tones" and their full literal Tailwind classes (literal so Tailwind's scanner picks them up). */
+type CalloutTone = "blue" | "emerald" | "amber" | "rose";
+
+const CALLOUT_STYLES: Record<CalloutTone, string> = {
+  // Physiopathology / general note
+  blue: "border-l-4 border-blue-500 bg-blue-50 text-slate-800",
+  // Arabic memory-anchor summaries
+  emerald: "border-l-4 border-emerald-500 bg-emerald-50 text-slate-800",
+  // "L'Astuce du Prof"
+  amber: "border-l-4 border-amber-500 bg-amber-50 text-slate-800",
+  // Red flags / danger / attention
+  rose: "border-l-4 border-rose-500 bg-rose-50 text-slate-800",
+};
+
+/** Flattens a hast node subtree to its text so a blockquote can be classified by content. */
+function hastText(node: unknown): string {
+  const n = node as { type?: string; value?: string; children?: unknown[] } | null;
+  if (!n) return "";
+  if (n.type === "text") return n.value ?? "";
+  if (Array.isArray(n.children)) return n.children.map(hastText).join("");
+  return "";
+}
+
+/** Picks a callout color from the blockquote's own text — works for static demo content AND live AI output. */
+function calloutTone(text: string): CalloutTone {
+  if (/[؀-ۿ]/.test(text)) return "emerald"; // contains Arabic → memory anchor
+  if (/astuce du prof/i.test(text)) return "amber";
+  if (/(attention|danger|red\s*flag|jamais|interdit|urgence vitale|mortel|risque vital)/i.test(text)) {
+    return "rose";
+  }
+  return "blue";
+}
+
 /**
- * ReactMarkdown element overrides. Wraps every table in a rounded, scrollable
- * container so wide comparison tables never overflow the reader (especially in
- * the narrow non-fullscreen layout) and keep clean rounded corners.
+ * ReactMarkdown element overrides:
+ * - blockquote: colored callout box, tone chosen from its content.
+ * - img: real responsive image with a styled caption (from the alt text).
+ * - table: wrapped in a rounded, horizontally-scrollable container.
  */
 export const MARKDOWN_COMPONENTS: Components = {
+  blockquote: ({ node, children }) => {
+    const tone = calloutTone(hastText(node));
+    return (
+      <blockquote
+        className={`my-5 rounded-r-lg px-5 py-3 font-normal not-italic shadow-sm ${CALLOUT_STYLES[tone]}`}
+      >
+        {children}
+      </blockquote>
+    );
+  },
+  img: ({ src, alt }) => (
+    <figure className="my-6">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={typeof src === "string" ? src : ""}
+        alt={alt ?? ""}
+        loading="lazy"
+        className="w-full rounded-2xl shadow-lg ring-1 ring-slate-200/80"
+      />
+      {alt ? (
+        <figcaption className="mt-2 text-center text-sm italic text-slate-500">{alt}</figcaption>
+      ) : null}
+    </figure>
+  ),
   table: ({ children }) => (
     <div className="my-6 overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
       <table className="m-0 w-full">{children}</table>

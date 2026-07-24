@@ -21,6 +21,13 @@ export interface DemoSection {
   label: string;
   icon: LucideIcon;
   content: string;
+  /** Per-tab color identity for the Studio sidebar (literal Tailwind classes). */
+  accent: {
+    /** Applied to the whole button when the tab is active. */
+    active: string;
+    /** Colored icon "badge" chip, shown in every state. */
+    chip: string;
+  };
 }
 
 export function buildDemoAskPrompt(selectedText: string): string {
@@ -47,246 +54,263 @@ export const DEMO_SECTIONS: DemoSection[] = [
     id: "explication",
     label: "Explication Ultra-Détaillée",
     icon: BookOpenText,
-    content: `# L'Appendicite Aiguë en Milieu Tropical et à Ressources Limitées
+    accent: {
+      active: "border-blue-300 bg-blue-50 text-blue-800",
+      chip: "bg-blue-100 text-blue-600",
+    },
+    content: `# L'Appendicite Aiguë en Milieu Tropical
 
-## Physiopathologie Moléculaire, Pièges Diagnostiques Régionaux et Stratégies Thérapeutiques Adaptées
+## Comprendre, du plus petit détail de la cellule jusqu'au geste qui sauve
+
+Bienvenue. Aujourd'hui, on va parler de l'appendicite. Mais attention : pas d'une manière ennuyeuse. On va faire simple, clair, avec des images de tous les jours. Mon but est que tu comprennes TOUT, même si le français n'est pas ta langue préférée. Tu vas voir : une fois que tu as le bon dessin dans la tête, tout devient facile.
+
+Ne saute aucune ligne, même si c'est long. Chaque petite idée en prépare une plus grande. À la fin, tu ne réciteras pas ce cours : tu le comprendras, et ça, personne ne pourra te l'enlever.
+
+![Un microscope en gros plan : c'est avec cet outil qu'on observe les cellules dont on va parler](https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1000&q=80)
 
 ## Sommaire
 
-- Avant-propos : La Vocation de Clinicien en Terrain Difficile
-- Chapitre I : Anatomie et Histologie de l'Appendice Vermiforme
-- Chapitre II : Le Microbiote Appendiculaire et l'Architecture Immunologique du GALT
-- Chapitre III : Diagnostic Différentiel en Zone Tropicale
-- Chapitre IV : Le Grand Mécanisme Physiopathologique — De l'Obstruction Luminale à la Nécrose Cellulaire
-- Chapitre V : L'Ascaridiose Digestive, une Cause Tropicale d'Obstruction Mécanique
-- Chapitre VI : La Cascade Inflammatoire Cellulaire en Détail
-- Chapitre VII : Stratification du Risque en Contexte de Ressources Limitées
-- Chapitre VIII : Arsenal Diagnostique Adapté au Terrain
-- Chapitre IX : Stratégie Thérapeutique en Environnement à Ressources Limitées
-- Chapitre X : Guide Pratique Contre l'Iatrogénie du Retard Diagnostique
-- Récapitulatif des Formes Évolutives et des Règles de Survie
+- Avant-propos : pourquoi ce cours est important pour toi
+- Chapitre I : L'appendice, c'est quoi au juste ?
+- Chapitre II : Un petit sac plein de soldats
+- Chapitre III : Les faux amis (ce qui ressemble à l'appendicite)
+- Chapitre IV : Comment le tuyau se bouche et finit par exploser
+- Chapitre V : Le ver qui bouche le tuyau
+- Chapitre VI : L'alarme incendie de la cellule
+- Chapitre VII : Qui doit partir à l'hôpital tout de suite ?
+- Chapitre VIII : Les outils du médecin sur le terrain
+- Chapitre IX : Comment on soigne
+- Chapitre X : L'erreur qui peut tuer : attendre trop longtemps
+- Récapitulatif : le tableau à retenir
 
-## Avant-Propos : La Vocation de Clinicien en Terrain Difficile
+## AVANT-PROPOS : Pourquoi ce cours est important pour toi
 
-Installe-toi confortablement. Prends de quoi noter, car ce que nous allons construire ensemble dépasse largement le simple cadre d'une lecture passive de polycopié de faculté. Nous n'allons pas seulement étudier une maladie chirurgicale banale. Nous allons étudier ce qu'elle devient lorsqu'elle survient loin d'un plateau technique complet, dans un centre de santé rural, sous un climat tropical, au milieu d'une population exposée à des co-infections parasitaires que la médecine occidentale rencontre rarement.
+Installe-toi bien. L'appendicite, c'est l'une des urgences du ventre les plus fréquentes au monde. Tu la verras très souvent. Le problème, c'est qu'elle est maligne : elle sait se déguiser. Parfois elle ressemble à une simple douleur au ventre, et pourtant elle peut tuer en quelques heures.
 
-L'appendicite aiguë est universelle : elle touche l'enfant de Blida comme l'adolescent de Bamako ou de Conakry. Mais son diagnostic différentiel, sa vitesse d'évolution et surtout sa prise en charge changent radicalement selon le plateau technique disponible. Dans un service d'urgences parfaitement équipé, une échographie et un scanner tranchent le doute en quelques minutes. Dans un dispensaire rural à quatre heures de piste du bloc opératoire le plus proche, le même diagnostic engage un tout autre raisonnement, un tout autre pari clinique. C'est précisément cette dimension que nous allons décortiquer aujourd'hui, sans jamais sacrifier la rigueur moléculaire et cellulaire qui doit sous-tendre chacun de tes raisonnements.
+Ton travail de médecin n'est pas d'apprendre une phrase par cœur. Ton travail, c'est de COMPRENDRE. Comprendre pourquoi un tout petit bouchon peut transformer un organe tranquille en une vraie bombe. Et surtout, comprendre quoi faire quand l'hôpital est loin, très loin, comme dans beaucoup de régions tropicales.
 
-Ton rôle de clinicien n'est pas de réciter "douleur en fosse iliaque droite égale appendicite". Ton rôle est de comprendre, molécule par molécule, cellule par cellule, pourquoi une obstruction millimétrique peut transformer un organe silencieux en une menace vitale, et comment adapter ta décision lorsque les outils diagnostiques dont tu rêverais ne sont tout simplement pas disponibles. Arrête-toi une seconde avant de continuer : d'après toi, qu'est-ce qui change fondamentalement dans le raisonnement médical lorsque le bloc opératoire le plus proche se trouve à plusieurs heures de route plutôt qu'à quelques mètres ? Garde cette question en tête, nous allons y répondre précisément tout au long de ce traité.
+Une question pour commencer. Attends, réponds-moi : d'après toi, qu'est-ce qui change vraiment quand le bloc opératoire est à quatre heures de route au lieu de quatre minutes ? Réfléchis une seconde avant de lire la suite. La réponse est simple : tu ne peux plus attendre d'être sûr à 100 pour cent. Tu dois décider plus tôt, et parfois envoyer le patient à l'hôpital juste sur un doute sérieux. On y reviendra souvent, car c'est le fil rouge de tout ce cours.
 
-![Visualisation 3D : Position anatomique de l'appendice vermiforme et ses quatre variantes topographiques (rétrocæcale, pelvienne, sous-hépatique, mésocœliaque), avec mise en évidence du point de convergence des ténias coliques](https://placehold.co/800x400/1e293b/ffffff?text=Visualisation+3D+:+Anatomie+Appendice)
+## CHAPITRE I : L'appendice, c'est quoi au juste ?
 
-## Chapitre I : Anatomie et Histologie de l'Appendice Vermiforme
+Imagine ton gros intestin comme un grand tuyau. Au tout début de ce tuyau, il y a une petite poche : le cæcum. Et sur cette poche est accroché un petit doigt creux, fin et fermé au bout, comme un petit gant à un seul doigt. C'est ça, l'appendice.
 
-Avant de comprendre comment cet organe s'enflamme, il faut savoir exactement où il se trouve, de quoi il est fait, et surtout pourquoi sa structure microscopique en fait un terrain si particulier pour l'inflammation.
+Le point où il est attaché ne bouge jamais. C'est un repère fixe pour le chirurgien. Par contre, la pointe de l'appendice, elle, peut se cacher un peu partout autour :
 
-### 1. Une Implantation Fixe, une Position Variable
+➔ **Derrière le cæcum** (le cas le plus fréquent) : là, il est caché. Quand on appuie sur le ventre, on ne sent presque rien. C'est le plus traître.
+➔ **Vers le bas, dans le petit bassin** : là, il touche la vessie ou, chez la femme, les organes féminins. On confond alors facilement avec un problème urinaire ou gynécologique.
+➔ **Vers le haut, sous le foie** : rare, mais la douleur monte et ressemble à une crise de vésicule biliaire.
 
-L'appendice vermiforme s'implante toujours au même endroit : à la convergence des trois bandelettes musculaires longitudinales du côlon, à la face postéro-interne du cæcum, environ deux à trois centimètres sous la valvule iléo-cæcale. Ce point d'implantation ne bouge jamais — c'est un repère chirurgical absolu, quelle que soit la latitude où tu opères.
+Il faut bien comprendre une chose sur sa forme. L'appendice est un cul-de-sac : un tuyau fermé au bout, avec une seule petite porte d'entrée. Pense à une impasse dans une ville, une petite rue sans issue. Tout ce qui rentre doit ressortir par le même endroit. Si on bloque l'entrée de l'impasse, tout ce qui est à l'intérieur reste coincé. Retiens bien cette image du cul-de-sac : c'est la clé de toute la maladie.
 
-En revanche, la position de son extrémité libre est extraordinairement variable d'un individu à l'autre. En position rétrocæcale, qui représente la majorité des cas, l'appendice se love derrière le cæcum, parfois jusqu'au flanc droit, rendant la défense abdominale antérieure quasiment absente. En position pelvienne, il plonge dans le petit bassin, au contact direct de la vessie, du rectum ou des annexes chez la femme. En position sous-hépatique, plus rare, il peut mimer une pathologie biliaire. En position mésocœliaque, il se love au milieu des anses grêles et provoque volontiers un iléus réflexe précoce.
+> **L'Astuce du Prof :** au bloc, si tu ne trouves pas l'appendice, ne panique pas. Le gros intestin a trois bandes de muscle sur sa surface, comme trois rails. Suis ces rails avec le doigt : ils se rejoignent TOUJOURS pile à la base de l'appendice. C'est le truc infaillible.
 
-### 2. Une Histologie qui Explique Tout
+![Vue anatomique du ventre : repérer où se cache l'appendice est la première étape du raisonnement](https://images.unsplash.com/photo-1530497610245-94d3c16cda28?auto=format&fit=crop&w=1000&q=80)
 
-Sur le plan histologique, l'appendice est une véritable amygdale abdominale. Sa paroi comprend quatre tuniques classiques : une muqueuse tapissée d'un épithélium cylindrique simple riche en cellules caliciformes sécrétrices de mucus, une sous-muqueuse extrêmement riche en follicules lymphoïdes secondaires à centre germinatif, une musculeuse à deux couches, circulaire interne et longitudinale externe, et une séreuse péritonéale. Cette richesse en tissu lymphoïde associé au tube digestif atteint son maximum de développement entre dix et vingt ans, ce qui explique en grande partie la fréquence de la maladie dans cette tranche d'âge, y compris en zone tropicale où les stimulations antigéniques infectieuses sont encore plus nombreuses et plus précoces qu'en climat tempéré.
+## CHAPITRE II : Un petit sac plein de soldats
 
-Sa lumière est étroite, tubulaire, et se draine par un orifice minuscule dans le cæcum. Ce détail anatomique est la clé de voûte de toute la physiopathologie que nous allons détailler au Chapitre IV : un conduit étroit, borgne, richement vascularisé et richement innervé, est par nature un piège parfait pour toute obstruction, qu'elle soit fécale, lymphoïde, ou parasitaire.
+Voici une chose que beaucoup d'étudiants ignorent. L'appendice n'est pas un déchet inutile. À l'intérieur de sa paroi, il y a énormément de cellules de défense, les cellules du système immunitaire. On peut le voir comme une petite caserne de soldats, toujours prête à se battre contre les microbes.
 
-## Chapitre II : Le Microbiote Appendiculaire et l'Architecture Immunologique du GALT
+Cette caserne est la plus remplie entre 10 et 20 ans. Et devine quoi : c'est exactement l'âge où l'appendicite est la plus fréquente. Ce n'est pas un hasard, tu vas comprendre pourquoi.
 
-### 1. L'Appendice, Réservoir de Microbiote
+Quand tu attrapes un simple rhume ou une petite gastro, tout ton corps met ses soldats en alerte. Les soldats de l'appendice se multiplient alors très vite et gonflent. Et là, problème : le tuyau de l'appendice est déjà tout fin. Si les soldats gonflent trop, ils bouchent le passage de l'intérieur, comme une éponge qui gonfle dans un tuyau étroit.
 
-Les travaux récents en microbiologie digestive ont profondément renouvelé la vision de cet organe. Loin d'être un simple vestige inutile de l'évolution, l'appendice agit comme un sanctuaire biologique protégé, un réservoir capable de reconstituer le microbiote colique normal après un épisode de diarrhée sévère ayant vidé le côlon de sa flore protectrice. Ce rôle de "sauvegarde bactérienne" prend une importance particulière en zone tropicale, où les épisodes de diarrhée infectieuse sont fréquents et répétés au cours de la vie, sollicitant cette fonction de réensemencement à de multiples reprises.
+Tu es avec moi ? Ne décroche pas, c'est le point de départ de toute la maladie : **un tuyau fin qui se bouche facilement.**
 
-### 2. L'Architecture du Tissu Lymphoïde Associé au Tube Digestif
+### Le tapis roulant de mucus
 
-Le GALT appendiculaire est organisé en follicules lymphoïdes secondaires comportant un centre germinatif riche en lymphocytes B en prolifération active, entouré d'une zone du manteau de lymphocytes B naïfs et d'une zone interfolliculaire riche en lymphocytes T CD4 auxiliaires et en cellules dendritiques présentatrices d'antigène. Cette architecture est directement responsable du phénomène central de ce cours : l'hyperplasie lymphoïde réactionnelle.
+Il y a une deuxième chose à connaître. La paroi de l'appendice fabrique du mucus, une sorte de gel glissant. Ce gel agit comme un tapis roulant : il attrape les microbes et les pousse doucement vers la sortie, vers le gros intestin. Tant que le tuyau est ouvert, ce tapis roulant nettoie tout seul, sans qu'on y pense.
 
-Arrête-toi une seconde : d'après toi, pourquoi une simple infection virale banale, comme une rhinopharyngite ou une gastro-entérite, peut-elle suffire à déclencher une prolifération suffisamment massive des centres germinatifs pour obstruer mécaniquement une lumière aussi étroite ? Réfléchis avant de lire la suite. La réponse tient à la cinétique de la réponse immunitaire adaptative : lors d'une stimulation antigénique systémique, les cellules dendritiques présentatrices d'antigène activent les lymphocytes T auxiliaires, qui à leur tour, via la sécrétion d'interleukine 4, d'interleukine 21 et l'interaction CD40 ligand sur CD40, déclenchent une prolifération clonale intense des lymphocytes B dans les centres germinatifs. Cette prolifération peut multiplier le volume du tissu lymphoïde sous-muqueux par plusieurs facteurs en quelques jours seulement, suffisant à comprimer complètement une lumière appendiculaire dont le diamètre normal ne dépasse pas quelques millimètres.
+Mais réfléchis deux secondes : que se passe-t-il si la sortie est bouchée ? Le tapis roulant continue de tourner, le mucus continue d'être fabriqué, mais il ne peut plus sortir. Il s'accumule. Et un endroit chaud, humide et fermé, plein de mucus, c'est le paradis des microbes. Voilà comment un simple bouchon transforme un organe propre en nid à microbes.
 
-![Visualisation 3D : Architecture d'un follicule lymphoïde de la sous-muqueuse appendiculaire avec centre germinatif, zone du manteau et zone interfolliculaire, illustrant l'hyperplasie réactionnelle obstructive](https://placehold.co/800x400/1e293b/ffffff?text=Visualisation+3D+:+Follicule+GALT)
+> ملخص بالعربية : الزائدة الدودية ليست عضواً عديم الفائدة، بل هي مليئة بخلايا المناعة التي تنتفخ عند أي عدوى بسيطة، فتسد الأنبوب الضيق.
 
-> L'Astuce du Prof : Retiens que l'hyperplasie lymphoïde n'est jamais un phénomène primitif de l'appendice lui-même — c'est toujours la conséquence d'une stimulation antigénique systémique qui, ailleurs dans le corps, semblerait totalement anodine.
+## CHAPITRE III : Les faux amis (ce qui ressemble à l'appendicite)
 
-> Résumé en Arabe : الزائدة الدودية ليست عضواً عديم الفائدة، بل هي مستودع مناعي ومكروبي يعيد تكوين الفلورا المعوية بعد الإسهال الحاد
+Attention ici, car c'est le chapitre le plus dangereux. Toute douleur en bas à droite du ventre n'est PAS une appendicite. En zone tropicale, plusieurs maladies portent le même masque. Si tu te trompes, ça peut coûter une vie.
 
-## Chapitre III : Diagnostic Différentiel en Zone Tropicale
+> **Attention, danger :** chez toute femme en âge d'avoir des enfants qui a mal en bas à droite, tu dois TOUJOURS éliminer une grossesse dans la trompe (grossesse extra-utérine) avant de penser appendicite. Ne l'oublie JAMAIS. C'est une erreur mortelle très classique.
 
-### 1. Le Syndrome Appendiculaire Typique, une Rareté Statistique
+Voici les principaux faux amis à connaître, surtout sous les tropiques :
 
-Cliniquement, on parle de syndrome appendiculaire devant l'association d'une douleur de la fosse iliaque droite, d'une fébricule modérée, de nausées, et d'une défense pariétale localisée. Mais ce tableau de manuel n'est présent que dans une minorité des présentations réelles, et cette proportion chute encore davantage en zone d'endémie parasitaire et infectieuse, où de nombreuses pathologies concurrentes produisent des tableaux de fosse iliaque droite fébrile.
-
-### 2. Le Spectre Élargi des Diagnostics Différentiels Tropicaux
-
-En zone tropicale, ton diagnostic différentiel doit impérativement s'élargir à des pathologies rarement évoquées en climat tempéré. La fièvre typhoïde à Salmonella Typhi peut se compliquer d'une perforation iléale distale qui mime trait pour trait un tableau appendiculaire fébrile et douloureux. Le paludisme viscéral à Plasmodium falciparum peut s'accompagner de douleurs abdominales diffuses et d'une splénomégalie douloureuse projetée. L'amœbose colique invasive, due à Entamoeba histolytica, peut provoquer une colite droite pseudo-appendiculaire, parfois compliquée d'un amœbome pseudo-tumoral. Enfin, l'adénite mésentérique d'origine tuberculeuse reproduit à s'y méprendre le tableau d'une adénite mésentérique banale.
-
-Tu es toujours avec nous ? Ne décroche pas maintenant, ce tableau comparatif est probablement le plus interrogé de tout ce chapitre, car confondre ces pathologies n'est pas une erreur académique mineure, c'est une erreur qui peut coûter une vie.
-
-| Pathologie | Contexte Épidémiologique | Présentation Clinique Distinctive | Examen Clé pour Trancher | Piège à Éviter |
-|---|---|---|---|---|
-| Appendicite Aiguë Vraie | Ubiquitaire, tout âge | Douleur migratrice ombilic vers fosse iliaque droite, défense localisée | Échographie ou clinique évolutive | Attendre une confirmation biologique avant d'opérer |
-| Fièvre Typhoïde Compliquée | Zone d'assainissement précaire, ingestion d'eau contaminée | Fièvre en plateau prolongée, splénomégalie, tuphos, puis péritonite brutale si perforation | Hémoculture, sérologie, contexte épidémique | Opérer sans couvrir Salmonella en péri-opératoire |
-| Paludisme à Plasmodium falciparum | Zone d'endémie, absence de chimioprophylaxie | Fièvre irrégulière, douleurs diffuses, parfois ictère et troubles de conscience | Goutte épaisse et frottis sanguin en urgence absolue | Attribuer la fièvre à une cause digestive sans éliminer le paludisme |
-| Amœbose Colique Invasive | Péril fécal, hygiène précaire | Douleur du cadre colique droit, diarrhée glairo-sanglante possible | Examen parasitologique des selles, sérologie amibienne | Confondre un amœbome avec une masse tumorale ou un plastron |
-| Adénite Mésentérique Tuberculeuse | Contexte d'endémie tuberculeuse, contage connu | Évolution subaiguë, altération de l'état général, sueurs nocturnes | Imagerie, ponction ganglionnaire, recherche de bacille acido-alcoolo-résistant | Opérer en urgence une adénite qui relève d'un traitement médical prolongé |
-
-> Résumé en Arabe : لا يجب أبداً افتراض التهاب الزائدة الدودية دون استبعاد الملاريا والتيفوئيد في المناطق الموبوءة
-
-## Chapitre IV : Le Grand Mécanisme Physiopathologique — De l'Obstruction Luminale à la Nécrose Cellulaire
-
-Voici le cœur battant de ce traité. Comprends bien cette cascade moléculaire, et tu comprendras absolument tout le reste : la clinique, l'urgence, et le traitement.
-
-### 1. L'Obstruction Luminale, Point de Départ Universel
-
-Tout commence par l'obstruction de la lumière appendiculaire étroite décrite au Chapitre I. Chez l'adulte, le coupable le plus fréquent est le stercolithe, un amas de matières fécales durcies et calcifiées. Chez l'enfant et l'adulte jeune, c'est le plus souvent l'hyperplasie lymphoïde décrite au Chapitre II. En zone tropicale, un troisième mécanisme s'ajoute à cette liste, que nous détaillerons pleinement au Chapitre V : l'obstruction parasitaire par migration d'Ascaris lumbricoides.
-
-### 2. La Distension et la Prolifération Bactérienne Exponentielle
-
-Imagine un ballon de baudruche gonflé à l'intérieur d'une pièce aux murs rigides et non extensibles. Une fois la lumière obstruée, la muqueuse continue de sécréter du mucus en amont du bouchon. Ce mucus s'accumule, ne peut plus s'évacuer, et la flore bactérienne normalement présente dans la lumière, notamment Escherichia coli et Bacteroides fragilis, se met à proliférer de façon exponentielle dans ce milieu confiné et stagnant, doublant sa densité toutes les vingt à trente minutes dans les conditions les plus favorables.
-
-### 3. La Bascule Hémodynamique Pariétale
-
-La pression intraluminale continue de monter. Elle finit par dépasser la pression de perfusion veineuse et lymphatique de la paroi appendiculaire, qui est une pression basse, facilement dépassée. Un œdème pariétal s'installe, la paroi s'épaissit et devient congestive : c'est la phase catarrhale. La pression continue d'augmenter et finit par dépasser la pression de perfusion artériolaire, bien plus élevée. C'est le point de bascule ischémique.
-
-Dis-moi : pourquoi la pression veineuse cède-t-elle systématiquement avant la pression artérielle, et jamais l'inverse ? Prends dix secondes avant de continuer. La réponse tient à un principe hémodynamique fondamental : le système veineux et lymphatique fonctionne à basse pression, de l'ordre de quelques millimètres de mercure, tandis que le système artériolaire fonctionne à haute pression, soutenu par la pression artérielle systémique. Toute compression externe croissante annule donc mécaniquement le drainage veineux et lymphatique bien avant de pouvoir s'opposer à l'apport artériel. Cette asymétrie explique pourquoi l'œdème et la congestion précèdent toujours l'ischémie franche.
-
-### 4. L'Ischémie, l'Invasion Bactérienne Transmurale et la Nécrose
-
-Une fois l'ischémie pariétale installée, les bactéries profitent de cette brèche dans les défenses tissulaires pour envahir massivement la paroi appendiculaire : c'est la phase suppurée ou phlegmoneuse. Si rien n'est fait, l'ischémie devient totale et la paroi se nécrose complètement : c'est la phase gangreneuse, caractérisée histologiquement par une perte de l'architecture tissulaire normale, une infiltration massive de polynucléaires neutrophiles, et des foyers de nécrose de coagulation.
-
-![Visualisation 3D : Coupe histologique de la paroi appendiculaire montrant la transition entre muqueuse congestive, infiltrat neutrophilique transmural et foyers de nécrose de coagulation](https://placehold.co/800x400/1e293b/ffffff?text=Visualisation+3D+:+Cascade+Ischemique)
-
-### 5. La Perforation, Contenue ou Généralisée
-
-Une paroi nécrosée finit toujours par céder. Si l'évolution est assez lente, l'épiploon et les anses intestinales voisines ont le temps de venir circonscrire l'infection, formant un plastron ou un abcès appendiculaire. Si l'évolution est brutale, le contenu septique se déverse directement dans la grande cavité péritonéale : c'est la péritonite généralisée, une urgence vitale absolue, dont la gestion devient un défi majeur lorsque le bloc opératoire n'est pas immédiatement accessible.
-
-> L'Astuce du Prof : Retiens cette règle absolue : la veine se bouche toujours avant l'artère. C'est exactement à ce moment de bascule veino-artérielle que la douleur migre du nombril vers la fosse iliaque droite, car l'inflammation atteint enfin le péritoine pariétal, richement innervé et parfaitement localisé.
-
-## Chapitre V : L'Ascaridiose Digestive, une Cause Tropicale d'Obstruction Mécanique
-
-### 1. Un Mécanisme Obstructif Propre aux Zones d'Endémie Parasitaire
-
-Une question directe, maintenant : pourquoi un patient parasité par des vers ronds intestinaux peut-il développer une authentique appendicite mécanique sans jamais avoir formé le moindre stercolithe ? En zone tropicale, la prévalence de l'ascaridiose digestive, due au nématode Ascaris lumbricoides, reste considérable dans les populations à hygiène fécale précaire. Ce ver adulte, pouvant atteindre vingt à trente centimètres de long, a un comportement migratoire erratique particulièrement marqué en cas de fièvre, d'anesthésie, ou de modification du pH digestif, notamment sous traitement antihelminthique mal conduit.
-
-### 2. La Cascade Mécanique et Inflammatoire de l'Obstruction Parasitaire
-
-Le ver adulte peut migrer depuis la lumière iléale vers la lumière appendiculaire, s'enrouler sur lui-même, et créer une obstruction mécanique complète strictement identique dans ses conséquences hémodynamiques à celle d'un stercolithe. Sa présence provoque en outre une réaction inflammatoire locale intense, avec recrutement d'éosinophiles via l'interleukine 5 et l'interleukine 13, sécrétées par les lymphocytes T auxiliaires de type 2 en réponse aux antigènes parasitaires. Cette éosinophilie tissulaire s'ajoute à l'infiltrat neutrophilique classique et peut accélérer la fragilisation pariétale.
-
-![Visualisation 3D : Représentation anatomique d'un ver Ascaris lumbricoides adulte migrant depuis la lumière cæcale vers la lumière appendiculaire et créant une obstruction mécanique complète](https://placehold.co/800x400/1e293b/ffffff?text=Visualisation+3D+:+Ascaris+Obstruction)
-
-### 3. L'Implication Thérapeutique Directe
-
-Ce mécanisme a une conséquence pratique majeure que tu dois connaître par cœur : dans les régions de forte endémie ascaridienne, une éosinophilie sanguine associée à un tableau appendiculaire doit systématiquement faire évoquer cette étiologie, et la pièce d'appendicectomie doit être examinée avec attention pour confirmer la présence du parasite, information indispensable pour orienter le traitement antiparasitaire postopératoire de l'ensemble de la fratrie et de l'entourage.
-
-> Résumé en Arabe : الإصابة بديدان الإسكارس يمكن أن تسبب انسداداً ميكانيكياً حقيقياً للزائدة الدودية دون وجود حصاة برازية
-
-## Chapitre VI : La Cascade Inflammatoire Cellulaire en Détail
-
-### 1. La Reconnaissance des Motifs Moléculaires
-
-Au niveau le plus fin de la biologie cellulaire, l'inflammation appendiculaire débute par la reconnaissance de motifs moléculaires associés aux pathogènes, les fameux PAMPs, par des récepteurs de reconnaissance de motifs exprimés à la surface des cellules épithéliales et des macrophages résidents. Le récepteur Toll-like 4, ou TLR4, reconnaît spécifiquement le lipopolysaccharide de la paroi des bactéries à Gram négatif comme Escherichia coli, abondamment présentes dans la lumière obstruée.
-
-Ne relâche pas ton attention ici, c'est précisément le genre de mécanisme moléculaire qui fait la différence entre une bonne et une excellente copie d'examen. La liaison du lipopolysaccharide à TLR4 déclenche le recrutement de la protéine adaptatrice MyD88, qui active à son tour la kinase IRAK, laquelle phosphoryle le complexe IKK. Ce complexe phosphoryle l'inhibiteur IκB, le marquant pour dégradation par le protéasome. Cette dégradation libère le facteur de transcription NF-κB, qui migre alors vers le noyau cellulaire pour activer la transcription de gènes pro-inflammatoires.
-
-![Visualisation 3D : Cascade de signalisation intracellulaire depuis la liaison du lipopolysaccharide au récepteur TLR4 jusqu'à la translocation nucléaire du facteur de transcription NF-kB](https://placehold.co/800x400/1e293b/ffffff?text=Visualisation+3D+:+Signalisation+TLR4)
-
-### 2. L'Inflammasome et la Libération d'Interleukine 1 Bêta
-
-Parallèlement à cette voie, la détérioration cellulaire libère des motifs moléculaires associés aux dégâts, les DAMPs, qui activent l'inflammasome NLRP3, un complexe protéique cytoplasmique multimoléculaire. Une fois assemblé, l'inflammasome active la caspase 1, laquelle clive la pro-interleukine 1 bêta en sa forme active, l'interleukine 1 bêta mature, un puissant pyrogène endogène responsable en grande partie de la fièvre observée cliniquement. La caspase 1 active également la gasdermine D, dont le clivage forme des pores dans la membrane plasmique, provoquant une mort cellulaire inflammatoire spécifique appelée pyroptose, distincte de l'apoptose classique par son caractère hautement pro-inflammatoire.
-
-### 3. Le Recrutement Leucocytaire et la Douleur
-
-L'interleukine 1 bêta, associée au facteur de nécrose tumorale alpha et à l'interleukine 6, agit en synergie pour induire l'expression de molécules d'adhésion endothéliales, la sélectine E et la molécule d'adhésion intercellulaire ICAM-1, permettant le roulement puis l'adhésion ferme des polynucléaires neutrophiles circulants, avant leur diapédèse à travers la paroi vasculaire sous l'effet du gradient chimiotactique d'interleukine 8. Ces mêmes cytokines stimulent la cyclo-oxygénase 2, ou COX-2, augmentant la synthèse locale de prostaglandine E2, qui sensibilise les terminaisons nerveuses nociceptives et abaisse leur seuil d'activation. La bradykinine, générée par le système kallikréine-kinine local, et la substance P, libérée par les fibres nerveuses afférentes elles-mêmes, amplifient encore cette sensibilisation périphérique, expliquant la douleur intense et localisée observée à ce stade.
-
-> L'Astuce du Prof : Chaque signe clinique que tu observes au lit du patient a une traduction moléculaire précise. La fièvre, c'est l'interleukine 1 bêta et le facteur de nécrose tumorale alpha agissant sur l'aire préoptique hypothalamique. La douleur, c'est la prostaglandine E2, la bradykinine et la substance P sensibilisant les nocicepteurs locaux.
-
-> Résumé en Arabe : الحمى والألم ليسا من فراغ، بل هما نتيجة مباشرة لجزيئات التهابية دقيقة مثل الإنترلوكين واحد بيتا والبروستاغلاندين
-
-## Chapitre VII : Stratification du Risque en Contexte de Ressources Limitées
-
-Face à toute suspicion d'appendicite, ton second réflexe, après le diagnostic positif, est de rechercher activement les signes annonçant une complication, car ils changent radicalement la prise en charge, plus encore lorsque le recours à un plateau chirurgical n'est pas immédiat.
-
-Attends, réponds-moi avant de poursuivre : si l'épiploon est peu développé chez l'enfant et si le trajet vers l'hôpital de référence dure plusieurs heures, quelle conséquence cela a-t-il nécessairement sur ta stratégie de décision ? La réponse est que ton seuil de tolérance à l'incertitude doit être beaucoup plus bas : tu dois orienter plus tôt, plus vite, et parfois traiter de manière probabiliste avant même d'avoir la certitude diagnostique complète.
-
-| Critère de Gravité | Seuil ou Signe Observé | Interprétation Physiopathologique | Conduite Adaptée au Contexte à Ressources Limitées |
+| Maladie | Où et pour qui | Ce qui doit t'alerter | L'examen qui tranche |
 |---|---|---|---|
-| Fièvre élevée avec frissons | Supérieure à 39°C | Bactériémie ou abcès profond constitué | Antibiothérapie parentérale immédiate avant tout transfert |
-| Contracture abdominale généralisée | Ventre de bois | Péritonite généralisée installée | Transfert en extrême urgence, réanimation hydro-électrolytique avant transport |
-| Distance au bloc opératoire de référence | Supérieure à quatre heures de piste | Risque de décompensation pendant le trajet | Organiser le transfert dès la suspicion, ne pas attendre la certitude |
-| Déshydratation par vomissements répétés | Pli cutané, muqueuses sèches | Hypovolémie aggravant le risque ischémique pariétal | Réhydratation intraveineuse précoce avant et pendant le transfert |
-| Âge inférieur à cinq ans | Terrain pédiatrique | Épiploon peu développé, évolution rapide vers la perforation | Priorité absolue de transfert, ne jamais temporiser |
-| Grossesse avancée | Troisième trimestre | Présentation atypique par déplacement de l'appendice | Association systématique d'un avis obstétrical au transfert chirurgical |
+| Vraie appendicite | Tout le monde, surtout 10-30 ans | Douleur qui part du nombril puis descend à droite | Échographie ou surveillance clinique |
+| Fièvre typhoïde | Eau sale, hygiène difficile | Fièvre longue en plateau, gros ventre, patient abattu | Prise de sang (hémoculture) |
+| Paludisme grave | Zone de moustiques, pas de protection | Fièvre + fatigue extrême, parfois jaunisse | Goutte de sang au microscope, en urgence |
+| Amibiase du côlon | Eau ou aliments souillés | Diarrhée avec du sang et des glaires | Examen des selles |
 
-> Résumé en Arabe : كلما بعدت المسافة عن غرفة العمليات، كلما وجب اتخاذ قرار التحويل بسرعة أكبر دون انتظار اليقين التام
+### Le piège de la gastro chez l'enfant
 
-## Chapitre VIII : Arsenal Diagnostique Adapté au Terrain
+Un dernier faux ami, très fréquent chez l'enfant : la gastro-entérite. L'enfant a mal au ventre, vomit, a un peu de fièvre. Les parents pensent à une simple gastro et attendent. Mais parfois, sous cette gastro se cache une vraie appendicite qui commence. La règle simple à retenir : si la douleur ne passe pas et se fixe de plus en plus en bas à droite, ce n'est plus une gastro. Réexamine toujours l'enfant quelques heures plus tard, c'est le meilleur détecteur de pièges.
 
-### 1. La Biologie, Souvent le Seul Outil Disponible
+> **L'Astuce du Prof :** retiens une règle d'or de la médecine tropicale. Fièvre + douleur au ventre au retour d'une zone à paludisme = paludisme jusqu'à preuve du contraire. On demande la goutte de sang AVANT tout le reste.
 
-La numération formule sanguine retrouve typiquement une hyperleucocytose à prédominance neutrophile, et la protéine C réactive est souvent élevée. Mais ces deux marqueurs peuvent rester strictement normaux en tout début d'évolution, et dans de nombreux centres à ressources limitées, ils constituent malheureusement le seul examen paraclinique disponible. Une biologie normale n'élimine jamais le diagnostic si la clinique est franche.
+> ملخص بالعربية : ليس كل ألم أسفل يمين البطن التهاب زائدة. في المناطق الحارة، فكّر دائماً في الملاريا والتيفوئيد أولاً.
 
-### 2. L'Échographie Portable, un Outil Précieux mais Opérateur-Dépendant
+## CHAPITRE IV : Comment le tuyau se bouche et finit par exploser
 
-L'échographie abdominale, lorsqu'elle est disponible, recherche un appendice augmenté de diamètre, une paroi épaissie, un stercolithe échogène avec cône d'ombre postérieur, ou parfois l'image linéaire caractéristique d'un ver ascaridien intraluminal. Sa limite majeure, déjà réelle en centre équipé, devient critique en zone rurale : sa sensibilité dépend fortement de l'expérience de l'opérateur, une compétence qui doit être développée et entretenue activement dans les structures à faible volume d'activité.
+Voici le cœur du cours. Je vais te raconter l'histoire en cinq étapes, comme un film. Si tu comprends ce film, tu comprends tout le reste : les signes, l'urgence, le traitement.
 
-![Visualisation 3D : Coupe échographique transversale d'un appendice pathologique en cocarde avec paroi épaissie et stercolithe échogène générant un cône d'ombre postérieur](https://placehold.co/800x400/1e293b/ffffff?text=Visualisation+3D+:+Echographie+Cocarde)
+### Étape 1 : le bouchon
 
-### 3. L'Absence de Scanner, une Réalité à Intégrer dans le Raisonnement
+Tout commence par un bouchon dans le petit tuyau. Chez l'adulte, c'est souvent une petite bille de matières dures (on l'appelle un stercolithe, mais retiens juste : un petit caillou de "caca" séché). Chez le jeune, c'est la caserne de soldats qui gonfle, comme on l'a vu au chapitre précédent. Dans tous les cas, la petite porte d'entrée du cul-de-sac se ferme.
 
-Dans de nombreux hôpitaux de district en zone tropicale, le scanner abdomino-pelvien injecté, examen de référence en centre équipé, est tout simplement indisponible ou inaccessible en délai utile. Ton raisonnement diagnostique doit alors s'appuyer davantage sur la clinique évolutive, la biologie répétée à quelques heures d'intervalle, et l'échographie lorsqu'elle existe, sans jamais laisser l'absence d'un examen retarder une décision opératoire qui s'impose cliniquement.
+### Étape 2 : ça se remplit
 
-> L'Astuce du Prof : Ne te laisse jamais paralyser par l'absence d'un examen que tu voudrais idéalement demander. La clinique évolutive, réévaluée à intervalles rapprochés, reste ton meilleur outil diagnostique lorsque l'imagerie de référence n'est pas accessible.
+Une fois le tuyau bouché, l'appendice continue de fabriquer du liquide en amont. Mais ce liquide ne peut plus sortir. Imagine un évier bouché où le robinet coule quand même : l'eau monte, monte, monte. En plus, les microbes qui vivent normalement là-dedans se retrouvent enfermés et se mettent à se multiplier très vite dans ce liquide stagnant. En quelques heures, ils sont des millions.
 
-## Chapitre IX : Stratégie Thérapeutique en Environnement à Ressources Limitées
+### Étape 3 : ça gonfle et ça serre les veines
 
-### 1. L'Appendicectomie par Laparotomie, la Réalité du Terrain
+La pression monte dans l'appendice fermé. Et voici un point clé. Dans la paroi, il y a deux types de tuyaux de sang : les veines (petite pression, molles) et les artères (grosse pression, solides). Quand la pression interne monte, elle écrase D'ABORD les veines, parce qu'elles sont molles.
 
-Devant une appendicite aiguë confirmée, le traitement de référence reste chirurgical. La voie cœlioscopique, largement privilégiée dans les centres équipés, reste souvent indisponible dans les structures rurales à ressources limitées, où l'appendicectomie par laparotomie selon l'incision de McBurney demeure la technique de référence, parfaitement efficace lorsqu'elle est réalisée par un opérateur entraîné.
+Dis-moi, d'après toi, pourquoi les veines cèdent avant les artères ? Réfléchis une seconde... Voilà : c'est comme deux tuyaux d'arrosage, un presque vide (la veine) et un gonflé à fond (l'artère). Si tu marches dessus, le tuyau presque vide s'aplatit tout de suite, l'autre résiste. Résultat : le sang entre encore par les artères mais ne ressort plus par les veines. La paroi gonfle d'eau, comme une éponge trempée.
 
-### 2. L'Antibiothérapie Probabiliste Élargie
+### Étape 4 : la paroi meurt
 
-En zone tropicale, l'antibiothérapie périopératoire doit parfois être élargie par rapport au schéma standard, en tenant compte du contexte épidémiologique local : couverture des germes digestifs aérobies et anaérobies habituels, mais aussi vigilance accrue devant tout contexte évocateur de fièvre typhoïde associée, justifiant une couverture adaptée si le tableau clinique ou l'anamnèse l'évoquent.
+La pression continue de monter et finit par écraser aussi les artères. Là, plus de sang du tout n'arrive. Sans sang, la paroi n'a plus d'oxygène. Elle s'étouffe et commence à mourir. Les microbes en profitent pour envahir tout le mur de l'appendice, de l'intérieur vers l'extérieur.
 
-### 3. Le Traitement Médical Premier, une Option Pragmatique
+> **L'Astuce du Prof :** retiens cette petite phrase : "la veine se bouche avant l'artère". C'est PILE à ce moment-là que la douleur se déplace du nombril vers le bas à droite. Pourquoi ? Parce que l'inflammation touche enfin la fine peau qui tapisse le ventre (le péritoine), et cette peau, elle, sait dire exactement où ça fait mal.
 
-Devant un plastron déjà constitué, ou en l'absence temporaire de possibilité chirurgicale immédiate, un traitement médical premier par antibiothérapie parentérale, associé à une surveillance clinique rapprochée, permet souvent de temporiser en sécurité jusqu'à l'obtention d'un transfert ou d'un plateau technique disponible, avant une appendicectomie différée une fois l'inflammation apaisée.
+![Observation au microscope : la paroi de l'appendice qui souffre et meurt, cellule par cellule](https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=1000&q=80)
 
-> L'Astuce du Prof : Face à un plastron, la précipitation chirurgicale est ton pire ennemi, qu'importe le plateau technique dont tu disposes. Refroidir avant d'opérer reste une règle universelle.
+### Étape 5 : l'explosion
 
-> Résumé en Arabe : غياب المنظار الجراحي لا يمنع إجراء استئصال الزائدة الدودية بالطريقة التقليدية المفتوحة بفعالية تامة
+Un mur mort finit toujours par se déchirer. C'est la perforation. Deux scénarios :
 
-## Chapitre X : Guide Pratique Contre l'Iatrogénie du Retard Diagnostique
+➔ **Explosion "contenue"** : si ça va lentement, les organes voisins et la graisse du ventre viennent coller autour, comme des pompiers qui font un mur autour d'un feu. Ça forme une grosse boule (un plastron) ou une poche de pus (un abcès).
+➔ **Explosion "libre"** : si ça va très vite, le pus se répand partout dans le ventre. C'est la péritonite généralisée. Là, c'est une urgence vitale, chaque minute compte.
 
-S'il y a une notion que tu dois retenir de ce chapitre, c'est celle-ci : en contexte de ressources limitées, la première cause évitable de surmortalité par appendicite n'est pas un mauvais geste chirurgical, c'est le retard cumulé entre l'apparition des symptômes et la décision de transfert.
+Retiens bien l'ordre de ce film : bouchon, remplissage, gonflement, mort de la paroi, explosion. Chaque étape prépare la suivante. Et plus le temps passe, plus on avance dans le film sans pouvoir revenir en arrière. C'est pour ça qu'on dit que l'appendicite est une course contre la montre.
 
-### Visualise la Scène Clinique
+> ملخص بالعربية : القصة في خمس مراحل: انسداد، امتلاء، انتفاخ يضغط الأوردة، موت الجدار، ثم الانفجار. الألم ينتقل إلى أسفل اليمين عندما يصل الالتهاب إلى غشاء البطن.
 
-Imagine un patient présentant une douleur abdominale débutante, à plusieurs heures de tout centre chirurgical. Par prudence excessive, par manque de moyens de transport, ou par sous-estimation de la gravité potentielle, la décision de transfert est reportée de plusieurs heures, parfois de plusieurs jours, dans l'attente d'une amélioration spontanée.
+## CHAPITRE V : Le ver qui bouche le tuyau
 
-### La Catastrophe Cumulative
+Voici une cause qu'on oublie souvent, mais très fréquente dans les régions chaudes : les vers intestinaux, en particulier un ver rond assez long qu'on appelle l'ascaris.
 
-Chaque heure de retard supplémentaire laisse progresser la cascade physiopathologique détaillée au Chapitre IV : l'ischémie s'aggrave, la nécrose s'étend, et le risque de perforation libre augmente de façon quasi linéaire avec le temps écoulé depuis le début des symptômes. Contrairement à un environnement équipé où ce retard se compte en heures, en zone rurale il peut se compter en jours, transformant une appendicite simple, curable par un geste chirurgical mineur, en une péritonite généralisée gravissime nécessitant une réanimation lourde, parfois inaccessible sur place.
+Attends, une question : comment un ver peut-il donner une appendicite ? C'est logique quand tu y penses. Ce ver vit dans l'intestin. Parfois, il se faufile dans l'entrée de l'appendice, s'enroule sur lui-même, et bouche le tuyau exactement comme un caillou le ferait. Le même film que le chapitre IV recommence, mais avec un ver comme bouchon.
 
-**La règle d'or à retenir :** devant toute douleur abdominale évocatrice, la décision d'orienter le patient vers une structure chirurgicale doit être prise dès la suspicion clinique raisonnable, sans attendre une confirmation paraclinique qui n'est peut-être pas accessible en délai utile, et sans attendre une aggravation qui ne fera que réduire les chances d'une évolution favorable.
+En plus, le corps déteste ce ver et envoie contre lui un type spécial de cellules de défense (les éosinophiles). Ça ajoute encore de l'inflammation. Voilà pourquoi, en zone tropicale, on regarde toujours la prise de sang : beaucoup d'éosinophiles, c'est un indice qui doit faire penser au ver.
 
-> Résumé en Arabe : كل ساعة تأخير في التحويل نحو مركز جراحي تزيد من خطر انثقاب الزائدة الدودية والتهاب الصفاق الشامل
+> **L'Astuce du Prof :** quand tu retires un appendice sous les tropiques, examine bien l'intérieur. Si tu trouves un ver, il faut traiter toute la famille contre les vers, sinon ça recommencera chez les frères et sœurs.
 
-## Récapitulatif des Formes Évolutives et des Règles de Survie
+![Vue anatomique du tube digestif : c'est là que le ver peut migrer et venir boucher l'appendice](https://images.unsplash.com/photo-1530497610245-94d3c16cda28?auto=format&fit=crop&w=1000&q=80)
 
-| Paramètre | Phase Catarrhale | Phase Suppurée | Phase Gangreneuse | Phase Perforée Contenue | Phase Perforée Généralisée |
-|---|---|---|---|---|---|
-| Mécanisme Cellulaire | Œdème pariétal, stase veino-lymphatique | Invasion bactérienne transmurale, activation NF-kB | Nécrose de coagulation, pyroptose massive | Rupture pariétale circonscrite par l'épiploon | Rupture pariétale et diffusion septique libre |
-| Présentation Clinique | Douleur péri-ombilicale vague | Douleur en fosse iliaque droite franche | Douleur intense et permanente | Masse palpable, fièvre oscillante | Contracture généralisée, choc septique |
-| Fièvre | Absente à discrète | Modérée | Élevée | Élevée, oscillante | Élevée avec frissons |
-| Risque Vital | Faible si traité rapidement | Modéré | Élevé | Élevé si méconnu | Vital immédiat |
-| Conduite en Ressources Limitées | Transfert programmé sans urgence extrême | Transfert urgent, antibiothérapie immédiate | Transfert en extrême urgence, réanimation avant transport | Traitement médical premier, drainage si possible | Transfert vital immédiat, réanimation hydro-électrolytique maximale |
+> ملخص بالعربية : الديدان مثل الإسكارس قد تسد الزائدة الدودية تماماً كالحصاة، وهي سبب متكرر في المناطق الحارة.
 
-Te voilà désormais armé d'une compréhension complète et exhaustive de l'appendicite aiguë, depuis la première molécule bloquée dans la lumière appendiculaire jusqu'aux contraintes réelles d'une prise en charge chirurgicale en environnement à ressources limitées. Mémorise cette cascade physiopathologique moléculaire, garde toujours en tête les pièges diagnostiques régionaux, et surtout, retiens que le temps perdu avant une décision de transfert reste, où que tu exerces, le facteur pronostique le plus déterminant de tous.`,
+## CHAPITRE VI : L'alarme incendie de la cellule
+
+On va descendre tout petit maintenant, au niveau des molécules. Mais reste tranquille : je vais tout expliquer avec des images simples. Tu vas voir, c'est comme un système d'alarme dans une maison.
+
+### La sonnette d'alarme
+
+Sur la surface des cellules, il y a des petits capteurs. Le plus important s'appelle le TLR4. Pense à une sonnette sur la porte. Quand un microbe (surtout sa "peau", une molécule appelée LPS) vient toucher cette sonnette, elle sonne : "Alerte, un ennemi est entré !".
+
+### L'interrupteur central
+
+Cette sonnette envoie un message à l'intérieur de la cellule jusqu'à un grand interrupteur, qu'on appelle NF-kB. Tant qu'il est éteint, rien ne se passe. Mais quand l'alarme sonne, l'interrupteur s'allume. Et cet interrupteur, lui, ouvre les "usines" qui fabriquent les signaux d'urgence.
+
+Tu es toujours là ? C'est le passage le plus technique, mais garde l'image : sonnette, puis fil électrique, puis interrupteur, puis usines qui démarrent. Rien de plus.
+
+### Les messagers d'urgence
+
+Les usines fabriquent alors des petits messagers chimiques (on les appelle les cytokines : par exemple l'interleukine 1, le TNF-alpha). Ces messagers partent dans le sang et font trois choses :
+
+✔ Ils montent la température du corps : c'est la fièvre.
+✔ Ils appellent les soldats du sang (les globules blancs) à venir se battre sur place.
+✔ Ils rendent les nerfs du coin très sensibles : c'est la douleur.
+
+Voilà pourquoi un malade avec une appendicite a de la fièvre, une prise de sang avec beaucoup de globules blancs, et mal au ventre. Ce ne sont pas trois hasards : c'est le même système d'alarme qui tourne à fond.
+
+### Les pompiers arrivent
+
+Quand les messagers d'urgence sonnent, les globules blancs du sang arrivent en courant. Mais comment sortent-ils du sang pour aller sur le lieu du combat ? Les parois des petits vaisseaux deviennent collantes, comme du velcro. Les globules blancs s'y accrochent, ralentissent, puis se faufilent entre les cellules du vaisseau pour rejoindre le tissu malade. C'est pour ça qu'à la prise de sang on voit beaucoup de globules blancs : une partie a quitté le sang pour aller combattre dans l'appendice.
+
+> **L'Astuce du Prof :** chaque signe que tu vois chez le patient a une explication au niveau des molécules. La fièvre, c'est les messagers qui parlent au cerveau. La douleur, c'est les nerfs rendus hypersensibles. Quand tu comprends ça, tu ne récites plus : tu raisonnes.
+
+![Image au microscope de cellules : c'est à cette échelle minuscule que se joue toute l'inflammation](https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1000&q=80)
+
+> ملخص بالعربية : الالتهاب مثل نظام إنذار: جرس على الخلية ينبّه مفتاحاً مركزياً، فيطلق رسائل كيميائية تسبب الحمى والألم واستدعاء خلايا الدفاع.
+
+## CHAPITRE VII : Qui doit partir à l'hôpital tout de suite ?
+
+Une fois que tu penses à une appendicite, ton deuxième réflexe est de chercher les signes de gravité. Ce sont eux qui décident si tu dois envoyer le patient EN URGENCE, surtout quand l'hôpital est loin.
+
+| Signe d'alarme | Ce qu'on voit | Ce que ça veut dire | Ce que tu fais |
+|---|---|---|---|
+| Ventre dur comme du bois | Le ventre ne se laisse plus toucher | L'explosion a déjà eu lieu (péritonite) | Transfert immédiat, sans attendre |
+| Fièvre très haute avec frissons | Plus de 39 degrés, le patient tremble | Les microbes passent dans le sang | Antibiotiques tout de suite, puis transfert |
+| Le patient ne peut plus uriner ou boire | Bouche sèche, très fatigué | Manque d'eau grave | Perfusion avant et pendant le voyage |
+| Très jeune enfant | Moins de 5 ans | La maladie va beaucoup plus vite chez lui | Priorité absolue, on ne perd pas de temps |
+| Hôpital à plusieurs heures | Longue route de piste | Le patient peut s'aggraver en chemin | Décider le transfert dès le doute sérieux |
+
+Pose-toi toujours la même question devant un mal de ventre : "Est-ce que ce patient peut attendre, oui ou non ?" Si tu hésites, considère que la réponse est non. Il vaut mille fois mieux envoyer à l'hôpital un patient qui, finalement, n'avait rien de grave, que de garder au village un patient dont l'appendice va exploser cette nuit.
+
+> **Attention, danger :** ne te laisse jamais rassurer par un patient qui a l'air calme si les signes de gravité sont là. Chez l'enfant et la personne âgée, le ventre peut sembler souple alors que tout est déjà grave à l'intérieur.
+
+> ملخص بالعربية : كلما بعُد المستشفى، وجب اتخاذ قرار التحويل بسرعة أكبر ودون انتظار اليقين الكامل.
+
+## CHAPITRE VIII : Les outils du médecin sur le terrain
+
+Dans une grande ville, on a le scanner et l'échographie. Mais sur le terrain, en zone rurale, tu as souvent très peu d'outils. Apprends à faire avec ce que tu as.
+
+➔ **La prise de sang :** elle montre souvent beaucoup de globules blancs. Mais attention : au tout début, elle peut être normale. Une prise de sang normale n'élimine JAMAIS une appendicite si le ventre parle.
+➔ **L'échographie :** très utile quand elle existe, surtout chez l'enfant et la femme (pas de rayons). On y cherche un appendice trop gros et une paroi épaissie. Son défaut : ça dépend beaucoup de la personne qui tient la sonde.
+➔ **Le scanner :** c'est le meilleur examen, mais dans beaucoup d'hôpitaux de campagne, il n'existe tout simplement pas.
+
+> **L'Astuce du Prof :** ne reste jamais bloqué à attendre un examen que tu n'as pas. Ton meilleur outil, c'est de réexaminer le ventre du patient toutes les quelques heures. Si la douleur grandit et se fixe en bas à droite, la réponse est en train de s'écrire sous tes yeux.
+
+![Un examen au microscope en laboratoire : sur le terrain, la prise de sang et l'observation attentive restent des outils précieux](https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=1000&q=80)
+
+## CHAPITRE IX : Comment on soigne
+
+Le traitement de base de l'appendicite, c'est l'opération : on enlève l'appendice. Voyons comment on adapte ça sur le terrain.
+
+➔ **L'opération :** dans les grandes villes, on passe par de tout petits trous (cœlioscopie). En campagne, on ouvre le ventre par une petite coupure classique. Ça marche très bien aussi, entre de bonnes mains.
+➔ **Les antibiotiques :** ils accompagnent l'opération. En cas de péritonite ou d'abcès, il en faut une vraie cure, plus longue et plus forte.
+➔ **Le cas de la grosse boule (plastron) :** quand la maladie a déjà formé une boule dure, opérer tout de suite est dangereux (les tissus sont trop fragiles). On donne alors d'abord des antibiotiques, on laisse le calme revenir, et on opère plus tard "à froid", environ 6 à 8 semaines après.
+
+### Les soins autour de l'opération
+
+Avant d'opérer, on prépare le patient. On le met à jeun : il ne mange plus, car endormir quelqu'un qui a l'estomac plein est dangereux (le contenu de l'estomac pourrait remonter et passer dans les poumons). On pose une perfusion pour lui donner de l'eau et du sucre directement dans la veine. On calme la douleur et on commence les antibiotiques. Après l'opération, on surveille trois choses simples : la température, le ventre, et la cicatrice. Quand tout a été fait à temps, le patient se remet en général très vite, et c'est ça, la plus belle récompense.
+
+> **L'Astuce du Prof :** face à une grosse boule inflammatoire, ton pire ennemi c'est la précipitation. Retiens la formule : "on refroidit avant d'opérer".
+
+> ملخص بالعربية : العلاج الأساسي هو استئصال الزائدة. أمام الكتلة الالتهابية، نعطي المضادات الحيوية أولاً ثم نعمل الجراحة لاحقاً بهدوء.
+
+## CHAPITRE X : L'erreur qui peut tuer : attendre trop longtemps
+
+S'il y a une seule chose à retenir de tout ce cours, c'est celle-ci. Loin de l'hôpital, ce qui tue le plus souvent, ce n'est pas une mauvaise opération. C'est le temps perdu avant de décider d'envoyer le patient.
+
+Imagine la scène. Un malade a mal au ventre dans un village loin de tout. On se dit : "attendons demain, ça va peut-être passer". Mais pendant qu'on attend, le film du chapitre IV continue tout seul, heure après heure : la paroi meurt, puis elle explose.
+
+Souviens-toi d'une image simple. L'appendicite, c'est comme un petit incendie qui commence dans une pièce fermée. Au début, un seau d'eau suffit pour l'éteindre. Mais si tu attends, le feu prend toute la maison, et là, même les pompiers ont du mal. Ton rôle de médecin, c'est d'agir quand il ne faut encore qu'un seau d'eau.
+
+> **Attention, danger :** chaque heure d'attente augmente le risque d'explosion. Devant un ventre qui inquiète, on décide d'envoyer le patient DÈS le doute sérieux. On n'attend pas d'être sûr, et on n'attend surtout pas que ça empire.
+
+> ملخص بالعربية : كل ساعة تأخير في التحويل تزيد خطر الانفجار والتهاب الصفاق. القرار المبكر ينقذ الحياة.
+
+## RÉCAPITULATIF : le tableau à retenir
+
+| Étape | Ce qui se passe | Le signe chez le patient | Le danger |
+|---|---|---|---|
+| Bouchon | Le tuyau se ferme | Encore peu de signes | Faible si on agit vite |
+| Ça gonfle | Les veines sont écrasées | Douleur vague autour du nombril | Modéré |
+| La paroi meurt | Plus de sang, plus d'oxygène | Douleur forte fixée en bas à droite, fièvre | Élevé |
+| Explosion contenue | Boule ou poche de pus | Masse dure, fièvre qui va et vient | Élevé si on ne voit pas |
+| Explosion libre | Le pus se répand partout | Ventre dur comme du bois, patient en danger | Vital, chaque minute compte |
+
+Voilà. Tu connais maintenant l'appendicite du tout petit détail de la cellule jusqu'au geste qui sauve. Retiens surtout trois images : le tuyau fin qui se bouche, la douleur qui se déplace vers le bas à droite, et le temps perdu qui est ton pire ennemi. Garde ces trois images dans la tête, et tu seras un bon médecin, même loin de tout.`,
   },
   {
     id: "resume",
     label: "Résumé",
     icon: ScrollText,
+    accent: {
+      active: "border-emerald-300 bg-emerald-50 text-emerald-800",
+      chip: "bg-emerald-100 text-emerald-600",
+    },
     content: `## Résumé Express : Appendicite Aiguë
 
 *   **Définition :** Inflammation de l'appendice, cul-de-sac accroché au cæcum.
@@ -302,6 +326,10 @@ Te voilà désormais armé d'une compréhension complète et exhaustive de l'app
     id: "pieges",
     label: "Les Pièges",
     icon: AlertTriangle,
+    accent: {
+      active: "border-rose-300 bg-rose-50 text-rose-800",
+      chip: "bg-rose-100 text-rose-600",
+    },
     content: `## Les Pièges Classiques à l'examen
 
 > **Piège n°1 :** Ne confonds pas la douleur péri-ombilicale initiale avec une gastro-entérite — l'examinateur adore ce piège chez les étudiants pressés.
@@ -315,6 +343,10 @@ Te voilà désormais armé d'une compréhension complète et exhaustive de l'app
     id: "astuces",
     label: "Astuces Mnémotechniques",
     icon: Lightbulb,
+    accent: {
+      active: "border-amber-300 bg-amber-50 text-amber-800",
+      chip: "bg-amber-100 text-amber-600",
+    },
     content: `## Astuces Mnémotechniques
 
 > **Pour la migration de la douleur :** "Du nombril au point Mc, en passant par la crampe" — retiens le trajet en trois temps : ombilic vers diffuse vers Fosse Iliaque Droite.
@@ -327,6 +359,10 @@ Te voilà désormais armé d'une compréhension complète et exhaustive de l'app
     id: "cas_clinique",
     label: "Cas Clinique",
     icon: Stethoscope,
+    accent: {
+      active: "border-purple-300 bg-purple-50 text-purple-800",
+      chip: "bg-purple-100 text-purple-600",
+    },
     content: `## Cas Clinique : À toi de jouer, Yacine
 
 Amine, 19 ans, se présente aux urgences pour une douleur abdominale débutée la veille au soir autour du nombril, de type crampe, puis migrant ce matin vers la fosse iliaque droite. Il présente une fièvre à 38.2°C, des nausées sans vomissement, et une défense à la palpation de la FID.
@@ -342,6 +378,10 @@ Amine, 19 ans, se présente aux urgences pour une douleur abdominale débutée l
     id: "qcm",
     label: "Examen QCMs",
     icon: ListChecks,
+    accent: {
+      active: "border-indigo-300 bg-indigo-50 text-indigo-800",
+      chip: "bg-indigo-100 text-indigo-600",
+    },
     content: `## QCM : Teste-toi sur l'Appendicite
 
 **1. Quelle est la cause la plus fréquente d'obstruction appendiculaire chez l'adulte ?**

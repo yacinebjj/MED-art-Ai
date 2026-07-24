@@ -65,7 +65,7 @@ export function CenterReader({
         <div
           ref={containerRef}
           onContextMenu={(e) => e.preventDefault()}
-          className="w-full max-w-4xl select-text rounded-xl bg-white p-10 shadow-lg"
+          className="w-full max-w-4xl select-text rounded-2xl border border-slate-200/80 bg-white p-10 shadow-sm"
         >
           {isLoading && (
             <div className="flex items-center gap-3 text-gray-500">

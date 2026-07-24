@@ -77,7 +77,7 @@ export default function DemoWorkspacePage() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[#F9FAFB]">
+    <div className="flex h-screen w-full overflow-hidden bg-slate-50">
       {/* Panneau Gauche — Sources */}
       <aside className="flex w-64 shrink-0 flex-col border-r bg-white p-4">
         <Link
@@ -106,8 +106,8 @@ export default function DemoWorkspacePage() {
       {/* Panneau Central — Lecture */}
       <main
         className={cn(
-          "relative flex-1 overflow-y-auto",
-          isFullscreen && "fixed inset-0 z-40 bg-[#F9FAFB]"
+          "relative flex-1 overflow-y-auto bg-slate-50/60",
+          isFullscreen && "fixed inset-0 z-40 bg-slate-50"
         )}
       >
         <div className="sticky top-0 z-50 flex justify-end p-4">
@@ -132,7 +132,7 @@ export default function DemoWorkspacePage() {
         <div
           ref={containerRef}
           onContextMenu={(e) => e.preventDefault()}
-          className="mx-auto mb-8 max-w-3xl select-text rounded-2xl bg-white p-12 shadow-sm ring-1 ring-slate-200"
+          className="mx-auto mb-8 max-w-3xl select-text rounded-2xl border border-slate-200/80 bg-white p-12 shadow-sm"
         >
           <article key={activeSection.id} className={cn(PROSE_CLASSES, "animate-fade-in")}>
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
@@ -158,20 +158,27 @@ export default function DemoWorkspacePage() {
         </h2>
 
         <div className="flex flex-col gap-2">
-          {DEMO_SECTIONS.map(({ id, label, icon: Icon }) => {
+          {DEMO_SECTIONS.map(({ id, label, icon: Icon, accent }) => {
             const isActive = id === activeId;
             return (
               <button
                 key={id}
                 onClick={() => setActiveId(id)}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-sm font-medium transition-colors",
+                  "flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition-all",
                   isActive
-                    ? "border-blue-200 bg-blue-50 text-blue-700"
-                    : "border-slate-200 bg-white text-gray-700 hover:bg-gray-100"
+                    ? cn(accent.active, "shadow-sm")
+                    : "border-slate-200 bg-white text-gray-700 hover:bg-gray-50"
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" />
+                <span
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                    accent.chip
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
                 {label}
               </button>
             );
