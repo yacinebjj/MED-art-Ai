@@ -27,6 +27,8 @@ export interface DemoSection {
     active: string;
     /** Colored icon "badge" chip, shown in every state. */
     chip: string;
+    /** Premium hover state (colored glow + lift) when the tab is idle. */
+    hover: string;
   };
 }
 
@@ -57,251 +59,355 @@ export const DEMO_SECTIONS: DemoSection[] = [
     accent: {
       active: "border-blue-300 bg-blue-50 text-blue-800",
       chip: "bg-blue-100 text-blue-600",
+      hover: "hover:-translate-y-1 hover:bg-blue-50 hover:text-blue-600 hover:shadow-md",
     },
     content: `# L'Appendicite Aiguë en Milieu Tropical
 
-## Comprendre, du plus petit détail de la cellule jusqu'au geste qui sauve
+## Un cours complet, expliqué avec des mots très simples
 
-Bienvenue. Aujourd'hui, on va parler de l'appendicite. Mais attention : pas d'une manière ennuyeuse. On va faire simple, clair, avec des images de tous les jours. Mon but est que tu comprennes TOUT, même si le français n'est pas ta langue préférée. Tu vas voir : une fois que tu as le bon dessin dans la tête, tout devient facile.
+Bonjour. On va apprendre l'appendicite ensemble. Je vais parler avec des mots faciles. Des phrases courtes. Beaucoup d'exemples de la vie de tous les jours. Mon but est simple : tu dois tout comprendre, même si le français est dur pour toi.
 
-Ne saute aucune ligne, même si c'est long. Chaque petite idée en prépare une plus grande. À la fin, tu ne réciteras pas ce cours : tu le comprendras, et ça, personne ne pourra te l'enlever.
+Ne va pas trop vite. Lis chaque ligne. Chaque petite idée aide à comprendre la suivante. À la fin, tu vas connaître l'appendicite très bien. Et tu vas la comprendre, pas juste la réciter.
 
-![Un microscope en gros plan : c'est avec cet outil qu'on observe les cellules dont on va parler](https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1000&q=80)
+> Ce cours est long. C'est normal. Un bon médecin prend son temps pour comprendre. Va à ton rythme, fais des pauses, et reviens quand tu veux.
 
 ## Sommaire
 
-- Avant-propos : pourquoi ce cours est important pour toi
-- Chapitre I : L'appendice, c'est quoi au juste ?
-- Chapitre II : Un petit sac plein de soldats
-- Chapitre III : Les faux amis (ce qui ressemble à l'appendicite)
-- Chapitre IV : Comment le tuyau se bouche et finit par exploser
-- Chapitre V : Le ver qui bouche le tuyau
-- Chapitre VI : L'alarme incendie de la cellule
-- Chapitre VII : Qui doit partir à l'hôpital tout de suite ?
-- Chapitre VIII : Les outils du médecin sur le terrain
-- Chapitre IX : Comment on soigne
-- Chapitre X : L'erreur qui peut tuer : attendre trop longtemps
-- Récapitulatif : le tableau à retenir
+● Avant-propos : pourquoi ce cours est important
+● Chapitre I : L'appendice, c'est quoi ?
+● Chapitre II : Un petit sac plein de soldats
+● Chapitre III : Le tapis roulant de mucus
+● Chapitre IV : Les faux amis
+● Chapitre V : Le film en cinq étapes
+● Chapitre VI : Pourquoi la douleur bouge
+● Chapitre VII : Le ver qui bouche le tuyau
+● Chapitre VIII : L'alarme de la cellule
+● Chapitre IX : Les pompiers du corps
+● Chapitre X : Pourquoi le corps chauffe
+● Chapitre XI : Qui part à l'hôpital tout de suite ?
+● Chapitre XII : Les outils du médecin
+● Chapitre XIII : Comment on soigne
+● Chapitre XIV : Autour de l'opération
+● Chapitre XV : L'erreur qui peut tuer
+● Récapitulatif
 
-## AVANT-PROPOS : Pourquoi ce cours est important pour toi
+## AVANT-PROPOS : Pourquoi ce cours est important
 
-Installe-toi bien. L'appendicite, c'est l'une des urgences du ventre les plus fréquentes au monde. Tu la verras très souvent. Le problème, c'est qu'elle est maligne : elle sait se déguiser. Parfois elle ressemble à une simple douleur au ventre, et pourtant elle peut tuer en quelques heures.
+L'appendicite est une maladie très fréquente. Tu vas la voir souvent dans ta vie de médecin. Le problème, c'est qu'elle sait se cacher. Parfois elle a l'air d'un simple mal de ventre. Mais elle peut tuer en quelques heures.
 
-Ton travail de médecin n'est pas d'apprendre une phrase par cœur. Ton travail, c'est de COMPRENDRE. Comprendre pourquoi un tout petit bouchon peut transformer un organe tranquille en une vraie bombe. Et surtout, comprendre quoi faire quand l'hôpital est loin, très loin, comme dans beaucoup de régions tropicales.
+Dans une grande ville, c'est plus facile. Il y a l'hôpital juste à côté. Il y a des machines pour voir dans le ventre. Mais dans beaucoup de régions chaudes, l'hôpital est loin. Très loin. Parfois à plusieurs heures de route. Là, tout change.
 
-Une question pour commencer. Attends, réponds-moi : d'après toi, qu'est-ce qui change vraiment quand le bloc opératoire est à quatre heures de route au lieu de quatre minutes ? Réfléchis une seconde avant de lire la suite. La réponse est simple : tu ne peux plus attendre d'être sûr à 100 pour cent. Tu dois décider plus tôt, et parfois envoyer le patient à l'hôpital juste sur un doute sérieux. On y reviendra souvent, car c'est le fil rouge de tout ce cours.
+Attends, réponds-moi : qu'est-ce qui change quand l'hôpital est à quatre heures de route ? Réfléchis avant de lire la suite.
 
-## CHAPITRE I : L'appendice, c'est quoi au juste ?
+>> La réponse : tu ne peux plus attendre d'être sûr à 100 pour cent. Tu dois décider vite. Parfois, tu envoies le malade à l'hôpital juste sur un doute. Mieux vaut un doute qu'un mort.
 
-Imagine ton gros intestin comme un grand tuyau. Au tout début de ce tuyau, il y a une petite poche : le cæcum. Et sur cette poche est accroché un petit doigt creux, fin et fermé au bout, comme un petit gant à un seul doigt. C'est ça, l'appendice.
+C'est le fil rouge de tout ce cours. On va y revenir souvent.
 
-Le point où il est attaché ne bouge jamais. C'est un repère fixe pour le chirurgien. Par contre, la pointe de l'appendice, elle, peut se cacher un peu partout autour :
+## CHAPITRE I : L'appendice, c'est quoi ?
 
-➔ **Derrière le cæcum** (le cas le plus fréquent) : là, il est caché. Quand on appuie sur le ventre, on ne sent presque rien. C'est le plus traître.
-➔ **Vers le bas, dans le petit bassin** : là, il touche la vessie ou, chez la femme, les organes féminins. On confond alors facilement avec un problème urinaire ou gynécologique.
-➔ **Vers le haut, sous le foie** : rare, mais la douleur monte et ressemble à une crise de vésicule biliaire.
+Imagine ton gros intestin. C'est un grand tuyau. Au début de ce tuyau, il y a une petite poche. On l'appelle le cæcum. Et sur cette poche, il y a un petit doigt creux. Fin. Fermé au bout. C'est ça, l'appendice.
 
-Il faut bien comprendre une chose sur sa forme. L'appendice est un cul-de-sac : un tuyau fermé au bout, avec une seule petite porte d'entrée. Pense à une impasse dans une ville, une petite rue sans issue. Tout ce qui rentre doit ressortir par le même endroit. Si on bloque l'entrée de l'impasse, tout ce qui est à l'intérieur reste coincé. Retiens bien cette image du cul-de-sac : c'est la clé de toute la maladie.
+Pense à un petit gant, mais avec un seul doigt. Ce doigt est vide à l'intérieur. Il a une seule petite porte pour entrer et sortir. C'est très important. Garde bien cette image.
 
-> **L'Astuce du Prof :** au bloc, si tu ne trouves pas l'appendice, ne panique pas. Le gros intestin a trois bandes de muscle sur sa surface, comme trois rails. Suis ces rails avec le doigt : ils se rejoignent TOUJOURS pile à la base de l'appendice. C'est le truc infaillible.
+Le point où l'appendice est accroché ne bouge jamais. C'est toujours le même endroit. Mais la pointe, elle, peut se cacher partout :
 
-![Vue anatomique du ventre : repérer où se cache l'appendice est la première étape du raisonnement](https://images.unsplash.com/photo-1530497610245-94d3c16cda28?auto=format&fit=crop&w=1000&q=80)
+➔ **Derrière le cæcum** : c'est le cas le plus fréquent. Là, l'appendice est caché. Quand on appuie sur le ventre, on ne sent presque rien. C'est le plus traître.
+➔ **Vers le bas** : l'appendice descend près de la vessie. Ou près des organes de la femme. On confond alors avec un problème urinaire ou de femme.
+➔ **Vers le haut** : rare. La douleur monte et ressemble à un problème de foie.
+
+■ Retiens une image forte : l'appendice est un **cul-de-sac**. Une rue sans issue. Une seule entrée. Tout ce qui rentre doit ressortir par le même trou. Si on bloque l'entrée, tout reste coincé dedans.
+
+> **L'Astuce du Prof :** au bloc opératoire, si tu ne trouves pas l'appendice, ne panique pas. Le gros intestin a trois bandes de muscle sur sa surface. Comme trois rails de train. Suis ces rails avec le doigt. Ils se rejoignent toujours pile à la base de l'appendice. C'est le truc qui marche à tous les coups.
+
+> ملخص بالعربية : الزائدة الدودية هي أنبوب صغير مسدود من طرف واحد، له باب واحد فقط. إذا انسد هذا الباب، يبقى كل شيء محبوساً بالداخل.
 
 ## CHAPITRE II : Un petit sac plein de soldats
 
-Voici une chose que beaucoup d'étudiants ignorent. L'appendice n'est pas un déchet inutile. À l'intérieur de sa paroi, il y a énormément de cellules de défense, les cellules du système immunitaire. On peut le voir comme une petite caserne de soldats, toujours prête à se battre contre les microbes.
+Beaucoup d'étudiants pensent que l'appendice ne sert à rien. C'est faux. Dans sa paroi, il y a beaucoup de cellules de défense. Ce sont les soldats du corps. Ils se battent contre les microbes.
 
-Cette caserne est la plus remplie entre 10 et 20 ans. Et devine quoi : c'est exactement l'âge où l'appendicite est la plus fréquente. Ce n'est pas un hasard, tu vas comprendre pourquoi.
+On peut voir l'appendice comme une petite caserne de soldats. Une base militaire dans le ventre. Toujours prête à combattre.
 
-Quand tu attrapes un simple rhume ou une petite gastro, tout ton corps met ses soldats en alerte. Les soldats de l'appendice se multiplient alors très vite et gonflent. Et là, problème : le tuyau de l'appendice est déjà tout fin. Si les soldats gonflent trop, ils bouchent le passage de l'intérieur, comme une éponge qui gonfle dans un tuyau étroit.
+Cette caserne est la plus remplie entre 10 et 20 ans. Et devine quoi ? C'est justement l'âge où l'appendicite arrive le plus souvent. Ce n'est pas un hasard. Tu vas comprendre pourquoi.
 
-Tu es avec moi ? Ne décroche pas, c'est le point de départ de toute la maladie : **un tuyau fin qui se bouche facilement.**
+Quand tu attrapes un rhume ou une petite gastro, tout ton corps se met en alerte. Les soldats se réveillent partout. Même ceux de l'appendice. Ils se multiplient vite. Et ils gonflent.
 
-### Le tapis roulant de mucus
+▲ Et voilà le problème : le tuyau de l'appendice est déjà tout fin. Si les soldats gonflent trop, ils bouchent le passage de l'intérieur. Comme une éponge sèche qu'on mouille : elle gonfle et remplit tout le tuyau.
 
-Il y a une deuxième chose à connaître. La paroi de l'appendice fabrique du mucus, une sorte de gel glissant. Ce gel agit comme un tapis roulant : il attrape les microbes et les pousse doucement vers la sortie, vers le gros intestin. Tant que le tuyau est ouvert, ce tapis roulant nettoie tout seul, sans qu'on y pense.
+Tu es avec moi ? Ne décroche pas. C'est le point de départ de la maladie : **un tuyau fin qui se bouche facilement.**
 
-Mais réfléchis deux secondes : que se passe-t-il si la sortie est bouchée ? Le tapis roulant continue de tourner, le mucus continue d'être fabriqué, mais il ne peut plus sortir. Il s'accumule. Et un endroit chaud, humide et fermé, plein de mucus, c'est le paradis des microbes. Voilà comment un simple bouchon transforme un organe propre en nid à microbes.
+>> Point clé à retenir : une infection banale, loin du ventre, peut réveiller les soldats de l'appendice, les faire gonfler, et boucher le tuyau. Une petite cause pour un gros problème.
 
-> ملخص بالعربية : الزائدة الدودية ليست عضواً عديم الفائدة، بل هي مليئة بخلايا المناعة التي تنتفخ عند أي عدوى بسيطة، فتسد الأنبوب الضيق.
+## CHAPITRE III : Le tapis roulant de mucus
 
-## CHAPITRE III : Les faux amis (ce qui ressemble à l'appendicite)
+Il y a une deuxième chose à comprendre. La paroi de l'appendice fabrique du mucus. Le mucus, c'est un gel qui glisse. Un peu comme du blanc d'œuf.
 
-Attention ici, car c'est le chapitre le plus dangereux. Toute douleur en bas à droite du ventre n'est PAS une appendicite. En zone tropicale, plusieurs maladies portent le même masque. Si tu te trompes, ça peut coûter une vie.
+Ce gel a un rôle : il attrape les microbes et les pousse doucement vers la sortie. Vers le gros intestin. C'est comme un tapis roulant dans un aéroport. Il avance tout seul et emmène les bagages. Ici, il emmène les microbes dehors.
 
-> **Attention, danger :** chez toute femme en âge d'avoir des enfants qui a mal en bas à droite, tu dois TOUJOURS éliminer une grossesse dans la trompe (grossesse extra-utérine) avant de penser appendicite. Ne l'oublie JAMAIS. C'est une erreur mortelle très classique.
+Tant que le tuyau est ouvert, ce tapis roulant nettoie tout seul. Personne n'y pense. Tout va bien.
 
-Voici les principaux faux amis à connaître, surtout sous les tropiques :
+Mais réfléchis deux secondes : que se passe-t-il si la sortie est bouchée ?
 
-| Maladie | Où et pour qui | Ce qui doit t'alerter | L'examen qui tranche |
+⮞ Le tapis roulant tourne encore. Le mucus continue d'être fabriqué. Mais il ne peut plus sortir. Alors il s'accumule. De plus en plus.
+
+⮞ Et un endroit chaud, humide, fermé, plein de mucus, c'est le paradis des microbes. Ils adorent. Ils se multiplient à toute vitesse.
+
+Voilà comment un simple bouchon change tout. L'appendice était propre. Maintenant, c'est un nid à microbes.
+
+> Note simple : le mucus n'est pas mauvais. Au contraire, il protège. Le problème, ce n'est pas le mucus. Le problème, c'est le bouchon qui l'empêche de sortir.
+
+> ملخص بالعربية : المخاط ينظّف الأنبوب مثل السير المتحرك. لكن إذا انسدت المخارج، يتجمّع المخاط ويصبح بيئة مثالية لتكاثر الجراثيم.
+
+## CHAPITRE IV : Les faux amis
+
+Attention. Ce chapitre est le plus dangereux. Écoute bien.
+
+Tout mal de ventre en bas à droite n'est PAS une appendicite. Dans les régions chaudes, plusieurs maladies portent le même masque. Elles ressemblent à l'appendicite mais ce sont autre chose. Si tu te trompes, ça peut coûter une vie.
+
+>>> Danger : chez toute femme qui peut avoir des enfants et qui a mal en bas à droite, il faut TOUJOURS penser à une grossesse dans la trompe. On appelle ça une grossesse extra-utérine. Il faut l'éliminer avant de dire appendicite. Ne l'oublie JAMAIS. C'est une erreur qui tue.
+
+Voici les principaux faux amis à connaître dans les zones tropicales :
+
+| Maladie | Chez qui | Ce qui doit t'alerter | L'examen qui aide |
 |---|---|---|---|
-| Vraie appendicite | Tout le monde, surtout 10-30 ans | Douleur qui part du nombril puis descend à droite | Échographie ou surveillance clinique |
-| Fièvre typhoïde | Eau sale, hygiène difficile | Fièvre longue en plateau, gros ventre, patient abattu | Prise de sang (hémoculture) |
-| Paludisme grave | Zone de moustiques, pas de protection | Fièvre + fatigue extrême, parfois jaunisse | Goutte de sang au microscope, en urgence |
-| Amibiase du côlon | Eau ou aliments souillés | Diarrhée avec du sang et des glaires | Examen des selles |
+| Vraie appendicite | Surtout 10-30 ans | Douleur qui part du nombril et descend à droite | Échographie ou surveillance |
+| Fièvre typhoïde | Eau sale, mauvaise hygiène | Fièvre longue, patient très fatigué | Prise de sang |
+| Paludisme | Zone de moustiques | Fièvre + grande fatigue, parfois jaunisse | Goutte de sang au microscope |
+| Amibiase | Eau ou nourriture sale | Diarrhée avec du sang | Examen des selles |
 
-### Le piège de la gastro chez l'enfant
+⮞ Un dernier faux ami, très fréquent chez l'enfant : la gastro. L'enfant a mal au ventre, vomit, a un peu de fièvre. Les parents pensent à une simple gastro. Ils attendent. Mais parfois, une vraie appendicite se cache dessous.
 
-Un dernier faux ami, très fréquent chez l'enfant : la gastro-entérite. L'enfant a mal au ventre, vomit, a un peu de fièvre. Les parents pensent à une simple gastro et attendent. Mais parfois, sous cette gastro se cache une vraie appendicite qui commence. La règle simple à retenir : si la douleur ne passe pas et se fixe de plus en plus en bas à droite, ce n'est plus une gastro. Réexamine toujours l'enfant quelques heures plus tard, c'est le meilleur détecteur de pièges.
+La règle simple : si la douleur ne passe pas, et si elle se fixe de plus en plus en bas à droite, ce n'est plus une gastro. Réexamine l'enfant quelques heures plus tard. Toujours.
 
-> **L'Astuce du Prof :** retiens une règle d'or de la médecine tropicale. Fièvre + douleur au ventre au retour d'une zone à paludisme = paludisme jusqu'à preuve du contraire. On demande la goutte de sang AVANT tout le reste.
+> **L'Astuce du Prof :** dans les régions chaudes, retiens cette règle d'or. Fièvre plus mal de ventre au retour d'une zone à moustiques, on pense paludisme d'abord. On demande la goutte de sang avant tout le reste. Le paludisme tue vite.
 
-> ملخص بالعربية : ليس كل ألم أسفل يمين البطن التهاب زائدة. في المناطق الحارة، فكّر دائماً في الملاريا والتيفوئيد أولاً.
+> ملخص بالعربية : ليس كل ألم أسفل يمين البطن هو التهاب زائدة. في المناطق الحارة، فكّر أولاً في الملاريا والتيفوئيد، وعند المرأة فكّر في الحمل خارج الرحم.
 
-## CHAPITRE IV : Comment le tuyau se bouche et finit par exploser
+## CHAPITRE V : Le film en cinq étapes
 
-Voici le cœur du cours. Je vais te raconter l'histoire en cinq étapes, comme un film. Si tu comprends ce film, tu comprends tout le reste : les signes, l'urgence, le traitement.
+Voici le cœur du cours. Je vais te raconter une histoire. Comme un film en cinq scènes. Si tu comprends ce film, tu comprends tout : les signes, l'urgence, le traitement.
 
-### Étape 1 : le bouchon
+### Scène 1 : le bouchon
 
-Tout commence par un bouchon dans le petit tuyau. Chez l'adulte, c'est souvent une petite bille de matières dures (on l'appelle un stercolithe, mais retiens juste : un petit caillou de "caca" séché). Chez le jeune, c'est la caserne de soldats qui gonfle, comme on l'a vu au chapitre précédent. Dans tous les cas, la petite porte d'entrée du cul-de-sac se ferme.
+Tout commence par un bouchon dans le petit tuyau. Chez l'adulte, c'est souvent une petite bille dure de matières. Chez le jeune, c'est la caserne de soldats qui gonfle. Dans les deux cas, la petite porte se ferme.
 
-### Étape 2 : ça se remplit
+### Scène 2 : ça se remplit
 
-Une fois le tuyau bouché, l'appendice continue de fabriquer du liquide en amont. Mais ce liquide ne peut plus sortir. Imagine un évier bouché où le robinet coule quand même : l'eau monte, monte, monte. En plus, les microbes qui vivent normalement là-dedans se retrouvent enfermés et se mettent à se multiplier très vite dans ce liquide stagnant. En quelques heures, ils sont des millions.
+Le tuyau est bouché. Mais l'appendice fabrique encore du liquide. Ce liquide ne peut plus sortir. Imagine un évier bouché avec le robinet ouvert. L'eau monte, monte, monte. Et les microbes enfermés dedans se multiplient très vite.
 
-### Étape 3 : ça gonfle et ça serre les veines
+### Scène 3 : ça gonfle et ça serre les veines
 
-La pression monte dans l'appendice fermé. Et voici un point clé. Dans la paroi, il y a deux types de tuyaux de sang : les veines (petite pression, molles) et les artères (grosse pression, solides). Quand la pression interne monte, elle écrase D'ABORD les veines, parce qu'elles sont molles.
+La pression monte dans l'appendice fermé. Écoute bien ce point clé. Dans la paroi, il y a deux types de petits tuyaux de sang. Les veines, molles, avec peu de pression. Les artères, dures, avec beaucoup de pression.
 
-Dis-moi, d'après toi, pourquoi les veines cèdent avant les artères ? Réfléchis une seconde... Voilà : c'est comme deux tuyaux d'arrosage, un presque vide (la veine) et un gonflé à fond (l'artère). Si tu marches dessus, le tuyau presque vide s'aplatit tout de suite, l'autre résiste. Résultat : le sang entre encore par les artères mais ne ressort plus par les veines. La paroi gonfle d'eau, comme une éponge trempée.
+Quand la pression monte à l'intérieur, elle écrase d'abord les veines. Pourquoi les veines et pas les artères ?
 
-### Étape 4 : la paroi meurt
+Dis-moi, d'après toi, pourquoi ? Réfléchis une seconde.
 
-La pression continue de monter et finit par écraser aussi les artères. Là, plus de sang du tout n'arrive. Sans sang, la paroi n'a plus d'oxygène. Elle s'étouffe et commence à mourir. Les microbes en profitent pour envahir tout le mur de l'appendice, de l'intérieur vers l'extérieur.
+⮞ Voilà : imagine deux tuyaux d'arrosage. Un presque vide (la veine). Un gonflé à fond (l'artère). Si tu marches dessus, le tuyau presque vide s'écrase tout de suite. L'autre résiste. C'est pareil dans la paroi.
 
-> **L'Astuce du Prof :** retiens cette petite phrase : "la veine se bouche avant l'artère". C'est PILE à ce moment-là que la douleur se déplace du nombril vers le bas à droite. Pourquoi ? Parce que l'inflammation touche enfin la fine peau qui tapisse le ventre (le péritoine), et cette peau, elle, sait dire exactement où ça fait mal.
+Résultat : le sang entre encore par les artères. Mais il ne sort plus par les veines. La paroi se gonfle d'eau. Comme une éponge trempée.
 
-![Observation au microscope : la paroi de l'appendice qui souffre et meurt, cellule par cellule](https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=1000&q=80)
+### Scène 4 : la paroi meurt
 
-### Étape 5 : l'explosion
+La pression monte encore. Elle finit par écraser aussi les artères. Là, plus de sang du tout. Sans sang, pas d'oxygène. La paroi étouffe. Elle commence à mourir. Les microbes en profitent et envahissent tout le mur.
 
-Un mur mort finit toujours par se déchirer. C'est la perforation. Deux scénarios :
+> **L'Astuce du Prof :** retiens une phrase simple. "La veine se bouche avant l'artère." C'est exactement à ce moment que la douleur change de place. Elle part du nombril et va en bas à droite. On explique pourquoi au chapitre suivant.
 
-➔ **Explosion "contenue"** : si ça va lentement, les organes voisins et la graisse du ventre viennent coller autour, comme des pompiers qui font un mur autour d'un feu. Ça forme une grosse boule (un plastron) ou une poche de pus (un abcès).
-➔ **Explosion "libre"** : si ça va très vite, le pus se répand partout dans le ventre. C'est la péritonite généralisée. Là, c'est une urgence vitale, chaque minute compte.
+### Scène 5 : l'explosion
 
-Retiens bien l'ordre de ce film : bouchon, remplissage, gonflement, mort de la paroi, explosion. Chaque étape prépare la suivante. Et plus le temps passe, plus on avance dans le film sans pouvoir revenir en arrière. C'est pour ça qu'on dit que l'appendicite est une course contre la montre.
+Un mur mort finit toujours par se déchirer. C'est la perforation. Deux cas possibles :
 
-> ملخص بالعربية : القصة في خمس مراحل: انسداد، امتلاء، انتفاخ يضغط الأوردة، موت الجدار، ثم الانفجار. الألم ينتقل إلى أسفل اليمين عندما يصل الالتهاب إلى غشاء البطن.
+➔ **Explosion contenue** : si ça va lentement, les organes voisins et la graisse du ventre viennent coller autour. Comme des pompiers qui font un mur autour du feu. Ça forme une grosse boule ou une poche de pus.
+➔ **Explosion libre** : si ça va très vite, le pus se répand partout dans le ventre. C'est très grave. On appelle ça une péritonite. Chaque minute compte.
 
-## CHAPITRE V : Le ver qui bouche le tuyau
+>>> Alerte : plus le temps passe, plus on avance dans le film. Et on ne peut pas revenir en arrière. L'appendicite est une course contre la montre.
 
-Voici une cause qu'on oublie souvent, mais très fréquente dans les régions chaudes : les vers intestinaux, en particulier un ver rond assez long qu'on appelle l'ascaris.
+> ملخص بالعربية : القصة في خمس مراحل: انسداد، ثم امتلاء، ثم انتفاخ يضغط الأوردة، ثم موت الجدار، ثم الانفجار.
 
-Attends, une question : comment un ver peut-il donner une appendicite ? C'est logique quand tu y penses. Ce ver vit dans l'intestin. Parfois, il se faufile dans l'entrée de l'appendice, s'enroule sur lui-même, et bouche le tuyau exactement comme un caillou le ferait. Le même film que le chapitre IV recommence, mais avec un ver comme bouchon.
+## CHAPITRE VI : Pourquoi la douleur bouge
 
-En plus, le corps déteste ce ver et envoie contre lui un type spécial de cellules de défense (les éosinophiles). Ça ajoute encore de l'inflammation. Voilà pourquoi, en zone tropicale, on regarde toujours la prise de sang : beaucoup d'éosinophiles, c'est un indice qui doit faire penser au ver.
+C'est une question que les examinateurs adorent. Pourquoi la douleur de l'appendicite commence autour du nombril, puis descend en bas à droite ?
 
-> **L'Astuce du Prof :** quand tu retires un appendice sous les tropiques, examine bien l'intérieur. Si tu trouves un ver, il faut traiter toute la famille contre les vers, sinon ça recommencera chez les frères et sœurs.
+Au début, l'appendice est juste gonflé à l'intérieur. Les nerfs qui sentent ça sont des nerfs anciens, un peu bêtes. Ils ne savent pas dire où ça fait mal exactement. Ils disent juste : "ça fait mal quelque part au milieu du ventre." C'est pour ça que la douleur de départ est vague, autour du nombril.
 
-![Vue anatomique du tube digestif : c'est là que le ver peut migrer et venir boucher l'appendice](https://images.unsplash.com/photo-1530497610245-94d3c16cda28?auto=format&fit=crop&w=1000&q=80)
+Plus tard, l'inflammation grandit. Elle touche la fine peau qui tapisse tout le ventre. Cette peau s'appelle le péritoine. Et elle, elle est très précise. Elle sait dire exactement où ça fait mal.
 
-> ملخص بالعربية : الديدان مثل الإسكارس قد تسد الزائدة الدودية تماماً كالحصاة، وهي سبب متكرر في المناطق الحارة.
+⮞ Donc quand la douleur "descend" et se fixe en bas à droite, ça veut dire une chose importante : l'inflammation touche maintenant le péritoine. La maladie a avancé.
 
-## CHAPITRE VI : L'alarme incendie de la cellule
+>> À retenir : douleur qui commence au nombril et qui descend à droite, c'est le signe le plus typique de l'appendicite. Si tu vois ça, pense appendicite tout de suite.
 
-On va descendre tout petit maintenant, au niveau des molécules. Mais reste tranquille : je vais tout expliquer avec des images simples. Tu vas voir, c'est comme un système d'alarme dans une maison.
+> ملخص بالعربية : الألم يبدأ غامضاً حول السرة، ثم ينتقل بوضوح إلى أسفل اليمين عندما يصل الالتهاب إلى غشاء البطن الحساس.
 
-### La sonnette d'alarme
+## CHAPITRE VII : Le ver qui bouche le tuyau
 
-Sur la surface des cellules, il y a des petits capteurs. Le plus important s'appelle le TLR4. Pense à une sonnette sur la porte. Quand un microbe (surtout sa "peau", une molécule appelée LPS) vient toucher cette sonnette, elle sonne : "Alerte, un ennemi est entré !".
+Voici une cause qu'on oublie souvent. Mais elle est fréquente dans les pays chauds. Ce sont les vers dans l'intestin. Surtout un ver rond assez long. On l'appelle l'ascaris.
 
-### L'interrupteur central
+Attends, une question : comment un ver peut donner une appendicite ? C'est logique quand tu y penses.
 
-Cette sonnette envoie un message à l'intérieur de la cellule jusqu'à un grand interrupteur, qu'on appelle NF-kB. Tant qu'il est éteint, rien ne se passe. Mais quand l'alarme sonne, l'interrupteur s'allume. Et cet interrupteur, lui, ouvre les "usines" qui fabriquent les signaux d'urgence.
+Ce ver vit dans l'intestin. Parfois, il se faufile dans l'entrée de l'appendice. Il s'enroule sur lui-même. Et il bouche le tuyau. Exactement comme une bille dure le ferait. Le même film du chapitre V recommence. Mais cette fois, le bouchon est un ver.
 
-Tu es toujours là ? C'est le passage le plus technique, mais garde l'image : sonnette, puis fil électrique, puis interrupteur, puis usines qui démarrent. Rien de plus.
+En plus, le corps déteste ce ver. Il envoie contre lui un type spécial de soldats. On les appelle les éosinophiles. Ça ajoute encore de l'inflammation.
 
-### Les messagers d'urgence
+■ C'est pour ça qu'on regarde toujours la prise de sang dans les zones tropicales. Beaucoup d'éosinophiles, c'est un indice. Ça fait penser au ver.
 
-Les usines fabriquent alors des petits messagers chimiques (on les appelle les cytokines : par exemple l'interleukine 1, le TNF-alpha). Ces messagers partent dans le sang et font trois choses :
+> **L'Astuce du Prof :** quand tu retires un appendice dans une zone à vers, regarde bien l'intérieur. Si tu trouves un ver, il faut traiter toute la famille contre les vers. Sinon, ça va recommencer chez les frères et les sœurs.
 
-✔ Ils montent la température du corps : c'est la fièvre.
-✔ Ils appellent les soldats du sang (les globules blancs) à venir se battre sur place.
-✔ Ils rendent les nerfs du coin très sensibles : c'est la douleur.
+> ملخص بالعربية : ديدان الإسكارس قد تسدّ الزائدة الدودية تماماً مثل الحصاة، وهي سبب متكرر في المناطق الحارة.
 
-Voilà pourquoi un malade avec une appendicite a de la fièvre, une prise de sang avec beaucoup de globules blancs, et mal au ventre. Ce ne sont pas trois hasards : c'est le même système d'alarme qui tourne à fond.
+## CHAPITRE VIII : L'alarme de la cellule
 
-### Les pompiers arrivent
+Maintenant, on descend tout petit. Au niveau des molécules. Mais reste tranquille. Je vais tout expliquer comme un système d'alarme dans une maison. Tu vas voir, c'est facile.
 
-Quand les messagers d'urgence sonnent, les globules blancs du sang arrivent en courant. Mais comment sortent-ils du sang pour aller sur le lieu du combat ? Les parois des petits vaisseaux deviennent collantes, comme du velcro. Les globules blancs s'y accrochent, ralentissent, puis se faufilent entre les cellules du vaisseau pour rejoindre le tissu malade. C'est pour ça qu'à la prise de sang on voit beaucoup de globules blancs : une partie a quitté le sang pour aller combattre dans l'appendice.
+### La sonnette
 
-> **L'Astuce du Prof :** chaque signe que tu vois chez le patient a une explication au niveau des molécules. La fièvre, c'est les messagers qui parlent au cerveau. La douleur, c'est les nerfs rendus hypersensibles. Quand tu comprends ça, tu ne récites plus : tu raisonnes.
+Sur la surface des cellules, il y a des petits capteurs. Le plus important s'appelle le TLR4. Pense à une sonnette sur la porte d'entrée. Quand un microbe vient toucher cette sonnette, elle sonne. Elle dit : "Alerte ! Un ennemi est entré !"
 
-![Image au microscope de cellules : c'est à cette échelle minuscule que se joue toute l'inflammation](https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1000&q=80)
+### L'interrupteur
 
-> ملخص بالعربية : الالتهاب مثل نظام إنذار: جرس على الخلية ينبّه مفتاحاً مركزياً، فيطلق رسائل كيميائية تسبب الحمى والألم واستدعاء خلايا الدفاع.
+La sonnette envoie un message à l'intérieur de la cellule. Le message va jusqu'à un grand interrupteur. On l'appelle NF-kB. Tant qu'il est éteint, rien ne bouge. Mais quand l'alarme sonne, l'interrupteur s'allume.
 
-## CHAPITRE VII : Qui doit partir à l'hôpital tout de suite ?
+Et cet interrupteur allume les "usines" de la cellule. Les usines qui fabriquent les signaux d'urgence.
 
-Une fois que tu penses à une appendicite, ton deuxième réflexe est de chercher les signes de gravité. Ce sont eux qui décident si tu dois envoyer le patient EN URGENCE, surtout quand l'hôpital est loin.
+Tu es toujours là ? C'est le passage le plus technique. Mais garde l'image simple : sonnette, puis fil électrique, puis interrupteur, puis usines qui démarrent. Rien de plus.
+
+### Les messagers
+
+Les usines fabriquent des petits messagers chimiques. On les appelle les cytokines. Par exemple l'interleukine 1. Ou le TNF. Ces messagers partent dans le sang et font trois choses :
+
+✦ Ils montent la température du corps. C'est la fièvre.
+✦ Ils appellent les soldats du sang à venir se battre. Ce sont les globules blancs.
+✦ Ils rendent les nerfs du coin très sensibles. C'est la douleur.
+
+⮞ Voilà pourquoi un malade avec une appendicite a trois choses en même temps : de la fièvre, beaucoup de globules blancs dans le sang, et mal au ventre. Ce ne sont pas trois hasards. C'est la même alarme qui tourne à fond.
+
+> **L'Astuce du Prof :** chaque signe que tu vois chez le malade a une cause au niveau des molécules. La fièvre, c'est les messagers qui parlent au cerveau. La douleur, c'est les nerfs devenus hypersensibles. Quand tu comprends ça, tu ne récites plus. Tu raisonnes.
+
+> ملخص بالعربية : الالتهاب مثل جهاز إنذار: جرس على الخلية ينبّه مفتاحاً مركزياً، فيطلق رسائل كيميائية تسبب الحمى والألم واستدعاء خلايا الدفاع.
+
+## CHAPITRE IX : Les pompiers du corps
+
+On a dit que les messagers appellent les globules blancs. Mais comment ces globules blancs sortent du sang pour aller au combat ? C'est une belle histoire. Simple à comprendre.
+
+Les globules blancs voyagent dans le sang, dans les petits tuyaux. Quand l'alarme sonne, la paroi de ces petits tuyaux devient collante. Comme du velcro.
+
+❖ Étape 1 : les globules blancs roulent doucement et s'accrochent au velcro. Ils ralentissent.
+❖ Étape 2 : ils s'arrêtent, bien collés à la paroi.
+❖ Étape 3 : ils se faufilent entre les cellules du tuyau. Ils passent de l'autre côté. Ils arrivent sur le lieu du combat.
+
+C'est pour ça qu'à la prise de sang, on voit beaucoup de globules blancs. Une partie a quitté le sang pour aller se battre dans l'appendice. Les pompiers sont partis au feu.
+
+>> À retenir : beaucoup de globules blancs dans le sang, c'est le signe que le corps a envoyé ses pompiers. C'est un signe d'infection ou d'inflammation forte.
+
+## CHAPITRE X : Pourquoi le corps chauffe
+
+Parlons de la fièvre. Pourquoi le corps chauffe quand on a une appendicite ?
+
+Les messagers chimiques du chapitre VIII voyagent dans le sang. Ils arrivent jusqu'au cerveau. Dans le cerveau, il y a une petite zone qui règle la température. Comme le thermostat d'une maison.
+
+Quand les messagers arrivent, ils poussent le thermostat vers le haut. Le cerveau dit alors au corps : "Il faut chauffer." Le corps frissonne, se réchauffe, et la fièvre monte.
+
+⮞ Pourquoi le corps fait ça ? Parce que beaucoup de microbes n'aiment pas la chaleur. La fièvre est une arme. C'est le corps qui essaie de brûler les ennemis.
+
+> Note simple : la fièvre n'est pas l'ennemi. C'est une défense. Mais une fièvre très haute avec des frissons forts est un signe que l'infection est sérieuse. Il faut faire attention.
+
+> ملخص بالعربية : الحمى تحدث لأن الرسائل الكيميائية ترفع "منظّم الحرارة" في الدماغ. الحمى سلاح دفاعي ضد الجراثيم.
+
+## CHAPITRE XI : Qui part à l'hôpital tout de suite ?
+
+Tu penses à une appendicite. Bien. Maintenant, ton deuxième travail est de chercher les signes de gravité. Ce sont eux qui décident : est-ce qu'on envoie le malade en urgence ?
+
+Voici le tableau à connaître par cœur :
 
 | Signe d'alarme | Ce qu'on voit | Ce que ça veut dire | Ce que tu fais |
 |---|---|---|---|
-| Ventre dur comme du bois | Le ventre ne se laisse plus toucher | L'explosion a déjà eu lieu (péritonite) | Transfert immédiat, sans attendre |
-| Fièvre très haute avec frissons | Plus de 39 degrés, le patient tremble | Les microbes passent dans le sang | Antibiotiques tout de suite, puis transfert |
-| Le patient ne peut plus uriner ou boire | Bouche sèche, très fatigué | Manque d'eau grave | Perfusion avant et pendant le voyage |
-| Très jeune enfant | Moins de 5 ans | La maladie va beaucoup plus vite chez lui | Priorité absolue, on ne perd pas de temps |
-| Hôpital à plusieurs heures | Longue route de piste | Le patient peut s'aggraver en chemin | Décider le transfert dès le doute sérieux |
+| Ventre dur comme du bois | Le ventre ne se laisse plus toucher | L'explosion a déjà eu lieu | Transfert tout de suite |
+| Fièvre très haute avec frissons | Plus de 39 degrés, le malade tremble | Les microbes passent dans le sang | Antibiotiques puis transfert |
+| Ne peut plus boire ni uriner | Bouche sèche, très fatigué | Manque d'eau grave | Perfusion avant et pendant la route |
+| Très jeune enfant | Moins de 5 ans | La maladie va plus vite chez lui | Priorité, on ne perd pas de temps |
+| Hôpital très loin | Longue route de piste | Le malade peut s'aggraver en chemin | Décider le transfert dès le doute |
 
-Pose-toi toujours la même question devant un mal de ventre : "Est-ce que ce patient peut attendre, oui ou non ?" Si tu hésites, considère que la réponse est non. Il vaut mille fois mieux envoyer à l'hôpital un patient qui, finalement, n'avait rien de grave, que de garder au village un patient dont l'appendice va exploser cette nuit.
+Pose-toi toujours la même question devant un mal de ventre : "Est-ce que ce malade peut attendre, oui ou non ?" Si tu hésites, la réponse est non.
 
-> **Attention, danger :** ne te laisse jamais rassurer par un patient qui a l'air calme si les signes de gravité sont là. Chez l'enfant et la personne âgée, le ventre peut sembler souple alors que tout est déjà grave à l'intérieur.
+>> Vérité simple : il vaut mille fois mieux envoyer à l'hôpital un malade qui n'avait rien de grave, que de garder au village un malade dont l'appendice va exploser cette nuit.
 
-> ملخص بالعربية : كلما بعُد المستشفى، وجب اتخاذ قرار التحويل بسرعة أكبر ودون انتظار اليقين الكامل.
+>>> Alerte : ne te laisse jamais tromper par un malade qui a l'air calme. Chez l'enfant et chez la personne âgée, le ventre peut sembler souple. Mais à l'intérieur, tout est déjà grave.
 
-## CHAPITRE VIII : Les outils du médecin sur le terrain
+> ملخص بالعربية : كلما كان المستشفى أبعد، وجب اتخاذ قرار التحويل بسرعة أكبر ودون انتظار اليقين الكامل.
 
-Dans une grande ville, on a le scanner et l'échographie. Mais sur le terrain, en zone rurale, tu as souvent très peu d'outils. Apprends à faire avec ce que tu as.
+## CHAPITRE XII : Les outils du médecin
 
-➔ **La prise de sang :** elle montre souvent beaucoup de globules blancs. Mais attention : au tout début, elle peut être normale. Une prise de sang normale n'élimine JAMAIS une appendicite si le ventre parle.
-➔ **L'échographie :** très utile quand elle existe, surtout chez l'enfant et la femme (pas de rayons). On y cherche un appendice trop gros et une paroi épaissie. Son défaut : ça dépend beaucoup de la personne qui tient la sonde.
-➔ **Le scanner :** c'est le meilleur examen, mais dans beaucoup d'hôpitaux de campagne, il n'existe tout simplement pas.
+Dans une grande ville, on a des machines : l'échographie, le scanner. Mais sur le terrain, souvent, tu as très peu de choses. Apprends à faire avec ce que tu as.
 
-> **L'Astuce du Prof :** ne reste jamais bloqué à attendre un examen que tu n'as pas. Ton meilleur outil, c'est de réexaminer le ventre du patient toutes les quelques heures. Si la douleur grandit et se fixe en bas à droite, la réponse est en train de s'écrire sous tes yeux.
+● **La prise de sang** : elle montre souvent beaucoup de globules blancs. Mais attention. Au tout début, elle peut être normale. Une prise de sang normale n'élimine jamais l'appendicite si le ventre parle.
 
-![Un examen au microscope en laboratoire : sur le terrain, la prise de sang et l'observation attentive restent des outils précieux](https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=1000&q=80)
+● **L'échographie** : très utile quand elle existe. Surtout chez l'enfant et la femme, car il n'y a pas de rayons. On cherche un appendice trop gros et une paroi épaisse. Son défaut : ça dépend beaucoup de la personne qui tient la sonde.
 
-## CHAPITRE IX : Comment on soigne
+● **Le scanner** : c'est le meilleur examen. Mais dans beaucoup d'hôpitaux de campagne, il n'existe pas.
 
-Le traitement de base de l'appendicite, c'est l'opération : on enlève l'appendice. Voyons comment on adapte ça sur le terrain.
+> **L'Astuce du Prof :** ne reste jamais bloqué à attendre une machine que tu n'as pas. Ton meilleur outil, c'est de réexaminer le ventre du malade toutes les quelques heures. Si la douleur grandit et se fixe en bas à droite, la réponse s'écrit sous tes yeux.
 
-➔ **L'opération :** dans les grandes villes, on passe par de tout petits trous (cœlioscopie). En campagne, on ouvre le ventre par une petite coupure classique. Ça marche très bien aussi, entre de bonnes mains.
-➔ **Les antibiotiques :** ils accompagnent l'opération. En cas de péritonite ou d'abcès, il en faut une vraie cure, plus longue et plus forte.
-➔ **Le cas de la grosse boule (plastron) :** quand la maladie a déjà formé une boule dure, opérer tout de suite est dangereux (les tissus sont trop fragiles). On donne alors d'abord des antibiotiques, on laisse le calme revenir, et on opère plus tard "à froid", environ 6 à 8 semaines après.
+## CHAPITRE XIII : Comment on soigne
 
-### Les soins autour de l'opération
+Le traitement de base de l'appendicite, c'est l'opération. On enlève l'appendice. Voyons comment on adapte ça sur le terrain.
 
-Avant d'opérer, on prépare le patient. On le met à jeun : il ne mange plus, car endormir quelqu'un qui a l'estomac plein est dangereux (le contenu de l'estomac pourrait remonter et passer dans les poumons). On pose une perfusion pour lui donner de l'eau et du sucre directement dans la veine. On calme la douleur et on commence les antibiotiques. Après l'opération, on surveille trois choses simples : la température, le ventre, et la cicatrice. Quand tout a été fait à temps, le patient se remet en général très vite, et c'est ça, la plus belle récompense.
+➔ **L'opération** : dans les grandes villes, on passe par de tout petits trous. On appelle ça la cœlioscopie. En campagne, on ouvre le ventre par une petite coupure classique. Ça marche très bien aussi, entre de bonnes mains.
 
-> **L'Astuce du Prof :** face à une grosse boule inflammatoire, ton pire ennemi c'est la précipitation. Retiens la formule : "on refroidit avant d'opérer".
+➔ **Les antibiotiques** : ils aident autour de l'opération. En cas de péritonite ou de poche de pus, il en faut une vraie cure, plus longue et plus forte.
 
-> ملخص بالعربية : العلاج الأساسي هو استئصال الزائدة. أمام الكتلة الالتهابية، نعطي المضادات الحيوية أولاً ثم نعمل الجراحة لاحقاً بهدوء.
+➔ **La grosse boule** : parfois, la maladie a déjà formé une grosse boule dure. Opérer tout de suite est dangereux, car les tissus sont trop fragiles. On donne alors d'abord des antibiotiques. On laisse le calme revenir. Et on opère plus tard, à froid, quelques semaines après.
 
-## CHAPITRE X : L'erreur qui peut tuer : attendre trop longtemps
+> **L'Astuce du Prof :** devant une grosse boule inflammatoire, ton pire ennemi c'est la précipitation. Retiens la formule : "on refroidit avant d'opérer."
 
-S'il y a une seule chose à retenir de tout ce cours, c'est celle-ci. Loin de l'hôpital, ce qui tue le plus souvent, ce n'est pas une mauvaise opération. C'est le temps perdu avant de décider d'envoyer le patient.
+> ملخص بالعربية : العلاج الأساسي هو استئصال الزائدة. أمام الكتلة الالتهابية الكبيرة، نعطي المضادات الحيوية أولاً ثم نجري الجراحة لاحقاً بهدوء.
 
-Imagine la scène. Un malade a mal au ventre dans un village loin de tout. On se dit : "attendons demain, ça va peut-être passer". Mais pendant qu'on attend, le film du chapitre IV continue tout seul, heure après heure : la paroi meurt, puis elle explose.
+## CHAPITRE XIV : Autour de l'opération
 
-Souviens-toi d'une image simple. L'appendicite, c'est comme un petit incendie qui commence dans une pièce fermée. Au début, un seau d'eau suffit pour l'éteindre. Mais si tu attends, le feu prend toute la maison, et là, même les pompiers ont du mal. Ton rôle de médecin, c'est d'agir quand il ne faut encore qu'un seau d'eau.
+Avant d'opérer, on prépare le malade. C'est simple mais important.
 
-> **Attention, danger :** chaque heure d'attente augmente le risque d'explosion. Devant un ventre qui inquiète, on décide d'envoyer le patient DÈS le doute sérieux. On n'attend pas d'être sûr, et on n'attend surtout pas que ça empire.
+■ On le met à jeun. Il ne mange plus. Pourquoi ? Parce qu'endormir quelqu'un avec l'estomac plein est dangereux. Le contenu de l'estomac pourrait remonter et passer dans les poumons.
+
+■ On pose une perfusion. On donne de l'eau et du sucre directement dans la veine.
+
+■ On calme la douleur. Et on commence les antibiotiques si besoin.
+
+Après l'opération, on surveille trois choses simples : la température, le ventre, et la cicatrice. Si tout a été fait à temps, le malade guérit vite. Et ça, c'est la plus belle récompense pour un médecin.
+
+>> À retenir : une appendicite prise tôt, c'est une petite opération et une guérison rapide. Une appendicite prise trop tard, c'est une grande bataille. La différence, c'est le temps.
+
+## CHAPITRE XV : L'erreur qui peut tuer
+
+S'il y a une seule chose à retenir de tout ce cours, c'est celle-ci. Loin de l'hôpital, ce qui tue le plus, ce n'est pas une mauvaise opération. C'est le temps perdu avant de décider d'envoyer le malade.
+
+Imagine la scène. Un malade a mal au ventre dans un village loin de tout. On se dit : "attendons demain, ça va peut-être passer." Mais pendant qu'on attend, le film du chapitre V continue tout seul. Heure après heure. La paroi meurt. Puis elle explose.
+
+Souviens-toi d'une image simple. L'appendicite, c'est comme un petit feu dans une pièce fermée. Au début, un seau d'eau suffit pour l'éteindre. Mais si tu attends, le feu prend toute la maison. Et là, même les pompiers ont du mal.
+
+⮞ Ton rôle de médecin, c'est d'agir quand il ne faut encore qu'un seau d'eau.
+
+>>> Alerte finale : chaque heure d'attente augmente le risque d'explosion. Devant un ventre qui inquiète, on décide d'envoyer le malade dès le doute sérieux. On n'attend pas d'être sûr. Et on n'attend surtout pas que ça empire.
 
 > ملخص بالعربية : كل ساعة تأخير في التحويل تزيد خطر الانفجار والتهاب الصفاق. القرار المبكر ينقذ الحياة.
 
-## RÉCAPITULATIF : le tableau à retenir
+## RÉCAPITULATIF
 
-| Étape | Ce qui se passe | Le signe chez le patient | Le danger |
+Voici le grand tableau de tout le film. Garde-le en tête.
+
+| Étape | Ce qui se passe | Le signe chez le malade | Le danger |
 |---|---|---|---|
-| Bouchon | Le tuyau se ferme | Encore peu de signes | Faible si on agit vite |
-| Ça gonfle | Les veines sont écrasées | Douleur vague autour du nombril | Modéré |
-| La paroi meurt | Plus de sang, plus d'oxygène | Douleur forte fixée en bas à droite, fièvre | Élevé |
+| Bouchon | Le tuyau se ferme | Presque rien au début | Faible si on agit vite |
+| Ça gonfle | Les veines sont écrasées | Douleur vague au nombril | Moyen |
+| La paroi meurt | Plus de sang, plus d'oxygène | Douleur forte en bas à droite, fièvre | Élevé |
 | Explosion contenue | Boule ou poche de pus | Masse dure, fièvre qui va et vient | Élevé si on ne voit pas |
-| Explosion libre | Le pus se répand partout | Ventre dur comme du bois, patient en danger | Vital, chaque minute compte |
+| Explosion libre | Le pus se répand partout | Ventre dur comme du bois | Vital, chaque minute compte |
 
-Voilà. Tu connais maintenant l'appendicite du tout petit détail de la cellule jusqu'au geste qui sauve. Retiens surtout trois images : le tuyau fin qui se bouche, la douleur qui se déplace vers le bas à droite, et le temps perdu qui est ton pire ennemi. Garde ces trois images dans la tête, et tu seras un bon médecin, même loin de tout.`,
+Voilà. Tu connais maintenant l'appendicite. Du tout petit détail de la cellule jusqu'au geste qui sauve.
+
+Garde trois images simples dans la tête :
+
+✦ Le tuyau fin qui se bouche.
+✦ La douleur qui descend vers le bas à droite.
+✦ Le temps perdu, qui est ton pire ennemi.
+
+Garde ces trois images, et tu seras un bon médecin. Même loin de tout. Bon courage.`,
   },
   {
     id: "resume",
@@ -310,6 +416,7 @@ Voilà. Tu connais maintenant l'appendicite du tout petit détail de la cellule 
     accent: {
       active: "border-emerald-300 bg-emerald-50 text-emerald-800",
       chip: "bg-emerald-100 text-emerald-600",
+      hover: "hover:-translate-y-1 hover:bg-emerald-50 hover:text-emerald-600 hover:shadow-md",
     },
     content: `## Résumé Express : Appendicite Aiguë
 
@@ -329,6 +436,7 @@ Voilà. Tu connais maintenant l'appendicite du tout petit détail de la cellule 
     accent: {
       active: "border-rose-300 bg-rose-50 text-rose-800",
       chip: "bg-rose-100 text-rose-600",
+      hover: "hover:-translate-y-1 hover:bg-rose-50 hover:text-rose-600 hover:shadow-md",
     },
     content: `## Les Pièges Classiques à l'examen
 
@@ -346,6 +454,7 @@ Voilà. Tu connais maintenant l'appendicite du tout petit détail de la cellule 
     accent: {
       active: "border-amber-300 bg-amber-50 text-amber-800",
       chip: "bg-amber-100 text-amber-600",
+      hover: "hover:-translate-y-1 hover:bg-amber-50 hover:text-amber-600 hover:shadow-md",
     },
     content: `## Astuces Mnémotechniques
 
@@ -362,6 +471,7 @@ Voilà. Tu connais maintenant l'appendicite du tout petit détail de la cellule 
     accent: {
       active: "border-purple-300 bg-purple-50 text-purple-800",
       chip: "bg-purple-100 text-purple-600",
+      hover: "hover:-translate-y-1 hover:bg-purple-50 hover:text-purple-600 hover:shadow-md",
     },
     content: `## Cas Clinique : À toi de jouer, Yacine
 
@@ -381,6 +491,7 @@ Amine, 19 ans, se présente aux urgences pour une douleur abdominale débutée l
     accent: {
       active: "border-indigo-300 bg-indigo-50 text-indigo-800",
       chip: "bg-indigo-100 text-indigo-600",
+      hover: "hover:-translate-y-1 hover:bg-indigo-50 hover:text-indigo-600 hover:shadow-md",
     },
     content: `## QCM : Teste-toi sur l'Appendicite
 

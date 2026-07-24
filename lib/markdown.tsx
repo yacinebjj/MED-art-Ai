@@ -5,9 +5,9 @@ import type { Components } from "react-markdown";
  * reader (workspace CenterReader + the static demo page). Kept in one place so
  * the two stay visually identical.
  *
- * Blockquote colors and images are handled by the custom components below
- * (not here), so this string only covers headings, bold, markers, tables and
- * separators. It also strips the plugin's default blockquote quotation marks.
+ * Blockquote colors are handled by the custom component below (not here), so
+ * this string covers headings, bold, markers, tables and separators. It also
+ * strips the plugin's default blockquote quotation marks.
  */
 export const PROSE_CLASSES = [
   "prose prose-slate prose-lg max-w-none",
@@ -19,7 +19,7 @@ export const PROSE_CLASSES = [
   "prose-a:text-blue-600",
   // Bullet / ordered-list markers
   "marker:text-blue-500",
-  // Kill the default open-/close-quote glyphs on blockquotes (components color them)
+  // Kill the default open-/close-quote glyphs on blockquotes (component colors them)
   "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",
   // Tables
   "prose-th:bg-blue-600 prose-th:text-white prose-th:font-semibold prose-th:p-3 prose-th:text-left",
@@ -29,17 +29,35 @@ export const PROSE_CLASSES = [
   "prose-hr:border-t-2 prose-hr:border-blue-100",
 ].join(" ");
 
+/**
+ * Turns the shorthand blockquote levels into single-level blockquotes tagged
+ * with a colored-circle marker so they can be colored without nested-box bugs:
+ *   >   ...  -> blue   (default note / physiopathologie)
+ *   >>  ...  -> green  (résumé, point positif)
+ *   >>> ...  -> red    (alerte, danger, red flag)
+ * The colored circle also stays visible as a structural bullet.
+ */
+export function normalizeCallouts(md: string): string {
+  return md
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^(\s*)(>{1,3})\s?(.*)$/);
+      if (!m) return line;
+      const [, indent, level, rest] = m;
+      if (level.length === 3) return `${indent}> 🔴 ${rest}`;
+      if (level.length === 2) return `${indent}> 🟢 ${rest}`;
+      return `${indent}> ${rest}`;
+    })
+    .join("\n");
+}
+
 /** The four callout "tones" and their full literal Tailwind classes (literal so Tailwind's scanner picks them up). */
 type CalloutTone = "blue" | "emerald" | "amber" | "rose";
 
 const CALLOUT_STYLES: Record<CalloutTone, string> = {
-  // Physiopathology / general note
   blue: "border-l-4 border-blue-500 bg-blue-50 text-slate-800",
-  // Arabic memory-anchor summaries
   emerald: "border-l-4 border-emerald-500 bg-emerald-50 text-slate-800",
-  // "L'Astuce du Prof"
   amber: "border-l-4 border-amber-500 bg-amber-50 text-slate-800",
-  // Red flags / danger / attention
   rose: "border-l-4 border-rose-500 bg-rose-50 text-slate-800",
 };
 
@@ -52,9 +70,12 @@ function hastText(node: unknown): string {
   return "";
 }
 
-/** Picks a callout color from the blockquote's own text — works for static demo content AND live AI output. */
+/** Picks a callout color from the blockquote's own text — works for the static demo AND live AI output. */
 function calloutTone(text: string): CalloutTone {
-  if (/[؀-ۿ]/.test(text)) return "emerald"; // contains Arabic → memory anchor
+  if (text.includes("🔴")) return "rose";
+  if (text.includes("🟢")) return "emerald";
+  if (text.includes("🔵")) return "blue";
+  if (/[؀-ۿ]/.test(text)) return "emerald"; // Arabic memory anchor
   if (/astuce du prof/i.test(text)) return "amber";
   if (/(attention|danger|red\s*flag|jamais|interdit|urgence vitale|mortel|risque vital)/i.test(text)) {
     return "rose";
@@ -65,7 +86,6 @@ function calloutTone(text: string): CalloutTone {
 /**
  * ReactMarkdown element overrides:
  * - blockquote: colored callout box, tone chosen from its content.
- * - img: real responsive image with a styled caption (from the alt text).
  * - table: wrapped in a rounded, horizontally-scrollable container.
  */
 export const MARKDOWN_COMPONENTS: Components = {
@@ -79,20 +99,6 @@ export const MARKDOWN_COMPONENTS: Components = {
       </blockquote>
     );
   },
-  img: ({ src, alt }) => (
-    <figure className="my-6">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={typeof src === "string" ? src : ""}
-        alt={alt ?? ""}
-        loading="lazy"
-        className="w-full rounded-2xl shadow-lg ring-1 ring-slate-200/80"
-      />
-      {alt ? (
-        <figcaption className="mt-2 text-center text-sm italic text-slate-500">{alt}</figcaption>
-      ) : null}
-    </figure>
-  ),
   table: ({ children }) => (
     <div className="my-6 overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
       <table className="m-0 w-full">{children}</table>
