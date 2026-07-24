@@ -14,6 +14,26 @@ import {
   GraduationCap,
   Zap,
   Wand2,
+  Stethoscope,
+  Gauge,
+  Eye,
+  ScanLine,
+  Siren,
+  ClipboardCheck,
+  Scissors,
+  FileCheck,
+  Syringe,
+  Snowflake,
+  AlertTriangle,
+  Ban,
+  TrendingUp,
+  Droplets,
+  Activity,
+  XCircle,
+  ShieldAlert,
+  AlertOctagon,
+  CircleDot,
+  Target,
   type LucideIcon,
 } from "lucide-react";
 
@@ -50,14 +70,92 @@ export interface ResumeMode {
   label: string;
   icon: LucideIcon;
   variant: ResumeVariant;
-  /** Markdown content. For "smart", this is unused — see `levels` instead. */
+  /** Markdown content. For "smart", this is unused — see `levels` instead. For "visual", see `flowcharts`. */
   content: string;
   /** Only present on the "smart" mode: three compression levels the student can toggle. */
   levels?: { 30: string; 50: string; 80: string };
+  /** Only present on the "visual" mode: real Tailwind flowcharts, not ASCII art. */
+  flowcharts?: FlowChartData[];
+}
+
+/** A semantic color family for a flowchart card — matches the app's callout palette. */
+export type FlowNodeTone = "blue" | "amber" | "emerald" | "rose";
+
+export interface FlowNode {
+  label: string;
+  sublabel?: string;
+  tone: FlowNodeTone;
+  icon: LucideIcon;
+}
+
+/** One row of the flowchart. More than one node means a fork/decision branch at that step. */
+export interface FlowLevel {
+  nodes: FlowNode[];
+}
+
+export interface FlowChartData {
+  title: string;
+  levels: FlowLevel[];
 }
 
 /** Same badge value across all 15 modes — it reflects the topic's exam relevance, not the mode. */
 export const RESUME_TOMBABILITE = 95;
+
+/** Real Tailwind/card flowcharts for the "Visual Summary" mode — no ASCII art. */
+export const VISUAL_FLOWCHARTS: FlowChartData[] = [
+  {
+    title: "Algorithme diagnostique",
+    levels: [
+      { nodes: [{ label: "Douleur FID + fièvre", sublabel: "Suspicion clinique", tone: "blue", icon: Stethoscope }] },
+      { nodes: [{ label: "Score de Alvarado", sublabel: "Stratification du risque", tone: "amber", icon: Gauge }] },
+      {
+        nodes: [
+          { label: "Score faible (1-4)", sublabel: "Surveillance + réévaluation", tone: "emerald", icon: Eye },
+          { label: "Score intermédiaire (5-6)", sublabel: "Imagerie : écho ou TDM", tone: "amber", icon: ScanLine },
+          { label: "Score élevé (7-10)", sublabel: "Chirurgie directe possible", tone: "rose", icon: Siren },
+        ],
+      },
+      { nodes: [{ label: "Confirmation diagnostique", sublabel: "Clinique et/ou imagerie positive", tone: "blue", icon: ClipboardCheck }] },
+      { nodes: [{ label: "Appendicectomie", sublabel: "Traitement de référence", tone: "emerald", icon: Scissors }] },
+    ],
+  },
+  {
+    title: "Stratégie thérapeutique",
+    levels: [
+      { nodes: [{ label: "Appendicite confirmée", sublabel: "Décision thérapeutique", tone: "blue", icon: FileCheck }] },
+      {
+        nodes: [
+          { label: "Non compliquée", sublabel: "Cœlioscopie + ATB courte", tone: "emerald", icon: Syringe },
+          { label: "Plastron", sublabel: "ATB seul puis chirurgie à froid (6-8 sem)", tone: "amber", icon: Snowflake },
+          { label: "Péritonite", sublabel: "Chirurgie immédiate + réanimation + ATB large spectre", tone: "rose", icon: AlertTriangle },
+        ],
+      },
+    ],
+  },
+  {
+    title: "Cascade physiopathologique",
+    levels: [
+      { nodes: [{ label: "Obstruction", sublabel: "Stercolithe, hyperplasie lymphoïde, ascaris", tone: "blue", icon: Ban }] },
+      { nodes: [{ label: "Distension", sublabel: "Pullulation microbienne", tone: "amber", icon: TrendingUp }] },
+      { nodes: [{ label: "Œdème", sublabel: "Pression > pression veineuse", tone: "amber", icon: Droplets }] },
+      { nodes: [{ label: "Ischémie", sublabel: "Pression > pression artérielle", tone: "rose", icon: Activity }] },
+      { nodes: [{ label: "Nécrose pariétale", sublabel: "Perte de viabilité tissulaire", tone: "rose", icon: XCircle }] },
+      {
+        nodes: [
+          { label: "Perforation contenue", sublabel: "Plastron ou abcès", tone: "amber", icon: ShieldAlert },
+          { label: "Perforation libre", sublabel: "Péritonite généralisée", tone: "rose", icon: AlertOctagon },
+        ],
+      },
+    ],
+  },
+  {
+    title: "Migration de la douleur",
+    levels: [
+      { nodes: [{ label: "Douleur péri-ombilicale", sublabel: "Innervation viscérale, vague", tone: "blue", icon: CircleDot }] },
+      { nodes: [{ label: "Douleur en FID", sublabel: "Péritoine pariétal atteint, précise", tone: "rose", icon: Target }] },
+    ],
+  },
+];
 
 export const RESUME_MODES: ResumeMode[] = [
   // ────────────────────────────────────────────────────────────────────
@@ -351,65 +449,8 @@ Jamais de **laxatif/lavement** sur douleur abdominale fébrile non étiquetée.`
     label: "Visual Summary",
     icon: GitBranch,
     variant: "visual",
-    content: `## Arbre décisionnel — Appendicite aiguë
-
-\`\`\`
-DOULEUR FOSSE ILIAQUE DROITE + FIEVRE
-                ⬇
-   EXAMEN CLINIQUE + SCORE D'ALVARADO
-                ⬇
-   ┌────────────┼────────────┐
-   ⬇            ⬇            ⬇
-Score 1-4    Score 5-6     Score 7-10
-(faible)    (intermédiaire)   (élevé)
-   ⬇            ⬇            ⬇
-Surveillance  IMAGERIE   CHIRURGIE directe
-+ réévaluation (Écho / TDM)  possible
-   ⬇            ⬇
-Réexamen    ┌───┴────┐
- à 6-12h    ⬇         ⬇
-         Négative   Positive
-            ⬇         ⬇
-        Autre DDx  APPENDICECTOMIE
-                        ⬇
-              ┌─────────┼─────────┐
-              ⬇         ⬇         ⬇
-        Non compliquée  Plastron   Péritonite
-              ⬇         ⬇         ⬇
-        Coelioscopie  ATB seul  Chirurgie
-        + ATB courte  puis      immédiate
-                      chirurgie  + réanimation
-                      "à froid"  + ATB large
-                      (6-8 sem)  spectre
-\`\`\`
-
-## Migration de la douleur (physiopathologie en une ligne)
-
-\`\`\`
-NOMBRIL (douleur viscérale, vague)
-     ➔ inflammation atteint le péritoine pariétal ➔
-FOSSE ILIAQUE DROITE (douleur somatique, précise)
-\`\`\`
-
-## Cascade physiopathologique
-
-\`\`\`
-OBSTRUCTION (stercolithe / hyperplasie lymphoïde / ascaris)
-        ⬇
-DISTENSION + pullulation microbienne
-        ⬇
-Pression > pression VEINEUSE  ➔  ŒDÈME (phase catarrhale)
-        ⬇
-Pression > pression ARTÉRIELLE  ➔  ISCHÉMIE (phase suppurée/gangreneuse)
-        ⬇
-NÉCROSE PARIÉTALE
-        ⬇
-   ┌────┴────┐
-   ⬇         ⬇
-PERFORATION   PERFORATION
-CONTENUE       LIBRE
-(plastron/abcès) (péritonite généralisée)
-\`\`\``,
+    content: "",
+    flowcharts: VISUAL_FLOWCHARTS,
   },
 
   // ────────────────────────────────────────────────────────────────────

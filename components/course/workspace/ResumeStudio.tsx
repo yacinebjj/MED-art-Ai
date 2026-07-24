@@ -8,6 +8,7 @@ import { Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PROSE_CLASSES, MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
 import { RESUME_MODES, RESUME_TOMBABILITE, type ResumeMode } from "@/lib/demo-resume-content";
+import { VisualFlowchart } from "@/components/course/workspace/VisualFlowchart";
 
 type SmartLevel = 30 | 50 | 80;
 
@@ -62,18 +63,6 @@ function ModeBody({ mode, markdown }: { mode: ResumeMode; markdown: string }) {
     case "flash":
       return (
         <div className={cn(PROSE_CLASSES, "prose-xl [&_ol]:space-y-5 [&_li]:font-semibold [&_li]:marker:font-bold")}>
-          {body}
-        </div>
-      );
-
-    case "visual":
-      return (
-        <div
-          className={cn(
-            PROSE_CLASSES,
-            "prose-pre:rounded-xl prose-pre:border prose-pre:border-slate-700 prose-pre:bg-slate-900 prose-pre:text-emerald-300 prose-pre:shadow-lg"
-          )}
-        >
           {body}
         </div>
       );
@@ -141,7 +130,11 @@ export function ResumeStudio() {
         </div>
       )}
 
-      <ModeBody key={`${mode.id}-${smartLevel}`} mode={mode} markdown={markdown} />
+      {mode.id === "visual" ? (
+        <VisualFlowchart charts={mode.flowcharts ?? []} />
+      ) : (
+        <ModeBody key={`${mode.id}-${smartLevel}`} mode={mode} markdown={markdown} />
+      )}
     </div>
   );
 }
