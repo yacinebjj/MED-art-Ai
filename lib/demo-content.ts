@@ -5,11 +5,13 @@ import {
   Lightbulb,
   Stethoscope,
   ListChecks,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
 export type DemoSectionId =
   | "explication"
+  | "visual_studio"
   | "resume"
   | "pieges"
   | "astuces"
@@ -579,6 +581,21 @@ Garde trois images simples dans la tête, pour toujours :
 ✦ Le temps perdu, qui est ton pire ennemi, loin de l'hôpital.
 
 Garde ces trois images, et tu seras un bon médecin. Même loin de tout. Même sans machine. Avec juste ta tête, tes mains et ton cœur. Bon courage pour la suite. Tu vas y arriver.`,
+  },
+  {
+    id: "visual_studio",
+    label: "Mode Visuel",
+    icon: Workflow,
+    accent: {
+      active: "border-cyan-300 bg-cyan-50 text-cyan-800",
+      chip: "bg-cyan-100 text-cyan-600",
+      hover: "hover:-translate-y-1 hover:bg-cyan-50 hover:text-cyan-600 hover:shadow-md",
+    },
+    // Rendu réel géré par <VisualStudioDemo /> dans page.tsx (composants interactifs,
+    // pas du markdown) — ce contenu ne sert que de repli si jamais affiché tel quel.
+    content: `## Mode Visuel : Appendicite Aiguë
+
+Ce mode transforme le cours en représentations visuelles interactives (parcours clinique en 7 étapes, arbre de décision diagnostique) plutôt qu'en texte continu.`,
   },
   {
     id: "resume",

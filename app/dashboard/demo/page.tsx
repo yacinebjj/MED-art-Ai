@@ -20,6 +20,7 @@ import { useFullscreen } from "@/hooks/useFullscreen";
 import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
 import { ChatPanel } from "@/components/course/workspace/ChatPanel";
 import { ResumeStudio } from "@/components/course/workspace/ResumeStudio";
+import { VisualStudioDemo } from "@/components/visual-studio/VisualStudioDemo";
 import type { ChatMessage } from "@/lib/types";
 
 export default function DemoWorkspacePage() {
@@ -148,12 +149,14 @@ export default function DemoWorkspacePage() {
           onContextMenu={(e) => e.preventDefault()}
           className={cn(
             "mx-auto mb-8 select-text rounded-2xl border border-slate-200/80 bg-white p-12 shadow-sm",
-            activeId === "resume" ? "max-w-5xl" : "max-w-3xl",
+            activeId === "resume" || activeId === "visual_studio" ? "max-w-5xl" : "max-w-3xl",
             chatOpen && "mt-8"
           )}
         >
           {activeId === "resume" ? (
             <ResumeStudio />
+          ) : activeId === "visual_studio" ? (
+            <VisualStudioDemo />
           ) : (
             <article key={activeSection.id} className={cn(PROSE_CLASSES, "animate-fade-in")}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
