@@ -1,19 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Dna, HeartPulse, Loader2, Maximize2, Minimize2, Moon, Sun } from "lucide-react";
-import {
-  DEMO_SECTIONS,
-  buildDemoAskPrompt,
-  buildDemoAskReply,
-  buildDemoTranslatePrompt,
-  buildDemoTranslateReply,
-  type DemoSectionId,
-} from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildDemoAskPrompt, buildDemoTranslatePrompt, type DemoSectionId } from "@/lib/demo-content";
 import { COURSE_SLUG_CONTENT, isCourseSlug, type CourseSlugSupabaseData } from "@/lib/course-slug-content";
 import { cn } from "@/lib/utils";
 import {
@@ -25,6 +18,7 @@ import {
 } from "@/lib/markdown";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { useCourseChat } from "@/hooks/useCourseChat";
 import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
 import { ChatPanel } from "@/components/course/workspace/ChatPanel";
 import { ResumeStudio } from "@/components/course/workspace/ResumeStudio";
@@ -36,7 +30,6 @@ import { GastriteResumeStudio } from "@/components/course/workspace/GastriteResu
 import { GastriteCasCliniqueStudio } from "@/components/course/workspace/GastriteCasCliniqueStudio";
 import { GastriteQcmsStudio } from "@/components/course/workspace/GastriteQcmsStudio";
 import { LazySection } from "@/components/course/workspace/LazySection";
-import type { ChatMessage } from "@/lib/types";
 
 export default function CourseSlugWorkspacePage() {
   const params = useParams<{ slug: string }>();
@@ -171,40 +164,15 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
 
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    };
-  }, []);
-
-  function sendDemoMessage(userContent: string, reply: string) {
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userContent };
-    setChatMessages((prev) => [...prev, userMessage]);
-    setChatOpen(true);
-    setIsTyping(true);
-
-    typingTimeoutRef.current = setTimeout(() => {
-      setChatMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: reply },
-      ]);
-      setIsTyping(false);
-    }, 900);
-  }
+  const { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage } = useCourseChat(slug);
 
   function handleAsk(selectedText: string) {
-    sendDemoMessage(buildDemoAskPrompt(selectedText), buildDemoAskReply(selectedText));
+    sendChatMessage(buildDemoAskPrompt(selectedText));
     clearSelection();
   }
 
   function handleTranslate(selectedText: string) {
-    sendDemoMessage(buildDemoTranslatePrompt(selectedText), buildDemoTranslateReply(selectedText));
+    sendChatMessage(buildDemoTranslatePrompt(selectedText));
     clearSelection();
   }
 
@@ -212,10 +180,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     const text = chatInput.trim();
     if (!text) return;
     setChatInput("");
-    sendDemoMessage(
-      text,
-      "Merci pour ta question ! Ceci est une démonstration statique de l'interface — les réponses réelles de MedArt arriveront une fois l'intégration IA réactivée. 🙂"
-    );
+    sendChatMessage(text);
   }
 
   // No legacy content, and Supabase confirmed there's no row for this slug either.

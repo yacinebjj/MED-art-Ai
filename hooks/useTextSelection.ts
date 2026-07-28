@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 export interface TextSelectionState {
   text: string;
@@ -9,8 +9,8 @@ export interface TextSelectionState {
 }
 
 interface UseTextSelectionResult {
-  /** Attach to the element whose text can be selected. */
-  containerRef: RefObject<HTMLDivElement>;
+  /** Attach to the element whose text can be selected. A callback ref (not a plain RefObject) — see the comment above the effect below for why. */
+  containerRef: (node: HTMLDivElement | null) => void;
   /** Attach to the floating tooltip so outside-clicks can be detected correctly. */
   tooltipRef: RefObject<HTMLDivElement>;
   selection: TextSelectionState | null;
@@ -23,12 +23,28 @@ interface UseTextSelectionResult {
  * itself on any mousedown outside both the selection and the tooltip.
  */
 export function useTextSelection(): UseTextSelectionResult {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // A callback ref backed by state, NOT a plain useRef — reproduced live:
+  // pages that show a loading screen before their content mounts (e.g. a
+  // freshly-uploaded course's page, which renders <LoadingScreen /> while its
+  // Supabase fetch is in flight) don't have the container div in the tree on
+  // first mount. A plain `useRef` + `useEffect(..., [])` reads `ref.current`
+  // exactly once, right after that first mount — at that moment it's still
+  // null, the effect bails, and since the effect never runs again the
+  // mouseup/mousedown listeners are never attached for the rest of the
+  // page's life, even once the real content (and the div) shows up moments
+  // later. A callback ref calls setContainer on every mount/unmount of the
+  // node, which the effect below depends on, so it re-runs the moment the
+  // container actually exists — regardless of how many renders it took to
+  // get there.
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    setContainer(node);
+  }, []);
+
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<TextSelectionState | null>(null);
 
   useEffect(() => {
-    const container = containerRef.current;
     if (!container) return;
 
     function handleMouseUp() {
@@ -87,7 +103,7 @@ export function useTextSelection(): UseTextSelectionResult {
       document.removeEventListener("mouseup", handleMouseUp);
       document.removeEventListener("mousedown", handleMouseDown);
     };
-  }, []);
+  }, [container]);
 
   return { containerRef, tooltipRef, selection, clearSelection: () => setSelection(null) };
 }

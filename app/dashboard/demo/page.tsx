@@ -1,18 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Dna, HeartPulse, Maximize2, Minimize2, Moon, Sun } from "lucide-react";
-import {
-  DEMO_SECTIONS,
-  buildDemoAskPrompt,
-  buildDemoAskReply,
-  buildDemoTranslatePrompt,
-  buildDemoTranslateReply,
-  type DemoSectionId,
-} from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildDemoAskPrompt, buildDemoTranslatePrompt, type DemoSectionId } from "@/lib/demo-content";
 import { cn } from "@/lib/utils";
 import {
   PROSE_CLASSES,
@@ -23,13 +16,13 @@ import {
 } from "@/lib/markdown";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { useCourseChat } from "@/hooks/useCourseChat";
 import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
 import { ChatPanel } from "@/components/course/workspace/ChatPanel";
 import { ResumeStudio } from "@/components/course/workspace/ResumeStudio";
 import { CasCliniqueStudio } from "@/components/course/workspace/CasCliniqueStudio";
 import { ExamQcmStudio } from "@/components/course/workspace/ExamQcmStudio";
 import { VisualStudioDemo } from "@/components/visual-studio/VisualStudioDemo";
-import type { ChatMessage } from "@/lib/types";
 
 export default function DemoWorkspacePage() {
   const [activeId, setActiveId] = useState<DemoSectionId>("explication");
@@ -40,40 +33,15 @@ export default function DemoWorkspacePage() {
   const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
 
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    };
-  }, []);
-
-  function sendDemoMessage(userContent: string, reply: string) {
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userContent };
-    setChatMessages((prev) => [...prev, userMessage]);
-    setChatOpen(true);
-    setIsTyping(true);
-
-    typingTimeoutRef.current = setTimeout(() => {
-      setChatMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: reply },
-      ]);
-      setIsTyping(false);
-    }, 900);
-  }
+  const { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage } = useCourseChat();
 
   function handleAsk(selectedText: string) {
-    sendDemoMessage(buildDemoAskPrompt(selectedText), buildDemoAskReply(selectedText));
+    sendChatMessage(buildDemoAskPrompt(selectedText));
     clearSelection();
   }
 
   function handleTranslate(selectedText: string) {
-    sendDemoMessage(buildDemoTranslatePrompt(selectedText), buildDemoTranslateReply(selectedText));
+    sendChatMessage(buildDemoTranslatePrompt(selectedText));
     clearSelection();
   }
 
@@ -81,10 +49,7 @@ export default function DemoWorkspacePage() {
     const text = chatInput.trim();
     if (!text) return;
     setChatInput("");
-    sendDemoMessage(
-      text,
-      "Merci pour ta question ! Ceci est une démonstration statique de l'interface — les réponses réelles de MedArt arriveront une fois l'intégration IA réactivée. 🙂"
-    );
+    sendChatMessage(text);
   }
 
   return (

@@ -114,6 +114,9 @@ export async function POST(request: NextRequest) {
       "resumé": null,
       cas_clinique: null,
       qcms: null,
+      // Unassigned by default — the student sorts it into a module later
+      // from the dashboard's "Mes cours" section (kebab menu > "Ajouter à un module").
+      module_id: null,
     };
 
     console.log("[generate-course] Colonnes envoyées à Supabase :", Object.keys(courseRow).join(", "));
