@@ -455,7 +455,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
           ) : activeId === "resume" ? (
             <ResumeStudio />
           ) : activeId === "visual_studio" ? (
-            <VisualStudioDemo dark={isDark} />
+            <VisualStudioDemo />
           ) : activeId === "cas_clinique" ? (
             <CasCliniqueStudio />
           ) : activeId === "qcm" ? (
