@@ -8,6 +8,8 @@ import { SourcesSidebar } from "@/components/course/workspace/SourcesSidebar";
 import { CenterReader } from "@/components/course/workspace/CenterReader";
 import { StudioSidebar } from "@/components/course/workspace/StudioSidebar";
 import { ChatPanel } from "@/components/course/workspace/ChatPanel";
+import { CasCliniqueLive } from "@/components/course/workspace/CasCliniqueLive";
+import { ExamQcmLive } from "@/components/course/workspace/ExamQcmLive";
 import type { ChatMessage, ContentType, Course } from "@/lib/types";
 
 function buildAskPrompt(selectedText: string): string {
@@ -68,6 +70,11 @@ export default function CoursePage() {
   async function loadContent(contentType: ContentType) {
     setActiveContentType(contentType);
     setContentError(null);
+
+    // "cas_clinique" and "qcm" are chunked content types: they fetch and
+    // stream their own sub-units via CasCliniqueLive/ExamQcmLive (see
+    // render below), never through this generic single-blob fetch.
+    if (contentType === "cas_clinique" || contentType === "qcm") return;
 
     if (cachedContent[contentType]) return;
 
@@ -196,13 +203,31 @@ export default function CoursePage() {
     <div className="flex h-screen w-full overflow-hidden bg-[#F9FAFB]">
       <SourcesSidebar course={course} />
 
-      <CenterReader
-        content={cachedContent[activeContentType] ?? null}
-        isLoading={loadingContentType === activeContentType}
-        error={contentError?.type === activeContentType ? contentError.message : null}
-        onAsk={handleAsk}
-        onTranslate={handleTranslate}
-      />
+      {activeContentType === "cas_clinique" ? (
+        <div className="relative flex-1 overflow-y-auto">
+          <div className="flex justify-center px-8 py-8">
+            <div className="w-full max-w-4xl">
+              <CasCliniqueLive courseId={id} />
+            </div>
+          </div>
+        </div>
+      ) : activeContentType === "qcm" ? (
+        <div className="relative flex-1 overflow-y-auto">
+          <div className="flex justify-center px-8 py-8">
+            <div className="w-full max-w-4xl">
+              <ExamQcmLive courseId={id} />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <CenterReader
+          content={cachedContent[activeContentType] ?? null}
+          isLoading={loadingContentType === activeContentType}
+          error={contentError?.type === activeContentType ? contentError.message : null}
+          onAsk={handleAsk}
+          onTranslate={handleTranslate}
+        />
+      )}
 
       <StudioSidebar
         activeContentType={activeContentType}

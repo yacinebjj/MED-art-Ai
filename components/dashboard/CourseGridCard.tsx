@@ -36,7 +36,7 @@ export function CourseGridCard({
   }
 
   const body = (
-    <div className="flex h-full flex-col rounded-xl bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+    <div className="flex h-full flex-col rounded-xl bg-gradient-to-br from-white to-sky-50 p-5 shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-start justify-between">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
           <Icon className="h-5 w-5" />

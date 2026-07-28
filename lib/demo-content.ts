@@ -1,8 +1,6 @@
 import {
   BookOpenText,
   ScrollText,
-  AlertTriangle,
-  Lightbulb,
   Stethoscope,
   ListChecks,
   Workflow,
@@ -13,8 +11,6 @@ export type DemoSectionId =
   | "explication"
   | "visual_studio"
   | "resume"
-  | "pieges"
-  | "astuces"
   | "cas_clinique"
   | "qcm";
 
@@ -616,41 +612,6 @@ Ce mode transforme le cours en représentations visuelles interactives (parcours
 *   **Traitement :** Appendicectomie, en urgence.
 
 > **Note du prof :** Si tu ne dois retenir qu'une phrase : douleur qui migre du nombril vers la FID = appendicite jusqu'à preuve du contraire.`,
-  },
-  {
-    id: "pieges",
-    label: "Les Pièges",
-    icon: AlertTriangle,
-    accent: {
-      active: "border-rose-300 bg-rose-50 text-rose-800",
-      chip: "bg-rose-100 text-rose-600",
-      hover: "hover:-translate-y-1 hover:bg-rose-50 hover:text-rose-600 hover:shadow-md",
-    },
-    content: `## Les Pièges Classiques à l'examen
-
-> **Piège n°1 :** Ne confonds pas la douleur péri-ombilicale initiale avec une gastro-entérite — l'examinateur adore ce piège chez les étudiants pressés.
-
-*   **Chez la femme jeune :** Élimine toujours une grossesse extra-utérine ou une torsion d'annexe avant de conclure trop vite à une appendicite.
-*   **Chez la personne âgée :** La présentation est souvent atypique (peu de fièvre, douleur diffuse) — le risque de perforation est plus élevé car le diagnostic est retardé.
-*   **Chez l'enfant :** Ne néglige jamais une douleur abdominale fébrile — l'évolution vers la perforation est plus rapide.
-*   **Erreur fréquente :** Attendre une hyperleucocytose franche avant d'opérer — une NFS normale n'élimine PAS le diagnostic.`,
-  },
-  {
-    id: "astuces",
-    label: "Astuces Mnémotechniques",
-    icon: Lightbulb,
-    accent: {
-      active: "border-amber-300 bg-amber-50 text-amber-800",
-      chip: "bg-amber-100 text-amber-600",
-      hover: "hover:-translate-y-1 hover:bg-amber-50 hover:text-amber-600 hover:shadow-md",
-    },
-    content: `## Astuces Mnémotechniques
-
-> **Pour la migration de la douleur :** "Du nombril au point Mc, en passant par la crampe" — retiens le trajet en trois temps : ombilic vers diffuse vers Fosse Iliaque Droite.
-
-*   **Point de McBurney :** situé au tiers externe de la ligne reliant l'ombilic à l'épine iliaque antéro-supérieure droite — pense à "2/3 - 1/3".
-*   **Signe de Blumberg :** la décompression fait plus mal que la compression — "ça fait mal quand on relâche, pas quand on appuie".
-*   **Triade clinique :** Douleur FID + Défense + Fièvre = pense appendicite avant tout.`,
   },
   {
     id: "cas_clinique",

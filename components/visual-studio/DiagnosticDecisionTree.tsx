@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   CheckCircle2,
   ChevronRight,
@@ -126,39 +125,31 @@ function DecisionNodeCard({ node, expandedIds, onToggle, depth }: DecisionNodeCa
         )}
       </button>
 
-      <AnimatePresence initial={false}>
-        {isExpandable && isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="overflow-hidden"
-          >
-            <div className="pt-2">
-              {node.detail && (
-                <p className="mb-2 rounded-lg bg-white/70 p-2.5 text-xs leading-relaxed text-slate-600">
-                  {node.detail}
-                </p>
-              )}
+      {isExpandable && isOpen && (
+        <div className="animate-fade-in overflow-hidden">
+          <div className="pt-2">
+            {node.detail && (
+              <p className="mb-2 rounded-lg bg-white/70 p-2.5 text-xs leading-relaxed text-slate-600">
+                {node.detail}
+              </p>
+            )}
 
-              {hasChildren && (
-                <div className="space-y-2 border-l-2 border-dashed border-slate-200 pl-4">
-                  {node.children!.map((child) => (
-                    <DecisionNodeCard
-                      key={child.id}
-                      node={child}
-                      expandedIds={expandedIds}
-                      onToggle={onToggle}
-                      depth={depth + 1}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {hasChildren && (
+              <div className="space-y-2 border-l-2 border-dashed border-slate-200 pl-4">
+                {node.children!.map((child) => (
+                  <DecisionNodeCard
+                    key={child.id}
+                    node={child}
+                    expandedIds={expandedIds}
+                    onToggle={onToggle}
+                    depth={depth + 1}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -39,6 +39,16 @@ export function useTextSelection(): UseTextSelectionResult {
         return;
       }
 
+      // Only react to selections that actually live inside our reading
+      // container. Listening on `document` (below) means a drag that starts
+      // inside the reader but ends outside it — trivially easy given the
+      // reader sits between two fixed sidebars — must still register; a
+      // listener scoped to `container` only fires when the mouseup's target
+      // is inside its subtree, so releasing just past the edge silently
+      // dropped the selection and the tooltip never appeared.
+      const anchorNode = sel.anchorNode;
+      if (!anchorNode || !container!.contains(anchorNode)) return;
+
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
 
@@ -70,11 +80,11 @@ export function useTextSelection(): UseTextSelectionResult {
       setSelection(null);
     }
 
-    container.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mouseup", handleMouseUp);
     document.addEventListener("mousedown", handleMouseDown);
 
     return () => {
-      container.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mouseup", handleMouseUp);
       document.removeEventListener("mousedown", handleMouseDown);
     };
   }, []);

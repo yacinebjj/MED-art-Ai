@@ -1,5 +1,8 @@
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "anthropic/claude-3.5-sonnet";
+// "anthropic/claude-3.5-sonnet" was retired by OpenRouter (404s with
+// "No endpoints found") — this is the current equivalent, confirmed live
+// against GET https://openrouter.ai/api/v1/models.
+const MODEL = "anthropic/claude-sonnet-5";
 
 export class OpenRouterError extends Error {
   status: number;

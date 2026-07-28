@@ -216,3 +216,20 @@ create policy "Users can view their own course content"
       and user_courses.user_id = auth.uid()
     )
   );
+
+-- ---------------------------------------------------------------------------
+-- Sub-unit chunking migration: "cas_clinique" and "qcm" are no longer filled
+-- by one mega-prompt call — each is split into several independent sub-units
+-- (5 clinical cases; 4 QCM batches + 1 QROC batch, see lib/sub-units.ts) so
+-- they can be generated concurrently (Promise.all) and cached individually.
+-- sub_unit_id defaults to '' (not null, so the unique constraint below
+-- actually enforces uniqueness for it) for every other content type, which
+-- still has exactly one row per (course, content type) as before.
+-- ---------------------------------------------------------------------------
+alter table course_content_cache add column if not exists sub_unit_id text not null default '';
+
+alter table course_content_cache drop constraint if exists course_content_cache_course_id_content_type_key;
+alter table course_content_cache drop constraint if exists course_content_cache_course_id_content_type_sub_unit_id_key;
+alter table course_content_cache
+  add constraint course_content_cache_course_id_content_type_sub_unit_id_key
+  unique (course_id, content_type, sub_unit_id);

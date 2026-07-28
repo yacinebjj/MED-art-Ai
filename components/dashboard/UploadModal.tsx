@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type { Course } from "@/lib/types";
 
 type UploadTab = "file" | "text" | "drive";
 
@@ -25,7 +24,8 @@ export function UploadModal({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onUploaded: (course: Course) => void;
+  /** Called with the new course's slug once the instant-insert upload succeeds. */
+  onUploaded: (slug: string) => void;
 }) {
   const [tab, setTab] = useState<UploadTab>("file");
   const [isDragging, setIsDragging] = useState(false);
@@ -65,15 +65,13 @@ export function UploadModal({
     try {
       const body = new FormData();
       body.append("file", file);
-      const res = await fetch("/api/generate", { method: "POST", body });
+      const res = await fetch("/api/generate-course", { method: "POST", body });
       const data = await res.json();
 
-      if (!res.ok) throw new Error(data.error ?? "Le téléversement a échoué.");
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Le téléversement a échoué.");
 
-      if (data.course) {
-        onUploaded(data.course);
-        handleOpenChange(false);
-      }
+      onUploaded(data.slug);
+      handleOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Le téléversement a échoué.");
     } finally {
@@ -93,15 +91,13 @@ export function UploadModal({
       const body = new FormData();
       body.append("text", text);
       body.append("title", title);
-      const res = await fetch("/api/generate", { method: "POST", body });
+      const res = await fetch("/api/generate-course", { method: "POST", body });
       const data = await res.json();
 
-      if (!res.ok) throw new Error(data.error ?? "L'import a échoué.");
+      if (!res.ok || !data.success) throw new Error(data.error ?? "L'import a échoué.");
 
-      if (data.course) {
-        onUploaded(data.course);
-        handleOpenChange(false);
-      }
+      onUploaded(data.slug);
+      handleOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "L'import a échoué.");
     } finally {

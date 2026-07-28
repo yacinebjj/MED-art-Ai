@@ -1,7 +1,14 @@
 "use client";
 
 import { Loader2, MessageCircle, Mic } from "lucide-react";
-import { STUDIO_CONTENT_TYPES, type ContentType } from "@/lib/types";
+import { STUDIO_CONTENT_TYPES, STUDIO_CHUNKED_CONTENT_TYPES, type ContentType } from "@/lib/types";
+
+/** Both lists combined — the chunked types (Cas Clinique, QCM) render via their own
+ * Live components once selected, so they never show the generic loading spinner here. */
+const ALL_STUDIO_TABS: { id: ContentType; label: string }[] = [
+  ...STUDIO_CONTENT_TYPES,
+  ...STUDIO_CHUNKED_CONTENT_TYPES,
+];
 
 export function StudioSidebar({
   activeContentType,
@@ -36,7 +43,7 @@ export function StudioSidebar({
       <div className="mb-2 h-px bg-gray-200" />
 
       <div className="flex flex-col gap-2">
-        {STUDIO_CONTENT_TYPES.map(({ id, label }) => (
+        {ALL_STUDIO_TABS.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => onSelect(id)}

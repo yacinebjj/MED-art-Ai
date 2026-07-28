@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
   AlertOctagon,
@@ -158,36 +157,28 @@ export function DiseaseJourneyViewer({ data, defaultExpandedIndex }: DiseaseJour
                   </div>
                 </button>
 
-                <AnimatePresence initial={false}>
-                  {isExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.2, ease: "easeOut" }}
-                      className="overflow-hidden"
-                    >
-                      <div className="mt-2 space-y-3 rounded-xl border border-slate-100 bg-slate-50/70 p-4">
-                        <p className="text-sm leading-relaxed text-slate-700">{step.details}</p>
-                        {step.keyPoints.length > 0 && (
-                          <ul className="space-y-1.5">
-                            {step.keyPoints.map((point, i) => (
-                              <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                                <span
-                                  className={cn(
-                                    "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
-                                    BULLET_TONE_STYLES[tone]
-                                  )}
-                                />
-                                <span>{point}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {isExpanded && (
+                  <div className="animate-fade-in overflow-hidden">
+                    <div className="mt-2 space-y-3 rounded-xl border border-slate-100 bg-slate-50/70 p-4">
+                      <p className="text-sm leading-relaxed text-slate-700">{step.details}</p>
+                      {step.keyPoints.length > 0 && (
+                        <ul className="space-y-1.5">
+                          {step.keyPoints.map((point, i) => (
+                            <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                              <span
+                                className={cn(
+                                  "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+                                  BULLET_TONE_STYLES[tone]
+                                )}
+                              />
+                              <span>{point}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </li>
           );

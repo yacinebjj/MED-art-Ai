@@ -34,6 +34,7 @@ import {
   AlertOctagon,
   CircleDot,
   Target,
+  Lightbulb,
   type LucideIcon,
 } from "lucide-react";
 
@@ -51,6 +52,7 @@ export type ResumeModeId =
   | "research"
   | "patient"
   | "professor"
+  | "astuces"
   | "flash"
   | "aihighlight";
 
@@ -601,6 +603,18 @@ Si vous avez à nouveau de la fièvre, si votre ventre redevient très douloureu
 > Retenez que la douleur **migre** : elle commence vague, autour du nombril, puis elle se fixe, précise, en bas à droite. Si un cas clinique d'examen décrit cette migration, pensez appendicite avant toute autre chose.
 
 > Le retour d'une zone à paludisme avec de la fièvre et une douleur abdominale, c'est un **paludisme jusqu'à preuve du contraire** — je vous le répéterai à chaque garde, et je vous le redemanderai à l'examen.`,
+  },
+
+  // ────────────────────────────────────────────────────────────────────
+  // 13bis. ASTUCES MNÉMOTECHNIQUES (rendu via <AstucesContent /> dans
+  // ResumeStudio.tsx — ce `content` n'est pas utilisé, gardé pour la forme).
+  // ────────────────────────────────────────────────────────────────────
+  {
+    id: "astuces",
+    label: "Astuces",
+    icon: Lightbulb,
+    variant: "default",
+    content: `13 astuces mnémotechniques pour l'appendicite aiguë — voir le composant dédié.`,
   },
 
   // ────────────────────────────────────────────────────────────────────

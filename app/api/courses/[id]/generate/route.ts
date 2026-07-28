@@ -1,51 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getUserCourse, getUserCourseSourceText } from "@/lib/user-courses";
-import {
-  getCachedContent,
-  setCachedContent,
-  setCachedContentBatch,
-} from "@/lib/course-content-cache";
+import { getCachedContent, setCachedContent } from "@/lib/course-content-cache";
 import {
   CourseGenerationError,
-  generateCourseContent,
   generateCoursOral,
   generateExplicationUltraDetaillee,
+  generateModeVisuel,
+  generateResumeMasterclass,
 } from "@/lib/ai/generate-course-content";
 import { canGenerate, recordGeneration } from "@/lib/subscription";
 import { profileFromUser } from "@/lib/auth";
-import type { ContentType } from "@/lib/types";
+import type { SingleUnitContentType } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-// The 5 sections still filled together by the mega-prompt in one call.
-// "cours_oral" and "explication" each have their own dedicated generator.
-const MEGA_PROMPT_SECTION_TYPES: ContentType[] = [
+const SINGLE_UNIT_TYPES: SingleUnitContentType[] = [
+  "cours_oral",
+  "explication",
+  "mode_visuel",
   "resume",
-  "pieges",
-  "astuces",
-  "cas_clinique",
-  "qcm",
 ];
 
-function isContentType(value: unknown): value is ContentType {
-  return (
-    value === "cours_oral" ||
-    value === "explication" ||
-    MEGA_PROMPT_SECTION_TYPES.includes(value as ContentType)
-  );
+function isSingleUnitContentType(value: unknown): value is SingleUnitContentType {
+  return SINGLE_UNIT_TYPES.includes(value as SingleUnitContentType);
 }
 
 /**
- * The heart of the on-demand model: check course_content_cache for
- * (courseId, contentType) first (0 tokens on a hit); on a miss, gate behind
- * the subscription/trial check, call OpenRouter, cache the result, return it.
+ * Handles the 4 single-unit content types — each filled by exactly one
+ * dedicated AI call (see lib/ai/generate-course-content.ts). "cas_clinique"
+ * and "qcm" are NOT handled here anymore: they're chunked into several
+ * sub-units generated concurrently by the streaming route, see
+ * app/api/courses/[id]/generate-stream/route.ts.
  *
- * "cours_oral" and "explication" each get their own dedicated AI call and
- * cache slot. The remaining 5 Studio sections (résumé, pièges, astuces, cas
- * clinique, qcm) are still filled together by one mega-prompt call — so
- * clicking a second of those 5 buttons for the same course is a free cache
- * hit even though it was never requested directly before.
+ * Same on-demand model as before: check course_content_cache first (0
+ * tokens on a hit); on a miss, gate behind the subscription/trial check,
+ * call OpenRouter, cache the result, return it.
  */
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthenticatedUser();
@@ -62,8 +52,14 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const contentType = body?.contentType;
   const force = body?.force === true;
 
-  if (!isContentType(contentType)) {
-    return NextResponse.json({ error: "Type de contenu invalide." }, { status: 400 });
+  if (!isSingleUnitContentType(contentType)) {
+    return NextResponse.json(
+      {
+        error:
+          "Type de contenu invalide pour cette route. « cas_clinique » et « qcm » utilisent /generate-stream.",
+      },
+      { status: 400 }
+    );
   }
 
   if (!force) {
@@ -87,42 +83,23 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   try {
+    let content: string;
+
     if (contentType === "cours_oral") {
-      const content = await generateCoursOral(sourceText);
-      await setCachedContent(course.id, "cours_oral", content);
-      await recordGeneration(user.id);
-      return NextResponse.json({ content, cached: false });
+      content = await generateCoursOral(sourceText);
+    } else if (contentType === "explication") {
+      content = await generateExplicationUltraDetaillee(sourceText);
+    } else if (contentType === "mode_visuel") {
+      content = await generateModeVisuel(sourceText);
+    } else {
+      const student = profileFromUser(user);
+      content = await generateResumeMasterclass(sourceText, student);
     }
 
-    if (contentType === "explication") {
-      const content = await generateExplicationUltraDetaillee(sourceText);
-      await setCachedContent(course.id, "explication", content);
-      await recordGeneration(user.id);
-      return NextResponse.json({ content, cached: false });
-    }
-
-    // Any of the remaining 5 Studio sections: one call fills all of them.
-    const student = profileFromUser(user);
-    const fiveSections = await generateCourseContent(sourceText, student);
-
-    await setCachedContentBatch(course.id, {
-      resume: fiveSections.resume,
-      pieges: fiveSections.pieges,
-      astuces: fiveSections.astuces,
-      cas_clinique: fiveSections.casClinique,
-      qcm: fiveSections.qcm,
-    });
+    await setCachedContent(course.id, contentType, content);
     await recordGeneration(user.id);
 
-    const contentByType: Record<Exclude<ContentType, "cours_oral" | "explication">, string> = {
-      resume: fiveSections.resume,
-      pieges: fiveSections.pieges,
-      astuces: fiveSections.astuces,
-      cas_clinique: fiveSections.casClinique,
-      qcm: fiveSections.qcm,
-    };
-
-    return NextResponse.json({ content: contentByType[contentType], cached: false });
+    return NextResponse.json({ content, cached: false });
   } catch (error) {
     if (error instanceof CourseGenerationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

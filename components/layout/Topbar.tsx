@@ -36,7 +36,7 @@ export function Topbar({
   }
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
       <div className="flex items-center gap-3">
         <button onClick={onMenuClick} className="text-muted-foreground lg:hidden">
           <Menu className="h-5 w-5" />

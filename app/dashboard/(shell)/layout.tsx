@@ -24,8 +24,14 @@ export default function DashboardShellLayout({
 
       <div className="flex min-h-screen flex-1 flex-col">
         <Topbar title="Espace Étudiant" onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 px-4 py-8 sm:px-6 lg:px-8">
-          <PageTransition>{children}</PageTransition>
+        <main className="clinical-canvas-bg relative flex-1 px-4 py-8 sm:px-6 lg:px-8">
+          <div
+            aria-hidden
+            className="clinical-mesh-bg animate-mesh-pulse pointer-events-none absolute inset-0 -z-10"
+          />
+          <div className="mx-auto w-full max-w-7xl">
+            <PageTransition>{children}</PageTransition>
+          </div>
         </main>
       </div>
     </div>

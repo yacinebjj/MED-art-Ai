@@ -1,13 +1,33 @@
 "use client";
 
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Loader2, AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { cn } from "@/lib/utils";
 import { PROSE_CLASSES, MARKDOWN_COMPONENTS } from "@/lib/markdown";
+import { MermaidDiagram } from "@/components/visual-studio/MermaidDiagram";
 import { SelectionTooltip } from "./SelectionTooltip";
+
+/** Same as MARKDOWN_COMPONENTS everywhere else, except ```mermaid fences (used by the
+ * "Mode Visuel" tab's flowcharts) render as an actual diagram instead of a code block. */
+let mermaidDiagramCounter = 0;
+
+const CENTER_READER_MARKDOWN_COMPONENTS: Components = {
+  ...MARKDOWN_COMPONENTS,
+  code({ className, children }) {
+    if (/language-mermaid/.test(className ?? "")) {
+      mermaidDiagramCounter += 1;
+      return (
+        <div className="my-6 rounded-xl border border-slate-200 bg-slate-950 p-4 not-prose">
+          <MermaidDiagram id={`center-reader-${mermaidDiagramCounter}`} chart={String(children).replace(/\n$/, "")} />
+        </div>
+      );
+    }
+    return <code className={className}>{children}</code>;
+  },
+};
 
 export function CenterReader({
   content,
@@ -83,7 +103,7 @@ export function CenterReader({
 
           {!isLoading && !error && content && (
             <article className={PROSE_CLASSES}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={CENTER_READER_MARKDOWN_COMPONENTS}>
                 {content}
               </ReactMarkdown>
             </article>
