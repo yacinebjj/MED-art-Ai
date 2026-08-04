@@ -3,9 +3,9 @@
  * (slug-keyed showcase/demo courses — distinct from the per-user
  * `user_courses` + `course_content_cache` pipeline in lib/prompts/*).
  *
- * Each prompt asks for ONLY its own section's JSON, never all five at once —
+ * Each prompt asks for ONLY its own section's JSON, never all at once —
  * that's the whole point: a single mega-call generating explication +
- * mode_visuel + resume + cas_clinique + qcms together routinely exceeded the
+ * resume + cas_clinique + qcms together routinely exceeded the
  * model's practical output budget and came back truncated/invalid. One
  * section per call comfortably fits, and lets each tab generate lazily,
  * on click, independently of the others.
@@ -77,82 +77,6 @@ VOLUME : le champ "explication" doit faire AU MOINS 3000 mots, idéalement 5000 
 Schéma exact :
 {
   "explication": "Cours ultra-détaillé au format Markdown suivant EXACTEMENT la structure décrite ci-dessus : H1 + sous-titre italique, introduction directe, Sommaire à puces ●■▲ en rotation, Avant-propos, chapitres numérotés avec toutes leurs conventions (➔, ⮞, ■, ❖, citations colorées par emoji, encarts 'L'Astuce du Prof', résumé arabe de fin de chapitre), et Récapitulatif final avec tableau et puces ✦. AUCUN résumé court n'est acceptable."
-}`;
-
-export const MODE_VISUEL_SYSTEM_PROMPT = `Tu es un professeur de médecine expert. Un étudiant te donne le contenu brut d'un cours. Génère le contenu du "Mode Visuel" : 4 slides visuelles résumant les mécanismes clés.
-
-${JSON_ONLY_RULES}
-${ICON_TONE_NOTES}
-- "layout" des slides doit être EXACTEMENT, dans l'ordre : "orbital", "cascade", "stats", "orbital_signs".
-
-Schéma exact :
-{
-  "mode_visuel": {
-    "pearls": ["4 astuces courtes du professeur, une par slide"],
-    "slides": [
-      {
-        "id": "slide-1", "numero": 1, "titre": "...", "layout": "orbital",
-        "central_node": { "label": "...", "icon": "stethoscope" },
-        "orbit_nodes": [
-          { "position": "top", "tone": "emerald", "icon": "shield", "label": "..." },
-          { "position": "right", "tone": "red", "icon": "bug", "label": "..." },
-          { "position": "bottom", "tone": "orange", "icon": "pill", "label": "..." },
-          { "position": "left", "tone": "cyan", "icon": "flame", "label": "..." }
-        ],
-        "side_cards": [
-          { "icon": "shield", "tone": "emerald", "titre": "...", "description": "..." },
-          { "icon": "flame", "tone": "cyan", "titre": "...", "description": "..." },
-          { "icon": "bug", "tone": "red", "titre": "...", "description": "..." },
-          { "icon": "pill", "tone": "orange", "titre": "...", "description": "..." }
-        ],
-        "steps": [], "le_pourquoi": "", "stat_bars": [],
-        "synthese": { "titre": "", "description": "", "badge": "" },
-        "signs": []
-      },
-      {
-        "id": "slide-2", "numero": 2, "titre": "...", "layout": "cascade",
-        "central_node": { "label": "", "icon": "" }, "orbit_nodes": [], "side_cards": [],
-        "steps": [
-          { "numero": "1", "icon": "shield", "tone": "cyan", "titre": "...", "description": "..." },
-          { "numero": "2", "icon": "bug", "tone": "blue", "titre": "...", "description": "..." },
-          { "numero": "3", "icon": "activity", "tone": "orange", "titre": "...", "description": "..." },
-          { "numero": "4", "icon": "alert-triangle", "tone": "red", "titre": "...", "description": "..." }
-        ],
-        "le_pourquoi": "Une phrase expliquant une nuance clé de cette cascade.",
-        "stat_bars": [], "synthese": { "titre": "", "description": "", "badge": "" }, "signs": []
-      },
-      {
-        "id": "slide-3", "numero": 3, "titre": "...", "layout": "stats",
-        "central_node": { "label": "", "icon": "" }, "orbit_nodes": [], "side_cards": [], "steps": [], "le_pourquoi": "",
-        "stat_bars": [
-          { "label": "...", "value": 50, "display": "~50%" },
-          { "label": "...", "value": 25, "display": "~25%" },
-          { "label": "...", "value": 90, "display": "~90%" },
-          { "label": "...", "value": 95, "display": "95%" }
-        ],
-        "synthese": { "titre": "Synthèse", "description": "...", "badge": "Données Validées" },
-        "signs": []
-      },
-      {
-        "id": "slide-4", "numero": 4, "titre": "...", "layout": "orbital_signs",
-        "central_node": { "label": "...", "icon": "stethoscope" },
-        "orbit_nodes": [
-          { "position": "top", "tone": "orange", "icon": "flame", "label": "..." },
-          { "position": "right", "tone": "blue", "icon": "activity", "label": "..." },
-          { "position": "bottom", "tone": "purple", "icon": "wind", "label": "..." },
-          { "position": "left", "tone": "emerald", "icon": "zap", "label": "..." }
-        ],
-        "side_cards": [], "steps": [], "le_pourquoi": "", "stat_bars": [],
-        "synthese": { "titre": "", "description": "", "badge": "" },
-        "signs": [
-          { "icon": "flame", "tone": "orange", "titre": "...", "description": "..." },
-          { "icon": "activity", "tone": "blue", "titre": "...", "description": "..." },
-          { "icon": "alert-triangle", "tone": "rose", "titre": "...", "description": "..." },
-          { "icon": "bug", "tone": "amber", "titre": "...", "description": "..." }
-        ]
-      }
-    ]
-  }
 }`;
 
 export const RESUME_SYSTEM_PROMPT = `Tu es un professeur de médecine expert. Un étudiant te donne le contenu brut d'un cours. Génère le contenu du "Résumé" : 6 modes de révision (Smart Summary, Exam Summary, Cheat Sheet, Guideline Summary, Professor Notes, Astuces).
@@ -316,6 +240,26 @@ Schéma exact :
     ],
     "qrocs": [
       { "id": 1, "question": "...", "reponseOfficielle": "..." }
+    ]
+  }
+}`;
+
+export const MIND_MAP_SYSTEM_PROMPT = `Tu es un professeur de médecine expert. Un étudiant te donne le contenu brut d'un cours. Génère une carte mentale (mind map) qui synthétise ce cours sous forme de graphe de noeuds et de liens : symptômes -> mécanismes -> diagnostic -> traitement.
+
+${JSON_ONLY_RULES}
+- "type" de chaque noeud doit être l'une de ces valeurs exactes : symptome, mecanisme, diagnostic, examen, traitement.
+- Génère 15 à 25 noeuds et leurs liens, couvrant les symptômes clés, les mécanismes physiopathologiques, les examens diagnostiques et les traitements du cours.
+- Chaque lien relie deux noeuds existants par leur "id" et porte un court verbe/label décrivant la relation (ex: "révèle", "confirme", "déclenche", "traite").
+
+Schéma exact :
+{
+  "mind_map": {
+    "nodes": [
+      { "id": "n1", "label": "...", "type": "symptome" },
+      { "id": "n2", "label": "...", "type": "mecanisme" }
+    ],
+    "links": [
+      { "source": "n1", "target": "n2", "label": "..." }
     ]
   }
 }`;

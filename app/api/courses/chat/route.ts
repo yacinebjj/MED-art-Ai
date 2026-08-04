@@ -3,6 +3,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { errorMessage } from "@/lib/course-generation-shared";
+import { lookupSemanticCache, storeSemanticCacheEntry } from "@/lib/ai/semantic-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -140,6 +141,62 @@ export async function POST(request: NextRequest) {
   // this is a hard truncation, not a summarization call).
   const historyTurns: HistoryTurn[] = Array.isArray(history) ? history.filter(isHistoryTurn).slice(-MAX_HISTORY_MESSAGES) : [];
 
+  // Save the student's message BEFORE anything else (cache lookup or model
+  // call) — if either fails a moment later, their question is still on record.
+  if (supabase && user) {
+    const { error } = await supabase
+      .from("course_chat_history")
+      .insert({ user_id: user.id, course_slug: courseSlug, role: "user", content: message });
+    if (error) {
+      console.error("[courses/chat POST] Échec sauvegarde message utilisateur:", { code: error.code, message: error.message });
+      // Not fatal — the student can still get an answer even if we failed
+      // to log their side of it.
+    }
+  }
+
+  // --- Semantic cache interception (Étape B/C/D) ----------------------------
+  // Runs BEFORE any OpenRouter call. lookupSemanticCache() already fails open
+  // internally (returns null on any embedding/RPC error) — this outer
+  // try/catch is a second, belt-and-suspenders layer so that even an
+  // unexpected exception here can never turn into a 500 for the student; it
+  // just degrades to a normal cache-miss generation below.
+  let cacheHit: Awaited<ReturnType<typeof lookupSemanticCache>> = null;
+  try {
+    cacheHit = await lookupSemanticCache({ question: message, courseSlug });
+  } catch (error) {
+    console.error(
+      "[courses/chat POST] Exception inattendue pendant le lookup du cache sémantique — bascule vers OpenRouter:",
+      error instanceof Error ? error.message : error
+    );
+  }
+
+  if (cacheHit) {
+    // CAS 1 — Cache Hit: serve the stored answer instantly, zero OpenRouter
+    // calls. Still persisted to course_chat_history exactly like a live
+    // reply, so the student's transcript reads identically either way.
+    if (supabase && user) {
+      const { error } = await supabase
+        .from("course_chat_history")
+        .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: cacheHit.answer });
+      if (error) {
+        console.error("[courses/chat POST] Échec sauvegarde réponse (cache) assistant:", { code: error.code, message: error.message });
+      }
+    }
+
+    return new NextResponse(cacheHit.answer, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Cache": "HIT",
+        "X-Cache-Similarity": cacheHit.similarity.toFixed(4),
+      },
+    });
+  }
+
+  // CAS 2 — Cache Miss: fetch the course's source text (deferred to here —
+  // no point paying this query on a cache hit, which needs neither it nor a
+  // system prompt) and fall through to the normal generation path.
   let sourceText: string | null = null;
   if (courseSlug && isSupabaseConfigured()) {
     const admin = getSupabaseAdmin();
@@ -156,19 +213,6 @@ export async function POST(request: NextRequest) {
     { role: "user", content: message },
   ];
 
-  // Save the student's message BEFORE starting the model call — if the
-  // OpenRouter call fails a moment later, their question is still on record.
-  if (supabase && user) {
-    const { error } = await supabase
-      .from("course_chat_history")
-      .insert({ user_id: user.id, course_slug: courseSlug, role: "user", content: message });
-    if (error) {
-      console.error("[courses/chat POST] Échec sauvegarde message utilisateur:", { code: error.code, message: error.message });
-      // Not fatal — the student can still get an answer even if we failed
-      // to log their side of it.
-    }
-  }
-
   try {
     const stream = await streamOpenRouter(messages, { maxTokens: 4096 });
 
@@ -177,8 +221,9 @@ export async function POST(request: NextRequest) {
     // are accumulated in `fullReply`. Only once the model is completely done
     // — i.e. once `flush()` fires, strictly after the client has already
     // received every chunk — do we write the full assistant reply to
-    // Supabase. The client never waits on this insert; it isn't even in the
-    // response path by the time it runs.
+    // Supabase AND index it into the semantic cache. The client never waits
+    // on either write; neither is even in the response path by the time it
+    // runs.
     let fullReply = "";
     const decoder = new TextDecoder();
     const persistOnFlush = new TransformStream<Uint8Array, Uint8Array>({
@@ -187,13 +232,20 @@ export async function POST(request: NextRequest) {
         controller.enqueue(chunk);
       },
       async flush() {
-        if (!supabase || !user || !fullReply.trim()) return;
-        const { error } = await supabase
-          .from("course_chat_history")
-          .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: fullReply });
-        if (error) {
-          console.error("[courses/chat POST] Échec sauvegarde réponse assistant:", { code: error.code, message: error.message });
-        }
+        if (!fullReply.trim()) return;
+
+        await Promise.all([
+          (async () => {
+            if (!supabase || !user) return;
+            const { error } = await supabase
+              .from("course_chat_history")
+              .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: fullReply });
+            if (error) {
+              console.error("[courses/chat POST] Échec sauvegarde réponse assistant:", { code: error.code, message: error.message });
+            }
+          })(),
+          storeSemanticCacheEntry({ question: message, answer: fullReply, courseSlug }),
+        ]);
       },
     });
 
@@ -202,6 +254,7 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "Cache-Control": "no-store",
+        "X-Cache": "MISS",
       },
     });
   } catch (error) {

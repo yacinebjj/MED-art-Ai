@@ -5,7 +5,7 @@ import {
   buildSourceTextUserMessage,
   CAS_CLINIQUE_SYSTEM_PROMPT,
   EXPLICATION_SYSTEM_PROMPT,
-  MODE_VISUEL_SYSTEM_PROMPT,
+  MIND_MAP_SYSTEM_PROMPT,
   QCMS_SYSTEM_PROMPT,
   RESUME_SYSTEM_PROMPT,
 } from "@/lib/prompts/public-course-sections";
@@ -14,10 +14,10 @@ import {
  * Shared helpers + the shared modular-generation pipeline used by:
  *  - app/api/generate-course/route.ts (instant upload: extract + insert only)
  *  - app/api/generate/explication/route.ts
- *  - app/api/generate/mode-visuel/route.ts
  *  - app/api/generate/resume/route.ts
  *  - app/api/generate/cas-clinique/route.ts
  *  - app/api/generate/qcm/route.ts
+ *  - app/api/generate/mind-map/route.ts
  *
  * Each of the 5 route files above is a thin wrapper calling
  * `generateCourseSection` with a fixed `Section` — kept as separate route
@@ -107,7 +107,28 @@ export function parseJsonResponse(raw: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-export type Section = "explication" | "mode_visuel" | "resume" | "cas_clinique" | "qcms";
+export type Section = "explication" | "resume" | "cas_clinique" | "qcms" | "mind_map";
+
+/**
+ * Cosine similarity floor for "Silent Semantic Deduplication" (Smart Clone —
+ * see generateCourseSection() below). Deliberately higher than the 0.88 chat
+ * cache threshold: cloning a whole generated section is a much bigger bet
+ * than reusing one Q&A answer, so this only fires when the source document
+ * is near-identical (same course, different scan/export/professor
+ * formatting), never merely "the same general topic".
+ */
+const SIMILAR_COURSE_THRESHOLD = 0.9;
+
+/** One row of match_similar_courses_by_slug()'s result — see supabase/schema.sql. Every section column is cast to `text` in SQL regardless of the column's real storage type, so callers always JSON.parse() the "object" ones themselves. */
+interface SimilarCourseRow {
+  slug: string;
+  similarity: number;
+  explication: string | null;
+  resume: string | null;
+  cas_clinique: string | null;
+  qcms: string | null;
+  mind_map: string | null;
+}
 
 interface SectionConfig {
   dbColumn: string;
@@ -119,21 +140,17 @@ interface SectionConfig {
 
 const SECTION_CONFIG: Record<Section, SectionConfig> = {
   explication: { dbColumn: "explication", systemPrompt: EXPLICATION_SYSTEM_PROMPT, expectedType: "string", maxTokens: 32000 },
-  mode_visuel: { dbColumn: "mode_visuel", systemPrompt: MODE_VISUEL_SYSTEM_PROMPT, expectedType: "object", maxTokens: 16000 },
   // The DB column is literally named "resumé" (French accent) — the JSON
   // key from the model and the frontend type both stay ASCII "resume".
   resume: { dbColumn: "resumé", systemPrompt: RESUME_SYSTEM_PROMPT, expectedType: "object", maxTokens: 16000 },
   cas_clinique: { dbColumn: "cas_clinique", systemPrompt: CAS_CLINIQUE_SYSTEM_PROMPT, expectedType: "object", maxTokens: 16000 },
   qcms: { dbColumn: "qcms", systemPrompt: QCMS_SYSTEM_PROMPT, expectedType: "object", maxTokens: 16000 },
+  mind_map: { dbColumn: "mind_map", systemPrompt: MIND_MAP_SYSTEM_PROMPT, expectedType: "object", maxTokens: 8000 },
 };
 
 interface RawCourseRow {
   raw_text: string | null;
-  explication: unknown;
-  mode_visuel: unknown;
-  resume: unknown;
-  cas_clinique: unknown;
-  qcms: unknown;
+  [section: string]: unknown;
 }
 
 /**
@@ -164,10 +181,19 @@ export async function generateCourseSection(slug: string, section: Section): Pro
 
   const supabase = getSupabaseAdmin();
 
+  // Select ONLY raw_text + THIS section's own column — never the other 4
+  // sections' columns. Reproduced live: the select used to unconditionally
+  // list every section's column, so adding a 6th section (mind_map) whose
+  // ALTER TABLE hadn't been run yet broke generation for ALL FIVE existing
+  // sections on EVERY course with a single Postgres "column does not exist"
+  // error, masked behind a misleading "Cours introuvable" 404. Scoping the
+  // select to just the requested section's column makes that entire class
+  // of bug structurally impossible going forward.
   // The DB column is named "resumé" (accent) — aliased to ASCII "resume" for
   // the same reason as app/api/courses/slug/[slug]/route.ts: supabase-js's
   // compile-time select-string parser can't statically parse the accent.
-  const selectColumns = "raw_text, explication, mode_visuel, resume:resumé, cas_clinique, qcms";
+  const aliasedColumn = section === "resume" ? "resume:resumé" : config.dbColumn;
+  const selectColumns = `raw_text, ${aliasedColumn}`;
 
   const { data: row, error: fetchError } = (await supabase
     .from("courses")
@@ -181,10 +207,68 @@ export async function generateCourseSection(slug: string, section: Section): Pro
   }
 
   // Cache hit: already generated (or pre-authored, like gastrite) — no AI call.
-  const existing = row[section as keyof RawCourseRow];
+  const existing = row[section];
   if (existing !== null && existing !== undefined) {
     console.log(`[generate/${section}] Cache hit — aucun appel IA.`);
     return NextResponse.json({ success: true, cached: true, section, data: existing });
+  }
+
+  // --- Silent Semantic Deduplication ("Smart Clone") ------------------------
+  // Before paying for a real OpenRouter call, check whether another course —
+  // any slug, any faculty, any professor's own phrasing/"كركاسة" — already
+  // has near-identical raw_text (cosine similarity > 0.9, computed entirely
+  // in Postgres from this row's content_embedding) AND already has THIS
+  // exact section generated. If so, clone that value straight into this row:
+  // same content, $0 OpenRouter cost, completely invisible to the student —
+  // their row, their chat history, their QCM attempts stay fully independent;
+  // only the generated payload itself is reused.
+  //
+  // Fails open by construction: this entire block is one try/catch, and
+  // ANY failure (RPC error, malformed cloned JSON, save error) falls straight
+  // through to the normal generation path below — a broken dedup check must
+  // never block a student from getting their section, it should just degrade
+  // to a normal (billed) generation, exactly like before this feature existed.
+  try {
+    const { data: similarCourses, error: matchError } = await supabase.rpc("match_similar_courses_by_slug", {
+      p_slug: slug,
+      match_threshold: SIMILAR_COURSE_THRESHOLD,
+      match_count: 5,
+    });
+
+    if (matchError) {
+      console.error(
+        `[generate/${section}] Smart Clone — recherche de cours similaires échouée (fail-open, génération normale):`,
+        matchError.message
+      );
+    } else {
+      const candidates = (similarCourses ?? []) as SimilarCourseRow[];
+      const master = candidates.find((candidate) => candidate[section] !== null && candidate[section] !== undefined);
+
+      if (master) {
+        const rawCloneValue = master[section] as string;
+        const clonedValue = config.expectedType === "object" ? JSON.parse(rawCloneValue) : rawCloneValue;
+        const sanitizedClone = sanitizeForPostgres(clonedValue);
+
+        const { error: cloneUpdateError } = await supabase
+          .from("courses")
+          .update({ [config.dbColumn]: sanitizedClone })
+          .eq("slug", slug);
+
+        if (cloneUpdateError) {
+          console.error(
+            `[generate/${section}] Smart Clone — échec sauvegarde de la section clonée (fail-open, génération normale):`,
+            cloneUpdateError.message
+          );
+        } else {
+          console.log(
+            `[generate/${section}] SMART CLONE — section clonée depuis slug="${master.slug}" (similarité ${master.similarity.toFixed(4)}) — 0$ appel OpenRouter.`
+          );
+          return NextResponse.json({ success: true, cached: false, cloned: true, section, data: sanitizedClone });
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`[generate/${section}] Smart Clone — exception inattendue (fail-open, génération normale):`, errorMessage(error));
   }
 
   const rawText = row.raw_text;

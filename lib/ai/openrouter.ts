@@ -1,8 +1,34 @@
+import { detectMockPayload, isChatSystemPrompt, MOCK_CHAT_REPLY } from "@/lib/ai/mock-data";
+
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // "anthropic/claude-3.5-sonnet" was retired by OpenRouter (404s with
 // "No endpoints found") — this is the current equivalent, confirmed live
 // against GET https://openrouter.ai/api/v1/models.
 const MODEL = "anthropic/claude-sonnet-5";
+
+// Zero-spend local development: every real AI call in this app funnels
+// through callOpenRouter/streamOpenRouter below, so gating it here — rather
+// than in each of the 6 generation routes or the chat route separately —
+// guarantees no code path can accidentally hit the (currently exhausted)
+// OpenRouter balance while NODE_ENV is "development". USE_MOCK_AI lets a
+// deployed non-production environment (e.g. a staging build) opt in too.
+// Exported so lib/ai/embeddings.ts applies the exact same gate to embedding
+// calls instead of re-deriving the flag (and risking the two drifting apart).
+export const USE_MOCK_AI = process.env.NODE_ENV === "development" || process.env.USE_MOCK_AI === "true";
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractText(content: ChatMessageInput["content"]): string {
+  if (typeof content === "string") return content;
+  return content.map((block) => block.text).join("\n");
+}
+
+function findSystemText(messages: ChatMessageInput[]): string {
+  const systemMessage = messages.find((message) => message.role === "system");
+  return systemMessage ? extractText(systemMessage.content) : "";
+}
 
 export class OpenRouterError extends Error {
   status: number;
@@ -43,6 +69,17 @@ export async function callOpenRouter(
   messages: ChatMessageInput[],
   options?: { maxTokens?: number }
 ): Promise<string> {
+  if (USE_MOCK_AI) {
+    const systemText = findSystemText(messages);
+    const mock = detectMockPayload(systemText);
+    if (mock) {
+      console.log(`[MOCK AI] callOpenRouter interceptée — section "${mock.section}" servie depuis lib/ai/mock-data.ts, aucun appel réel à OpenRouter.`);
+      await delay(1000 + Math.random() * 1000);
+      return JSON.stringify({ [mock.section]: mock.value });
+    }
+    console.warn("[MOCK AI] Mode mock actif mais aucun fixture ne correspond à ce prompt système — appel réel à OpenRouter effectué. Ajoute un marqueur dans lib/ai/mock-data.ts si ce prompt est nouveau.");
+  }
+
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
@@ -100,6 +137,15 @@ export async function streamOpenRouter(
   messages: ChatMessageInput[],
   options?: { maxTokens?: number }
 ): Promise<ReadableStream<Uint8Array>> {
+  if (USE_MOCK_AI) {
+    const systemText = findSystemText(messages);
+    if (isChatSystemPrompt(systemText)) {
+      console.log("[MOCK AI] streamOpenRouter interceptée — réponse factice de lib/ai/mock-data.ts, aucun appel réel à OpenRouter.");
+      return buildMockChatStream(MOCK_CHAT_REPLY);
+    }
+    console.warn("[MOCK AI] Mode mock actif mais ce prompt système ne correspond à aucun fixture de streaming — appel réel à OpenRouter effectué.");
+  }
+
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
@@ -167,4 +213,28 @@ export async function streamOpenRouter(
   });
 
   return res.body.pipeThrough(unwrapSse);
+}
+
+/**
+ * Emits `text` as a `ReadableStream<Uint8Array>`, one word/whitespace token
+ * per `pull()`, with a short delay between each — mirrors the incremental,
+ * token-by-token shape of the real SSE-unwrapped stream above closely enough
+ * to exercise the chat UI's progressive-rendering path in mock mode.
+ */
+function buildMockChatStream(text: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const tokens = text.split(/(\s+)/).filter((token) => token.length > 0);
+  let index = 0;
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (index >= tokens.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(tokens[index]));
+      index += 1;
+      await delay(20 + Math.random() * 20);
+    },
+  });
 }

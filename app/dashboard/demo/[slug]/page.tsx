@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useTheme } from "next-themes";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Dna, HeartPulse, Loader2, Maximize2, Minimize2, Moon, Sun } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { DEMO_SECTIONS, buildDemoAskPrompt, buildDemoTranslatePrompt, type DemoSectionId } from "@/lib/demo-content";
 import { COURSE_SLUG_CONTENT, isCourseSlug, type CourseSlugSupabaseData } from "@/lib/course-slug-content";
 import { cn } from "@/lib/utils";
@@ -16,19 +17,19 @@ import {
   DARK_MARKDOWN_COMPONENTS,
   normalizeCallouts,
 } from "@/lib/markdown";
-import { useTextSelection } from "@/hooks/useTextSelection";
-import { useFullscreen } from "@/hooks/useFullscreen";
 import { useCourseChat } from "@/hooks/useCourseChat";
-import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
-import { ChatPanel } from "@/components/course/workspace/ChatPanel";
+import { useToast } from "@/components/ui/Toast";
+import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
+import { SourcesPanel } from "@/components/course/workspace/SourcesPanel";
+import { ChatDocumentPanel, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
+import { StudioPanel, type SectionStatus } from "@/components/course/workspace/StudioPanel";
 import { ResumeStudio } from "@/components/course/workspace/ResumeStudio";
 import { CasCliniqueStudio } from "@/components/course/workspace/CasCliniqueStudio";
 import { ExamQcmStudio } from "@/components/course/workspace/ExamQcmStudio";
-import { VisualStudioDemo } from "@/components/visual-studio/VisualStudioDemo";
-import { GastriteVisualStudio } from "@/components/visual-studio/GastriteVisualStudio";
 import { GastriteResumeStudio } from "@/components/course/workspace/GastriteResumeStudio";
 import { GastriteCasCliniqueStudio } from "@/components/course/workspace/GastriteCasCliniqueStudio";
 import { GastriteQcmsStudio } from "@/components/course/workspace/GastriteQcmsStudio";
+import { MindMapStudio } from "@/components/course/workspace/MindMapStudio";
 import { LazySection } from "@/components/course/workspace/LazySection";
 
 export default function CourseSlugWorkspacePage() {
@@ -39,31 +40,37 @@ export default function CourseSlugWorkspacePage() {
 }
 
 /**
- * Maps each Studio tab to the `CourseSlugSupabaseData` field it reads/writes,
+ * Maps each Studio tile to the `CourseSlugSupabaseData` field it reads/writes,
  * the modular generation route that fills it, and the label used in the
  * LazySection empty-state button — one config drives the whole lazy-loading
- * UX for all 5 tabs.
+ * UX for all tiles.
  */
 const SECTION_LAZY_CONFIG: Partial<
   Record<DemoSectionId, { dataKey: keyof CourseSlugSupabaseData; endpoint: string; label: string }>
 > = {
   explication: { dataKey: "explication", endpoint: "/api/generate/explication", label: "l'Explication" },
-  visual_studio: { dataKey: "mode_visuel", endpoint: "/api/generate/mode-visuel", label: "le Mode Visuel" },
   resume: { dataKey: "resume", endpoint: "/api/generate/resume", label: "le Résumé" },
   cas_clinique: { dataKey: "cas_clinique", endpoint: "/api/generate/cas-clinique", label: "les Cas Cliniques" },
   qcm: { dataKey: "qcms", endpoint: "/api/generate/qcm", label: "les QCM" },
+  // No "mind_map" entry: the Mind Map is now a fully static, hardcoded
+  // component (MindMapStudio) — nothing to generate, no endpoint to call.
+  // (Two now-orphaned, still-functional routes exist from earlier
+  // iterations — app/api/generate/mind-map/route.ts, the original
+  // {nodes,links}-graph pipeline, and app/api/generate-mindmap/route.ts,
+  // the OpenRouter+Ideogram image pipeline — kept but disconnected, since
+  // deleting working infrastructure wasn't asked for.)
 };
 
 function NotFoundScreen({ slug }: { slug: string }) {
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center gap-4 bg-slate-50 text-center">
-      <p className="text-lg font-semibold text-slate-900">Cours introuvable</p>
-      <p className="max-w-sm text-sm text-slate-500">
+    <div className="flex h-screen w-full flex-col items-center justify-center gap-4 bg-gray-100 text-center dark:bg-neutral-950">
+      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">Cours introuvable</p>
+      <p className="max-w-sm text-sm text-gray-500 dark:text-gray-400">
         Aucun contenu n'est disponible pour « {slug} » pour le moment.
       </p>
       <Link
         href="/dashboard"
-        className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+        className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-gray-300 dark:hover:bg-neutral-800"
       >
         <ArrowLeft className="h-4 w-4" />
         Retour au dashboard
@@ -74,13 +81,15 @@ function NotFoundScreen({ slug }: { slug: string }) {
 
 function LoadingScreen() {
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-slate-50">
-      <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+    <div className="flex h-screen w-full items-center justify-center bg-gray-100 dark:bg-neutral-950">
+      <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
     </div>
   );
 }
 
 function CourseSlugWorkspace({ slug }: { slug: string }) {
+  const { toast } = useToast();
+
   // Slugs with content hardcoded ahead of time (appendicite, gastrite, ulcere,
   // rectocolite) — their explication tab and Sources card keep using this
   // static content exactly as before, even once a Supabase row also exists.
@@ -88,7 +97,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
 
   // Any course row saved in Supabase's `courses` table, looked up by slug.
   // Brand-new courses (no legacy entry) render entirely from this; gastrite
-  // keeps its legacy explication but still gets its 4 Studio tabs from here.
+  // keeps its legacy explication but still gets its Studio tiles from here.
   const [supabaseData, setSupabaseData] = useState<CourseSlugSupabaseData | null | undefined>(undefined);
 
   useEffect(() => {
@@ -124,64 +133,146 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   );
 
   const [activeId, setActiveId] = useState<DemoSectionId>("explication");
-  const [isDark, setIsDark] = useState(true);
   const today = new Date().toLocaleDateString("fr-FR");
   const activeSection = sections.find((s) => s.id === activeId) ?? sections[0];
 
+  // Single source of dark/light truth for the whole workspace — the app's
+  // ThemeProvider default is "light" (app/layout.tsx); this just resolves it
+  // so the Studio content components (which take a `dark` boolean, not
+  // Tailwind `dark:` variants) stay in sync with it instead of keeping their
+  // own disconnected local toggle.
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+
+  // Cosmetic for now (this app has exactly one source per course) — reflects
+  // into the Chat panel's and Studio list's "N source(s)" labels so they
+  // aren't hardcoded lies.
+  const [sourceSelected, setSourceSelected] = useState(true);
+  const sourceCount = sourceSelected ? 1 : 0;
+
+  const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, clearMessages } = useCourseChat(slug);
+  const chatPanelRef = useRef<ChatDocumentPanelHandle>(null);
+
+  // Split-screen: Chat + Studio share a balanced 50/50 grid (Sources hidden)
+  // instead of the default 3-column layout — auto-triggered by a contextual
+  // action (Ask MedArt, Translate) and otherwise toggleable by hand from the
+  // Chat header. The Mind Map no longer triggers this: it's now a
+  // pan/zoom image viewer (MindMapStudio) with no clickable nodes.
+  const [isSplitScreen, setIsSplitScreen] = useState(false);
+  // Names whatever contextual action is currently awaiting its reply, so the
+  // Chat's typing indicator can say "Thinking about X..." instead of a
+  // generic message — cleared by every OTHER way of sending a message so a
+  // stale label never lingers on an unrelated exchange.
+  const [pendingThinkingLabel, setPendingThinkingLabel] = useState<string | null>(null);
+
+  /** "Ask MedArt" on a text selection — populates the chat input and focuses it, but doesn't send (student reviews/edits first, per spec). */
+  function handleAskSelection(text: string) {
+    setPendingThinkingLabel(null);
+    setIsSplitScreen(true);
+    setChatInput(buildDemoAskPrompt(text));
+    chatPanelRef.current?.focusInput();
+  }
+
+  /** "Translate" on a text selection — sends immediately through the real chat pipeline (a translation is a quick lookup, not something worth reviewing first). */
+  function handleTranslateSelection(text: string) {
+    setPendingThinkingLabel(null);
+    setIsSplitScreen(true);
+    sendChatMessage(buildDemoTranslatePrompt(text));
+  }
+
+  // Studio panel: null = "browse" view (tile grid + generations list); set =
+  // "detail" view, showing that section's content (reusing the exact same
+  // render logic that used to live directly in the tab-content switch below).
+  const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
+  // Which section is being generated via a direct tile click (as opposed to
+  // opening it and using LazySection's own "Générer" button) — drives the
+  // "Generating ... based on N source(s)" row in the Studio list.
+  const [generatingSection, setGeneratingSection] = useState<DemoSectionId | null>(null);
+
+  const [isNoteOpen, setIsNoteOpen] = useState(false);
+  const [noteContent, setNoteContent] = useState("");
+
   // Lazy loading: a freshly-uploaded course's row has every content column
-  // (mode_visuel/resume/cas_clinique/qcms/explication) set to null. Each is
-  // generated on demand — the student clicks "Générer ..." on the relevant
-  // tab (handled by <LazySection>) rather than all 5 being generated at once
-  // at upload time (that single mega-call routinely got truncated on larger
-  // source documents).
+  // (resume/cas_clinique/qcms/explication) set to null. Each is
+  // generated on demand — the student clicks a Studio tile (handled by
+  // <LazySection> once opened, or generateSection() below directly from the
+  // tile grid) rather than all being generated at once at upload time (that
+  // single mega-call routinely got truncated on larger source documents).
   function handleSectionGenerated<K extends keyof CourseSlugSupabaseData>(dataKey: K, data: CourseSlugSupabaseData[K]) {
     setSupabaseData((prev) => (prev ? { ...prev, [dataKey]: data } : prev));
   }
 
+  /** Whether a Studio tile already has real content to show, or still needs generating. */
+  function getSectionStatus(id: DemoSectionId): SectionStatus {
+    if (id === "mind_map") return "available"; // fully static/hardcoded — nothing to generate, ever
+    if (!hasStudioData) return "available"; // legacy-only slug: fixed components/customTabContent, nothing to generate
+    if (id === "explication") {
+      if (legacySlugData) return "available";
+      return supabaseData?.explication != null ? "available" : "needs_generation";
+    }
+    if (id === "resume" && legacySlugData?.resume) return "available";
+    if (id === "cas_clinique" && legacySlugData?.casClinique) return "available";
+    if (id === "qcm" && legacySlugData?.qcm) return "available";
+
+    const dataKey = SECTION_LAZY_CONFIG[id]?.dataKey;
+    if (!dataKey) return "available";
+    return supabaseData?.[dataKey] != null ? "available" : "needs_generation";
+  }
+
+  /** Same POST-then-save flow as LazySection's own button, triggered directly from a Studio tile so the grid can show a live "Generating..." row without first opening the section. */
+  async function generateSection(id: DemoSectionId) {
+    const config = SECTION_LAZY_CONFIG[id];
+    if (!config) return;
+
+    setGeneratingSection(id);
+    try {
+      const res = await fetch(config.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body?.success) {
+        handleSectionGenerated(config.dataKey, body.data);
+      } else {
+        toast({ variant: "error", title: "Échec de la génération", description: body?.error ?? "Réessaie." });
+      }
+    } catch {
+      toast({ variant: "error", title: "Échec de la génération", description: "Impossible de contacter le serveur." });
+    } finally {
+      setGeneratingSection(null);
+    }
+  }
+
+  function handleStudioItemClick(id: DemoSectionId) {
+    if (getSectionStatus(id) === "needs_generation") {
+      if (!generatingSection) generateSection(id);
+      return;
+    }
+    setActiveId(id);
+    setOpenedSection(id);
+  }
+
   // Slugs with fully authored per-tab markdown (legacy gastrite fallback)
   // render that here instead of the fixed appendicite-specific interactive
-  // components (ResumeStudio, VisualStudioDemo, CasCliniqueStudio, ExamQcmStudio).
+  // components (ResumeStudio, CasCliniqueStudio, ExamQcmStudio).
   const customTabContent: string | undefined =
     activeId === "resume"
       ? legacySlugData?.resume
-      : activeId === "visual_studio"
-        ? legacySlugData?.visualBreakdown
-        : activeId === "cas_clinique"
-          ? legacySlugData?.casClinique
-          : activeId === "qcm"
-            ? legacySlugData?.qcm
-            : undefined;
+      : activeId === "cas_clinique"
+        ? legacySlugData?.casClinique
+        : activeId === "qcm"
+          ? legacySlugData?.qcm
+          : undefined;
 
-  // Any slug with a Supabase-backed row gets the interactive Mode Visuel,
-  // Résumé, Cas Clinique and QCM Studio components, fed by that row's data —
-  // this is what makes a brand-new course fully navigable the moment its
-  // row exists in `courses`, with zero code change per course.
-  const showVisualStudioData = hasStudioData && activeId === "visual_studio";
+  // Any slug with a Supabase-backed row gets the interactive Résumé, Cas
+  // Clinique and QCM Studio components, fed by that row's data — this is
+  // what makes a brand-new course fully navigable the moment its row exists
+  // in `courses`, with zero code change per course.
   const showResumeStudioData = hasStudioData && activeId === "resume";
   const showCasCliniqueStudioData = hasStudioData && activeId === "cas_clinique";
   const showQcmsStudioData = hasStudioData && activeId === "qcm";
-
-  const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
-  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
-
-  const { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage } = useCourseChat(slug);
-
-  function handleAsk(selectedText: string) {
-    sendChatMessage(buildDemoAskPrompt(selectedText));
-    clearSelection();
-  }
-
-  function handleTranslate(selectedText: string) {
-    sendChatMessage(buildDemoTranslatePrompt(selectedText));
-    clearSelection();
-  }
-
-  function handleChatSubmit() {
-    const text = chatInput.trim();
-    if (!text) return;
-    setChatInput("");
-    sendChatMessage(text);
-  }
+  const showMindMapStudioData = hasStudioData && activeId === "mind_map";
 
   // No legacy content, and Supabase confirmed there's no row for this slug either.
   if (!legacySlugData && supabaseData === null) {
@@ -194,360 +285,172 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     return <LoadingScreen />;
   }
 
-  return (
-    <div
-      className={cn(
-        "relative isolate flex h-screen w-full overflow-hidden transition-colors duration-500",
-        isDark ? "bg-slate-950" : "bg-slate-50"
-      )}
+  // The currently-opened Studio section's content — unchanged from the
+  // original tab-content switch, just rendered inside <StudioPanel>'s
+  // "detail" view instead of directly in the aside.
+  const openedSectionContent = showResumeStudioData ? (
+    <LazySection
+      dark={isDark}
+      data={supabaseData?.resume}
+      label={SECTION_LAZY_CONFIG.resume!.label}
+      endpoint={SECTION_LAZY_CONFIG.resume!.endpoint}
+      slug={slug}
+      onGenerated={(data) => handleSectionGenerated("resume", data)}
     >
-      {/* Fond — Aurore animée (sombre) ou dégradé doux (clair) */}
-      {isDark ? (
-        <>
-          <div aria-hidden className="pointer-events-none absolute inset-0 -z-20 overflow-hidden">
-            <div className="animate-aurora-breathe absolute -left-40 -top-40 h-[42rem] w-[42rem] rounded-full bg-[radial-gradient(circle,rgba(6,182,212,0.08),transparent_70%)] blur-3xl" />
-            <div
-              className="animate-aurora-breathe absolute -bottom-40 -right-20 h-[46rem] w-[46rem] rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.08),transparent_70%)] blur-3xl"
-              style={{ animationDelay: "4s", animationDuration: "15s" }}
-            />
-          </div>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:4rem_4rem]"
-          />
-        </>
-      ) : (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 -z-10 animate-[pulse_10s_ease-in-out_infinite] bg-gradient-to-br from-slate-50 via-white to-slate-100"
-        />
+      {(data) => <GastriteResumeStudio data={data} />}
+    </LazySection>
+  ) : showCasCliniqueStudioData ? (
+    <LazySection
+      dark={isDark}
+      data={supabaseData?.cas_clinique}
+      label={SECTION_LAZY_CONFIG.cas_clinique!.label}
+      endpoint={SECTION_LAZY_CONFIG.cas_clinique!.endpoint}
+      slug={slug}
+      onGenerated={(data) => handleSectionGenerated("cas_clinique", data)}
+    >
+      {(data) => <GastriteCasCliniqueStudio data={data} />}
+    </LazySection>
+  ) : showQcmsStudioData ? (
+    <LazySection
+      dark={isDark}
+      data={supabaseData?.qcms}
+      label={SECTION_LAZY_CONFIG.qcm!.label}
+      endpoint={SECTION_LAZY_CONFIG.qcm!.endpoint}
+      slug={slug}
+      onGenerated={(data) => handleSectionGenerated("qcms", data)}
+    >
+      {(data) => <GastriteQcmsStudio data={data} />}
+    </LazySection>
+  ) : showMindMapStudioData ? (
+    <MindMapStudio />
+  ) : customTabContent ? (
+    <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
+        {normalizeCallouts(customTabContent)}
+      </ReactMarkdown>
+    </article>
+  ) : activeId === "resume" ? (
+    <ResumeStudio />
+  ) : activeId === "cas_clinique" ? (
+    <CasCliniqueStudio />
+  ) : activeId === "qcm" ? (
+    <ExamQcmStudio />
+  ) : activeId === "explication" && hasStudioData && !legacySlugData ? (
+    <LazySection
+      dark={isDark}
+      data={supabaseData?.explication}
+      label={SECTION_LAZY_CONFIG.explication!.label}
+      endpoint={SECTION_LAZY_CONFIG.explication!.endpoint}
+      slug={slug}
+      onGenerated={(data) => handleSectionGenerated("explication", data)}
+    >
+      {(content) => (
+        <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}
+          >
+            {normalizeCallouts(content)}
+          </ReactMarkdown>
+        </article>
       )}
+    </LazySection>
+  ) : (
+    <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
+        {normalizeCallouts(activeSection.content)}
+      </ReactMarkdown>
+    </article>
+  );
 
-      {/* Panneau Gauche — Sources (masqué en mode discussion) */}
-      <aside
-        className={cn(
-          "relative flex w-72 shrink-0 flex-col overflow-hidden p-4 backdrop-blur-2xl transition-all duration-300",
-          isDark ? "border-r border-white/10 bg-slate-950" : "border-r bg-white/80",
-          chatOpen && "hidden"
-        )}
-      >
-        <div
-          aria-hidden
-          className={cn(
-            "animate-sidebar-wave pointer-events-none absolute -left-24 top-1/3 z-0 h-96 w-96 rounded-full blur-2xl",
-            isDark
-              ? "bg-[radial-gradient(circle,rgba(6,95,70,0.2),rgba(13,148,136,0.1)_60%,transparent_75%)]"
-              : "bg-[radial-gradient(circle,rgba(209,250,229,0.4),rgba(240,253,250,0.5)_60%,transparent_75%)]"
-          )}
-        />
-        <Dna
-          aria-hidden
-          className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-64 w-64 -translate-x-1/2 -translate-y-1/2 text-emerald-500 opacity-[0.03]"
-          strokeWidth={1}
-        />
+  const chatPanel = (
+    <ChatDocumentPanel
+      ref={chatPanelRef}
+      title={title || "Cours"}
+      dateLabel={today}
+      sourceCount={sourceCount}
+      messages={chatMessages}
+      isTyping={isTyping}
+      input={chatInput}
+      onInputChange={setChatInput}
+      onSend={() => {
+        const text = chatInput.trim();
+        if (!text) return;
+        setChatInput("");
+        setPendingThinkingLabel(null);
+        sendChatMessage(text);
+      }}
+      onClearHistory={clearMessages}
+      onAskSelection={handleAskSelection}
+      onTranslateSelection={handleTranslateSelection}
+      pendingThinkingLabel={pendingThinkingLabel}
+      isSplitScreen={isSplitScreen}
+      onToggleSplitScreen={() => setIsSplitScreen((v) => !v)}
+      dark={isDark}
+    />
+  );
 
-        <Link
-          href="/dashboard"
-          className={cn(
-            "relative z-10 mb-4 flex items-center gap-2 text-sm font-medium transition-colors duration-300",
-            isDark ? "text-slate-400 hover:text-white" : "text-gray-500 hover:text-gray-900"
-          )}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Retour
-        </Link>
+  const studioPanel = (
+    <StudioPanel
+      sections={sections}
+      openedSection={openedSection}
+      openedLabel={activeSection.label}
+      onItemClick={handleStudioItemClick}
+      onCloseSection={() => setOpenedSection(null)}
+      getSectionStatus={getSectionStatus}
+      generatingSection={generatingSection}
+      sourceCount={sourceCount}
+      isNoteOpen={isNoteOpen}
+      onOpenNote={() => setIsNoteOpen(true)}
+      onBackFromNote={() => setIsNoteOpen(false)}
+      onDeleteNote={() => {
+        setIsNoteOpen(false);
+        setNoteContent("");
+      }}
+      noteContent={noteContent}
+      onNoteContentChange={setNoteContent}
+      onAskSelection={handleAskSelection}
+      onTranslateSelection={handleTranslateSelection}
+    >
+      {openedSectionContent}
+    </StudioPanel>
+  );
 
-        <h2
-          className={cn(
-            "relative z-10 mb-3 text-xs font-semibold uppercase tracking-wide",
-            isDark ? "text-slate-500" : "text-gray-400"
-          )}
-        >
-          Sources
-        </h2>
+  const panelShellClasses =
+    "flex flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900";
 
-        <div
-          className={cn(
-            "relative z-10 flex items-start gap-2 overflow-hidden rounded-xl p-3",
-            isDark ? "border border-white/10 bg-slate-800/40 pl-4 text-slate-200" : "border-none bg-gray-100 text-gray-700"
-          )}
-        >
-          {isDark && (
-            <span
-              aria-hidden
-              className="absolute left-0 top-0 h-full w-0.5 rounded-full bg-cyan-400 shadow-[0_0_8px_2px_rgba(34,211,238,0.6)]"
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
+      <WorkspaceTopbar title={title} />
+
+      <div className="flex flex-1 gap-4 overflow-hidden p-4">
+        {/* Panneau Gauche — Sources (masqué en écran partagé pour laisser Chat/Studio respirer à 50/50) */}
+        {!isSplitScreen && (
+          <aside className={cn(panelShellClasses, "w-72 shrink-0")}>
+            <SourcesPanel
+              sourceFileName={sourceFileName}
+              sourceSize={sourceSize}
+              dateLabel={today}
+              selected={sourceSelected}
+              onToggleSelected={setSourceSelected}
             />
-          )}
-          <span className="text-base leading-none">📄</span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{sourceFileName}</p>
-            <p className={cn("mt-0.5 text-xs", isDark ? "text-slate-500" : "text-gray-500")}>
-              {today} · {sourceSize}
-            </p>
-          </div>
-        </div>
-      </aside>
-
-      {/* Panneau Central — Lecture */}
-      <main
-        className={cn(
-          "relative z-10 flex-1 overflow-y-auto transition-colors duration-500",
-          isDark ? "custom-scrollbar bg-transparent" : "scrollbar-thin bg-slate-50/60",
-          isFullscreen && !chatOpen && cn("fixed inset-0 z-40", isDark ? "bg-slate-950" : "bg-slate-50")
-        )}
-      >
-        {!chatOpen && (
-          <div className="sticky top-0 z-30 flex justify-end gap-2 p-4">
-            <button
-              onClick={() => setIsDark((v) => !v)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-all duration-300",
-                isDark
-                  ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
-                  : "border-slate-200 bg-white/90 text-gray-600 shadow-sm hover:bg-gray-50"
-              )}
-            >
-              {isDark ? (
-                <>
-                  <Sun className="h-3.5 w-3.5" />
-                  Mode Clair
-                </>
-              ) : (
-                <>
-                  <Moon className="h-3.5 w-3.5" />
-                  Mode Sombre
-                </>
-              )}
-            </button>
-
-            <button
-              onClick={toggleFullscreen}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-all duration-300",
-                isDark
-                  ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
-                  : "border-slate-200 bg-white/90 text-gray-600 shadow-sm hover:bg-gray-50"
-              )}
-            >
-              {isFullscreen ? (
-                <>
-                  <Minimize2 className="h-3.5 w-3.5" />
-                  Quitter le plein écran
-                </>
-              ) : (
-                <>
-                  <Maximize2 className="h-3.5 w-3.5" />
-                  Plein écran
-                </>
-              )}
-            </button>
-          </div>
+          </aside>
         )}
 
+        {/* Panneau Central — Chat, seul ou en grille 50/50 avec Studio en écran partagé */}
         <div
-          ref={containerRef}
-          onContextMenu={(e) => e.preventDefault()}
           className={cn(
-            "mx-auto mb-8 w-full select-text transition-all duration-500",
-            activeId === "visual_studio" && (!customTabContent || showVisualStudioData)
-              ? "max-w-6xl"
-              : cn(
-                  "rounded-2xl p-12 backdrop-blur-2xl",
-                  isDark ? "border border-white/10 bg-slate-900/80 shadow-2xl" : "border border-slate-200/80 bg-white shadow-sm",
-                  activeId === "resume" || activeId === "cas_clinique" || activeId === "qcm" || (activeId === "visual_studio" && customTabContent)
-                    ? "max-w-5xl"
-                    : "max-w-3xl"
-                ),
-            chatOpen && "mt-8"
+            "grid flex-1 gap-4 overflow-hidden transition-all duration-300",
+            isSplitScreen ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
           )}
         >
-          {showVisualStudioData ? (
-            <LazySection
-              dark={isDark}
-              data={supabaseData?.mode_visuel}
-              label={SECTION_LAZY_CONFIG.visual_studio!.label}
-              endpoint={SECTION_LAZY_CONFIG.visual_studio!.endpoint}
-              slug={slug}
-              onGenerated={(data) => handleSectionGenerated("mode_visuel", data)}
-            >
-              {(data) => <GastriteVisualStudio dark={isDark} data={data} />}
-            </LazySection>
-          ) : showResumeStudioData ? (
-            <LazySection
-              dark={isDark}
-              data={supabaseData?.resume}
-              label={SECTION_LAZY_CONFIG.resume!.label}
-              endpoint={SECTION_LAZY_CONFIG.resume!.endpoint}
-              slug={slug}
-              onGenerated={(data) => handleSectionGenerated("resume", data)}
-            >
-              {(data) => <GastriteResumeStudio data={data} />}
-            </LazySection>
-          ) : showCasCliniqueStudioData ? (
-            <LazySection
-              dark={isDark}
-              data={supabaseData?.cas_clinique}
-              label={SECTION_LAZY_CONFIG.cas_clinique!.label}
-              endpoint={SECTION_LAZY_CONFIG.cas_clinique!.endpoint}
-              slug={slug}
-              onGenerated={(data) => handleSectionGenerated("cas_clinique", data)}
-            >
-              {(data) => <GastriteCasCliniqueStudio data={data} />}
-            </LazySection>
-          ) : showQcmsStudioData ? (
-            <LazySection
-              dark={isDark}
-              data={supabaseData?.qcms}
-              label={SECTION_LAZY_CONFIG.qcm!.label}
-              endpoint={SECTION_LAZY_CONFIG.qcm!.endpoint}
-              slug={slug}
-              onGenerated={(data) => handleSectionGenerated("qcms", data)}
-            >
-              {(data) => <GastriteQcmsStudio data={data} />}
-            </LazySection>
-          ) : customTabContent ? (
-            <article
-              key={activeId}
-              className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}
-              >
-                {normalizeCallouts(customTabContent)}
-              </ReactMarkdown>
-            </article>
-          ) : activeId === "resume" ? (
-            <ResumeStudio />
-          ) : activeId === "visual_studio" ? (
-            <VisualStudioDemo />
-          ) : activeId === "cas_clinique" ? (
-            <CasCliniqueStudio />
-          ) : activeId === "qcm" ? (
-            <ExamQcmStudio />
-          ) : activeId === "explication" && hasStudioData && !legacySlugData ? (
-            <LazySection
-              dark={isDark}
-              data={supabaseData?.explication}
-              label={SECTION_LAZY_CONFIG.explication!.label}
-              endpoint={SECTION_LAZY_CONFIG.explication!.endpoint}
-              slug={slug}
-              onGenerated={(data) => handleSectionGenerated("explication", data)}
-            >
-              {(content) => (
-                <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}
-                  >
-                    {normalizeCallouts(content)}
-                  </ReactMarkdown>
-                </article>
-              )}
-            </LazySection>
-          ) : (
-            <article
-              key={activeSection.id}
-              className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}
-              >
-                {normalizeCallouts(activeSection.content)}
-              </ReactMarkdown>
-            </article>
-          )}
+          <main className={panelShellClasses}>{chatPanel}</main>
+          {isSplitScreen && <aside className={panelShellClasses}>{studioPanel}</aside>}
         </div>
 
-        {selection && (
-          <SelectionTooltip
-            ref={tooltipRef}
-            selection={selection}
-            onAsk={handleAsk}
-            onTranslate={handleTranslate}
-          />
-        )}
-      </main>
-
-      {/* Panneau Droit — Studio (masqué en mode discussion) */}
-      <aside
-        className={cn(
-          "relative flex w-80 shrink-0 flex-col overflow-hidden p-4 backdrop-blur-2xl transition-all duration-300",
-          isDark ? "border-l border-white/10 bg-slate-950" : "border-l bg-slate-50/80",
-          chatOpen && "hidden"
-        )}
-      >
-        <div
-          aria-hidden
-          className={cn(
-            "animate-sidebar-wave pointer-events-none absolute -right-24 bottom-1/3 z-0 h-96 w-96 rounded-full blur-2xl",
-            isDark
-              ? "bg-[radial-gradient(circle,rgba(6,95,70,0.2),rgba(13,148,136,0.1)_60%,transparent_75%)]"
-              : "bg-[radial-gradient(circle,rgba(209,250,229,0.4),rgba(240,253,250,0.5)_60%,transparent_75%)]"
-          )}
-          style={{ animationDelay: "6s", animationDuration: "22s" }}
-        />
-        <HeartPulse
-          aria-hidden
-          className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-64 w-64 -translate-x-1/2 -translate-y-1/2 text-emerald-500 opacity-[0.03]"
-          strokeWidth={1}
-        />
-
-        <h2
-          className={cn(
-            "relative z-10 mb-3 text-xs font-semibold uppercase tracking-wide",
-            isDark ? "text-slate-500" : "text-gray-400"
-          )}
-        >
-          Studio
-        </h2>
-
-        <div className="relative z-10 flex flex-col gap-2">
-          {sections.map(({ id, label, icon: Icon, accent }) => {
-            const isActive = id === activeId;
-            return (
-              <button
-                key={id}
-                onClick={() => setActiveId(id)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300",
-                  isDark
-                    ? isActive
-                      ? "border-l-2 border-cyan-400 bg-cyan-500/10 text-white shadow-[0_0_20px_-6px_rgba(34,211,238,0.5)]"
-                      : "border-l-2 border-transparent text-slate-400 hover:translate-x-1 hover:bg-white/5 hover:text-slate-200"
-                    : isActive
-                      ? cn(accent.active, "border shadow-sm")
-                      : cn("border border-slate-200 bg-white text-gray-700", accent.hover)
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
-                    isDark && !isActive ? "bg-white/5 text-slate-400" : accent.chip
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                </span>
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </aside>
-
-      {/* Panneau de discussion — mode split 50/50 (glassmorphism) */}
-      <ChatPanel
-        open={chatOpen}
-        onClose={() => setChatOpen(false)}
-        messages={chatMessages}
-        isTyping={isTyping}
-        input={chatInput}
-        onInputChange={setChatInput}
-        onSend={handleChatSubmit}
-        variant="split"
-        dark={isDark}
-      />
+        {/* Panneau Droit — Studio (disposition par défaut uniquement ; en écran partagé il vit dans la grille ci-dessus) */}
+        {!isSplitScreen && <aside className={cn(panelShellClasses, "w-96 shrink-0")}>{studioPanel}</aside>}
+      </div>
     </div>
   );
 }

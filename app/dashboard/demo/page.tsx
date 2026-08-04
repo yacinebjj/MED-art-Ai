@@ -22,7 +22,6 @@ import { ChatPanel } from "@/components/course/workspace/ChatPanel";
 import { ResumeStudio } from "@/components/course/workspace/ResumeStudio";
 import { CasCliniqueStudio } from "@/components/course/workspace/CasCliniqueStudio";
 import { ExamQcmStudio } from "@/components/course/workspace/ExamQcmStudio";
-import { VisualStudioDemo } from "@/components/visual-studio/VisualStudioDemo";
 
 export default function DemoWorkspacePage() {
   const [activeId, setActiveId] = useState<DemoSectionId>("explication");
@@ -207,20 +206,14 @@ export default function DemoWorkspacePage() {
           onContextMenu={(e) => e.preventDefault()}
           className={cn(
             "mx-auto mb-8 w-full select-text transition-all duration-500",
-            activeId === "visual_studio"
-              ? "max-w-6xl"
-              : cn(
-                  "rounded-2xl p-12 backdrop-blur-2xl",
-                  isDark ? "border border-white/10 bg-slate-900/80 shadow-2xl" : "border border-slate-200/80 bg-white shadow-sm",
-                  activeId === "resume" || activeId === "cas_clinique" || activeId === "qcm" ? "max-w-5xl" : "max-w-3xl"
-                ),
+            "rounded-2xl p-12 backdrop-blur-2xl",
+            isDark ? "border border-white/10 bg-slate-900/80 shadow-2xl" : "border border-slate-200/80 bg-white shadow-sm",
+            activeId === "resume" || activeId === "cas_clinique" || activeId === "qcm" ? "max-w-5xl" : "max-w-3xl",
             chatOpen && "mt-8"
           )}
         >
           {activeId === "resume" ? (
             <ResumeStudio />
-          ) : activeId === "visual_studio" ? (
-            <VisualStudioDemo />
           ) : activeId === "cas_clinique" ? (
             <CasCliniqueStudio />
           ) : activeId === "qcm" ? (

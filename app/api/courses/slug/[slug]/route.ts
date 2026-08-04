@@ -28,7 +28,7 @@ function parseJsonColumn(value: unknown): unknown {
  * Public, unauthenticated lookup of a hand-authored showcase course (e.g.
  * "gastrite") by slug, from the `courses` table — distinct from the
  * per-user `user_courses` table. Powers app/dashboard/demo/[slug]/page.tsx's
- * Mode Visuel / Résumé / Cas Clinique / QCM Studio tabs.
+ * Résumé / Cas Clinique / QCM Studio tabs.
  */
 export async function GET(request: NextRequest, { params }: { params: { slug: string } }) {
   if (!isSupabaseConfigured()) {
@@ -41,17 +41,21 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
     slug: string;
     title: string;
     explication: string;
-    mode_visuel: unknown;
     resume: unknown;
     cas_clinique: unknown;
     qcms: unknown;
+    mind_map: unknown;
   }
 
   // The DB column is named "resumé" (with the French accent) and aliased to
   // "resume" here so the JSON response and frontend types can use plain
   // ASCII. supabase-js's compile-time select-string parser can't statically
   // parse the accented column name, so the query result is cast by hand.
-  const selectColumns = "slug, title, explication, mode_visuel, resume:resumé, cas_clinique, qcms";
+  //
+  // "mode_visuel" is deliberately NOT selected — the "Mode Visuel" feature was
+  // removed; an old row may still physically have this column populated, but
+  // never selecting it means the app never reads or parses that stale data.
+  const selectColumns = "slug, title, explication, resume:resumé, cas_clinique, qcms, mind_map";
 
   const { data, error } = (await supabase
     .from("courses")
@@ -67,10 +71,10 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
     slug: data.slug,
     title: data.title,
     explication: data.explication,
-    mode_visuel: parseJsonColumn(data.mode_visuel),
     resume: parseJsonColumn(data.resume),
     cas_clinique: parseJsonColumn(data.cas_clinique),
     qcms: parseJsonColumn(data.qcms),
+    mind_map: parseJsonColumn(data.mind_map),
   });
 }
 

@@ -28,9 +28,15 @@ yarn-error.log*
 # vercel
 .vercel
 
+# locally-cached generated images (TEMP_TEST_MODE in app/api/generate-mindmap)
+/public/generated/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
 # claude code (machine/session-local settings)
 .claude/settings.local.json
+
+# repomix full-codebase dump (local tool output, not source)
+/repomix-output.xml

@@ -233,3 +233,214 @@ alter table course_content_cache drop constraint if exists course_content_cache_
 alter table course_content_cache
   add constraint course_content_cache_course_id_content_type_sub_unit_id_key
   unique (course_id, content_type, sub_unit_id);
+
+-- ---------------------------------------------------------------------------
+-- NOTE ON WHAT'S MISSING ABOVE THIS LINE: `courses`, `modules`, and
+-- `course_chat_history` — the tables actually powering the current public
+-- Studio pipeline (app/api/generate/*, app/dashboard/demo/**,
+-- app/api/courses/chat) — were created ad hoc directly in the Supabase SQL
+-- editor during earlier sessions and were never appended here. This file is
+-- therefore an incomplete history above this point; everything from here on
+-- is kept in sync going forward.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- AI Mind Map: 6th on-demand Studio section, same lazy-generation pipeline
+-- as explication/mode_visuel/resume/cas_clinique/qcms (see
+-- lib/course-generation-shared.ts SECTION_CONFIG). jsonb, not text, since the
+-- stored value is a { nodes, links } graph object, not prose.
+-- ---------------------------------------------------------------------------
+alter table courses add column if not exists mind_map jsonb;
+
+-- ---------------------------------------------------------------------------
+-- qcm_attempts: one row per (student, course, QCM) — a repeat attempt
+-- UPDATEs the same row (via upsert onConflict) rather than inserting a new
+-- one, so leitner_box/next_review_at always reflect the latest state. Powers
+-- the Leitner spaced-repetition scheduler (lib/srs.ts) via
+-- app/api/srs/attempt, app/api/srs/due and, through the weakness_radar
+-- function below, app/api/srs/weakness-radar.
+-- ---------------------------------------------------------------------------
+create table if not exists qcm_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  course_slug text not null,
+  qcm_id text not null,
+  is_correct boolean not null,
+  leitner_box integer not null default 1,
+  next_review_at timestamptz not null default now(),
+  attempted_at timestamptz not null default now(),
+  unique (user_id, course_slug, qcm_id)
+);
+
+create index if not exists qcm_attempts_user_next_review_idx on qcm_attempts (user_id, next_review_at);
+
+alter table qcm_attempts enable row level security;
+
+drop policy if exists "Users can view their own QCM attempts" on qcm_attempts;
+create policy "Users can view their own QCM attempts"
+  on qcm_attempts for select
+  using (auth.uid() = user_id);
+
+-- Mastery percentage per module (Gastroentérologie, Infectiologie, ...) for
+-- one student, called by app/api/srs/weakness-radar/route.ts via
+-- supabase.rpc("weakness_radar", { p_user_id }). Joins through courses.slug
+-- (qcm_attempts has no direct module_id — a course can move between modules
+-- via the dashboard's "Déplacer" action, so deriving the module from the
+-- course at query time, rather than freezing it on the attempt row, keeps
+-- past attempts correctly attributed after a course is reorganized).
+create or replace function weakness_radar(p_user_id uuid)
+returns table (
+  module_id bigint,
+  module_name text,
+  total_attempts bigint,
+  correct_attempts bigint,
+  mastery_pct numeric
+)
+language sql stable
+as $$
+  select
+    m.id as module_id,
+    m.name as module_name,
+    count(*) as total_attempts,
+    count(*) filter (where qa.is_correct) as correct_attempts,
+    round(100.0 * count(*) filter (where qa.is_correct) / count(*), 1) as mastery_pct
+  from qcm_attempts qa
+  join courses c on c.slug = qa.course_slug
+  join modules m on m.id = c.module_id
+  where qa.user_id = p_user_id
+  group by m.id, m.name
+  order by mastery_pct asc;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- semantic_cache: cross-student cache of (question, answer) pairs, matched by
+-- cosine similarity over pgvector rather than exact text — see
+-- lib/ai/semantic-cache.ts getCachedOrGenerate(). Column names here MUST
+-- match that file's .insert({ course_slug, question, answer, embedding })
+-- call exactly (it writes "question"/"answer", not "chunk_text").
+-- ---------------------------------------------------------------------------
+create extension if not exists vector;
+
+create table if not exists semantic_cache (
+  id uuid primary key default gen_random_uuid(),
+  course_slug text,
+  question text not null,
+  answer text not null,
+  embedding vector(1536) not null,
+  created_at timestamptz not null default now()
+);
+
+-- IVFFlat needs at least some rows to build meaningful lists; fine to create
+-- empty; Supabase docs recommend re-running `analyze` after the table has
+-- real data (a handful of qualifying rows) to reach optimal recall.
+create index if not exists semantic_cache_embedding_idx
+  on semantic_cache using ivfflat (embedding vector_cosine_ops)
+  with (lists = 100);
+
+create index if not exists semantic_cache_course_slug_idx on semantic_cache (course_slug);
+
+alter table semantic_cache enable row level security;
+
+-- Cosine-similarity search, filtered by course when match_course_slug is
+-- given, across all courses when it's null (see the comment on
+-- getCachedOrGenerate() in lib/ai/semantic-cache.ts for why cross-course
+-- search is sometimes desirable). match_threshold matches
+-- SIMILARITY_THRESHOLD (0.92) in that same file.
+create or replace function match_semantic_cache(
+  query_embedding vector(1536),
+  match_course_slug text,
+  match_threshold float,
+  match_count int
+)
+returns table (
+  id uuid,
+  question text,
+  answer text,
+  similarity float
+)
+language sql stable
+as $$
+  select
+    semantic_cache.id,
+    semantic_cache.question,
+    semantic_cache.answer,
+    1 - (semantic_cache.embedding <=> query_embedding) as similarity
+  from semantic_cache
+  where (match_course_slug is null or semantic_cache.course_slug = match_course_slug)
+    and 1 - (semantic_cache.embedding <=> query_embedding) >= match_threshold
+  order by semantic_cache.embedding <=> query_embedding
+  limit match_count;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- content_embedding: one embedding per course, computed ONCE at upload from
+-- raw_text (see app/api/generate-course/route.ts) — a fingerprint of the
+-- COURSE CONTENT itself. Distinct from `semantic_cache.embedding`, which
+-- fingerprints student QUESTIONS — different table, different purpose,
+-- never conflate the two.
+--
+-- Powers "Silent Semantic Deduplication" (lib/course-generation-shared.ts
+-- generateCourseSection()): before paying for a real OpenRouter call to
+-- generate a section, the app checks whether another course — any slug, any
+-- faculty, any professor's phrasing/"كركاسة" — already has near-identical
+-- raw_text (cosine similarity > 0.90) AND already has that exact section
+-- generated. If so, the section is cloned in, 0$, invisible to the student:
+-- their row, their chat history, their QCM attempts stay fully independent —
+-- only the generated explanation/JSON payload is reused.
+--
+-- Existing rows uploaded before this migration have content_embedding = null
+-- and simply never participate (neither as a source nor a candidate) until
+-- backfilled — acceptable since this only needs to cover NEW uploads going
+-- forward; backfilling old rows is a separate, optional maintenance task.
+-- ---------------------------------------------------------------------------
+alter table courses add column if not exists content_embedding vector(1536);
+
+create index if not exists courses_content_embedding_idx
+  on courses using ivfflat (content_embedding vector_cosine_ops)
+  with (lists = 100);
+
+-- Finds other courses whose raw_text is near-identical to the course at
+-- p_slug, returning enough of each candidate's already-generated sections
+-- for the caller to pick, per section, whichever candidate already has that
+-- exact section filled. The self-join (`self` subquery) keeps the query
+-- embedding entirely inside Postgres — the caller passes only a slug, never
+-- a raw vector(1536), so there is no vector-serialization round-trip through
+-- JS to get wrong. Section columns are cast to `text` because some
+-- environments store them as jsonb and others as plain text (see
+-- parseJsonColumn() in app/api/courses/slug/[slug]/route.ts) — casting
+-- normalizes both to a string the caller JSON.parse()s itself, exactly like
+-- every other read path in this app already does.
+create or replace function match_similar_courses_by_slug(
+  p_slug text,
+  match_threshold float,
+  match_count int
+)
+returns table (
+  slug text,
+  similarity float,
+  explication text,
+  mode_visuel text,
+  resume text,
+  cas_clinique text,
+  qcms text,
+  mind_map text
+)
+language sql stable
+as $$
+  select
+    c.slug,
+    1 - (c.content_embedding <=> self.content_embedding) as similarity,
+    c.explication,
+    c.mode_visuel::text,
+    c.resumé::text as resume,
+    c.cas_clinique::text,
+    c.qcms::text,
+    c.mind_map::text
+  from courses c, (select content_embedding from courses where slug = p_slug) as self
+  where c.content_embedding is not null
+    and self.content_embedding is not null
+    and c.slug <> p_slug
+    and 1 - (c.content_embedding <=> self.content_embedding) >= match_threshold
+  order by c.content_embedding <=> self.content_embedding
+  limit match_count;
+$$;

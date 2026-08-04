@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ListChecks, CheckCircle2, XCircle, PenLine, GraduationCap } from "lucide-react";
+import { ListChecks, CheckCircle2, XCircle, PenLine, GraduationCap, ThumbsUp, ThumbsDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { GastriteQcmsData } from "@/lib/course-slug-content";
+import { useToast } from "@/components/ui/Toast";
 
 /* ----------------------------------------------------------------------- */
 /* Data structure — identical shape to the appendicite ExamQcmStudio.tsx,   */
@@ -34,12 +35,83 @@ interface QROC {
   reponseOfficielle: string;
 }
 
+/* ----------------------------------------------------------------------- */
+/* Spaced repetition hook: once a student reveals an answer, they self-     */
+/* grade it — this is the only place in the app that writes to             */
+/* `qcm_attempts`, which powers the Leitner scheduler (lib/srs.ts) and the  */
+/* Weakness Radar (app/api/srs/weakness-radar). `qcmId` is prefixed by kind */
+/* ("qcm-"/"qroc-") since the qcms[] and qrocs[] arrays each restart their   */
+/* ids at 1 — without the prefix a QCM and a QROC sharing id=1 would        */
+/* collide into the same qcm_attempts row.                                  */
+/* ----------------------------------------------------------------------- */
+
+function GradeButtons({
+  grading,
+  graded,
+  onGrade,
+}: {
+  grading: boolean;
+  graded: boolean | null;
+  onGrade: (isCorrect: boolean) => void;
+}) {
+  if (graded !== null) {
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-1.5 text-xs font-semibold",
+          graded ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+        )}
+      >
+        {graded ? <ThumbsUp className="h-3.5 w-3.5" /> : <ThumbsDown className="h-3.5 w-3.5" />}
+        {graded ? "Réussi — programmé pour une prochaine révision" : "Raté — reprogrammé pour bientôt"}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      <span className="mr-1 text-xs text-slate-400 dark:text-slate-500">Sois honnête, ça t'aide à réviser :</span>
+      <button
+        type="button"
+        onClick={() => onGrade(true)}
+        disabled={grading}
+        className="flex items-center gap-1.5 rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-900/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+      >
+        {grading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
+        J&apos;ai réussi
+      </button>
+      <button
+        type="button"
+        onClick={() => onGrade(false)}
+        disabled={grading}
+        className="flex items-center gap-1.5 rounded-lg bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-rose-900/40 dark:text-rose-300 dark:hover:bg-rose-900/60"
+      >
+        {grading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsDown className="h-3.5 w-3.5" />}
+        J&apos;ai raté
+      </button>
+    </div>
+  );
+}
 
 /* ----------------------------------------------------------------------- */
 /* Interactive UI — identical shell to the appendicite ExamQcmStudio.tsx.   */
 /* ----------------------------------------------------------------------- */
 
-function QcmCard({ qcm, revealed, onReveal }: { qcm: QCM; revealed: boolean; onReveal: () => void }) {
+function QcmCard({
+  qcm,
+  revealed,
+  onReveal,
+  grading,
+  graded,
+  onGrade,
+}: {
+  qcm: QCM;
+  revealed: boolean;
+  onReveal: () => void;
+  grading: boolean;
+  graded: boolean | null;
+  onGrade: (isCorrect: boolean) => void;
+}) {
   return (
     <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 md:p-6 shadow-sm space-y-4">
       <div className="flex items-start gap-3">
@@ -107,13 +179,30 @@ function QcmCard({ qcm, revealed, onReveal }: { qcm: QCM; revealed: boolean; onR
               <strong className="text-teal-900 dark:text-teal-100">E.</strong> {qcm.explication.E}
             </li>
           </ul>
+          <div className="border-t border-teal-200 dark:border-teal-900/40 pt-3">
+            <GradeButtons grading={grading} graded={graded} onGrade={onGrade} />
+          </div>
         </motion.div>
       )}
     </div>
   );
 }
 
-function QrocCard({ qroc, revealed, onReveal }: { qroc: QROC; revealed: boolean; onReveal: () => void }) {
+function QrocCard({
+  qroc,
+  revealed,
+  onReveal,
+  grading,
+  graded,
+  onGrade,
+}: {
+  qroc: QROC;
+  revealed: boolean;
+  onReveal: () => void;
+  grading: boolean;
+  graded: boolean | null;
+  onGrade: (isCorrect: boolean) => void;
+}) {
   return (
     <div className="rounded-2xl border border-orange-200 dark:border-orange-900/40 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
       <div className="flex items-start gap-3">
@@ -137,6 +226,9 @@ function QrocCard({ qroc, revealed, onReveal }: { qroc: QROC; revealed: boolean;
         >
           <p className="text-[10px] font-black uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-1.5">Barème — Mots-clés attendus</p>
           <p className="text-sm font-medium text-orange-900 dark:text-orange-200 leading-relaxed">{qroc.reponseOfficielle}</p>
+          <div className="mt-3 border-t border-orange-200 dark:border-orange-900/40 pt-3">
+            <GradeButtons grading={grading} graded={graded} onGrade={onGrade} />
+          </div>
         </motion.div>
       )}
     </div>
@@ -146,6 +238,35 @@ function QrocCard({ qroc, revealed, onReveal }: { qroc: QROC; revealed: boolean;
 export function GastriteQcmsStudio({ data }: { data: GastriteQcmsData }) {
   const [revealedQcms, setRevealedQcms] = useState<Record<number, boolean>>({});
   const [revealedQrocs, setRevealedQrocs] = useState<Record<number, boolean>>({});
+  const [gradedQcms, setGradedQcms] = useState<Record<number, boolean>>({});
+  const [gradedQrocs, setGradedQrocs] = useState<Record<number, boolean>>({});
+  const [gradingKey, setGradingKey] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  async function recordAttempt(kind: "qcm" | "qroc", id: number, isCorrect: boolean) {
+    const key = `${kind}-${id}`;
+    setGradingKey(key);
+    try {
+      const res = await fetch("/api/srs/attempt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseSlug: data.slug, qcmId: key, isCorrect }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? "Échec de l'enregistrement.");
+
+      if (kind === "qcm") setGradedQcms((prev) => ({ ...prev, [id]: isCorrect }));
+      else setGradedQrocs((prev) => ({ ...prev, [id]: isCorrect }));
+    } catch (error) {
+      toast({
+        variant: "error",
+        title: "Suivi de révision indisponible",
+        description: error instanceof Error ? error.message : "Connecte-toi pour suivre ta progression.",
+      });
+    } finally {
+      setGradingKey(null);
+    }
+  }
 
   return (
     <div className="w-full mx-auto space-y-8 font-sans text-slate-800 dark:text-slate-200 animate-fade-in">
@@ -179,6 +300,9 @@ export function GastriteQcmsStudio({ data }: { data: GastriteQcmsData }) {
               qcm={qcm}
               revealed={!!revealedQcms[qcm.id]}
               onReveal={() => setRevealedQcms((prev) => ({ ...prev, [qcm.id]: true }))}
+              grading={gradingKey === `qcm-${qcm.id}`}
+              graded={gradedQcms[qcm.id] ?? null}
+              onGrade={(isCorrect) => recordAttempt("qcm", qcm.id, isCorrect)}
             />
           ))}
         </div>
@@ -196,6 +320,9 @@ export function GastriteQcmsStudio({ data }: { data: GastriteQcmsData }) {
               qroc={qroc}
               revealed={!!revealedQrocs[qroc.id]}
               onReveal={() => setRevealedQrocs((prev) => ({ ...prev, [qroc.id]: true }))}
+              grading={gradingKey === `qroc-${qroc.id}`}
+              graded={gradedQrocs[qroc.id] ?? null}
+              onGrade={(isCorrect) => recordAttempt("qroc", qroc.id, isCorrect)}
             />
           ))}
         </div>

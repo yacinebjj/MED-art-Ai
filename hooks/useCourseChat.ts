@@ -12,6 +12,8 @@ interface UseCourseChatResult {
   isTyping: boolean;
   /** Sends a user message to the MedArt Assistant and streams the reply in progressively. */
   sendChatMessage: (userContent: string) => Promise<void>;
+  /** Clears the on-screen conversation. Local only — does not delete the persisted `course_chat_history` rows. */
+  clearMessages: () => void;
 }
 
 /**
@@ -98,5 +100,9 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
     }
   }
 
-  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage };
+  function clearMessages() {
+    setChatMessages([]);
+  }
+
+  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, clearMessages };
 }

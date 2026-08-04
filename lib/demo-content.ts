@@ -3,16 +3,16 @@ import {
   ScrollText,
   Stethoscope,
   ListChecks,
-  Workflow,
+  Network,
   type LucideIcon,
 } from "lucide-react";
 
 export type DemoSectionId =
   | "explication"
-  | "visual_studio"
   | "resume"
   | "cas_clinique"
-  | "qcm";
+  | "qcm"
+  | "mind_map";
 
 export interface DemoSection {
   id: DemoSectionId;
@@ -568,21 +568,6 @@ Garde trois images simples dans la tête, pour toujours :
 Garde ces trois images, et tu seras un bon médecin. Même loin de tout. Même sans machine. Avec juste ta tête, tes mains et ton cœur. Bon courage pour la suite. Tu vas y arriver.`,
   },
   {
-    id: "visual_studio",
-    label: "Mode Visuel",
-    icon: Workflow,
-    accent: {
-      active: "border-cyan-300 bg-cyan-50 text-cyan-800",
-      chip: "bg-cyan-100 text-cyan-600",
-      hover: "hover:-translate-y-1 hover:bg-cyan-50 hover:text-cyan-600 hover:shadow-md",
-    },
-    // Rendu réel géré par <VisualStudioDemo /> dans page.tsx (composants interactifs,
-    // pas du markdown) — ce contenu ne sert que de repli si jamais affiché tel quel.
-    content: `## Mode Visuel : Appendicite Aiguë
-
-Ce mode transforme le cours en représentations visuelles interactives (parcours clinique en 7 étapes, arbre de décision diagnostique) plutôt qu'en texte continu.`,
-  },
-  {
     id: "resume",
     label: "Résumé",
     icon: ScrollText,
@@ -652,5 +637,20 @@ C. Une douleur uniquement nocturne
 D. Une contracture généralisée
 
 > **Réponses :** 1-B, 2-B, 3-B. Si tu as tout bon, tu es prêt(e) pour la garde de chirurgie !`,
+  },
+  {
+    id: "mind_map",
+    label: "Mind Map",
+    icon: Network,
+    accent: {
+      active: "border-violet-300 bg-violet-50 text-violet-800",
+      chip: "bg-violet-100 text-violet-600",
+      hover: "hover:-translate-y-1 hover:bg-violet-50 hover:text-violet-600 hover:shadow-md",
+    },
+    // Rendu réel géré par <MindMapStudio /> dans page.tsx (graphe Mermaid interactif,
+    // pas du markdown) — ce contenu ne sert que de repli si jamais affiché tel quel.
+    content: `## Mind Map
+
+Ce mode transforme le cours en carte mentale interactive : symptômes, mécanismes, examens diagnostiques et traitements reliés entre eux par des flèches.`,
   },
 ];

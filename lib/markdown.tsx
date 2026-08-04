@@ -12,13 +12,20 @@ import { cn } from "@/lib/utils";
  * strips the plugin's default blockquote quotation marks.
  */
 export const PROSE_CLASSES = [
-  "prose prose-slate prose-lg max-w-none",
+  // prose-xl at md+ (mobile keeps prose-lg) — a comfortable "premium reader"
+  // text size, done via the typography plugin's own scale rather than a
+  // literal text-lg utility stacked on the same element (which would just
+  // silently lose to/fight prose-lg's own font-size rule).
+  "prose prose-slate prose-lg md:prose-xl max-w-none",
   // Headings — premium, color by importance, gradient-clip for h1/h2
   "prose-headings:font-bold prose-headings:tracking-tight",
   "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-600 prose-h1:to-emerald-600",
   "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-600 prose-h2:to-emerald-600",
   "prose-h3:text-indigo-600",
   "prose-a:text-blue-600",
+  // Reading comfort: relaxed line-height and more breathing room between
+  // paragraphs/list items than the plugin's own default rhythm.
+  "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
   // List markers are replaced by custom icon bullets (see createMarkdownComponents)
   "prose-ul:list-none prose-ul:pl-0 prose-ol:list-none prose-ol:pl-0",
   // Kill the default open-/close-quote glyphs on blockquotes (component colors them)
@@ -38,9 +45,9 @@ export const PROSE_CLASSES = [
  * `prose-h2:text-*` resolve.
  */
 export const DARK_PROSE_CLASSES = [
-  "prose prose-invert prose-lg max-w-none",
+  "prose prose-invert prose-lg md:prose-xl max-w-none",
   "prose-headings:font-bold prose-headings:tracking-wide",
-  "prose-p:leading-relaxed prose-li:leading-relaxed",
+  "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
   // Gradient headings for a premium, glowing feel against the dark canvas
   "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-400 prose-h1:to-emerald-400",
   "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-400 prose-h2:to-emerald-400",
@@ -95,10 +102,15 @@ const DARK_CALLOUT_STYLES: Record<CalloutTone, string> = {
   rose: "border-l-4 border-rose-400 bg-rose-500/10 text-slate-100",
 };
 
-/** Inline "keyword badge" pill styling for **bold** terms — literal so Tailwind's scanner picks it up. */
+/**
+ * **bold** terms render as bold, colored text — no background pill. A filled
+ * badge reads fine in light mode but turns into a muddy, low-contrast block
+ * in dark mode (and visually overloads a page dense with medical terms);
+ * plain bold-plus-color still pops for memorization without that cost.
+ */
 const BADGE_CLASSES = {
-  light: "mx-0.5 inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[0.85em] font-bold text-amber-700 align-middle",
-  dark: "mx-0.5 inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-0.5 text-[0.85em] font-bold text-amber-400 align-middle",
+  light: "font-bold text-primary-700",
+  dark: "font-bold text-primary-400",
 };
 
 /** List-item bullet icon color — literal so Tailwind's scanner picks it up. */

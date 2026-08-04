@@ -13,12 +13,11 @@ export interface CourseSlugContent {
   content: string;
   source: CourseSlugSource;
   /**
-   * Optional per-tab content for the other 4 Studio tabs (Mode Visuel, Résumé,
-   * Cas Clinique, QCM). When present for a slug, the workspace page renders
-   * these as markdown instead of the fixed appendicite-specific interactive
-   * components (ResumeStudio, VisualStudioDemo, CasCliniqueStudio, ExamQcmStudio).
+   * Optional per-tab content for the other Studio tabs (Résumé, Cas Clinique,
+   * QCM). When present for a slug, the workspace page renders these as
+   * markdown instead of the fixed appendicite-specific interactive components
+   * (ResumeStudio, CasCliniqueStudio, ExamQcmStudio).
    */
-  visualBreakdown?: string;
   resume?: string;
   casClinique?: string;
   qcm?: string;
@@ -32,76 +31,6 @@ export interface CourseSlugContent {
 /* `icon` strings need resolving to a Lucide component — see               */
 /* lib/lucide-icon-lookup.ts.                                              */
 /* ----------------------------------------------------------------------- */
-
-export interface GastriteOrbitNode {
-  position: "top" | "right" | "bottom" | "left";
-  tone: string;
-  icon: string;
-  label: string;
-}
-
-export interface GastriteCentralNode {
-  label: string;
-  icon: string;
-}
-
-export interface GastriteSideCard {
-  icon: string;
-  tone: string;
-  titre: string;
-  description: string;
-}
-
-export interface GastriteCascadeStep {
-  numero: string;
-  icon: string;
-  tone: string;
-  titre: string;
-  description: string;
-}
-
-export interface GastriteStatBar {
-  label: string;
-  value: number;
-  display: string;
-}
-
-export interface GastriteSynthese {
-  titre: string;
-  description: string;
-  badge: string;
-}
-
-export interface GastriteSign {
-  icon: string;
-  tone: string;
-  titre: string;
-  description: string;
-}
-
-export interface GastriteSlide {
-  id: string;
-  numero: number;
-  titre: string;
-  layout: "orbital" | "cascade" | "stats" | "orbital_signs";
-  /** Some legacy rows still store this as null rather than an empty-shape object — components must fall back rather than crash. */
-  central_node: GastriteCentralNode | null;
-  orbit_nodes: GastriteOrbitNode[];
-  side_cards: GastriteSideCard[];
-  steps: GastriteCascadeStep[];
-  le_pourquoi: string;
-  stat_bars: GastriteStatBar[];
-  /** Some legacy rows still store this as null rather than an empty-shape object — components must fall back rather than crash. */
-  synthese: GastriteSynthese | null;
-  signs: GastriteSign[];
-}
-
-export interface GastriteModeVisuelData {
-  slug: string;
-  section: string;
-  pearls: string[];
-  slides: GastriteSlide[];
-}
 
 export interface GastriteResumeCard {
   titre: string;
@@ -272,6 +201,25 @@ export interface GastriteQcmsData {
   qrocs: QrocItem[];
 }
 
+/** One node of the AI Mind Map graph — shape matches MIND_MAP_SYSTEM_PROMPT's schema exactly (lib/prompts/public-course-sections.ts). */
+export interface MindMapNode {
+  id: string;
+  label: string;
+  type: "symptome" | "mecanisme" | "diagnostic" | "examen" | "traitement";
+}
+
+export interface MindMapLink {
+  source: string;
+  target: string;
+  label: string;
+}
+
+/** No `slug`/`section` wrapper here (unlike the Gastrite*Data types above) — the AI's raw JSON output for this section is exactly `{ nodes, links }`, nothing more. */
+export interface MindMapData {
+  nodes: MindMapNode[];
+  links: MindMapLink[];
+}
+
 /**
  * The full `courses` table row for one slug, as returned by GET
  * /api/courses/slug/[slug] — any slug, not just gastrite.
@@ -286,10 +234,10 @@ export interface CourseSlugSupabaseData {
   slug: string;
   title: string;
   explication: string | null;
-  mode_visuel: GastriteModeVisuelData | null;
   resume: GastriteResumeData | null;
   cas_clinique: GastriteCasCliniqueData | null;
   qcms: GastriteQcmsData | null;
+  mind_map: MindMapData | null;
 }
 
 const APPENDICITE_CONTENT = DEMO_SECTIONS.find((s) => s.id === "explication")!.content;
@@ -741,56 +689,6 @@ Garde trois images simples dans la tête, pour toujours :
 
 Garde ces trois images, et tu seras un bon médecin. Même loin de tout. Même sans machine. Avec juste ta tête, tes mains et ton cœur. Bon courage pour la suite. Tu vas y arriver.`;
 
-const GASTRITE_VISUAL_CONTENT = `## Mode Visuel : La Gastrite
-
-Ferme les yeux une seconde, puis rouvre-les sur ce texte. Ce mode ne va pas te réciter des mécanismes : il va te les faire voir, image par image, comme si tu descendais toi-même, en miniature, jusque dans la paroi de l'estomac. Prends ton temps sur chaque schéma. Laisse l'image se former avant de passer à la suivante.
-
-### 🖼️ Schéma 1 : L'Anatomie de la Forteresse (La Barrière Muqueuse)
-
-Imagine une forteresse médiévale construite tout autour d'un lac de lave. À l'intérieur de l'enceinte, le sol lui-même produit en permanence ce liquide brûlant, l'acide chlorhydrique. Et pourtant, les murs de la forteresse ne fondent jamais. Comment est-ce possible ? Regarde de plus près : les remparts ne sont pas faits d'une simple pierre nue. Ils sont recouverts d'une épaisse couche de gel translucide, presque gélatineuse, un mucus visqueux qui s'étale sur toute la surface intérieure comme un enduit ignifuge appliqué sans interruption, jour et nuit, par des petites cellules-ouvrières alignées le long du mur.
-
-Regarde encore plus près, à l'intérieur même de cet enduit : de minuscules bulles de bicarbonate y sont piégées, disséminées comme un réseau de petites poches neutralisantes. Chaque fois qu'une goutte d'acide remonte du sol et touche cet enduit, le bicarbonate l'intercepte immédiatement et l'éteint sur place, exactement comme un extincteur miniature qui neutralise une flammèche avant qu'elle n'atteigne la pierre. Le mur ne brûle jamais, non pas parce que l'acide est faible, il est au contraire redoutable, mais parce que la couche protectrice absorbe et neutralise l'agression avant qu'elle n'atteigne les fondations vivantes.
-
-Maintenant, zoome encore, jusqu'aux cellules elles-mêmes, les pierres vivantes du mur. Entre chaque cellule, imagine une soudure hermétique, une jonction serrée qui verrouille les cellules les unes aux autres comme des briques scellées par un joint parfaitement étanche. Ces jonctions empêchent l'acide de se faufiler entre les cellules pour atteindre les tissus fragiles situés juste en dessous. Tant que ces trois défenses tiennent ensemble, le tapis de mucus, les poches de bicarbonate, et les jonctions étanches entre les cellules, la forteresse reste imprenable, et l'équilibre entre l'attaque et la protection reste parfaitement stable.
-
-> Retiens cette image de la forteresse : un lac de lave à l'intérieur, un mur vivant recouvert d'un enduit protecteur neutralisant, et des briques soudées entre elles sans la moindre fissure. Toute la gastrite commence le jour où l'une de ces trois défenses se fragilise.
-
-### 🖼️ Schéma 2 : L'Invasion Silencieuse (L'attaque de Helicobacter Pylori)
-
-Maintenant, glisse-toi dans la scène suivante. Une créature minuscule vient d'arriver aux portes de la forteresse : Helicobacter pylori. Visualise-la précisément : un corps spiralé, tordu comme un tire-bouchon, muni à une extrémité de plusieurs longs flagelles qui tournent à toute vitesse, comme les hélices d'un petit sous-marin miniature. Grâce à cette forme vrillée et à ses flagelles tournoyants, elle ne nage pas dans le lac de lave, elle le contourne intelligemment : elle plonge directement dans l'épaisseur du mucus protecteur, ce gel visqueux qui la protège déjà partiellement de l'acide environnant.
-
-Mais elle va plus loin encore. Elle dégaine une véritable arme chimique embarquée : une enzyme appelée uréase. Regarde ce qui se passe autour d'elle : elle libère cette enzyme en continu, qui transforme instantanément l'urée environnante en un nuage d'ammoniac. Ce nuage l'enveloppe comme une bulle de gaz protectrice, une sorte de masque à gaz personnel qui neutralise l'acide juste à son contact. Elle avance ainsi, invisible et protégée, en plein cœur d'un territoire censé être mortel pour n'importe quel autre microbe.
-
-Une fois arrivée tout contre le mur vivant, elle sort de minuscules crochets moléculaires, des protéines d'adhésion, et s'arrime fermement à la surface des cellules, comme un grappin planté dans la pierre. Elle s'installe là, immobile, protégée par sa bulle, en position de sabotage permanent. Autour de son point d'ancrage, observe la scène s'assombrir progressivement : la muqueuse commence à rougir, des signaux d'alarme chimiques sont émis, et de petites flèches convergentes, représentant les cellules de défense du corps, arrivent en masse pour tenter de la déloger. Mais cette bataille locale, aussi utile soit-elle contre l'intrus, abîme elle-même la paroi qu'elle est censée protéger.
-
-> **L'Astuce du Prof :** retiens cette image du sous-marin au masque à gaz : c'est exactement ce double mécanisme, la protection par l'ammoniac et l'ancrage par les crochets moléculaires, qui explique pourquoi H. pylori peut vivre littéralement des dizaines d'années dans un environnement censé être hostile à toute vie microbienne.
-
-### 🖼️ Schéma 3 : Le Sabotage de l'Intérieur (Le Mécanisme des AINS)
-
-Change complètement de décor. Cette fois, l'attaque ne vient pas de l'extérieur, mais de l'intérieur même de la forteresse, sous la forme d'un comprimé avalé, un anti-inflammatoire non stéroïdien comme l'ibuprofène ou l'aspirine à forte dose. Visualise ce comprimé comme un agent saboteur envoyé en mission secrète, qui se dirige tout droit vers les petites usines cellulaires chargées de fabriquer les substances protectrices du mur : les usines à cyclo-oxygénase.
-
-Regarde cette usine fonctionner normalement, avant le sabotage : un ouvrier moléculaire travaille sans relâche à une chaîne de montage, transformant des matières premières en substances essentielles, les prostaglandines, qui commandent ensuite la production de mucus et de bicarbonate. Maintenant, regarde le saboteur agir : la molécule d'AINS se glisse précisément dans le poste de travail de cet ouvrier, comme une clé cassée qu'on enfonce de force dans une serrure, bloquant définitivement son mouvement. L'ouvrier s'arrête net. Toute la chaîne de montage derrière lui s'immobilise à son tour.
-
-Plus aucune prostaglandine protectrice n'est produite. Regarde les conséquences se propager en cascade dans l'image : le tapis de mucus, qui n'est plus réapprovisionné, s'amincit visiblement, se troue par endroits, un peu comme un vieux tissu qui s'use jusqu'à la corde. Les poches de bicarbonate, elles aussi, se raréfient, laissant des zones entières du mur sans aucune neutralisation locale de l'acide. Et le pire, c'est que cette usine sabotée n'a même pas besoin d'un microbe pour créer des dégâts : elle le fait toute seule, silencieusement, tant que le comprimé reste actif dans l'organisme.
-
-Le schéma se termine sur une image saisissante : une portion entière du mur, désormais complètement nue, sans enduit protecteur, directement exposée aux gouttelettes d'acide qui continuent, elles, d'être fabriquées comme si de rien n'était juste en dessous. C'est un mur qui se retrouve à découvert, face à son propre feu, uniquement parce que ses ouvriers ont été mis hors service.
-
->> Point clé à visualiser : contrairement à H. pylori qui agit lentement sur des années, ce sabotage chimique peut rendre un mur complètement nu en seulement quelques jours, surtout si le comprimé est pris à forte dose, à jeun, ou de façon répétée.
-
-### 🖼️ Schéma 4 : Le Champ de Bataille (La Vue Endoscopique)
-
-Dernière scène : tu es maintenant à la place du médecin. Une caméra minuscule, au bout d'un tube fin et souple, avance doucement dans la cavité de l'estomac pendant une FOGD. L'écran s'allume, et voici exactement ce que tes yeux découvrent, comme un champ de bataille filmé après les combats.
-
-D'abord, l'érythème : la muqueuse, normalement rose pâle et satinée, apparaît maintenant rouge vif, presque écarlate par endroits, exactement comme une peau qui vient de prendre un violent coup de soleil. Cette rougeur intense n'est pas uniforme : elle forme des plaques, des traînées, parfois des taches isolées qui contrastent avec le rose normal environnant.
-
-Ensuite, l'œdème : les plis de la muqueuse, normalement fins et bien dessinés, apparaissent gonflés, épaissis, un peu bouffis, comme un tissu qui a trop absorbé d'eau. La surface perd sa finesse habituelle et prend un aspect brouillé, moins net à la caméra.
-
-Puis, les érosions : dispersées sur cette surface rouge et gonflée, de minuscules éraflures apparaissent, comme de petites griffures peu profondes, parfois surlignées d'un discret filet de sang qui suinte doucement, sans jamais former une vraie flaque. Ce sont des petites plaies de surface, douloureuses, mais qui n'ont pas encore percé les couches profondes de la paroi.
-
-Enfin, dans les formes chroniques les plus anciennes, la caméra peut découvrir un tout autre paysage : un aspect en pavés, nodulaire, où la muqueuse forme de petits reliefs bosselés, irréguliers, un peu comme une chaussée pavée à l'ancienne, signe d'une inflammation qui dure depuis longtemps et qui a fini par remodeler la texture même de la paroi.
-
-> **À retenir visuellement :** érythème comme un coup de soleil, œdème comme un tissu gonflé d'eau, érosions comme de petites griffures superficielles, et pavés nodulaires comme la signature d'une inflammation chronique installée depuis des années. Quatre images, quatre indices, un seul diagnostic à reconnaître d'un seul coup d'œil : la gastrite.`;
-
 const GASTRITE_RESUME_CONTENT = `## Résumé Express : La Gastrite
 
 - **Définition** : Inflammation de la muqueuse gastrique, sans perte de substance profonde (contrairement à l'ulcère), résultant d'un déséquilibre entre l'acide qui attaque et la barrière protectrice (mucus, bicarbonate, vascularisation) qui protège.
@@ -1104,7 +1002,6 @@ export const COURSE_SLUG_CONTENT: Record<CourseSlug, CourseSlugContent> = {
     title: "La Gastrite : Comprendre l'inflammation de l'estomac",
     content: GASTRITE_CONTENT,
     source: { fileName: "Gastrite_Notes.txt", size: "45 KB" },
-    visualBreakdown: GASTRITE_VISUAL_CONTENT,
     resume: GASTRITE_RESUME_CONTENT,
     casClinique: GASTRITE_CAS_CLINIQUE_CONTENT,
     qcm: GASTRITE_QCM_CONTENT,

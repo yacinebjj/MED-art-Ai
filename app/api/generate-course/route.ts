@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { OfficeParser } from "officeparser";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage, sanitizeForPostgres, slugify } from "@/lib/course-generation-shared";
+import { getEmbedding } from "@/lib/ai/embeddings";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
 
@@ -10,10 +11,10 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 Mo
 /**
  * Lazy-loading architecture: this route ONLY extracts the PDF's text and
  * creates the course row instantly — it never calls the AI. Each Studio tab
- * (explication, mode_visuel, resume, cas_clinique, qcms) is generated on its
- * own, on demand, the first time the student clicks that tab — see the 5
+ * (explication, resume, cas_clinique, qcms) is generated on its
+ * own, on demand, the first time the student clicks that tab — see the
  * routes under app/api/generate/*. A single mega-call generating
- * all 5 sections at once routinely failed on larger PDFs (truncated JSON
+ * all sections at once routinely failed on larger PDFs (truncated JSON
  * from hitting the model's output ceiling); splitting per-section removes
  * that failure mode entirely and makes the upload itself near-instant.
  *
@@ -103,14 +104,30 @@ export async function POST(request: NextRequest) {
     const slug = `${slugify(title)}-${Date.now()}`;
     console.log(`[generate-course] Slug généré : "${slug}"`);
 
+    // Fingerprint the course content for "Silent Semantic Deduplication"
+    // (see lib/course-generation-shared.ts generateCourseSection()) — computed
+    // ONCE here so every later section-generation click can reuse it for a
+    // free similarity search instead of re-embedding the text each time.
+    // Fail-open: the upload must stay instant and must never fail because of
+    // this — if the embedding call errors, content_embedding just stays null,
+    // and this course silently falls back to normal generation for every
+    // section (exactly like before this feature existed), no student-facing
+    // impact either way.
+    let contentEmbedding: number[] | null = null;
+    try {
+      contentEmbedding = await getEmbedding(sourceText);
+    } catch (error) {
+      console.error("[generate-course] Échec calcul de l'embedding de contenu (non bloquant, upload continue):", errorMessage(error));
+    }
+
     // Every content column starts empty (not yet generated) — each Studio
     // tab fills its own column in on first click, via the section route.
     const courseRow: Record<string, unknown> = {
       slug,
       title,
       raw_text: sourceText,
+      content_embedding: contentEmbedding,
       explication: null,
-      mode_visuel: null,
       "resumé": null,
       cas_clinique: null,
       qcms: null,
@@ -123,7 +140,25 @@ export async function POST(request: NextRequest) {
 
     try {
       const supabase = getSupabaseAdmin();
-      const { error: insertError } = await supabase.from("courses").insert(courseRow);
+      let { error: insertError } = await supabase.from("courses").insert(courseRow);
+
+      // Missing-column errors happen if the `content_embedding` migration
+      // (supabase/schema.sql) hasn't been run yet — PostgREST rejects the
+      // payload itself with "PGRST204" (schema cache has no such column)
+      // before the query ever reaches Postgres, so the raw Postgres code
+      // "42703" never actually surfaces here; checked for anyway in case a
+      // future Supabase version routes this differently. Retry once without
+      // the column rather than failing the whole upload: course creation
+      // must never depend on a migration timing detail. The course still
+      // gets created normally; it just won't participate in Smart Clone
+      // deduplication until the column exists.
+      if ((insertError?.code === "PGRST204" || insertError?.code === "42703") && "content_embedding" in courseRow) {
+        console.warn(
+          "[generate-course] Colonne 'content_embedding' absente (migration non exécutée) — nouvel essai sans elle."
+        );
+        const { content_embedding: _omittedEmbedding, ...courseRowWithoutEmbedding } = courseRow;
+        ({ error: insertError } = await supabase.from("courses").insert(courseRowWithoutEmbedding));
+      }
 
       if (insertError) {
         console.error("[generate-course] Échec insertion Supabase — détail complet:", {

@@ -16,9 +16,9 @@ import {
 
 /**
  * Resolves the kebab-case icon-name strings stored in Supabase (e.g.
- * "heart-pulse") to an actual Lucide component. Shared by
- * GastriteVisualStudio and GastriteCasCliniqueStudio, whose JSON data
- * carries icons as strings rather than component references.
+ * "heart-pulse") to an actual Lucide component. Used by
+ * GastriteCasCliniqueStudio, whose JSON data carries icons as strings rather
+ * than component references.
  */
 const LUCIDE_ICON_LOOKUP: Record<string, LucideIcon> = {
   shield: Shield,
