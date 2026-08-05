@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
     }
 
-    const rl = rateLimit(`generate-qcm:${user.id}`, RATE_LIMITS.ai);
+    const rl = rateLimit(`generate-exemples-analogies:${user.id}`, RATE_LIMITS.ai);
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
@@ -26,9 +26,9 @@ export async function POST(request: NextRequest) {
     if (typeof slug !== "string" || !slug.trim()) {
       return NextResponse.json({ success: false, error: "Le champ 'slug' est requis." }, { status: 400 });
     }
-    return await generateCourseSection(slug, "qcms");
+    return await generateCourseSection(slug, "exemples_analogies");
   } catch (error) {
-    console.error("[generate/qcm] Erreur non gérée:", error);
+    console.error("[generate/exemples-analogies] Erreur non gérée:", error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 });
   }
 }

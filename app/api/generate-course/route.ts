@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { OfficeParser } from "officeparser";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { errorMessage, sanitizeForPostgres, slugify } from "@/lib/course-generation-shared";
 import { getEmbedding } from "@/lib/ai/embeddings";
+import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
 
@@ -26,6 +28,21 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
 
   try {
+    // Auth required — this creates a public showcase course (real embedding
+    // call + Supabase write) and must never be reachable anonymously.
+    const user = await getAuthenticatedUser();
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+    }
+
+    const rl = rateLimit(`generate-course:${user.id}`, RATE_LIMITS.ai);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+      );
+    }
+
     // --- 1. Réception & validation de l'entrée (fichier PDF OU texte collé) ---
     console.log("[generate-course] (1/3) Réception de la requête...");
 

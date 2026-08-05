@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 // Without this, Next.js treats this GET Route Handler as static and caches
@@ -45,6 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
     cas_clinique: unknown;
     qcms: unknown;
     mind_map: unknown;
+    exemples_analogies: string | null;
   }
 
   // The DB column is named "resumé" (with the French accent) and aliased to
@@ -55,7 +58,7 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
   // "mode_visuel" is deliberately NOT selected — the "Mode Visuel" feature was
   // removed; an old row may still physically have this column populated, but
   // never selecting it means the app never reads or parses that stale data.
-  const selectColumns = "slug, title, explication, resume:resumé, cas_clinique, qcms, mind_map";
+  const selectColumns = "slug, title, explication, resume:resumé, cas_clinique, qcms, mind_map, exemples_analogies";
 
   const { data, error } = (await supabase
     .from("courses")
@@ -75,6 +78,7 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
     cas_clinique: parseJsonColumn(data.cas_clinique),
     qcms: parseJsonColumn(data.qcms),
     mind_map: parseJsonColumn(data.mind_map),
+    exemples_analogies: data.exemples_analogies,
   });
 }
 
@@ -82,8 +86,23 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
  * Renames a course and/or moves it to a different module (or unassigns it
  * with `module_id: null`). Body: { title?: string, module_id?: number | null }.
  * Powers the dashboard's kebab menu ("Renommer" / "Ajouter à un module").
+ * Auth required — renaming/re-moduling a course is a write, unlike the
+ * public GET lookup above.
  */
 export async function PATCH(request: NextRequest, { params }: { params: { slug: string } }) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`courses-patch:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
   }
@@ -145,8 +164,21 @@ export async function PATCH(request: NextRequest, { params }: { params: { slug: 
   return NextResponse.json({ success: true, course: data });
 }
 
-/** Deletes a course by slug — powers the dashboard's kebab menu "Supprimer" action. */
+/** Deletes a course by slug — powers the dashboard's kebab menu "Supprimer" action. Auth required — this is a destructive write; must never be reachable anonymously. */
 export async function DELETE(_request: NextRequest, { params }: { params: { slug: string } }) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`courses-delete:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
   }

@@ -4,6 +4,7 @@ import {
   Stethoscope,
   ListChecks,
   Network,
+  Lightbulb,
   type LucideIcon,
 } from "lucide-react";
 
@@ -12,7 +13,8 @@ export type DemoSectionId =
   | "resume"
   | "cas_clinique"
   | "qcm"
-  | "mind_map";
+  | "mind_map"
+  | "exemples_analogies";
 
 export interface DemoSection {
   id: DemoSectionId;
@@ -652,5 +654,21 @@ D. Une contracture généralisée
     content: `## Mind Map
 
 Ce mode transforme le cours en carte mentale interactive : symptômes, mécanismes, examens diagnostiques et traitements reliés entre eux par des flèches.`,
+  },
+  {
+    id: "exemples_analogies",
+    label: "Exemples & Analogies",
+    icon: Lightbulb,
+    accent: {
+      active: "border-yellow-300 bg-yellow-50 text-yellow-800",
+      chip: "bg-yellow-100 text-yellow-600",
+      hover: "hover:-translate-y-1 hover:bg-yellow-50 hover:text-yellow-600 hover:shadow-md",
+    },
+    // Fallback for legacy-only courses with no Supabase row (e.g. appendicite)
+    // — real content is AI-generated per course, in Darija + termes français,
+    // via app/api/generate/exemples-analogies (see EXEMPLES_ANALOGIES_SYSTEM_PROMPT).
+    content: `## Exemples & Analogies
+
+Ce mode réexplique le cours avec des analogies de la vie de tous les jours (bouteilles, tuyaux, ballons...), pour comprendre le mécanisme de la maladie, déduire les signes de l'examen clinique, et repérer les pièges classiques de QCM.`,
   },
 ];

@@ -4,6 +4,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import {
   buildSourceTextUserMessage,
   CAS_CLINIQUE_SYSTEM_PROMPT,
+  EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
   EXPLICATION_SYSTEM_PROMPT,
   MIND_MAP_SYSTEM_PROMPT,
   QCMS_SYSTEM_PROMPT,
@@ -18,8 +19,9 @@ import {
  *  - app/api/generate/cas-clinique/route.ts
  *  - app/api/generate/qcm/route.ts
  *  - app/api/generate/mind-map/route.ts
+ *  - app/api/generate/exemples-analogies/route.ts
  *
- * Each of the 5 route files above is a thin wrapper calling
+ * Each of the 6 route files above is a thin wrapper calling
  * `generateCourseSection` with a fixed `Section` — kept as separate route
  * files (rather than one parameterized route) per spec, but sharing this one
  * implementation so the sanitization/parsing/error-handling logic — all of
@@ -107,7 +109,7 @@ export function parseJsonResponse(raw: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-export type Section = "explication" | "resume" | "cas_clinique" | "qcms" | "mind_map";
+export type Section = "explication" | "resume" | "cas_clinique" | "qcms" | "mind_map" | "exemples_analogies";
 
 /**
  * Cosine similarity floor for "Silent Semantic Deduplication" (Smart Clone —
@@ -128,6 +130,7 @@ interface SimilarCourseRow {
   cas_clinique: string | null;
   qcms: string | null;
   mind_map: string | null;
+  exemples_analogies: string | null;
 }
 
 interface SectionConfig {
@@ -146,6 +149,11 @@ const SECTION_CONFIG: Record<Section, SectionConfig> = {
   cas_clinique: { dbColumn: "cas_clinique", systemPrompt: CAS_CLINIQUE_SYSTEM_PROMPT, expectedType: "object", maxTokens: 16000 },
   qcms: { dbColumn: "qcms", systemPrompt: QCMS_SYSTEM_PROMPT, expectedType: "object", maxTokens: 16000 },
   mind_map: { dbColumn: "mind_map", systemPrompt: MIND_MAP_SYSTEM_PROMPT, expectedType: "object", maxTokens: 8000 },
+  // Now targets the SAME exhaustiveness as explication (3000-7000+ words),
+  // but in Darija — Arabic script tokenizes less efficiently per word than
+  // French, so this needs AT LEAST as much headroom as explication's 32000,
+  // not less.
+  exemples_analogies: { dbColumn: "exemples_analogies", systemPrompt: EXEMPLES_ANALOGIES_SYSTEM_PROMPT, expectedType: "string", maxTokens: 32000 },
 };
 
 interface RawCourseRow {

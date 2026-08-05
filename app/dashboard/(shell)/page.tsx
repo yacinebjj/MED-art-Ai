@@ -15,11 +15,17 @@ import type { ModuleSummary, PublicCourseSummary } from "@/lib/dashboard-modules
  * or moved from the UI. Always merged into the "Gastroentérologie" module's
  * display (matched by name) alongside any real gastro course rows.
  */
-const LEGACY_GASTRO_SOURCES: { slug: string; title: string }[] = [
-  { slug: "appendicite", title: "Appendicite_Cours.pdf" },
-  { slug: "ulcere", title: "Ulcere_Gastro.pdf" },
-  { slug: "rectocolite", title: "Rectocolite_Video.mp4" },
-];
+// "ulcere" and "rectocolite" were removed from this list: "ulcere" pointed
+// at /dashboard/demo/ulcere, a dead legacy slug distinct from
+// "ulcere-gastrique" (the real, complete Supabase-backed course); the
+// content behind "rectocolite" is now genuinely migrated to Supabase, at
+// slug "la-rectocolite-hemorragique-rch-1785846798448" — both used to lead
+// to a partially-broken page (only the Explication tab had content;
+// Résumé/Cas Clinique/QCM silently fell back to Appendicite's). See
+// lib/course-slug-content.ts's comment on CourseSlug for the full story.
+// Only "appendicite" remains: the one course intentionally kept as a fully
+// hardcoded showcase, with no Supabase row at all.
+const LEGACY_GASTRO_SOURCES: { slug: string; title: string }[] = [{ slug: "appendicite", title: "Appendicite_Cours.pdf" }];
 
 function isGastroModule(name: string): boolean {
   return name.trim().toLowerCase().startsWith("gastro");

@@ -10,7 +10,7 @@ export const config = {
     /*
      * Run on everything except static assets, so the auth cookie stays
      * fresh across the whole app — but the redirect-to-/login logic in
-     * updateSession only actually triggers for /dashboard/**.
+     * updateSession only actually triggers for /dashboard/** and /study.
      */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],

@@ -7,7 +7,12 @@ interface CookieToSet {
   options: CookieOptions;
 }
 
-const PROTECTED_PREFIX = "/dashboard";
+// "/study" lives outside /dashboard (its own full-page layout, no
+// Sidebar/Topbar chrome) but needs the exact same auth gate — it used to
+// rely solely on "nobody will type this URL directly," which isn't a real
+// guard: its data routes (app/api/srs/*) were always server-gated, but the
+// page itself rendered for anyone who hit the URL.
+const PROTECTED_PREFIXES = ["/dashboard", "/study"];
 
 /**
  * Refreshes the Supabase auth cookie on every request (required so session
@@ -42,7 +47,7 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  if (!user && pathname.startsWith(PROTECTED_PREFIX)) {
+  if (!user && PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("next", pathname);

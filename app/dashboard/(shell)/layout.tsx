@@ -7,9 +7,9 @@ import { PageTransition } from "@/components/layout/PageTransition";
 
 /**
  * Chrome (Sidebar + Topbar) for the dashboard list, settings, and billing
- * pages. Deliberately NOT applied to /dashboard/course/[id] — that route is
- * a full-screen workspace and lives as a sibling outside this group so it
- * doesn't inherit this shell (see app/dashboard/layout.tsx).
+ * pages. Deliberately NOT applied to full-screen workspaces like
+ * app/dashboard/demo/[slug] — those live as siblings outside this group so
+ * they don't inherit this shell (see app/dashboard/layout.tsx).
  */
 export default function DashboardShellLayout({
   children,

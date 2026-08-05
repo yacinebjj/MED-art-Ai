@@ -76,6 +76,7 @@ const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
   cas_clinique: "bg-amber-50 dark:bg-amber-950",
   qcm: "bg-purple-50 dark:bg-purple-950",
   mind_map: "bg-pink-50 dark:bg-pink-950",
+  exemples_analogies: "bg-yellow-50 dark:bg-yellow-950",
 };
 
 /** Soft tint per study mode — light-mode pastel + a discreet dark-mode counterpart. */
@@ -99,6 +100,10 @@ const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string }> = {
   mind_map: {
     bg: "bg-pink-50/80 dark:bg-pink-950/20 border-pink-200/50 dark:border-pink-900/40",
     icon: "text-pink-600 dark:text-pink-400",
+  },
+  exemples_analogies: {
+    bg: "bg-yellow-50/80 dark:bg-yellow-950/20 border-yellow-200/50 dark:border-yellow-900/40",
+    icon: "text-yellow-600 dark:text-yellow-400",
   },
 };
 

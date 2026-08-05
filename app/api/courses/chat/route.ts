@@ -4,6 +4,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { lookupSemanticCache, storeSemanticCacheEntry } from "@/lib/ai/semantic-cache";
+import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -113,6 +114,25 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  // Auth required — this triggers a real, billed OpenRouter call, and every
+  // page that renders this chat already sits behind the /dashboard/** auth
+  // gate, so a logged-out caller here is never a legitimate student, only a
+  // direct-API abuse attempt. (Previously this route let an unauthenticated
+  // caller stream a real answer without persisting it — that fallback is
+  // intentionally removed: zero anonymous access, full stop.)
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`courses-chat:${user.id}`, RATE_LIMITS.ai);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -127,13 +147,7 @@ export async function POST(request: NextRequest) {
   }
 
   const courseSlug = typeof slug === "string" && slug.trim() ? slug.trim() : null;
-
-  // A signed-in user is required to persist history — the chat still works
-  // (streams a real answer) for an unauthenticated caller, it just can't be
-  // saved. In practice every page that renders this chat sits behind the
-  // /dashboard/** auth gate, so this should always resolve to a real user.
-  const user = await getAuthenticatedUser();
-  const supabase = courseSlug && user && isSupabaseConfigured() ? getSupabaseAdmin() : null;
+  const supabase = courseSlug && isSupabaseConfigured() ? getSupabaseAdmin() : null;
 
   // Bound the context sent upstream — the last 5 exchanges is plenty of
   // continuity for a course-reading chat without letting the request grow

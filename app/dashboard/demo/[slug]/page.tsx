@@ -52,14 +52,31 @@ const SECTION_LAZY_CONFIG: Partial<
   resume: { dataKey: "resume", endpoint: "/api/generate/resume", label: "le Résumé" },
   cas_clinique: { dataKey: "cas_clinique", endpoint: "/api/generate/cas-clinique", label: "les Cas Cliniques" },
   qcm: { dataKey: "qcms", endpoint: "/api/generate/qcm", label: "les QCM" },
+  exemples_analogies: {
+    dataKey: "exemples_analogies",
+    endpoint: "/api/generate/exemples-analogies",
+    label: "les Exemples & Analogies",
+  },
   // No "mind_map" entry: the Mind Map is now a fully static, hardcoded
   // component (MindMapStudio) — nothing to generate, no endpoint to call.
-  // (Two now-orphaned, still-functional routes exist from earlier
-  // iterations — app/api/generate/mind-map/route.ts, the original
-  // {nodes,links}-graph pipeline, and app/api/generate-mindmap/route.ts,
-  // the OpenRouter+Ideogram image pipeline — kept but disconnected, since
-  // deleting working infrastructure wasn't asked for.)
+  // (One now-orphaned, still-functional route remains from an earlier
+  // iteration — app/api/generate/mind-map/route.ts, the original
+  // {nodes,links}-graph pipeline — kept but disconnected. Its sibling,
+  // app/api/generate-mindmap/route.ts — the OpenRouter+Ideogram image
+  // pipeline behind three failed attempts at generating this exact poster —
+  // was deleted outright: that approach is permanently abandoned, not
+  // paused, so keeping the route around only invited someone to try a
+  // fourth time.)
 };
+
+/**
+ * MindMapStudio is a single hardcoded poster for ONE course (Pleurésie) —
+ * not a generic per-course renderer. Gating it by exact slug, rather than
+ * just `hasStudioData`, is what stops every other Supabase-backed course
+ * (gastrite, ulcère, BPCO, HTIC, ...) from showing this unrelated poster
+ * under its own title.
+ */
+const PLEURESIE_SLUG = "3-la-pleuresie-purulente-support-du-dr-firan-1785259421242";
 
 function NotFoundScreen({ slug }: { slug: string }) {
   return (
@@ -272,7 +289,8 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   const showResumeStudioData = hasStudioData && activeId === "resume";
   const showCasCliniqueStudioData = hasStudioData && activeId === "cas_clinique";
   const showQcmsStudioData = hasStudioData && activeId === "qcm";
-  const showMindMapStudioData = hasStudioData && activeId === "mind_map";
+  const showMindMapStudioData = hasStudioData && activeId === "mind_map" && slug === PLEURESIE_SLUG;
+  const showMindMapUnavailable = activeId === "mind_map" && !showMindMapStudioData;
 
   // No legacy content, and Supabase confirmed there's no row for this slug either.
   if (!legacySlugData && supabaseData === null) {
@@ -319,10 +337,17 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       slug={slug}
       onGenerated={(data) => handleSectionGenerated("qcms", data)}
     >
-      {(data) => <GastriteQcmsStudio data={data} />}
+      {(data) => <GastriteQcmsStudio data={data} courseSlug={slug} />}
     </LazySection>
   ) : showMindMapStudioData ? (
     <MindMapStudio />
+  ) : showMindMapUnavailable ? (
+    <div className="flex h-full flex-col items-center justify-center gap-2 py-20 text-center">
+      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Mind Map — bientôt disponible pour ce cours</p>
+      <p className="max-w-sm text-xs text-gray-500 dark:text-gray-400">
+        Cette carte mentale visuelle n'existe pour l'instant que pour un cours pilote (Pleurésie). Elle arrivera pour les autres cours une fois la version générique prête.
+      </p>
+    </div>
   ) : customTabContent ? (
     <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
@@ -346,6 +371,31 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     >
       {(content) => (
         <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}
+          >
+            {normalizeCallouts(content)}
+          </ReactMarkdown>
+        </article>
+      )}
+    </LazySection>
+  ) : activeId === "exemples_analogies" && hasStudioData ? (
+    <LazySection
+      dark={isDark}
+      data={supabaseData?.exemples_analogies}
+      label={SECTION_LAZY_CONFIG.exemples_analogies!.label}
+      endpoint={SECTION_LAZY_CONFIG.exemples_analogies!.endpoint}
+      slug={slug}
+      onGenerated={(data) => handleSectionGenerated("exemples_analogies", data)}
+    >
+      {(content) => (
+        // dir="auto" — this content is predominantly Darija (Arabic script,
+        // RTL) with French medical terms inline (LTR); letting the browser
+        // pick direction from the first strong-direction character renders
+        // correctly instead of forcing the whole block LTR like every other
+        // (French) Studio section.
+        <article dir="auto" className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}

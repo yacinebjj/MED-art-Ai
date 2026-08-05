@@ -1,7 +1,19 @@
 import { DEMO_SECTIONS } from "@/lib/demo-content";
 import type { QcmItem, QrocItem } from "@/lib/types";
 
-export type CourseSlug = "appendicite" | "gastrite" | "ulcere" | "rectocolite";
+// "ulcere" was removed: it was a dead legacy entry pointing at
+// /dashboard/demo/ulcere, a URL nothing in the UI links to anymore. The
+// real, complete Ulcère course lives in Supabase at the DIFFERENT slug
+// "ulcere-gastrique" (auto-generated at upload time from its title) — that
+// one already renders correctly through the generic Supabase pipeline, so
+// there was never anything to migrate for it, just a stale pointer to delete.
+//
+// "rectocolite" was removed the same way it was fixed: migrated into a real
+// Supabase row (slug "la-rectocolite-hemorragique-rch-1785846798448",
+// auto-generated from its title) via the normal authenticated upload flow —
+// it now renders through the generic Supabase pipeline like any other
+// course, so this hardcoded fallback is no longer needed.
+export type CourseSlug = "appendicite" | "gastrite";
 
 export interface CourseSlugSource {
   fileName: string;
@@ -193,9 +205,16 @@ export interface GastriteCasCliniqueData {
   cases: GastriteRawCase[];
 }
 
+/**
+ * Matches QCMS_SYSTEM_PROMPT's schema exactly (lib/prompts/public-course-sections.ts)
+ * — this is the raw value stored in `courses.qcms`, nothing more. It never
+ * contains a course slug (a prior version of this type incorrectly declared
+ * one, which silently meant `data.slug` was always `undefined` wherever this
+ * type was consumed — see GastriteQcmsStudio.tsx's `courseSlug` prop for the
+ * fix: the real course slug is passed down separately by the page that
+ * already has it in scope, not read off this data blob.
+ */
 export interface GastriteQcmsData {
-  slug: string;
-  section: string;
   titre_section: string;
   qcms: QcmItem[];
   qrocs: QrocItem[];
@@ -238,6 +257,8 @@ export interface CourseSlugSupabaseData {
   cas_clinique: GastriteCasCliniqueData | null;
   qcms: GastriteQcmsData | null;
   mind_map: MindMapData | null;
+  /** Markdown, like `explication` — Darija (Arabic script) mixed with French medical terms. See lib/prompts/public-course-sections.ts's EXEMPLES_ANALOGIES_SYSTEM_PROMPT. */
+  exemples_analogies: string | null;
 }
 
 const APPENDICITE_CONTENT = DEMO_SECTIONS.find((s) => s.id === "explication")!.content;
@@ -746,252 +767,6 @@ D. Le scanner abdominal
 
 > **Réponses :** 1-B, 2-B, 3-B. Si tu as tout bon, tu es prêt(e) pour reconnaître une gastrite en consultation !`;
 
-const ULCERE_CONTENT = `# L'Ulcère Gastroduodénal : Physiopathologie et Traitement
-
-## Un cours complet, expliqué avec des mots très simples
-
-Bonjour. On continue notre voyage dans l'estomac, mais cette fois on va plus loin que la simple irritation. On va parler du trou. Du vrai trou dans la paroi. C'est ça, l'ulcère gastroduodénal.
-
-Ne t'inquiète pas si certaines idées ressemblent à celles de la gastrite. C'est normal, les deux maladies viennent de la même famille de problèmes : un déséquilibre entre ce qui attaque l'estomac et ce qui le protège. Sauf qu'ici, le déséquilibre est allé plus loin.
-
-> Retiens la différence dès le départ : la gastrite, c'est une peau qui rougit. L'ulcère, c'est une peau qui a fini par se percer.
-
-## Sommaire
-
-- ● Avant-propos : pourquoi ce trou fait si peur
-- ■ Chapitre I : deux endroits, un seul mécanisme
-- ▲ Chapitre II : la balance acide contre mucus
-- ● Chapitre III : H. pylori et les anti-inflammatoires, les deux grands coupables
-- ■ Chapitre IV : la douleur de l'ulcère, un signe qui parle
-- ▲ Chapitre V : la complication qui fait trembler, l'hémorragie
-- ● Chapitre VI : le trou qui perce complètement, la perforation
-- ■ Chapitre VII : comment on confirme le diagnostic
-- ▲ Chapitre VIII : les traitements, calmer puis réparer
-- Récapitulatif
-
-## AVANT-PROPOS : Pourquoi ce trou fait si peur
-
-Un ulcère, c'est une perte de substance. Ça veut dire qu'un morceau de la paroi a littéralement disparu, rongé par l'acide, laissant un vrai cratère. Comme un trou dans un mur, jusqu'à parfois toucher les couches profondes, là où passent des vaisseaux sanguins importants.
-
-C'est pour ça que l'ulcère n'est jamais anodin. Un trou qui reste petit et superficiel guérit tranquillement avec un traitement. Mais un trou qui s'approfondit peut toucher un vaisseau et saigner, ou aller jusqu'au bout et transpercer complètement la paroi.
-
->> Retiens cette image : l'ulcère est comme la rouille qui ronge une tôle de voiture. Au début, une simple tache. Puis un trou. Et si on laisse faire, la rouille peut finir par transpercer complètement la tôle.
-
-## CHAPITRE I : Deux endroits, un seul mécanisme
-
-L'ulcère peut apparaître à deux endroits principaux : dans l'estomac, on parle d'ulcère gastrique. Juste après l'estomac, au début de l'intestin grêle, dans une zone appelée le duodénum, on parle d'ulcère duodénal. C'est pour ça qu'on dit "gastroduodénal" : les deux zones sont concernées par la même maladie.
-
-■ Retiens une différence pratique : l'ulcère duodénal est plus fréquent, et il est presque toujours lié à H. pylori. L'ulcère gastrique, lui, doit toujours faire penser un peu plus sérieusement à éliminer un cancer, en particulier chez la personne âgée, car un cancer de l'estomac peut parfois ressembler exactement à un ulcère au début.
-
-> ملخص بالعربية : القرحة قد تكون في المعدة أو في العفج (بداية الأمعاء الدقيقة)، والآلية واحدة، لكن قرحة المعدة تستوجب استبعاد السرطان أكثر من قرحة العفج.
-
-## CHAPITRE II : La balance acide contre mucus
-
-On l'a vu dans le cours sur la gastrite : l'estomac vit en équilibre entre une force qui attaque, l'acide, et une force qui protège, le mucus et le bicarbonate. L'ulcère apparaît quand cet équilibre est cassé de façon plus sévère et plus prolongée que dans la simple gastrite.
-
-Imagine une balance. D'un côté, tu poses l'acide et tout ce qui agresse la paroi. De l'autre côté, tu poses le mucus et tout ce qui protège. Tant que la balance est équilibrée, la paroi résiste. Mais si tu ajoutes trop de poids du côté de l'attaque, ou si tu enlèves trop de poids du côté de la protection, la balance penche, et le trou commence à se former.
-
-⮞ Deux façons de casser la balance : soit on augmente l'attaque (trop d'acide, une bactérie qui affaiblit le mucus), soit on diminue la protection (un médicament qui bloque la fabrication du mucus protecteur). Souvent, c'est un mélange des deux.
-
-## CHAPITRE III : H. pylori et les anti-inflammatoires, les deux grands coupables
-
-### H. pylori
-
-Exactement comme pour la gastrite, cette bactérie s'installe dans le mucus, l'affaiblit, et entretient une inflammation locale. À force, cette agression chronique finit par créer un vrai trou, surtout au niveau du duodénum.
-
-### Les anti-inflammatoires non stéroïdiens (AINS)
-
-Ces médicaments, très utilisés contre la douleur et l'inflammation, ont un défaut : ils bloquent une enzyme, la cyclo-oxygénase, qui sert normalement à fabriquer les substances protectrices de la paroi de l'estomac. En bloquant cette enzyme, ils affaiblissent directement le bouclier protecteur, sans même avoir besoin d'une bactérie.
-
->> Point clé à retenir : chez une personne qui prend des anti-inflammatoires régulièrement, surtout une personne âgée, le risque d'ulcère grimpe fortement. C'est pour ça qu'on associe souvent un protecteur d'estomac quand un traitement anti-inflammatoire doit durer longtemps.
-
-> ملخص بالعربية : المسبّبان الرئيسيان للقرحة هما جرثومة الملوية البوابية ومضادات الالتهاب غير الستيروئيدية، وكلاهما يُضعف حماية جدار المعدة.
-
-## CHAPITRE IV : La douleur de l'ulcère, un signe qui parle
-
-La douleur de l'ulcère a souvent un rythme particulier, presque comme une horloge. Elle se situe en haut du ventre, à l'épigastre.
-
-➔ Dans l'ulcère duodénal, la douleur calme souvent quand le malade mange. Puis elle revient deux à trois heures après le repas, parfois même la nuit, réveillant le malade. On dit qu'elle est rythmée par les repas.
-
-➔ Dans l'ulcère gastrique, c'est parfois l'inverse : la douleur peut au contraire s'aggraver pendant ou juste après le repas.
-
-⮞ Retiens cette astuce simple pour l'examen : douleur calmée par la nourriture, qui revient à distance du repas et la nuit, pense duodénum. Douleur qui s'aggrave avec la nourriture, pense davantage estomac.
-
-## CHAPITRE V : La complication qui fait trembler, l'hémorragie
-
-Le trou de l'ulcère peut s'approfondir jusqu'à toucher un vaisseau sanguin dans la paroi. Et là, ça peut saigner. Parfois un saignement discret, qui rend juste le malade pâle et fatigué avec le temps. Parfois un saignement massif et brutal.
-
-Les signes à connaître : des vomissements de sang, qu'on appelle une hématémèse, ou des selles noires, collantes et malodorantes, comme du goudron, qu'on appelle un méléna.
-
->>> Alerte : devant un vomissement de sang ou des selles noires, il faut agir vite. C'est une urgence, car le malade peut perdre beaucoup de sang rapidement et faire un choc.
-
-## CHAPITRE VI : Le trou qui perce complètement, la perforation
-
-Parfois, le trou continue de s'approfondir jusqu'à traverser complètement la paroi, de part en part. Le contenu de l'estomac, très acide, se déverse alors directement dans le ventre. C'est une perforation.
-
-⮞ Le malade ressent alors une douleur brutale, extrêmement intense, comme un coup de poignard. Le ventre devient dur comme une planche de bois, car les muscles se contractent pour se défendre. C'est une urgence chirurgicale absolue.
-
-> **L'Astuce du Prof :** retiens ce contraste. L'hémorragie, c'est du sang qui sort par le haut ou par le bas. La perforation, c'est le contenu de l'estomac qui sort par un trou direct dans le ventre. Les deux sont des urgences, mais elles ne se manifestent pas de la même façon.
-
-## CHAPITRE VII : Comment on confirme le diagnostic
-
-L'endoscopie digestive haute reste l'examen clé. Elle permet de voir directement le trou, de mesurer sa taille, et surtout de faire des biopsies, en particulier pour un ulcère de l'estomac, afin d'être certain qu'il ne s'agit pas d'un cancer déguisé en ulcère.
-
-■ On recherche également H. pylori, par biopsie, test respiratoire, ou recherche dans les selles, exactement comme pour la gastrite.
-
-## CHAPITRE VIII : Les traitements, calmer puis réparer
-
-### Bloquer l'acide
-
-On donne un médicament puissant qui bloque presque toute la fabrication d'acide, pour laisser à la paroi le calme nécessaire pour cicatriser, comme on retire le feu sous une casserole pour laisser refroidir.
-
-### Traiter H. pylori si elle est présente
-
-Si la bactérie est retrouvée, on donne une association d'antibiotiques avec le médicament anti-acide, pendant une dizaine de jours. Éradiquer la bactérie réduit énormément le risque que l'ulcère revienne plus tard.
-
-### Arrêter la cause si possible
-
-Si un anti-inflammatoire est en cause, on l'arrête, ou on le remplace par une autre solution, et on protège l'estomac si le traitement doit continuer malgré tout.
-
-### En cas de complication
-
-En cas de saignement, on peut arrêter l'hémorragie directement pendant l'endoscopie. En cas de perforation, l'opération en urgence est nécessaire pour fermer le trou et nettoyer le ventre.
-
->> Formule à retenir : on calme l'acide, on traite la bactérie si elle est là, on retire la cause si elle est évitable, et on opère en urgence si le trou a saigné fort ou percé de part en part.
-
-## RÉCAPITULATIF
-
-- L'ulcère est un vrai trou dans la paroi, contrairement à la simple irritation de la gastrite.
-- Il apparaît quand la balance entre l'acide et la protection penche trop longtemps du mauvais côté.
-- H. pylori et les anti-inflammatoires sont les deux grandes causes à connaître.
-- La douleur suit souvent un rythme lié aux repas, différent selon la localisation.
-- Les deux complications à ne jamais rater : l'hémorragie et la perforation.
-- Le traitement associe toujours : calmer l'acide, traiter la cause, et opérer en urgence si complication grave.
-
-Garde une seule image en tête : la rouille qui ronge la tôle. Prise à temps, elle se traite facilement. Négligée, elle peut transpercer complètement le mur.`;
-
-const RECTOCOLITE_CONTENT = `# La Rectocolite Hémorragique (RCH)
-
-## Un cours complet, expliqué avec des mots très simples
-
-Bonjour. Aujourd'hui, on change un peu de famille de maladies. On ne parle plus d'un problème d'acide, mais d'un problème du système de défense du corps qui se retourne contre lui-même. C'est la rectocolite hémorragique, souvent appelée RCH.
-
-Le nom est long, mais on va le découper tranquillement. "Recto" pour le rectum, "colite" pour une inflammation du côlon, "hémorragique" parce que ça saigne souvent. Tout est déjà dans le nom, en fait.
-
-> Cette maladie fait partie d'une famille plus large appelée les maladies inflammatoires chroniques de l'intestin, ou MICI. La RCH en est l'une des deux formes principales, avec la maladie de Crohn.
-
-## Sommaire
-
-- ● Avant-propos : une maladie qui dure toute la vie, par poussées
-- ■ Chapitre I : où se situe l'inflammation
-- ▲ Chapitre II : quand le corps se trompe de cible
-- ● Chapitre III : ce qui déclenche les poussées
-- ■ Chapitre IV : les signes chez le malade
-- ▲ Chapitre V : les complications à surveiller
-- ● Chapitre VI : comment on pose le diagnostic
-- ■ Chapitre VII : le traitement, calmer puis maintenir le calme
-- Récapitulatif
-
-## AVANT-PROPOS : Une maladie qui dure toute la vie, par poussées
-
-La RCH n'est pas une maladie qui arrive une fois et qui repart pour toujours. C'est une maladie chronique, qui dure toute la vie, mais qui évolue par poussées. Il y a des périodes où tout va mal, avec des symptômes forts, et des périodes de calme, qu'on appelle la rémission, où le malade se sent presque normal.
-
->> Retiens cette idée dès le départ : le but du traitement n'est pas de "guérir" définitivement au sens classique, mais de calmer les poussées et de prolonger le plus possible les périodes de calme.
-
-## CHAPITRE I : Où se situe l'inflammation
-
-La RCH touche le gros intestin, aussi appelé côlon, et presque toujours en commençant par le rectum, la toute dernière partie, juste avant l'anus. Depuis le rectum, l'inflammation peut remonter plus ou moins loin dans le côlon, mais elle reste toujours continue, sans zone saine au milieu.
-
-■ Retiens ce mot clé : continue. Dans la RCH, l'inflammation forme une seule zone continue, qui commence toujours au rectum et remonte plus ou moins haut, sans jamais "sauter" une zone. C'est très différent de sa cousine, la maladie de Crohn, où l'inflammation peut toucher n'importe quelle partie du tube digestif, en laissant des zones saines entre deux zones malades, comme des îlots séparés.
-
-> ملخص بالعربية : التهاب القولون التقرحي يصيب المستقيم دائماً وقد يمتد بشكل متواصل نحو الأعلى في القولون، دون مناطق سليمة متفرقة بينه.
-
-## CHAPITRE II : Quand le corps se trompe de cible
-
-### Un système de défense qui s'emballe
-
-Dans la RCH, le système de défense du corps, celui qui est censé protéger contre les microbes, se met à attaquer la paroi du côlon elle-même, comme s'il la prenait pour un ennemi. On appelle ce genre de maladie une maladie à composante auto-immune ou dysimmunitaire.
-
-Imagine une armée qui, par erreur, se met à tirer sur ses propres soldats au lieu de l'ennemi. C'est un peu ce qui se passe dans la paroi du côlon pendant une poussée de RCH.
-
-### Une atteinte superficielle mais étendue
-
-Contrairement à la maladie de Crohn qui peut toucher toute l'épaisseur de la paroi, la RCH touche surtout la couche la plus superficielle, la muqueuse. Mais cette atteinte, bien que superficielle, peut être très étendue en surface, avec de nombreuses petites plaies, des ulcérations, qui saignent facilement.
-
-⮞ C'est cette fragilité de la muqueuse enflammée qui explique le symptôme principal de la maladie : le saignement fréquent, visible dans les selles.
-
-## CHAPITRE III : Ce qui déclenche les poussées
-
-On ne connaît pas une cause unique et simple à la RCH. On pense plutôt à un mélange de plusieurs éléments :
-
-| Facteur | Rôle possible |
-|---|---|
-| Terrain génétique | Rend certaines personnes plus sensibles |
-| Flore intestinale | Un déséquilibre des bactéries normales du côlon peut jouer un rôle |
-| Système immunitaire | Réaction excessive et mal ciblée contre la paroi |
-| Stress, infections | Peuvent parfois déclencher ou aggraver une poussée |
-
-■ Retiens qu'il n'y a pas "une seule cause" à trouver et à traiter, contrairement à une infection classique. C'est pour ça que le traitement vise surtout à calmer la réaction du corps, plutôt qu'à éliminer un microbe précis.
-
-## CHAPITRE IV : Les signes chez le malade
-
-Le symptôme le plus caractéristique, c'est la diarrhée avec du sang, parfois avec du mucus (des glaires). Le malade va souvent aux toilettes, parfois plus de dix fois par jour pendant une poussée sévère.
-
-✦ Des douleurs abdominales, souvent avant d'aller à la selle.
-
-✦ Une envie très pressante et difficile à retenir d'aller à la selle.
-
-✦ Une fatigue importante, parfois de la fièvre pendant les poussées sévères.
-
-✦ Une perte de poids si les poussées sont fréquentes et intenses.
-
->> À retenir : diarrhée glairo-sanglante qui dure, chez un jeune adulte, doit toujours faire penser à une RCH jusqu'à preuve du contraire, surtout si ça se répète par poussées.
-
-## CHAPITRE V : Les complications à surveiller
-
-■ Une poussée très sévère peut entraîner une dilatation dangereuse du côlon, appelée mégacôlon toxique, avec un risque de perforation. C'est une urgence.
-
-■ Un saignement important et répété peut provoquer une anémie, avec fatigue et pâleur.
-
-■ Après de nombreuses années d'évolution, en particulier si toute la longueur du côlon est touchée, le risque de cancer du côlon augmente, ce qui justifie une surveillance régulière par endoscopie chez les malades anciens.
-
->>> Alerte : une poussée sévère avec fièvre haute, ventre très gonflé et douloureux, et état général qui se dégrade vite doit faire penser au mégacôlon toxique et nécessite une prise en charge en urgence.
-
-> ملخص بالعربية : من مضاعفات المرض توسّع القولون السّام في النوبات الشديدة، وفقر الدم بسبب النزيف المتكرر، وزيادة خطر سرطان القولون على المدى الطويل.
-
-## CHAPITRE VI : Comment on pose le diagnostic
-
-L'examen clé est la coloscopie, une endoscopie qui explore tout le côlon avec une caméra. On y voit la muqueuse rouge, fragile, qui saigne facilement au moindre contact, avec des ulcérations, en commençant toujours par le rectum. On fait aussi des biopsies pour confirmer le diagnostic et éliminer d'autres causes.
-
-■ On complète souvent avec une prise de sang, à la recherche d'une inflammation ou d'une anémie, et parfois une analyse des selles pour éliminer une infection qui pourrait donner des symptômes ressemblants.
-
-## CHAPITRE VII : Le traitement, calmer puis maintenir le calme
-
-### Calmer la poussée
-
-Selon la sévérité, on utilise des médicaments anti-inflammatoires locaux ou par voie générale, parfois des traitements qui modulent plus fortement le système de défense dans les formes sévères. Dans les poussées très sévères, une hospitalisation est parfois nécessaire.
-
-### Maintenir la rémission
-
-Une fois la poussée calmée, l'objectif devient d'éviter qu'une nouvelle poussée revienne, avec un traitement d'entretien au long cours. C'est un peu comme entretenir un jardin : une fois les mauvaises herbes enlevées, il faut continuer à en prendre soin pour qu'elles ne repoussent pas.
-
-### La chirurgie dans les formes sévères
-
-Dans certains cas très sévères, résistants aux traitements, ou en cas de complication grave comme le mégacôlon toxique, on peut être amené à retirer chirurgicalement tout le côlon malade. C'est un traitement radical, mais qui peut être nécessaire pour sauver le malade.
-
->> Formule à retenir : dans la RCH, on calme la poussée, puis on entretient le calme sur le long terme, et on garde la chirurgie pour les formes sévères ou compliquées.
-
-## RÉCAPITULATIF
-
-- La RCH est une inflammation chronique, par poussées, qui touche toujours le rectum puis remonte de façon continue dans le côlon.
-- Le système de défense du corps attaque par erreur la muqueuse du côlon.
-- Le signe principal est la diarrhée glairo-sanglante récidivante.
-- Les complications à connaître : le mégacôlon toxique, l'anémie, et à long terme le risque de cancer du côlon.
-- Le diagnostic repose sur la coloscopie avec biopsies.
-- Le traitement calme la poussée, puis entretient la rémission, avec la chirurgie réservée aux formes sévères.
-
-Garde une seule image en tête : une armée de défense qui, par erreur, tire sur son propre camp. Le traitement, c'est apprendre à cette armée à redevenir calme, et à le rester le plus longtemps possible.`;
-
 export const COURSE_SLUG_CONTENT: Record<CourseSlug, CourseSlugContent> = {
   appendicite: {
     title: "L'Appendicite Aiguë en Milieu Tropical",
@@ -1005,16 +780,6 @@ export const COURSE_SLUG_CONTENT: Record<CourseSlug, CourseSlugContent> = {
     resume: GASTRITE_RESUME_CONTENT,
     casClinique: GASTRITE_CAS_CLINIQUE_CONTENT,
     qcm: GASTRITE_QCM_CONTENT,
-  },
-  ulcere: {
-    title: "L'Ulcère Gastroduodénal : Physiopathologie et Traitement",
-    content: ULCERE_CONTENT,
-    source: { fileName: "Ulcere_Gastro.pdf", size: "2.4 Mo" },
-  },
-  rectocolite: {
-    title: "La Rectocolite Hémorragique (RCH)",
-    content: RECTOCOLITE_CONTENT,
-    source: { fileName: "Rectocolite_Video.mp4", size: "15 Mo" },
   },
 };
 
