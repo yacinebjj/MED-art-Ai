@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
 import { Copy, Moon, Settings, Share2, Sparkles, Sun } from "lucide-react";
@@ -22,6 +23,13 @@ interface WorkspaceTopbarProps {
 export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  // next-themes only knows the real theme after mount (it reads
+  // localStorage client-side) — rendering Sun/Moon from `isDark` before that
+  // resolves means the server's default-theme guess can differ from the
+  // client's first render, which React flags as a hydration mismatch. Same
+  // guard as components/layout/ThemeToggle.tsx.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-2 dark:border-neutral-800 dark:bg-neutral-900">
@@ -55,7 +63,9 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
           aria-label={isDark ? "Passer en mode clair" : "Passer en mode sombre"}
           onClick={() => setTheme(isDark ? "light" : "dark")}
         >
-          {isDark ? (
+          {!mounted ? (
+            <Moon className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+          ) : isDark ? (
             <Sun className="h-4 w-4 text-gray-500 dark:text-gray-400" />
           ) : (
             <Moon className="h-4 w-4 text-gray-500 dark:text-gray-400" />

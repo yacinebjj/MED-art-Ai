@@ -337,7 +337,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       slug={slug}
       onGenerated={(data) => handleSectionGenerated("qcms", data)}
     >
-      {(data) => <GastriteQcmsStudio data={data} courseSlug={slug} />}
+      {(data) => <GastriteQcmsStudio data={data} courseSlug={slug} explicationMarkdown={explicationContent} />}
     </LazySection>
   ) : showMindMapStudioData ? (
     <MindMapStudio />
@@ -359,7 +359,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   ) : activeId === "cas_clinique" ? (
     <CasCliniqueStudio />
   ) : activeId === "qcm" ? (
-    <ExamQcmStudio />
+    <ExamQcmStudio explicationMarkdown={explicationContent} />
   ) : activeId === "explication" && hasStudioData && !legacySlugData ? (
     <LazySection
       dark={isDark}

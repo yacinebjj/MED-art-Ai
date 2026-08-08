@@ -623,7 +623,11 @@ const qrocData: QROC[] = [
 /* Phase 3 — Interactive UI, delegated to the shared quiz engine.           */
 /* ----------------------------------------------------------------------- */
 
-export function ExamQcmStudio() {
+export function ExamQcmStudio({
+  explicationMarkdown,
+}: {
+  explicationMarkdown?: string;
+} = {}) {
   return (
     <div className="w-full mx-auto space-y-8 font-sans text-slate-800 dark:text-slate-200 animate-fade-in">
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-700 to-blue-900 dark:from-indigo-950 dark:to-black p-8 shadow-xl border border-indigo-400/30">
@@ -644,7 +648,12 @@ export function ExamQcmStudio() {
         </div>
       </div>
 
-      <InteractiveQuiz qcms={qcmsData} qrocs={qrocData} courseSlug={COURSE_SLUG} />
+      <InteractiveQuiz
+        qcms={qcmsData}
+        qrocs={qrocData}
+        courseSlug={COURSE_SLUG}
+        explicationMarkdown={explicationMarkdown}
+      />
     </div>
   );
 }

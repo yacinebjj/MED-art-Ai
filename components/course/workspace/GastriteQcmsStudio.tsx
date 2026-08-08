@@ -13,7 +13,15 @@ import { InteractiveQuiz } from "@/components/course/workspace/InteractiveQuiz";
  * (which was always `undefined` — the exact bug that made every QCM click
  * fail with "Le champ 'courseSlug' est requis.").
  */
-export function GastriteQcmsStudio({ data, courseSlug }: { data: GastriteQcmsData; courseSlug: string }) {
+export function GastriteQcmsStudio({
+  data,
+  courseSlug,
+  explicationMarkdown,
+}: {
+  data: GastriteQcmsData;
+  courseSlug: string;
+  explicationMarkdown?: string;
+}) {
   return (
     <div className="w-full mx-auto space-y-8 font-sans text-slate-800 dark:text-slate-200 animate-fade-in">
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-700 to-cyan-900 dark:from-teal-950 dark:to-black p-8 shadow-xl border border-teal-400/30">
@@ -34,7 +42,12 @@ export function GastriteQcmsStudio({ data, courseSlug }: { data: GastriteQcmsDat
         </div>
       </div>
 
-      <InteractiveQuiz qcms={data.qcms} qrocs={data.qrocs} courseSlug={courseSlug} />
+      <InteractiveQuiz
+        qcms={data.qcms}
+        qrocs={data.qrocs}
+        courseSlug={courseSlug}
+        explicationMarkdown={explicationMarkdown}
+      />
     </div>
   );
 }

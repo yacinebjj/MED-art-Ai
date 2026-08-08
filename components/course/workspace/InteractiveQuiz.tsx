@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useTheme } from "next-themes";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   CheckCircle2,
   XCircle,
@@ -13,9 +16,14 @@ import {
   Trophy,
   Square,
   CheckSquare,
+  AlertTriangle,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
+import { findBestMatchingSection } from "@/lib/weakness-matching";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
+import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
 
 /**
  * Shared interactive quiz engine — used by both GastriteQcmsStudio.tsx (the
@@ -323,12 +331,183 @@ function EndScreen({ score20, correctCount, total }: { score20: number; correctC
   );
 }
 
-export function InteractiveQuiz({ qcms, qrocs, courseSlug }: { qcms: Qcm[]; qrocs: Qroc[]; courseSlug: string }) {
+/**
+ * Post-quiz weakness targeting — lists every missed QCM with its real,
+ * already-generated `explication.globale` (never a fabricated summary) and a
+ * "Voir le concept" button that opens the matched chapter of the Explication
+ * in-place, in a modal (see ConceptModal below) — no page navigation, the
+ * QCM list stays mounted underneath. Renders nothing if there are no wrong
+ * answers.
+ */
+function WeakPointsPanel({ wrongQcms, onViewConcept }: { wrongQcms: Qcm[]; onViewConcept: (qcm: Qcm) => void }) {
+  if (wrongQcms.length === 0) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.15 }}
+      className="rounded-3xl border-2 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 p-6 space-y-4"
+    >
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+        <h3 className="text-sm font-black uppercase tracking-wide text-amber-800 dark:text-amber-300">
+          Notions à revoir
+        </h3>
+      </div>
+
+      <div className="space-y-3">
+        {wrongQcms.map((qcm) => (
+          <div
+            key={qcm.id}
+            className="rounded-xl border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-slate-900 p-4 space-y-2"
+          >
+            <p dir="auto" className="text-sm font-semibold text-slate-800 dark:text-slate-100">{qcm.question}</p>
+            <p dir="auto" className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">{qcm.explication.globale}</p>
+            <button
+              type="button"
+              onClick={() => onViewConcept(qcm)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 dark:text-teal-400 hover:underline"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Voir le concept
+            </button>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+interface ConceptModalState {
+  title: string;
+  content: string;
+}
+
+/**
+ * "Voir le concept" — the matched Explication chapter (or, when no chapter
+ * clears the minimum keyword overlap, the QCM's own explanation as an
+ * honest fallback — never a fabricated summary either way), rendered
+ * in-place over a blurred backdrop so the student never loses their QCM
+ * session underneath. Closing it resumes the quiz exactly where it was.
+ *
+ * z-[1000] on both layers: StudioPanel's own "Agrandir" fullscreen view
+ * (components/course/workspace/StudioPanel.tsx) portals to document.body at
+ * z-[999] — the QCM tab is routinely viewed that way — so anything lower
+ * (the Dialog's z-50 default) would render invisibly underneath it.
+ */
+function ConceptModal({ state, onClose, isDark }: { state: ConceptModalState | null; onClose: () => void; isDark: boolean }) {
+  return (
+    <Dialog open={state !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        overlayClassName="z-[1000] backdrop-blur-md"
+        className="z-[1000] max-h-[80vh] max-w-2xl overflow-y-auto"
+      >
+        <DialogHeader>
+          <DialogTitle>{state?.title ?? "Concept"}</DialogTitle>
+        </DialogHeader>
+        {state && (
+          <article dir="auto" className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "prose-sm md:prose-base max-w-none")}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
+              {normalizeCallouts(state.content)}
+            </ReactMarkdown>
+          </article>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Everything auto-saved/restored for one quiz session — see the two effects below. */
+interface PersistedQuizState {
+  qcmAnswers: Record<number, QcmAnswerState>;
+  revealedQrocs: Record<number, boolean>;
+  gradedQrocs: Record<number, boolean>;
+}
+
+function quizProgressStorageKey(courseSlug: string): string {
+  return `medart:quiz-progress:${courseSlug}`;
+}
+
+export function InteractiveQuiz({
+  qcms,
+  qrocs,
+  courseSlug,
+  explicationMarkdown,
+}: {
+  qcms: Qcm[];
+  qrocs: Qroc[];
+  courseSlug: string;
+  /** The course's Explication content — enables the "Voir le concept" modal to show the matched chapter instead of just the QCM's own explanation. */
+  explicationMarkdown?: string;
+}) {
   const [qcmAnswers, setQcmAnswers] = useState<Record<number, QcmAnswerState>>({});
   const [revealedQrocs, setRevealedQrocs] = useState<Record<number, boolean>>({});
   const [gradedQrocs, setGradedQrocs] = useState<Record<number, boolean>>({});
   const [gradingKey, setGradingKey] = useState<string | null>(null);
+  const [conceptModal, setConceptModal] = useState<ConceptModalState | null>(null);
   const { toast } = useToast();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  // Guards the restore-on-mount effect against firing twice (React 18
+  // StrictMode — enabled in next.config.mjs — intentionally double-invokes
+  // effects in dev to surface missing-cleanup bugs; without this guard the
+  // toast below would show twice on every load).
+  const hasRestoredRef = useRef(false);
+
+  // Restore-on-mount: runs once per course. Only sets local UI state (never
+  // re-POSTs to /api/srs/attempt — those attempts were already recorded
+  // server-side the first time they happened, re-sending them would just be
+  // redundant network calls).
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+    hasRestoredRef.current = true;
+
+    let saved: PersistedQuizState | null = null;
+    try {
+      const raw = localStorage.getItem(quizProgressStorageKey(courseSlug));
+      if (raw) saved = JSON.parse(raw) as PersistedQuizState;
+    } catch {
+      saved = null; // Corrupted or unavailable localStorage — start fresh, never crash the quiz over it.
+    }
+
+    if (saved && Object.keys(saved.qcmAnswers ?? {}).length > 0) {
+      setQcmAnswers(saved.qcmAnswers);
+      setRevealedQrocs(saved.revealedQrocs ?? {});
+      setGradedQrocs(saved.gradedQrocs ?? {});
+      toast({
+        variant: "info",
+        title: "Progression restaurée",
+        description: "Tu reprends exactement où tu t'étais arrêté(e).",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseSlug]);
+
+  // Auto-save: fires after every interaction that changes answer state (the
+  // effect runs post-commit, so it always sees the fresh value — never a
+  // stale closure). A plain localStorage write triggers no state update, so
+  // this can't cycle back into itself.
+  useEffect(() => {
+    if (Object.keys(qcmAnswers).length === 0 && Object.keys(revealedQrocs).length === 0) return;
+    try {
+      const state: PersistedQuizState = { qcmAnswers, revealedQrocs, gradedQrocs };
+      localStorage.setItem(quizProgressStorageKey(courseSlug), JSON.stringify(state));
+    } catch {
+      // Quota exceeded / private mode — losing the local save is not worth interrupting the quiz over.
+    }
+  }, [courseSlug, qcmAnswers, revealedQrocs, gradedQrocs]);
+
+  function handleViewConcept(qcm: Qcm) {
+    const matchedSection = explicationMarkdown
+      ? findBestMatchingSection(explicationMarkdown, `${qcm.question} ${qcm.explication.globale}`)
+      : null;
+    setConceptModal(
+      matchedSection
+        ? { title: matchedSection.headingText, content: matchedSection.content }
+        : { title: "Explication de cette question", content: qcm.explication.globale }
+    );
+  }
 
   /** Fire-and-forget SRS write — a failed write never blocks the student from seeing their own result, it only means their Weakness Radar won't reflect this attempt. */
   async function recordAttempt(qcmId: string, isCorrect: boolean) {
@@ -385,6 +564,10 @@ export function InteractiveQuiz({ qcms, qrocs, courseSlug }: { qcms: Qcm[]; qroc
   const correctCount = useMemo(() => Object.values(qcmAnswers).filter((a) => a.isCorrect).length, [qcmAnswers]);
   const allAnswered = qcms.length > 0 && answeredCount === qcms.length;
   const score20 = qcms.length > 0 ? Math.round((correctCount / qcms.length) * 20 * 10) / 10 : 0;
+  const wrongQcms = useMemo(
+    () => qcms.filter((qcm) => qcmAnswers[qcm.id] && !qcmAnswers[qcm.id].isCorrect),
+    [qcms, qcmAnswers]
+  );
 
   return (
     <div className="space-y-8">
@@ -402,6 +585,7 @@ export function InteractiveQuiz({ qcms, qrocs, courseSlug }: { qcms: Qcm[]; qroc
         </div>
 
         {allAnswered && <EndScreen score20={score20} correctCount={correctCount} total={qcms.length} />}
+        {allAnswered && <WeakPointsPanel wrongQcms={wrongQcms} onViewConcept={handleViewConcept} />}
 
         <div className="space-y-4">
           {qcms.map((qcm) => (
@@ -429,6 +613,8 @@ export function InteractiveQuiz({ qcms, qrocs, courseSlug }: { qcms: Qcm[]; qroc
           ))}
         </div>
       </section>
+
+      <ConceptModal state={conceptModal} onClose={() => setConceptModal(null)} isDark={isDark} />
     </div>
   );
 }
