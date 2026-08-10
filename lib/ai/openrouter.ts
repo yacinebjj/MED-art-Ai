@@ -40,6 +40,27 @@ export class OpenRouterError extends Error {
 }
 
 /**
+ * Pulls the human-readable detail out of OpenRouter's error body (shape:
+ * `{"error":{"message":"...","code":...}}`), e.g. "google/gemini-1.5-flash
+ * is not a valid model ID" — this is exactly the detail that used to get
+ * swallowed into a generic "L'appel au modèle IA a échoué", which made a bad
+ * model id or a misconfigured key indistinguishable from a real transient
+ * outage. Falls back to a short raw-body excerpt if the body isn't the
+ * expected JSON shape (e.g. an HTML error page from a proxy in front of the
+ * API), never null/empty — there's always SOMETHING to show.
+ */
+function extractOpenRouterErrorDetail(body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const detail = parsed?.error?.message;
+    if (typeof detail === "string" && detail.trim()) return detail.trim();
+  } catch {
+    // body wasn't JSON — fall through to the raw excerpt below.
+  }
+  return body.trim().slice(0, 200) || "Réponse vide.";
+}
+
+/**
  * A single "part" of a message's content, Anthropic/OpenRouter's
  * content-block format. `cache_control: { type: "ephemeral" }` marks this
  * block (and everything before it in the prompt) as a cacheable prefix —
@@ -67,9 +88,21 @@ export interface ChatMessageInput {
  */
 export async function callOpenRouter(
   messages: ChatMessageInput[],
-  options?: { maxTokens?: number }
+  options?: { maxTokens?: number; model?: string; bypassMock?: boolean }
 ): Promise<string> {
-  if (USE_MOCK_AI) {
+  // detectMockPayload matches by loose substring against the SYSTEM PROMPT
+  // TEXT, not by an explicit section id — it was built for one fixed set of
+  // prompts (lib/prompts/public-course-sections.ts) and has no way to know a
+  // caller belongs to a different pipeline entirely. This already bit the
+  // Studio pipeline once: its "explication" prompt happened to contain the
+  // literal substring "explication ULTRA-DÉTAILLÉE", which is also this
+  // mock system's marker for the real per-course pipeline — so in dev mode
+  // it silently served the hardcoded méningite JSON fixture instead of ever
+  // calling Claude, no matter how the prompt was worded. `bypassMock` lets a
+  // caller opt out of this matching entirely rather than playing whack-a-mole
+  // rewording prompts to dodge marker collisions that could reappear with
+  // any future edit.
+  if (USE_MOCK_AI && !options?.bypassMock) {
     const systemText = findSystemText(messages);
     const mock = detectMockPayload(systemText);
     if (mock) {
@@ -97,7 +130,7 @@ export async function callOpenRouter(
         "X-Title": "Med Art AI",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: options?.model ?? MODEL,
         messages,
         max_tokens: options?.maxTokens ?? 8192,
       }),
@@ -109,8 +142,14 @@ export async function callOpenRouter(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    const detail = extractOpenRouterErrorDetail(body);
     console.error(`OpenRouter API error (${res.status})`, body.slice(0, 500));
-    throw new OpenRouterError("L'appel au modèle IA a échoué. Réessaie dans un instant.", 502);
+    // Propagate OpenRouter's own status (400 bad request/model id, 401 bad
+    // key, 429 rate limit, ...) instead of collapsing everything to a
+    // generic 502 — every caller of callOpenRouter already forwards
+    // OpenRouterError.status straight through to its own API response, so
+    // this makes THAT response accurate too, not just the server log.
+    throw new OpenRouterError(`L'appel au modèle IA a échoué : ${detail}`, res.status);
   }
 
   const data = await res.json();
@@ -175,8 +214,9 @@ export async function streamOpenRouter(
 
   if (!res.ok || !res.body) {
     const body = await res.text().catch(() => "");
+    const detail = extractOpenRouterErrorDetail(body);
     console.error(`OpenRouter stream API error (${res.status})`, body.slice(0, 500));
-    throw new OpenRouterError("L'appel au modèle IA a échoué. Réessaie dans un instant.", 502);
+    throw new OpenRouterError(`L'appel au modèle IA a échoué : ${detail}`, res.status);
   }
 
   const decoder = new TextDecoder();

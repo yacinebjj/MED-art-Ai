@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Search, UploadCloud } from "lucide-react";
+import { Plus, Search, Settings, UploadCloud } from "lucide-react";
 import { UploadModal } from "@/components/dashboard/UploadModal";
 import { PublicCourseCard } from "@/components/dashboard/PublicCourseCard";
-import { ModuleBentoGrid } from "@/components/dashboard/ModuleBentoGrid";
+import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
 import { useAuth } from "@/providers/AuthProvider";
 import type { ModuleSummary, PublicCourseSummary } from "@/lib/dashboard-modules";
 import {
@@ -15,44 +15,29 @@ import {
   MOCK_SRS_MASTERY_FALLBACK_BY_COURSE_SLUG,
 } from "@/lib/mock-course-progress";
 import { MAX_LEITNER_BOX } from "@/lib/srs";
+import type { CurriculumYearData } from "@/types/academic";
 
 /**
- * Demo/showcase slugs authored before the `courses` table existed — no
- * Supabase row, so no id/module_id, so they can never be renamed, deleted,
- * or moved from the UI. Always merged into the "Gastroentérologie" module's
- * display (matched by name) alongside any real gastro course rows.
+ * The client wants the "Mes cours indépendants (Historique)" section to show
+ * only these two courses for now, without touching the database (no DELETE)
+ * — so this is a pure frontend filter over whatever `/api/courses/list`
+ * actually returns. Matched by keyword against the real title, not module_id
+ * (e.g. "masterclass : la gastrite" is filed under a real module, but must
+ * still show up here), accent/case-insensitive so "Pleurésie" and
+ * "pleuresie" both hit.
  */
-// "ulcere" and "rectocolite" were removed from this list: "ulcere" pointed
-// at /dashboard/demo/ulcere, a dead legacy slug distinct from
-// "ulcere-gastrique" (the real, complete Supabase-backed course); the
-// content behind "rectocolite" is now genuinely migrated to Supabase, at
-// slug "la-rectocolite-hemorragique-rch-1785846798448" — both used to lead
-// to a partially-broken page (only the Explication tab had content;
-// Résumé/Cas Clinique/QCM silently fell back to Appendicite's). See
-// lib/course-slug-content.ts's comment on CourseSlug for the full story.
-// Only "appendicite" remains: the one course intentionally kept as a fully
-// hardcoded showcase, with no Supabase row at all.
-const LEGACY_GASTRO_SOURCES: { slug: string; title: string }[] = [{ slug: "appendicite", title: "Appendicite_Cours.pdf" }];
+const HISTORIQUE_VISIBLE_KEYWORDS = ["pleuresie", "gastrite"];
 
-function isGastroModule(name: string): boolean {
-  return name.trim().toLowerCase().startsWith("gastro");
-}
-
-interface WeaknessRadarRow {
-  module_id: number;
-  module_name: string;
-  total_attempts: number;
-  correct_attempts: number;
-  mastery_pct: number;
+function normalizeForMatch(text: string): string {
+  return text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, curriculumProfile } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
   const [courses, setCourses] = useState<PublicCourseSummary[]>([]);
   const [modules, setModules] = useState<ModuleSummary[]>([]);
-  const [weaknessRadar, setWeaknessRadar] = useState<WeaknessRadarRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -74,17 +59,6 @@ export default function DashboardPage() {
     setModules(data.modules ?? []);
   }, []);
 
-  // Real per-module mastery %, computed server-side by the `weakness_radar`
-  // SQL function from actual qcm_attempts — powers the Bento Grid's progress
-  // bars (see progressByModuleName below). A 401 here just means "not signed
-  // in yet" during the auth bootstrap race, not a real failure — silently
-  // falls back to an empty radar (every card shows "Pas encore de données").
-  const refreshWeaknessRadar = useCallback(async () => {
-    const res = await fetch("/api/srs/weakness-radar");
-    const data = await res.json().catch(() => ({}));
-    setWeaknessRadar(data.radar ?? []);
-  }, []);
-
   // Real per-course mastery % + avg Leitner box (see the `course_mastery` SQL
   // function and /api/srs/course-mastery) — powers the dual indicator on each
   // course card AND the "Statistiques" modal's QCM/SRS bars.
@@ -99,25 +73,60 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    Promise.all([refreshCourses(), refreshModules(), refreshWeaknessRadar(), refreshCourseMastery()]).finally(() =>
-      setLoading(false)
-    );
-  }, [refreshCourses, refreshModules, refreshWeaknessRadar, refreshCourseMastery]);
+    Promise.all([refreshCourses(), refreshModules(), refreshCourseMastery()]).finally(() => setLoading(false));
+  }, [refreshCourses, refreshModules, refreshCourseMastery]);
 
-  // Matches each Bento Grid prototype card (a hardcoded name, not a real
-  // module row — see ModuleBentoGrid.tsx) to a real module the student has
-  // actually created, by name, then to that module's real mastery % from the
-  // radar above. Most cards will resolve to nothing until the student has
-  // both created a same-named module AND answered QCMs in a course filed
-  // under it — that's a true reflection of the data, not a bug.
-  const progressByModuleName = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const mod of modules) {
-      const radarRow = weaknessRadar.find((r) => r.module_id === mod.id);
-      if (radarRow) map.set(mod.name.trim().toLowerCase(), radarRow.mastery_pct);
+  // Real official curriculum (UE + modules indépendants) for the student's
+  // saved filière/année — see app/api/curriculum/route.ts. Both ids are null
+  // until Settings has been filled in at least once; no fallback to a
+  // hardcoded year here, an honest empty state below instead.
+  const [curriculumData, setCurriculumData] = useState<CurriculumYearData | null>(null);
+  const [curriculumLoading, setCurriculumLoading] = useState(false);
+  const [curriculumError, setCurriculumError] = useState<string | null>(null);
+
+  // Keyed on the primitive (specialtyName, level) pair, not the
+  // `curriculumProfile` object itself: AuthProvider can (legitimately) hand
+  // out a new object reference with the exact same content — e.g. once
+  // right after login resolves — and re-running this whole fetch on every
+  // such reference change was the direct cause of the Dashboard's curriculum
+  // section flickering (data reset to null, then re-fetched, then
+  // reappeared) even when nothing had actually changed.
+  const curriculumSpecialtyName = curriculumProfile?.specialty?.name ?? null;
+  const curriculumLevel = curriculumProfile?.academicYear?.level ?? null;
+
+  useEffect(() => {
+    if (!curriculumSpecialtyName || curriculumLevel == null) {
+      setCurriculumData(null);
+      return;
     }
-    return map;
-  }, [modules, weaknessRadar]);
+
+    let cancelled = false;
+    setCurriculumLoading(true);
+    setCurriculumError(null);
+
+    fetch(`/api/curriculum?specialty=${encodeURIComponent(curriculumSpecialtyName)}&level=${curriculumLevel}`)
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error ?? "Impossible de charger le programme.");
+        return body as CurriculumYearData;
+      })
+      .then((body) => {
+        if (!cancelled) setCurriculumData(body);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCurriculumError(err instanceof Error ? err.message : "Impossible de charger le programme.");
+          setCurriculumData(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCurriculumLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [curriculumSpecialtyName, curriculumLevel]);
 
   // The mock fallback (lib/mock-course-progress.ts) only fills a gap for a
   // course with zero real attempts; it's dropped the instant real ones exist
@@ -177,18 +186,10 @@ export default function DashboardPage() {
     setModules((prev) => (prev.some((m) => m.id === newModule.id) ? prev : [...prev, newModule]));
   }
 
-  const unassignedCourses = useMemo(() => courses.filter((c) => c.module_id === null), [courses]);
-
-  const coursesByModule = useMemo(() => {
-    const map = new Map<number, PublicCourseSummary[]>();
-    for (const course of courses) {
-      if (course.module_id == null) continue;
-      const list = map.get(course.module_id) ?? [];
-      list.push(course);
-      map.set(course.module_id, list);
-    }
-    return map;
-  }, [courses]);
+  const historiqueCourses = useMemo(
+    () => courses.filter((c) => HISTORIQUE_VISIBLE_KEYWORDS.some((keyword) => normalizeForMatch(c.title).includes(keyword))),
+    [courses]
+  );
 
   const firstName = profile?.fullName?.split(" ")[0] || "Étudiant(e)";
 
@@ -197,9 +198,11 @@ export default function DashboardPage() {
       {/* --- 1. Hero & Actions Rapides ------------------------------------ */}
       <div className="mb-10 flex flex-col gap-5 rounded-2xl bg-gradient-to-br from-teal-50 via-cyan-50 to-white p-6 sm:flex-row sm:items-center sm:justify-between dark:from-teal-950/40 dark:via-cyan-950/20 dark:to-neutral-950">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Bonjour, {firstName} 👋</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Bonjour Dr. {firstName} 👋</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Bienvenue dans ton espace de 1ère année de médecine — choisis un module ou ajoute un cours indépendant.
+            {curriculumProfile?.academicYear
+              ? `Bienvenue dans ton espace de ${curriculumProfile.academicYear.name} — choisis une unité, un module indépendant, ou ajoute un cours indépendant.`
+              : "Choisis ta spécialité et ton année dans les Paramètres pour voir ton programme — en attendant, ajoute un cours indépendant."}
           </p>
         </div>
 
@@ -261,105 +264,80 @@ export default function DashboardPage() {
         </div>
       </form>
 
-      {/* --- 3. Grille des Modules — 1ère Année Médecine (prototype) ------ */}
+      {/* --- 3. Programme officiel — dépend de la spécialité/année réelles */}
+      {/* enregistrées dans le profil (voir providers/AuthProvider.tsx et    */}
+      {/* app/api/curriculum/route.ts). Fini le blocage sur "1ère année" :   */}
+      {/* ce bloc suit exactement ce que l'étudiant a choisi dans Paramètres.*/}
       <section className="mb-10">
-        <h2 className="mb-4 text-xl font-bold tracking-tight text-slate-900 dark:text-gray-100">Mes Modules — 1ère Année Médecine</h2>
-        <ModuleBentoGrid progressByModuleName={progressByModuleName} />
+        <h2 className="mb-4 text-xl font-bold tracking-tight text-slate-900 dark:text-gray-100">
+          Mon Programme{curriculumProfile?.academicYear ? ` — ${curriculumProfile.academicYear.name}` : ""}
+        </h2>
+
+        {curriculumProfile === null || curriculumLoading ? (
+          // curriculumProfile === null means AuthProvider hasn't resolved it
+          // yet (still loading, not "nothing configured") — showing the
+          // skeleton here instead of the "configure your profile" prompt
+          // avoids that prompt flashing on screen for a frame before the
+          // real (already-configured) state arrives.
+          <CurriculumViewSkeleton />
+        ) : !curriculumProfile?.academicYear ? (
+          <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-gray-400">
+            <p>Choisis ta spécialité et ton année dans les Paramètres pour afficher tes unités d&apos;enseignement.</p>
+            <Link
+              href="/dashboard/settings"
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-500"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Aller aux Paramètres
+            </Link>
+          </div>
+        ) : curriculumError ? (
+          <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            {curriculumError}
+          </p>
+        ) : curriculumData ? (
+          <CurriculumView data={curriculumData} />
+        ) : null}
       </section>
 
       <hr className="my-10 border-slate-200 dark:border-neutral-800" />
 
-      {/* --- 4. Historique — code EXISTANT, intégralement conservé, juste  */}
-      {/* déplacé sous ce nouveau titre. Ne rien changer ci-dessous.       */}
+      {/* --- 4. Historique — la grille Bento du programme ci-dessus gère   */}
+      {/* déjà la navigation par module ; cette section ne montre plus que  */}
+      {/* les cours indépendants du client (filtrage frontend, DB intacte). */}
       <section>
-        <h2 className="mb-6 text-xl font-bold tracking-tight text-slate-900 dark:text-gray-100">Mes Cours Récents (Historique)</h2>
+        <h2 className="mb-6 text-xl font-bold tracking-tight text-slate-900 dark:text-gray-100">
+          Mes cours indépendants (Historique)
+        </h2>
 
-        {/* Mes cours — tout cours pas encore rangé dans un module (le bouton */}
-        {/* d'ajout vit désormais dans le bandeau au-dessus de la grille). */}
-        <section className="mb-10">
-          <h3 className="mb-4 text-lg font-semibold text-slate-900">Mes cours</h3>
-          {loading ? (
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-40 animate-pulse rounded-xl bg-gray-100" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
-              {unassignedCourses.map((course) => (
-                <PublicCourseCard
-                  key={course.id}
-                  course={course}
-                  modules={modules}
-                  onDeleted={handleDeleted}
-                  onRenamed={handleRenamed}
-                  onModuleChanged={handleModuleChanged}
-                  onModuleCreated={handleModuleCreated}
-                  readingPct={readingProgressByCourseSlug.get(course.slug)}
-                  examReadinessPct={examReadinessByCourseSlug.get(course.slug)}
-                  srsMasteryPct={srsMasteryByCourseSlug.get(course.slug)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Mes modules — uniquement les modules réels, avec leurs cours respectifs. */}
-        <section>
-          <h3 className="mb-4 text-lg font-semibold text-slate-900">Mes modules</h3>
-          {!loading && modules.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-              Aucun module pour l'instant — utilise « Ajouter à un module » sur un cours pour en créer un.
-            </p>
-          ) : (
-            <div className="space-y-8">
-              {modules.map((moduleItem) => {
-                const moduleCourses = coursesByModule.get(moduleItem.id) ?? [];
-                const legacyExtras = isGastroModule(moduleItem.name)
-                  ? LEGACY_GASTRO_SOURCES.filter((legacy) => !moduleCourses.some((c) => c.slug === legacy.slug))
-                  : [];
-
-                return (
-                  <div key={moduleItem.id}>
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">{moduleItem.name}</p>
-                    {moduleCourses.length === 0 && legacyExtras.length === 0 ? (
-                      <p className="text-sm text-slate-400">Aucun cours dans ce module pour l'instant.</p>
-                    ) : (
-                      <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
-                        {moduleCourses.map((course) => (
-                          <PublicCourseCard
-                            key={course.id}
-                            course={course}
-                            modules={modules}
-                            onDeleted={handleDeleted}
-                            onRenamed={handleRenamed}
-                            onModuleChanged={handleModuleChanged}
-                            onModuleCreated={handleModuleCreated}
-                            readingPct={readingProgressByCourseSlug.get(course.slug)}
-                            examReadinessPct={examReadinessByCourseSlug.get(course.slug)}
-                            srsMasteryPct={srsMasteryByCourseSlug.get(course.slug)}
-                          />
-                        ))}
-                        {legacyExtras.map((source) => (
-                          <Link
-                            key={source.slug}
-                            href={`/dashboard/demo/${source.slug}`}
-                            className="flex h-40 flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
-                          >
-                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
-                              <FileText className="h-5 w-5" />
-                            </div>
-                            <p className="line-clamp-2 text-sm font-semibold text-slate-900">{source.title}</p>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+        {loading ? (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-40 animate-pulse rounded-xl bg-gray-100" />
+            ))}
+          </div>
+        ) : historiqueCourses.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+            Aucun cours pour l'instant.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
+            {historiqueCourses.map((course) => (
+              <PublicCourseCard
+                key={course.id}
+                course={course}
+                modules={modules}
+                onDeleted={handleDeleted}
+                onRenamed={handleRenamed}
+                onModuleChanged={handleModuleChanged}
+                onModuleCreated={handleModuleCreated}
+                readingPct={readingProgressByCourseSlug.get(course.slug)}
+                examReadinessPct={examReadinessByCourseSlug.get(course.slug)}
+                srsMasteryPct={srsMasteryByCourseSlug.get(course.slug)}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       <UploadModal open={modalOpen} onOpenChange={setModalOpen} onUploaded={handleUploaded} />

@@ -17,10 +17,13 @@ export function GastriteQcmsStudio({
   data,
   courseSlug,
   explicationMarkdown,
+  isPreview,
 }: {
   data: GastriteQcmsData;
   courseSlug: string;
   explicationMarkdown?: string;
+  /** Threaded straight to InteractiveQuiz — see its own prop doc. Defaults to false (unchanged behavior for real courses). */
+  isPreview?: boolean;
 }) {
   return (
     <div className="w-full mx-auto space-y-8 font-sans text-slate-800 dark:text-slate-200 animate-fade-in">
@@ -47,6 +50,7 @@ export function GastriteQcmsStudio({
         qrocs={data.qrocs}
         courseSlug={courseSlug}
         explicationMarkdown={explicationMarkdown}
+        isPreview={isPreview}
       />
     </div>
   );

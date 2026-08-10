@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRef, type ChangeEvent } from "react";
 import {
   Clipboard,
   FileText,
@@ -32,15 +32,29 @@ interface SourcesPanelProps {
  * content to a real student, unlike the topbar's Settings menu (inert labels,
  * not factual claims about the user's own data). This app has no
  * multi-source-per-course or web-search-for-sources feature yet, so "Add
- * sources" opens a modal whose only REAL action is "Upload files" (routes to
- * the real upload flow); the other affordances announce themselves as
- * not-yet-available instead of silently doing nothing.
+ * sources" opens a modal whose only REAL action is "Upload files" (opens the
+ * system's native file picker via a hidden input); the other affordances
+ * announce themselves as not-yet-available instead of silently doing
+ * nothing. Backend PDF parsing for this picker isn't wired up yet — only
+ * the file-selection UI is real so far, per the current iteration's scope.
  */
 export function SourcesPanel({ sourceFileName, sourceSize, dateLabel, selected, onToggleSelected }: SourcesPanelProps) {
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function notYetAvailable(feature: string) {
     toast({ variant: "info", title: "Bientôt disponible", description: `${feature} arrive dans une prochaine mise à jour.` });
+  }
+
+  function handleFileSelected(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so selecting the same file again still fires onChange
+    if (!file) return;
+    toast({
+      variant: "info",
+      title: "Fichier sélectionné",
+      description: `${file.name} — le traitement de ce fichier arrive dans une prochaine mise à jour.`,
+    });
   }
 
   return (
@@ -101,11 +115,10 @@ export function SourcesPanel({ sourceFileName, sourceSize, dateLabel, selected, 
               </p>
 
               <div className="mt-6 flex flex-wrap justify-center gap-4">
-                <Button asChild variant="ghost" size="sm">
-                  <Link href="/dashboard">
-                    <Upload className="h-4 w-4" />
-                    Upload files
-                  </Link>
+                <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileSelected} />
+                <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="h-4 w-4" />
+                  Upload files
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => notYetAvailable("L'ajout de sites web")}>
                   <LinkIcon className="h-4 w-4" />

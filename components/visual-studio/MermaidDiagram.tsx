@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 
 let mermaidInitialized = false;
+let lastTheme: boolean | null = null;
 
 /**
  * Renders a Mermaid graph definition to SVG and injects it into the DOM.
  * Mermaid is dynamically imported inside the effect (never at module scope)
  * so none of its browser-only (document/window) code ever runs during SSR.
  */
-export function MermaidDiagram({ id, chart }: { id: string; chart: string }) {
+export function MermaidDiagram({ id, chart, dark = true }: { id: string; chart: string; dark?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,14 +21,21 @@ export function MermaidDiagram({ id, chart }: { id: string; chart: string }) {
       setError(null);
       const { default: mermaid } = await import("mermaid");
 
-      if (!mermaidInitialized) {
+      // Re-initialize whenever the requested theme differs from the last
+      // render — mermaidInitialized used to be a one-time latch (fine when
+      // this component had exactly zero callers), but a real caller can now
+      // render both a light- and a dark-mode instance across the app's
+      // lifetime, and mermaid.initialize() is what actually applies the
+      // theme for every subsequent .render() call.
+      if (!mermaidInitialized || lastTheme !== dark) {
         mermaid.initialize({
           startOnLoad: false,
-          theme: "dark",
+          theme: dark ? "dark" : "default",
           securityLevel: "loose",
           fontFamily: "inherit",
         });
         mermaidInitialized = true;
+        lastTheme = dark;
       }
 
       try {

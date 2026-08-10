@@ -434,12 +434,15 @@ export function InteractiveQuiz({
   qrocs,
   courseSlug,
   explicationMarkdown,
+  isPreview = false,
 }: {
   qcms: Qcm[];
   qrocs: Qroc[];
   courseSlug: string;
   /** The course's Explication content — enables the "Voir le concept" modal to show the matched chapter instead of just the QCM's own explanation. */
   explicationMarkdown?: string;
+  /** Studio preview mode (an ephemeral, unpersisted course): keeps every visual/interactive behavior (click-to-answer, score, explanations) but skips the /api/srs/attempt network write, which would 404/fail since courseSlug isn't a real Supabase row. Defaults to false — zero behavior change for the real Pleurésie/Gastrite/Appendicite pages. */
+  isPreview?: boolean;
 }) {
   const [qcmAnswers, setQcmAnswers] = useState<Record<number, QcmAnswerState>>({});
   const [revealedQrocs, setRevealedQrocs] = useState<Record<number, boolean>>({});
@@ -511,6 +514,7 @@ export function InteractiveQuiz({
 
   /** Fire-and-forget SRS write — a failed write never blocks the student from seeing their own result, it only means their Weakness Radar won't reflect this attempt. */
   async function recordAttempt(qcmId: string, isCorrect: boolean) {
+    if (isPreview) return; // Studio preview: local answer state already updated by the caller, nothing to persist.
     setGradingKey(qcmId);
     try {
       const res = await fetch("/api/srs/attempt", {
@@ -538,6 +542,11 @@ export function InteractiveQuiz({
   }
 
   async function recordQrocAttempt(id: number, isCorrect: boolean) {
+    if (isPreview) {
+      // No real courseSlug to persist against — grade locally only, same self-reported mechanic.
+      setGradedQrocs((prev) => ({ ...prev, [id]: isCorrect }));
+      return;
+    }
     const key = `qroc-${id}`;
     setGradingKey(key);
     try {

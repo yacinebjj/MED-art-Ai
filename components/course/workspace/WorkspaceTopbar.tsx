@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { Copy, Moon, Settings, Share2, Sparkles, Sun } from "lucide-react";
+import { Copy, Moon, Settings, Share2, Stethoscope, Sun } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import {
   DropdownMenu,
@@ -34,12 +34,13 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-2 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex min-w-0 items-center gap-3">
-        <Link
-          href="/dashboard"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-secondary-600 text-white"
-        >
-          <Sparkles className="h-4 w-4" />
+        <Link href="/dashboard" className="flex shrink-0 items-center gap-2">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-secondary-600 text-white">
+            <Stethoscope className="h-4 w-4" />
+          </span>
+          <span className="hidden text-sm font-bold text-gray-900 dark:text-gray-100 sm:inline">Med Art AI</span>
         </Link>
+        <span className="hidden h-6 w-px shrink-0 bg-gray-200 dark:bg-neutral-700 sm:block" />
         <h1 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
           {title || "Cours"}
         </h1>
@@ -47,7 +48,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
 
       <div className="flex items-center gap-2">
         <Button asChild size="sm" className="rounded-full">
-          <Link href="/dashboard">Create notebook</Link>
+          <Link href="/dashboard">Créer des notes</Link>
         </Button>
 
         <Button variant="ghost" size="icon" aria-label="Copier le lien">

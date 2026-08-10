@@ -32,12 +32,16 @@ const MODULE_TITLE = "Anatomie — 1ère Année";
 
 function AnatomieSourcesPanel() {
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function notYetAvailable() {
+  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
     toast({
       variant: "info",
-      title: "Bientôt disponible",
-      description: "L'ajout de sources pour ce module arrive dans une prochaine mise à jour.",
+      title: "Fichier sélectionné",
+      description: `${file.name} — le traitement de ce fichier arrive dans une prochaine mise à jour.`,
     });
   }
 
@@ -55,7 +59,8 @@ function AnatomieSourcesPanel() {
       </div>
 
       <div className="flex flex-1 flex-col space-y-4 overflow-y-auto p-4">
-        <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={notYetAvailable}>
+        <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileSelected} />
+        <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => fileInputRef.current?.click()}>
           <Plus className="h-4 w-4" />
           Add sources
         </Button>
