@@ -54,7 +54,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (user && (pathname === "/login" || pathname === "/register")) {
+  if (user && (pathname === "/login" || pathname === "/register" || pathname === "/")) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/dashboard";
     redirectUrl.search = "";

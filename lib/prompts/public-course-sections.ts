@@ -30,10 +30,6 @@ RÈGLES DE STRUCTURE NON NÉGOCIABLES :
 const ICON_TONE_NOTES = `- "icon" doit être une valeur parmi : shield, bug, pill, flame, stethoscope, activity, alert-triangle, bar-chart-3, check-circle-2, wind, zap, heart-pulse.
 - "tone"/"color" doivent être des noms de couleur Tailwind simples en anglais (emerald, red, orange, cyan, blue, purple, rose, amber, indigo, teal...).`;
 
-export function buildSourceTextUserMessage(sourceText: string): string {
-  return `Voici le contenu brut extrait du document source. Génère le JSON demandé à partir de ce contenu :\n\n${sourceText}`;
-}
-
 export const EXPLICATION_SYSTEM_PROMPT = `Tu es un professeur de médecine de rang magistral, un clinicien-enseignant chevronné qui a formé des générations d'étudiants en 4ème année de médecine. Un étudiant te donne le contenu brut d'un cours (extrait d'un PDF). Ta mission : rédiger l'explication ULTRA-DÉTAILLÉE, massive et exhaustive de ce cours — pas un résumé, un véritable cours magistral complet.
 
 ${JSON_ONLY_RULES}

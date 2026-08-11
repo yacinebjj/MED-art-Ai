@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Columns2, Copy, Loader2, MoreVertical, Pin, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ArrowUp, Columns2, Copy, Loader2, MoreVertical, Pin, Quote, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   PROSE_CLASSES,
@@ -45,6 +45,9 @@ interface ChatDocumentPanelProps {
   isSplitScreen: boolean;
   onToggleSplitScreen: () => void;
   dark: boolean;
+  /** The passage "Ask MedArt" inserted as a citation above the composer — shown as a dismissible blockquote-style chip, prepended to the actual message (as real markdown "> ...") only when the student sends. */
+  quotedText: string | null;
+  onClearQuote: () => void;
 }
 
 /**
@@ -70,6 +73,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     isSplitScreen,
     onToggleSplitScreen,
     dark,
+    quotedText,
+    onClearQuote,
   },
   ref
 ) {
@@ -94,7 +99,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (input.trim().length === 0 || isTyping) return;
+    if ((input.trim().length === 0 && !quotedText) || isTyping) return;
     onSend();
   }
 
@@ -132,8 +137,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Customize notebook</DropdownMenuItem>
-              <DropdownMenuItem onSelect={onClearHistory}>Delete chat history</DropdownMenuItem>
+              <DropdownMenuItem>Personnaliser MedArt</DropdownMenuItem>
+              <DropdownMenuItem onSelect={onClearHistory}>Nouvelle conversation</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -217,6 +222,20 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       )}
 
       <div className="border-t border-gray-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+        {quotedText && (
+          <div className="mb-2 flex items-start gap-2 rounded-xl border-l-4 border-gray-400 bg-gray-100 px-3 py-2 dark:border-gray-500 dark:bg-neutral-800">
+            <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
+            <p className="line-clamp-2 flex-1 text-xs italic text-gray-600 dark:text-gray-400">{quotedText}</p>
+            <button
+              type="button"
+              onClick={onClearQuote}
+              aria-label="Retirer la citation"
+              className="shrink-0 rounded-full p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2 rounded-3xl bg-gray-100 p-2 dark:bg-neutral-800"
@@ -239,7 +258,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           <Button
             type="submit"
             size="icon"
-            disabled={input.trim().length === 0 || isTyping}
+            disabled={(input.trim().length === 0 && !quotedText) || isTyping}
             className="shrink-0 rounded-full"
             aria-label="Envoyer"
           >

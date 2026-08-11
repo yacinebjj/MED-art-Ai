@@ -54,6 +54,13 @@ export interface ButtonProps
   isLoading?: boolean;
 }
 
+// Wrapped so a Button rendered `asChild` (e.g. wrapping a <Link> for the
+// landing page's primary CTAs) gets the exact same hover/tap feedback as a
+// plain <button> — previously this branch used a bare Slot with zero motion,
+// so the app's most prominent CTAs ("Commencer gratuitement", "Créer mon
+// compte étudiant") had no tap feedback at all.
+const MotionSlot = motion.create(Slot);
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (
     { className, variant, size, asChild = false, isLoading = false, disabled, children, ...props },
@@ -61,12 +68,16 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     if (asChild) {
       return (
-        <Slot
+        <MotionSlot
+          ref={ref}
+          whileHover={disabled ? undefined : { scale: 1.02 }}
+          whileTap={disabled ? undefined : { scale: 0.97 }}
+          transition={{ duration: 0.12 }}
           className={cn(buttonVariants({ variant, size }), className)}
           {...(props as Record<string, unknown>)}
         >
           {children}
-        </Slot>
+        </MotionSlot>
       );
     }
 

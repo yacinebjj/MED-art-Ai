@@ -168,6 +168,8 @@ export const MindMapNodeSchema = z.object({
    * approach (v6) was tried and reverted.
    */
   icon: z.string().optional().default("stethoscope"),
+  /** Short real clinical elaboration (score/classification/mechanism precision) shown under the node's label in DynamicMindMapStudio's v11 radial cards — optional/lenient like "icon" above, since a missing detail on one node must never fail the whole generation. */
+  detail: z.string().optional().default(""),
 });
 const MindMapLinkSchema = z.object({
   source: z.string(),

@@ -117,3 +117,43 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ success: true, course: toSummary(data as StudioCourseRow) });
 }
+
+/** "Supprimer toutes les sources" from a module card's ⋮ menu — wipes every course this student uploaded into this module. The curriculum module row itself (Anatomie, Cytologie...) is never touched, only their own studio_courses rows. */
+export async function DELETE(request: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`studio-courses-bulk-delete:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
+  const moduleIdParam = request.nextUrl.searchParams.get("moduleId");
+  const moduleId = moduleIdParam ? Number(moduleIdParam) : NaN;
+  if (!Number.isFinite(moduleId)) {
+    return NextResponse.json({ success: false, error: "'moduleId' est requis et doit être un nombre." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("studio_courses")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("curriculum_module_id", moduleId);
+
+  if (error) {
+    console.error("[studio/courses:bulk-delete] Échec suppression Supabase:", error);
+    return NextResponse.json({ success: false, error: `Suppression échouée : ${error.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}

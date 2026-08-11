@@ -1,25 +1,38 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MailCheck } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
-import { ALGERIAN_FACULTIES, SPECIALTIES, getAcademicYearOptions } from "@/lib/constants";
+import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
+import type { AcademicYear, Specialty } from "@/types/academic";
 
 const FACULTY_OPTIONS = ALGERIAN_FACULTIES.map((name) => ({ value: name, label: name }));
+
+/**
+ * Maps a curriculum_specialties.name (the real, DB-backed row picked below)
+ * to the narrow enum StudentProfile.specialty still expects in
+ * auth.user_metadata (see lib/auth.ts) — kept in sync with the exact 3 rows
+ * seeded in supabase/schema.sql. Only used for that legacy metadata field;
+ * the real linkage that drives the Dashboard's "Mon Programme" is
+ * specialtyId/academicYearId, PATCHed straight to `profiles` below.
+ */
+const SPECIALTY_NAME_TO_ENUM: Record<string, "medicine" | "dentistry" | "pharmacy"> = {
+  Médecine: "medicine",
+  Pharmacie: "pharmacy",
+  Dentaire: "dentistry",
+};
 
 interface FormState {
   fullName: string;
   email: string;
   password: string;
   university: string;
-  specialty: string;
-  academicYear: string;
 }
 
 const INITIAL_STATE: FormState = {
@@ -27,10 +40,19 @@ const INITIAL_STATE: FormState = {
   email: "",
   password: "",
   university: "",
-  specialty: "",
-  academicYear: "",
 };
 
+/**
+ * Spécialité + Année are sourced live from Supabase (curriculum_specialties /
+ * curriculum_academic_years), exactly like the Settings page's own picker —
+ * and PATCHed to profiles.specialty_id/academic_year_id the moment sign-up
+ * succeeds, not left for the student to set later. Before this, registration
+ * only ever wrote a specialty/année STRING into auth.user_metadata, which
+ * `/api/profile` (and therefore the Dashboard's "Mon Programme" section)
+ * never reads — a brand-new student always landed on "Choisis ta spécialité
+ * dans les Paramètres" with no indication anything was actually missing,
+ * since they'd just filled in a specialty/année field one screen earlier.
+ */
 export function RegisterForm() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -38,23 +60,72 @@ export function RegisterForm() {
   const [error, setError] = useState<string | null>(null);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
 
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+  const [years, setYears] = useState<AcademicYear[]>([]);
+  const [specialtyId, setSpecialtyId] = useState<number | null>(null);
+  const [academicYearId, setAcademicYearId] = useState<number | null>(null);
+  const [yearsLoading, setYearsLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/curriculum/specialties")
+      .then((res) => res.json())
+      .then((data) => setSpecialties(data.specialties ?? []))
+      .catch(() => setSpecialties([]));
+  }, []);
+
+  useEffect(() => {
+    if (specialtyId == null) {
+      setYears([]);
+      return;
+    }
+    let cancelled = false;
+    setYearsLoading(true);
+    setAcademicYearId(null);
+
+    fetch(`/api/curriculum/years?specialtyId=${specialtyId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setYears(data.years ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setYears([]);
+      })
+      .finally(() => {
+        if (!cancelled) setYearsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [specialtyId]);
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => {
-      const next = { ...prev, [key]: value };
-      // The available years depend on the specialty — drop a now-invalid
-      // selection instead of silently submitting a mismatched year.
-      if (key === "specialty") {
-        next.academicYear = "";
-      }
-      return next;
-    });
+    setForm((prev) => ({ ...prev, [key]: value }));
+    setError(null);
+  }
+
+  function handleSpecialtyChange(value: string) {
+    setSpecialtyId(Number(value));
+    setError(null);
+  }
+
+  function handleYearChange(value: string) {
+    setAcademicYearId(Number(value));
     setError(null);
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (specialtyId == null || academicYearId == null) {
+      setError("Choisis ta spécialité et ton année.");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
+
+    const specialtyName = specialties.find((s) => s.id === specialtyId)?.name ?? "";
+    const yearName = years.find((y) => y.id === academicYearId)?.name ?? "";
 
     const supabase = createClient();
     const { data, error: signUpError } = await supabase.auth.signUp({
@@ -65,26 +136,43 @@ export function RegisterForm() {
         data: {
           full_name: form.fullName,
           university: form.university,
-          specialty: form.specialty,
-          academic_year: form.academicYear,
+          specialty: SPECIALTY_NAME_TO_ENUM[specialtyName] ?? "medicine",
+          academic_year: yearName,
         },
       },
     });
 
-    setIsLoading(false);
-
     if (signUpError) {
+      setIsLoading(false);
       setError(translateAuthError(signUpError.message));
       return;
     }
 
     if (data.session) {
-      // Email confirmation is disabled on this project — the student is
-      // already logged in.
+      // Real curriculum linkage — this is what makes "Mon Programme" render
+      // on the very first Dashboard load, with zero extra trip to Settings.
+      // Awaited before navigating (not fire-and-forget, not refreshed via
+      // AuthProvider — this page renders outside its tree, under
+      // app/(auth)/, so there's no useAuth() to call here): the fresh
+      // AuthProvider instance that mounts under app/dashboard/layout.tsx
+      // right after navigation runs its own bootstrap fetch of
+      // GET /api/profile, which only sees this row if the PATCH below has
+      // already landed by then.
+      await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ specialtyId, academicYearId }),
+      });
+      setIsLoading(false);
       router.push("/dashboard");
       router.refresh();
     } else {
-      // Confirmation email sent — no session until they click the link.
+      // Confirmation email sent — no session until they click the link, so
+      // there's no authenticated PATCH /api/profile to make yet. They'll
+      // land on the same "Choisis ta spécialité" prompt once, on Settings,
+      // after confirming — a real gap, but a rare one (this project's own
+      // signUp call currently disables email confirmation in practice).
+      setIsLoading(false);
       setAwaitingConfirmation(true);
     }
   }
@@ -109,6 +197,9 @@ export function RegisterForm() {
       </div>
     );
   }
+
+  const specialtyOptions = specialties.map((s) => ({ value: String(s.id), label: s.name }));
+  const yearOptions = years.map((y) => ({ value: String(y.id), label: y.name }));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -163,20 +254,21 @@ export function RegisterForm() {
           label="Spécialité"
           name="specialty"
           placeholder="Choisis"
-          options={SPECIALTIES}
+          options={specialtyOptions}
           required
-          value={form.specialty}
-          onValueChange={(value) => update("specialty", value)}
+          value={specialtyId != null ? String(specialtyId) : ""}
+          onValueChange={handleSpecialtyChange}
         />
 
         <Select
           label="Année"
           name="academicYear"
-          placeholder="Choisis"
-          options={getAcademicYearOptions(form.specialty)}
+          placeholder={specialtyId == null ? "Choisis d'abord" : yearsLoading ? "Chargement..." : "Choisis"}
+          options={yearOptions}
           required
-          value={form.academicYear}
-          onValueChange={(value) => update("academicYear", value)}
+          disabled={specialtyId == null || yearsLoading}
+          value={academicYearId != null ? String(academicYearId) : ""}
+          onValueChange={handleYearChange}
         />
       </div>
 

@@ -1,5 +1,8 @@
 export const APP_NAME = "Med Art AI";
 
+/** The hand-authored reference/showcase course ("masterclass") — the one course every visitor can open regardless of their own data, via the global "Voir la Démo" entry point (components/layout/Topbar.tsx). Single source of truth for this slug; do not redefine it locally elsewhere. */
+export const PLEURESIE_DEMO_SLUG = "3-la-pleuresie-purulente-support-du-dr-firan-1785259421242";
+
 export const SPECIALTIES = [
   { value: "medicine", label: "Médecine" },
   { value: "dentistry", label: "Médecine Dentaire" },
@@ -42,14 +45,27 @@ export function getAcademicYearOptions(specialty: string) {
 }
 
 export const ALGERIAN_FACULTIES = [
-  "Université de Blida",
-  "Université d'Alger",
-  "Université de Médéa",
-  "Université d'Oran",
+  "Université d'Alger 1 (Benyoucef Benkhedda)",
+  "Université de Blida 1 (Saad Dahlab)",
+  "Université d'Oran 1 (Ahmed Ben Bella)",
+  "Université de Constantine 3 (Salah Boubnider)",
+  "Université d'Annaba (Badji Mokhtar)",
+  "Université de Tlemcen (Abou Bekr Belkaid)",
+  "Université de Sétif 1 (Ferhat Abbas)",
+  "Université de Batna 2 (Mostefa Ben Boulaid)",
+  "Université de Sidi Bel Abbès (Djillali Liabes)",
+  "Université de Tizi Ouzou (Mouloud Mammeri)",
+  "Université de Béjaïa (Abderrahmane Mira)",
+  "Université de Mostaganem (Abdelhamid Ibn Badis)",
+  "Université de Ouargla (Kasdi Merbah)",
+  "Université de Laghouat (Amar Telidji)",
+  "Université de Béchar (Tahri Mohammed)",
+  "Université de Biskra (Mohamed Khider)",
+  "Université de Tamanrasset",
   "Autre",
 ] as const;
 
-export const ACCEPTED_FILE_TYPES = [".pdf", ".pptx", ".docx"];
+export const ACCEPTED_FILE_TYPES = [".pdf", ".pptx", ".docx", ".txt"];
 
 export const OUTPUT_TABS = [
   {

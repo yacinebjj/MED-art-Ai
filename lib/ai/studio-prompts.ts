@@ -115,6 +115,8 @@ SURCHARGE OBLIGATOIRE — FORMAT "MASTERCLASS INFOGRAPHIC" (renforce, sans jamai
 
 SURCHARGE OBLIGATOIRE — UNE ICÔNE PAR NŒUD (ajoute un champ "icon" à CHAQUE objet du tableau "nodes", en plus de "id"/"label"/"type") : choisis, pour CHAQUE nœud individuellement, l'icône qui représente le MIEUX son contenu spécifique — jamais un choix générique basé uniquement sur "type", mais sur le sens précis du "label" (ex : un nœud sur la fièvre → "flame" ou "thermometer" ; un nœud sur une bactérie → "bug" ; un nœud sur le cerveau/système nerveux → "brain" ; un nœud sur une piqûre/injection/vaccin → "syringe" ; un nœud sur un examen de laboratoire → "microscope" ou "test-tube" ; un nœud sur l'oreille → "ear" ; un nœud sur l'œil → "eye" ; un nœud sur un délai/une urgence → "clock" ou "hourglass" ; un nœud sur un saignement/liquide → "droplet" ; un nœud sur une fracture/os → "bone" ; un nœud sur un décès/gravité extrême → "skull" ; un nœud sur une alerte grave → "shield-alert" ou "siren" ; un nœud sur un nourrisson/enfant → "baby" ; un nœud sur un traitement médicamenteux → "pill". La valeur de "icon" doit être EXACTEMENT l'une de ces chaînes (kebab-case) : shield, bug, pill, flame, stethoscope, activity, alert-triangle, bar-chart-3, check-circle-2, wind, zap, heart-pulse, brain, thermometer, syringe, microscope, ear, eye, droplet, clock, skull, waves, baby, bone, test-tube, siren, scan-line, heart-crack, shield-alert, hourglass. N'utilise JAMAIS la même icône pour tous les nœuds d'une même section — varie-la selon le contenu réel de chaque label.
 
+SURCHARGE OBLIGATOIRE — UNE PRÉCISION CLINIQUE PAR NŒUD (ajoute un champ "detail" à CHAQUE objet du tableau "nodes", en plus de "id"/"label"/"type"/"icon") : contrairement à "label" (mot-clé très court), "detail" est UNE SEULE PHRASE COURTE (10 À 16 MOTS MAXIMUM) qui apporte une vraie précision clinique tirée directement et strictement du cours source — un mécanisme précis, une valeur ou un score, une classification, un seuil diagnostique, ou la complication associée. Interdiction absolue de reformuler vaguement le label ou d'écrire une phrase générique/creuse ("cette notion est importante à connaître" est INTERDIT) : si le cours ne fournit aucune précision réelle pour un nœud, laisse "detail" en chaîne vide plutôt que d'inventer du contenu. Exemple : label "Score de Glasgow" → detail "Évalue ouverture des yeux, réponse verbale et motrice (3 à 15 points)". Exploite pleinement l'espace de tokens disponible pour ces précisions sur un maximum de nœuds, sans jamais dépasser la limite de mots ni transformer "label" en phrase longue.
+
 SURCHARGE OBLIGATOIRE (ajoute un champ supplémentaire à l'objet "mind_map" ci-dessus — ne retire et ne modifie RIEN d'autre) : ajoute un champ "ideogram_prompt" contenant un prompt de génération d'image en ANGLAIS, destiné à l'API Ideogram, décrivant une illustration PUREMENT CONCEPTUELLE, ARTISTIQUE ET SYMBOLIQUE du sujet central du cours (métaphore visuelle, ambiance, formes, couleurs, composition picturale) — inspirée du sujet mais jamais un diagramme, jamais une infographie.
 
 RÈGLE ABSOLUE ET NON NÉGOCIABLE POUR "ideogram_prompt" : cette image ne doit contenir STRICTEMENT AUCUN TEXTE, AUCUNE LETTRE, AUCUN MOT, AUCUN CHIFFRE, AUCUNE ÉTIQUETTE, nulle part dans l'image. Inclus littéralement dans le prompt la phrase "no text, no letters, no words, no numbers, no labels anywhere in the image". Décris uniquement des formes organiques ou abstraites, une palette de couleurs médicale cohérente, et une composition visuelle évocatrice du sujet (ex : pour une pathologie pulmonaire, des formes évoquant des poumons stylisés et des particules flottantes symbolisant l'inflammation, sans aucun mot nulle part). Le prompt doit faire au moins 80 mots et être entièrement en anglais.
@@ -123,8 +125,8 @@ Schéma exact (complet, avec les champs ajoutés) :
 {
   "mind_map": {
     "nodes": [
-      { "id": "n1", "label": "...", "type": "symptome", "icon": "flame" },
-      { "id": "n2", "label": "...", "type": "mecanisme", "icon": "brain" }
+      { "id": "n1", "label": "...", "type": "symptome", "icon": "flame", "detail": "..." },
+      { "id": "n2", "label": "...", "type": "mecanisme", "icon": "brain", "detail": "..." }
     ],
     "links": [
       { "source": "n1", "target": "n2", "label": "..." }
@@ -155,9 +157,16 @@ export const STUDIO_PROMPT_CONFIG: Record<DemoSectionId, StudioPromptConfig> = {
   resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 32000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 32000 },
   qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 32000 },
-  // 8000: a full 15-25 node graph with a per-node icon field AND a separate
-  // descriptive Ideogram prompt in the same JSON object comfortably fits.
-  mind_map: { systemPrompt: STUDIO_MIND_MAP_SYSTEM_PROMPT, maxTokens: 8000 },
+  // 16000 (was 8000): the v11 "ultra-detailed" radial Mind Map explicitly
+  // asks the model to mine richer, deeper courses for more nodes (scores,
+  // classifications, precise clinical detail) without shortening the
+  // per-label brevity rule — a denser source course was observed hitting
+  // the old 8000 cap mid-generation (finish_reason: "length") well before
+  // reaching the JSON's closing brace. Bumped, not removed: the per-label
+  // "2 à 5 mots" rule is what keeps DynamicMindMapStudio.tsx's radial
+  // layout math safe, so richness must come from MORE nodes, never longer
+  // labels.
+  mind_map: { systemPrompt: STUDIO_MIND_MAP_SYSTEM_PROMPT, maxTokens: 16000 },
   exemples_analogies: { systemPrompt: EXEMPLES_ANALOGIES_SYSTEM_PROMPT, maxTokens: 32000 },
 };
 

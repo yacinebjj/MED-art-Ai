@@ -63,6 +63,19 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /**
+   * When true, this message is skipped entirely when building the `history`
+   * array for every LATER request — it still displayed in the transcript
+   * and was itself sent to the model for its own reply, but never resends
+   * afterward. Set on BOTH halves of a one-off contextual quick-action
+   * exchange ("Ask MedArt"/"Translate" on a text selection): the user's
+   * message (which embeds the quoted passage) AND the assistant's resulting
+   * reply (which, being a full medical explanation, is just as capable of
+   * anchoring an unrelated later message — like a plain "hello" — back onto
+   * the old topic if left in history). Trimming only the user side isn't
+   * enough; the reply has to go too.
+   */
+  excludeFromHistory?: boolean;
 }
 
 /* ----------------------------------------------------------------------- */

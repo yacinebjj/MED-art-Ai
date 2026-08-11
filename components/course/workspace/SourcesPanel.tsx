@@ -1,22 +1,21 @@
 "use client";
 
-import { useRef, type ChangeEvent } from "react";
-import {
-  Clipboard,
-  FileText,
-  Link2 as LinkIcon,
-  PanelLeftClose,
-  Plus,
-  Search,
-  Triangle,
-  Upload,
-} from "lucide-react";
+import { useState } from "react";
+import { Columns2, FileText, MoreVertical, PanelLeftClose, Plus, Trash2, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Checkbox } from "@/components/ui/Checkbox";
-import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/Dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/DropdownMenu";
+import { CourseStatsModal } from "@/components/dashboard/CourseStatsModal";
+import { UploadModal } from "@/components/dashboard/UploadModal";
+import type { CourseStats } from "@/lib/course-stats";
 
 interface SourcesPanelProps {
   sourceFileName: string;
@@ -24,37 +23,50 @@ interface SourcesPanelProps {
   dateLabel: string;
   selected: boolean;
   onToggleSelected: (value: boolean) => void;
+  courseTitle: string;
+  courseSlug: string;
+  /** Real when available (see the dashboard's course_mastery fetch) — undefined fields render an honest "—"/"pas encore de données" in CourseStatsModal rather than a fabricated number. This workspace doesn't fetch mastery data itself (yet), so this is deliberately the honest-empty default until it does. */
+  stats?: CourseStats;
+  isSplitScreen: boolean;
+  onToggleSplitScreen: () => void;
+  /** Collapses this panel to the Chat+Studio split view (the same layout "Afficher le cours" opens, minus its source-view content) — reversible any time via the Chat header's own split-screen toggle. */
+  onClosePanel: () => void;
 }
 
 /**
  * Left "Sources" panel. Only the course's ONE real uploaded source is
  * rendered — inventing extra placeholder rows would misrepresent real course
- * content to a real student, unlike the topbar's Settings menu (inert labels,
- * not factual claims about the user's own data). This app has no
- * multi-source-per-course or web-search-for-sources feature yet, so "Add
- * sources" opens a modal whose only REAL action is "Upload files" (opens the
- * system's native file picker via a hidden input); the other affordances
- * announce themselves as not-yet-available instead of silently doing
- * nothing. Backend PDF parsing for this picker isn't wired up yet — only
- * the file-selection UI is real so far, per the current iteration's scope.
+ * content to a real student. "Add sources" opens the same unified,
+ * tabbed <UploadModal> used on the dashboard (Fichier/Texte brut/Drive) —
+ * this app has no multi-source-per-course backend yet, so both submit paths
+ * honestly reject with an explanatory message shown inline in the modal
+ * (never a false "success") instead of silently doing nothing.
  */
-export function SourcesPanel({ sourceFileName, sourceSize, dateLabel, selected, onToggleSelected }: SourcesPanelProps) {
+export function SourcesPanel({
+  sourceFileName,
+  sourceSize,
+  dateLabel,
+  selected,
+  onToggleSelected,
+  courseTitle,
+  courseSlug,
+  stats,
+  isSplitScreen,
+  onToggleSplitScreen,
+  onClosePanel,
+}: SourcesPanelProps) {
   const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
 
-  function notYetAvailable(feature: string) {
-    toast({ variant: "info", title: "Bientôt disponible", description: `${feature} arrive dans une prochaine mise à jour.` });
+  async function rejectNotYetAvailable(): Promise<string> {
+    throw new Error("Ce cours ne supporte qu'une seule source pour l'instant — l'ajout d'une source supplémentaire arrive dans une prochaine mise à jour.");
   }
 
-  function handleFileSelected(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // reset so selecting the same file again still fires onChange
-    if (!file) return;
-    toast({
-      variant: "info",
-      title: "Fichier sélectionné",
-      description: `${file.name} — le traitement de ce fichier arrive dans une prochaine mise à jour.`,
-    });
+  function handleConfirmDelete() {
+    setDeleteOpen(false);
+    toast({ variant: "info", title: "Bientôt disponible", description: "La suppression d'une source individuelle arrive dans une prochaine mise à jour." });
   }
 
   return (
@@ -63,6 +75,7 @@ export function SourcesPanel({ sourceFileName, sourceSize, dateLabel, selected, 
         <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sources</h2>
         <button
           type="button"
+          onClick={onClosePanel}
           aria-label="Fermer le panneau"
           className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100"
         >
@@ -71,86 +84,10 @@ export function SourcesPanel({ sourceFileName, sourceSize, dateLabel, selected, 
       </div>
 
       <div className="flex flex-1 flex-col space-y-4 overflow-y-auto p-4">
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="w-full rounded-xl">
-              <Plus className="h-4 w-4" />
-              Add sources
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-3xl rounded-3xl p-8">
-            <DialogHeader>
-              <DialogTitle className="text-center text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                Create Audio and Video Overviews from{" "}
-                <span className="bg-gradient-to-r from-emerald-500 to-blue-500 bg-clip-text text-transparent">
-                  your documents
-                </span>
-              </DialogTitle>
-            </DialogHeader>
-
-            <div className="mt-6 flex items-center gap-2 rounded-full border border-gray-300 p-2 shadow-sm dark:border-neutral-700">
-              <Input
-                placeholder="Search the web for new sources"
-                className="flex-1 border-none bg-transparent shadow-none dark:text-gray-100 dark:placeholder:text-gray-500"
-              />
-              <Badge variant="neutral" className="shrink-0">
-                Web
-              </Badge>
-              <Badge variant="neutral" className="shrink-0">
-                Fast research
-              </Badge>
-              <button
-                type="button"
-                onClick={() => notYetAvailable("La recherche web de sources")}
-                aria-label="Rechercher"
-                className="shrink-0 rounded-full p-2 text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-neutral-800"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-6 flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-10 text-center dark:bg-neutral-900/50">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                or drop your files (pdf, images, docs, audio, and more)
-              </p>
-
-              <div className="mt-6 flex flex-wrap justify-center gap-4">
-                <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileSelected} />
-                <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}>
-                  <Upload className="h-4 w-4" />
-                  Upload files
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => notYetAvailable("L'ajout de sites web")}>
-                  <LinkIcon className="h-4 w-4" />
-                  Websites
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => notYetAvailable("La connexion à Drive")}>
-                  <Triangle className="h-4 w-4" />
-                  Drive
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => notYetAvailable("Le collage de texte")}>
-                  <Clipboard className="h-4 w-4" />
-                  Copied text
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-          <Input
-            placeholder="Search the web..."
-            className="border-none bg-gray-100 pl-9 shadow-none dark:bg-neutral-800 dark:text-gray-100 dark:placeholder:text-gray-500"
-          />
-        </div>
-
-        <div className="flex items-center justify-end gap-2 text-sm text-gray-500 dark:text-gray-400">
-          <label htmlFor="select-all-sources" className="cursor-pointer select-none">
-            Select all
-          </label>
-          <Checkbox id="select-all-sources" checked={selected} onCheckedChange={(v) => onToggleSelected(v === true)} />
-        </div>
+        <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => setUploadOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Add sources
+        </Button>
 
         <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
           <FileText className="mt-0.5 h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
@@ -161,8 +98,69 @@ export function SourcesPanel({ sourceFileName, sourceSize, dateLabel, selected, 
             </p>
           </div>
           <Checkbox checked={selected} onCheckedChange={(v) => onToggleSelected(v === true)} />
+
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+              aria-label="Options de la source"
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={onToggleSplitScreen}>
+                <Columns2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                {isSplitScreen ? "Fermer l'écran partagé" : "Afficher le cours"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
+                <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                Statistiques
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
+                <Trash2 className="h-4 w-4" />
+                Supprimer
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Supprimer cette source ?</DialogTitle>
+            <DialogDescription>
+              « {sourceFileName} » sera retirée de ce cours. Cette action est irréversible.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)}>
+              Annuler
+            </Button>
+            <Button type="button" variant="danger" onClick={handleConfirmDelete}>
+              Supprimer
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <CourseStatsModal
+        open={statsOpen}
+        onOpenChange={setStatsOpen}
+        courseTitle={courseTitle}
+        courseSlug={courseSlug}
+        stats={stats ?? { qcmSuccessPct: undefined, srsMasteryPct: undefined, readingPct: undefined }}
+      />
+
+      <UploadModal
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onUploaded={() => {}}
+        onSubmitFile={rejectNotYetAvailable}
+        onSubmitText={rejectNotYetAvailable}
+        title="Ajouter une source"
+        description="Importe un document ou colle du texte pour ce cours."
+      />
     </>
   );
 }

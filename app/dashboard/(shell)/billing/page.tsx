@@ -14,8 +14,13 @@ interface SubscriptionInfo {
   status: string;
   active: boolean;
   periodEnd: string | null;
-  generationsUsed: number;
-  generationCap: number | null;
+  effectivePlan: PlanId;
+  effectivePlanLabel: string;
+  unlimitedThisPeriod: boolean;
+  coursesUsed: number;
+  courseCap: number;
+  highlightMessagesUsed: number;
+  highlightMessageCap: number;
 }
 
 export default function BillingPage() {
@@ -99,11 +104,11 @@ function BillingPageContent() {
         </Card>
       )}
 
-      {subscription?.active && (
+      {subscription && (
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">
-            Formule actuelle : <span className="font-semibold text-foreground">{subscription.planLabel}</span>
-            {subscription.periodEnd && (
+            Formule actuelle : <span className="font-semibold text-foreground">{subscription.effectivePlanLabel}</span>
+            {subscription.active && subscription.effectivePlan === subscription.plan && subscription.periodEnd && (
               <>
                 {" "}
                 — valable jusqu'au{" "}
@@ -112,21 +117,24 @@ function BillingPageContent() {
                 </span>
               </>
             )}
+            {subscription.effectivePlan !== subscription.plan && (
+              <> — ta formule « {subscription.planLabel} » a expiré, tu es repassé(e) en Freemium.</>
+            )}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {subscription.generationCap === null
-              ? "Générations IA illimitées."
-              : `${subscription.generationsUsed} / ${subscription.generationCap} générations IA utilisées cette période.`}
+            {subscription.unlimitedThisPeriod
+              ? "Essai gratuit en cours — cours et messages illimités."
+              : `${subscription.coursesUsed} / ${subscription.courseCap} cours générés ce mois-ci · ${subscription.highlightMessagesUsed} / ${subscription.highlightMessageCap} messages "sélection" ce mois-ci.`}
           </p>
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {Object.values(PLANS).map((plan) => (
           <PlanCard
             key={plan.id}
             plan={plan}
-            isCurrentPlan={subscription?.active === true && subscription.plan === plan.id}
+            isCurrentPlan={subscription?.effectivePlan === plan.id}
             isLoading={loadingPlan === plan.id}
             onSubscribe={() => handleSubscribe(plan.id)}
           />

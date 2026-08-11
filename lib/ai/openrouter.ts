@@ -1,4 +1,4 @@
-import { detectMockPayload, isChatSystemPrompt, MOCK_CHAT_REPLY } from "@/lib/ai/mock-data";
+import { detectMockPayload } from "@/lib/ai/mock-data";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // "anthropic/claude-3.5-sonnet" was retired by OpenRouter (404s with
@@ -6,15 +6,24 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // against GET https://openrouter.ai/api/v1/models.
 const MODEL = "anthropic/claude-sonnet-5";
 
-// Zero-spend local development: every real AI call in this app funnels
-// through callOpenRouter/streamOpenRouter below, so gating it here — rather
-// than in each of the 6 generation routes or the chat route separately —
-// guarantees no code path can accidentally hit the (currently exhausted)
-// OpenRouter balance while NODE_ENV is "development". USE_MOCK_AI lets a
-// deployed non-production environment (e.g. a staging build) opt in too.
-// Exported so lib/ai/embeddings.ts applies the exact same gate to embedding
-// calls instead of re-deriving the flag (and risking the two drifting apart).
-export const USE_MOCK_AI = process.env.NODE_ENV === "development" || process.env.USE_MOCK_AI === "true";
+// Forced model for the chat's "highlight" quick actions (Ask MedArt /
+// Translate on a text selection) — see app/api/courses/chat/route.ts's
+// isHighlightMode. Confirmed live against
+// GET https://openrouter.ai/anthropic/claude-3.5-haiku on the day this was
+// added: real, active model, id exactly as below. Re-verify against
+// GET https://openrouter.ai/api/v1/models if this ever 400s with a
+// "not a valid model ID" error — OpenRouter does retire/rename slugs.
+export const HAIKU_MODEL = "anthropic/claude-3.5-haiku";
+
+// Zero-spend Studio-content generation for local development: callOpenRouter
+// below checks this to serve a canned fixture (lib/ai/mock-data.ts) instead
+// of a real, billed call. Deliberately does NOT gate streamOpenRouter (the
+// chat) — a chat that gives the same fixed answer regardless of the
+// question isn't "cost-controlled", it's broken, and that exact bug (every
+// message answered with a hardcoded "méningite bactérienne" fixture) is why
+// this no longer applies there. Exported so lib/ai/embeddings.ts applies the
+// same gate to embedding calls used by Studio-content generation.
+export const USE_MOCK_AI = process.env.USE_MOCK_AI === "true";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,20 +180,23 @@ export async function callOpenRouter(
  * no client-side SSE parser needed. Used by the MedArt Assistant chat, which
  * needs to render the answer progressively instead of waiting for the whole
  * completion.
+ *
+ * Deliberately NEVER gated by USE_MOCK_AI, unlike callOpenRouter above — a
+ * fixed, unconditional canned reply here (this function used to return the
+ * exact same "méningite bactérienne" fixture for every single message,
+ * regardless of what the student actually typed) makes the chat look
+ * completely broken rather than merely cost-controlled: the whole point of
+ * a chat is that the reply changes with the question. The chat always calls
+ * the real model.
+ *
+ * `options.model` defaults to the standard Sonnet MODEL — pass HAIKU_MODEL
+ * explicitly for the chat's highlight quick actions, which is what forces
+ * that cheap-model routing rather than it happening implicitly/by accident.
  */
 export async function streamOpenRouter(
   messages: ChatMessageInput[],
-  options?: { maxTokens?: number }
+  options?: { maxTokens?: number; model?: string }
 ): Promise<ReadableStream<Uint8Array>> {
-  if (USE_MOCK_AI) {
-    const systemText = findSystemText(messages);
-    if (isChatSystemPrompt(systemText)) {
-      console.log("[MOCK AI] streamOpenRouter interceptée — réponse factice de lib/ai/mock-data.ts, aucun appel réel à OpenRouter.");
-      return buildMockChatStream(MOCK_CHAT_REPLY);
-    }
-    console.warn("[MOCK AI] Mode mock actif mais ce prompt système ne correspond à aucun fixture de streaming — appel réel à OpenRouter effectué.");
-  }
-
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
@@ -201,7 +213,7 @@ export async function streamOpenRouter(
         "X-Title": "Med Art AI",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: options?.model ?? MODEL,
         messages,
         max_tokens: options?.maxTokens ?? 4096,
         stream: true,
@@ -253,28 +265,4 @@ export async function streamOpenRouter(
   });
 
   return res.body.pipeThrough(unwrapSse);
-}
-
-/**
- * Emits `text` as a `ReadableStream<Uint8Array>`, one word/whitespace token
- * per `pull()`, with a short delay between each — mirrors the incremental,
- * token-by-token shape of the real SSE-unwrapped stream above closely enough
- * to exercise the chat UI's progressive-rendering path in mock mode.
- */
-function buildMockChatStream(text: string): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  const tokens = text.split(/(\s+)/).filter((token) => token.length > 0);
-  let index = 0;
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      if (index >= tokens.length) {
-        controller.close();
-        return;
-      }
-      controller.enqueue(encoder.encode(tokens[index]));
-      index += 1;
-      await delay(20 + Math.random() * 20);
-    },
-  });
 }

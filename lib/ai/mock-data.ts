@@ -1,17 +1,17 @@
 /**
  * Fixture data returned instead of a real OpenRouter call when mock mode is
- * active (see lib/ai/openrouter.ts). Every payload below is a single
- * realistic case — méningite bactérienne aiguë (Infectiologie) — shaped
- * EXACTLY like the JSON schemas in lib/prompts/public-course-sections.ts, so
- * the Studio components render them with zero special-casing versus a real
- * AI response.
+ * active (see lib/ai/openrouter.ts's callOpenRouter — used by Studio content
+ * generation ONLY, never the chat, which always calls the real model). Every
+ * payload below is a single realistic case — méningite bactérienne aiguë
+ * (Infectiologie) — shaped EXACTLY like the JSON schemas in
+ * lib/prompts/public-course-sections.ts, so the Studio components render
+ * them with zero special-casing versus a real AI response.
  *
  * Detection is by system-prompt content, not by an explicit `section`
- * parameter — callOpenRouter/streamOpenRouter only ever see a `messages`
- * array, never which Section enum value the caller is generating. Each
- * marker string below is a substring that exists in exactly one of the
- * prompts in public-course-sections.ts (or the chat route's system prompt)
- * and nowhere else — see detectMockPayload() in openrouter.ts.
+ * parameter — callOpenRouter only ever sees a `messages` array, never which
+ * Section enum value the caller is generating. Each marker string below is a
+ * substring that exists in exactly one of the prompts in
+ * public-course-sections.ts and nowhere else — see detectMockPayload().
  */
 
 export const MOCK_EXPLICATION = `# Méningite bactérienne aiguë : l'urgence qui ne pardonne pas les heures perdues
@@ -703,14 +703,6 @@ export const MOCK_EXEMPLES_ANALOGIES = `## 🫁 1. القاعدة الأساسي
 
 البلوريزي هي مشكل في "الزلاقة" تاع الرية. إذا نشفت وحراشت = سطر وموس في الصدر (Pleurésie sèche). وإذا تعمرت بالماء = الرية تنضغط والمريض يتخنق (Épanchement). والسؤال الذهبي لي يفرق بين كل مريض ومريض: **علاش جا هذا الماء؟** — إذا الجواب "الغشاء مريض" (سيتوكينات، فيبرين، ثقابي كبار) = Exsudat، طبق Critères de Light. وإذا الجواب "المشكل بعيد" (قلب، كبدة، كلاوي) = Transudat، روح عالج السبب الأصلي.`;
 
-export const MOCK_CHAT_REPLY = `Bonne question ! Reprenons ça calmement.
-
-La **méningite bactérienne aiguë** est une urgence parce que le délai avant l'antibiothérapie conditionne directement le pronostic neurologique. Concrètement : chaque heure de retard augmente le risque de séquelles (surdité, épilepsie séquellaire) et le risque de décès.
-
-Le point le plus important à retenir pour ta pratique : si tu vois un **purpura fulminans** (des taches violacées qui ne s'effacent pas quand tu appuies dessus avec un verre), tu traites **avant** d'avoir la moindre confirmation biologique. Ce n'est pas une négligence de "sauter" la ponction lombaire dans ce cas précis — c'est la bonne pratique.
-
-Est-ce que tu veux qu'on détaille la conduite à tenir devant une suspicion sans signe de gravité, ou plutôt les critères qui feraient différer la ponction lombaire ?`;
-
 interface DetectedMock {
   section: string;
   value: unknown;
@@ -753,9 +745,4 @@ export function detectMockPayload(systemText: string): DetectedMock | null {
     return { section, value: STATIC_MOCK_VALUES[section] };
   }
   return null;
-}
-
-/** True when the system prompt is the MedArt Assistant chat persona (app/api/courses/chat/route.ts). */
-export function isChatSystemPrompt(systemText: string): boolean {
-  return systemText.includes("MedArt Assistant");
 }

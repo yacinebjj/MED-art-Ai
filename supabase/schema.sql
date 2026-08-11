@@ -75,6 +75,45 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Migration: 2-plan model (semestriel/annuel, sold only via Chargily) -> the
+-- 6-plan model (freemium/basic/pro/max/semester/annual), where Freemium is a
+-- permanent, un-purchased default floor every account has from day one.
+-- Written as its own idempotent block (drop/re-add the constraint, add the
+-- new column) rather than editing the original CREATE TABLE above, matching
+-- this file's existing convention for evolving a table already in
+-- production (see content_embedding's migration further down for the same
+-- pattern). Safe to re-run.
+-- ---------------------------------------------------------------------------
+alter table subscriptions drop constraint if exists subscriptions_plan_check;
+update subscriptions set plan = 'semester' where plan = 'semestriel';
+update subscriptions set plan = 'annual' where plan = 'annuel';
+alter table subscriptions add constraint subscriptions_plan_check
+  check (plan in ('freemium', 'basic', 'pro', 'max', 'semester', 'annual'));
+
+-- Highlight-chat quota, tracked alongside generations_used. Shares
+-- generations_period_start as its rollover clock (see
+-- lib/subscription.ts's ensureFreshUsagePeriod) rather than adding a second
+-- timestamp column — both counters are monthly allowances that always reset
+-- together, so one shared anchor is simpler and can't drift out of sync.
+alter table subscriptions add column if not exists highlight_messages_used integer not null default 0;
+
+create or replace function increment_highlight_messages_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set highlight_messages_used = highlight_messages_used + 1, updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+-- Backfill: every account created before this migration (or whose signup
+-- trigger hiccupped) gets an implicit Freemium row too, exactly like the
+-- profiles backfill below. Accounts that already have a row (paid or not)
+-- are left untouched by the ON CONFLICT.
+insert into subscriptions (user_id, email, plan, status, period_start, generations_used, generations_period_start, highlight_messages_used)
+select id::text, email, 'freemium', 'active', now(), 0, now(), 0 from auth.users
+on conflict (user_id) do nothing;
+
+-- ---------------------------------------------------------------------------
 -- payments: one row per Chargily checkout attempt, for auditing/reconciliation.
 -- ---------------------------------------------------------------------------
 create table if not exists payments (
@@ -127,6 +166,15 @@ begin
   insert into public.profiles (id, trial_ends_at)
   values (new.id, now() + interval '7 days')
   on conflict (id) do nothing;
+
+  -- Every new signup gets an implicit Freemium row from day one (1 cours/mois,
+  -- 10 messages highlight/mois) — see lib/subscription.ts's resolveEffectivePlan
+  -- for why a Freemium row (not a null one) is what makes quota gating never
+  -- need a lazy upsert race in application code.
+  insert into public.subscriptions (user_id, email, plan, status, period_start, generations_used, generations_period_start, highlight_messages_used)
+  values (new.id::text, new.email, 'freemium', 'active', now(), 0, now(), 0)
+  on conflict (user_id) do nothing;
+
   return new;
 end;
 $$;
@@ -519,6 +567,93 @@ as $$
     and 1 - (c.content_embedding <=> self.content_embedding) >= match_threshold
   order by c.content_embedding <=> self.content_embedding
   limit match_count;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- course_source_chunks: fine-grained, SECTION-LEVEL Smart Clone matching —
+-- distinct from `course_chunks` below, which only ever holds ALREADY
+-- GENERATED content (search, not dedup) and is therefore empty and useless
+-- for a brand-new upload with nothing generated yet. This table chunks the
+-- RAW SOURCE TEXT instead (available immediately at upload, before any
+-- generation — see app/api/generate-course/route.ts and
+-- lib/search/source-chunking.ts), so a new course can be compared against
+-- existing courses at the paragraph level, not just as one whole-document
+-- vector.
+--
+-- Why this exists alongside content_embedding above: a single whole-document
+-- cosine score can miss a real match — two courses whose actual medical
+-- content is 90% identical but whose cover page, OCR artifacts, or section
+-- ordering differ enough dilute that ONE score below the 0.90 threshold.
+-- Comparing chunk-by-chunk catches that: even when the whole document
+-- wouldn't match, individual paragraphs still can. See
+-- match_similar_source_chunks() below and the chunk-based Smart Clone check
+-- in lib/course-generation-shared.ts (generateCourseSection()) for how the
+-- fraction of matched chunks gates cloning.
+-- ---------------------------------------------------------------------------
+create table if not exists course_source_chunks (
+  id bigint generated by default as identity primary key,
+  course_slug text not null references courses (slug) on delete cascade,
+  chunk_index integer not null default 0,
+  content text not null,
+  embedding vector(1536) not null,
+  created_at timestamptz not null default now(),
+  unique (course_slug, chunk_index)
+);
+
+create index if not exists course_source_chunks_embedding_idx
+  on course_source_chunks using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+create index if not exists course_source_chunks_course_slug_idx on course_source_chunks (course_slug);
+
+alter table course_source_chunks enable row level security;
+
+-- For every chunk of p_slug, finds its single closest match among every
+-- OTHER course's chunks (lateral join, top-1 per chunk — cheap, and enough:
+-- the caller only needs to know IF a chunk matched somewhere strongly
+-- enough, not every course it's similar to), then aggregates per candidate
+-- course: how many of p_slug's chunks matched THAT candidate at
+-- >= match_threshold, out of how many chunks p_slug has in total. The
+-- caller divides matched/total to get a coverage ratio and decides whether
+-- to clone a section from that candidate. Note: picking only the single
+-- globally-closest match per chunk means a strong runner-up candidate can be
+-- under-credited for that chunk — a deliberate simplicity/cost trade-off,
+-- not a correctness bug.
+create or replace function match_similar_source_chunks(
+  p_slug text,
+  match_threshold float
+)
+returns table (
+  candidate_slug text,
+  matched_chunks bigint,
+  total_chunks bigint
+)
+language sql stable
+as $$
+  with target_chunks as (
+    select id, embedding from course_source_chunks where course_slug = p_slug
+  ),
+  best_per_chunk as (
+    select
+      tc.id as target_chunk_id,
+      best.course_slug as candidate_slug,
+      best.similarity
+    from target_chunks tc
+    cross join lateral (
+      select csc.course_slug, 1 - (csc.embedding <=> tc.embedding) as similarity
+      from course_source_chunks csc
+      where csc.course_slug <> p_slug
+      order by csc.embedding <=> tc.embedding
+      limit 1
+    ) best
+  )
+  select
+    candidate_slug,
+    count(*) filter (where similarity >= match_threshold) as matched_chunks,
+    (select count(*) from target_chunks) as total_chunks
+  from best_per_chunk
+  group by candidate_slug
+  having count(*) filter (where similarity >= match_threshold) > 0
+  order by matched_chunks desc
+  limit 10;
 $$;
 
 -- ---------------------------------------------------------------------------

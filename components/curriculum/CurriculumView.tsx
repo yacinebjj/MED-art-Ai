@@ -3,9 +3,19 @@
 import { memo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, MoreVertical, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
+import { useToast } from "@/components/ui/Toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
+import { Button } from "@/components/ui/Button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/DropdownMenu";
+import { ModuleStatsModal } from "@/components/dashboard/ModuleStatsModal";
 import type { CurriculumModule, CurriculumYearData, TeachingUnitWithModules } from "@/types/academic";
 
 /**
@@ -33,6 +43,11 @@ const BENTO_CARD_CLASSES = cn(
 
 const ILLUSTRATION_CONTAINER_CLASSES =
   "mb-4 flex h-24 w-24 shrink-0 transform items-center justify-center rounded-full bg-indigo-50/50 text-[4rem] shadow-inner drop-shadow-md transition-transform duration-300 group-hover:scale-110 dark:bg-indigo-900/20";
+
+// Cascade entrance for both Bento grids below — same stagger language as the
+// Dashboard's "Mes cours indépendants" grid.
+const BENTO_GRID_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
+const BENTO_ITEM_VARIANTS = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 const TITLE_CLASSES = "line-clamp-2 px-2 text-center text-lg font-bold text-slate-900 dark:text-gray-100";
 
@@ -62,20 +77,98 @@ function SubModulePill({ module: mod }: { module: CurriculumModule }) {
 
 const IndependentModuleCard = memo(function IndependentModuleCard({ module: mod }: { module: CurriculumModule }) {
   const router = useRouter();
+  const { toast } = useToast();
   const illustration = getCartoonIllustration(mod.title);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   function handleClick() {
     router.push(`/dashboard/module/${mod.id}`);
   }
 
+  async function handleConfirmDelete() {
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/studio/courses?moduleId=${mod.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data?.error ?? "Erreur inconnue.");
+      toast({ variant: "success", title: "Sources supprimées", description: `Toutes les sources de « ${mod.title} » ont été supprimées.` });
+      setDeleteOpen(false);
+    } catch (error) {
+      toast({ variant: "error", title: "Échec de la suppression", description: error instanceof Error ? error.message : "Erreur inconnue." });
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   return (
-    <button type="button" onClick={handleClick} className={BENTO_CARD_CLASSES}>
+    // A <div role="button"> rather than a real <button> — it now contains its
+    // own nested, independently-clickable ⋮ menu button, and a <button> can
+    // never legally contain another <button>. Matches <TeachingUnitCard>'s
+    // existing pattern below.
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleClick();
+        }
+      }}
+      className={cn(BENTO_CARD_CLASSES, "relative")}
+    >
+      <div className="absolute right-2 top-2 z-10" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-slate-500 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-700 dark:bg-slate-800/80 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-100"
+            aria-label="Options du module"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
+              <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              Voir statistiques
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4" />
+              Supprimer toutes les sources
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
       {/* TODO: Remplacer le bloc div ci-dessous par
           <img src={`/illustrations/${mod.id}.png`} className="w-24 h-24 object-contain mb-4" alt={mod.title} />
           une fois les vraies illustrations dessinées disponibles côté client. */}
       <div className={ILLUSTRATION_CONTAINER_CLASSES}>{illustration}</div>
       <p className={TITLE_CLASSES}>{mod.title}</p>
-    </button>
+
+      <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
+        <DialogContent className="max-w-sm" onClick={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>Supprimer toutes les sources ?</DialogTitle>
+            <DialogDescription>
+              Tous les cours ajoutés dans « {mod.title} » et leur contenu généré seront supprimés définitivement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)} disabled={isDeleting}>
+              Annuler
+            </Button>
+            <Button type="button" variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
+              Supprimer
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <div onClick={(e) => e.stopPropagation()}>
+        <ModuleStatsModal open={statsOpen} onOpenChange={setStatsOpen} moduleTitle={mod.title} moduleId={mod.id} />
+      </div>
+    </div>
   );
 });
 
@@ -161,7 +254,14 @@ export function CurriculumViewSkeleton() {
   );
 }
 
-export function CurriculumView({ data }: { data: CurriculumYearData }) {
+/**
+ * Wrapped in React.memo: `data` is a stable object reference held in the
+ * dashboard page's own state (only replaced when the curriculum is actually
+ * refetched) — without this, every unrelated re-render of that page (e.g.
+ * each keystroke in its search box) re-rendered this entire Bento grid and
+ * every card inside it for no reason.
+ */
+export const CurriculumView = memo(function CurriculumView({ data }: { data: CurriculumYearData }) {
   const [expandedUnitId, setExpandedUnitId] = useState<number | null>(null);
   const hasTeachingUnits = data.teachingUnits.length > 0;
 
@@ -172,16 +272,17 @@ export function CurriculumView({ data }: { data: CurriculumYearData }) {
           <h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
             Unités d&apos;Enseignement
           </h2>
-          <div className={BENTO_GRID_CLASSES}>
+          <motion.div className={BENTO_GRID_CLASSES} variants={BENTO_GRID_VARIANTS} initial="hidden" animate="show">
             {data.teachingUnits.map((unit) => (
-              <TeachingUnitCard
-                key={unit.id}
-                unit={unit}
-                expanded={expandedUnitId === unit.id}
-                onToggle={() => setExpandedUnitId((prev) => (prev === unit.id ? null : unit.id))}
-              />
+              <motion.div key={unit.id} variants={BENTO_ITEM_VARIANTS}>
+                <TeachingUnitCard
+                  unit={unit}
+                  expanded={expandedUnitId === unit.id}
+                  onToggle={() => setExpandedUnitId((prev) => (prev === unit.id ? null : unit.id))}
+                />
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </div>
       )}
 
@@ -190,13 +291,15 @@ export function CurriculumView({ data }: { data: CurriculumYearData }) {
           <h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
             {hasTeachingUnits ? "Modules Indépendants" : "Modules"}
           </h2>
-          <div className={BENTO_GRID_CLASSES}>
+          <motion.div className={BENTO_GRID_CLASSES} variants={BENTO_GRID_VARIANTS} initial="hidden" animate="show">
             {data.independentModules.map((mod) => (
-              <IndependentModuleCard key={mod.id} module={mod} />
+              <motion.div key={mod.id} variants={BENTO_ITEM_VARIANTS}>
+                <IndependentModuleCard module={mod} />
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </div>
       )}
     </div>
   );
-}
+});

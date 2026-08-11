@@ -147,3 +147,42 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   return NextResponse.json({ success: true });
 }
+
+/** Deletes one course and everything it holds (all generated Studio sections live as columns on this same row, so a single row delete is a full delete — no child tables to cascade). */
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`studio-courses-delete:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
+  const id = parseCourseId(params.id);
+  if (id === null) {
+    return NextResponse.json({ success: false, error: "Identifiant de cours invalide." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  // .eq("user_id", ...) on the DELETE itself is what stops one student from deleting another's course by guessing an id.
+  const { error, count } = await supabase.from("studio_courses").delete({ count: "exact" }).eq("id", id).eq("user_id", user.id);
+
+  if (error) {
+    console.error("[studio/courses/[id]:delete] Échec suppression Supabase:", error);
+    return NextResponse.json({ success: false, error: `Suppression échouée : ${error.message}` }, { status: 500 });
+  }
+  if (count === 0) {
+    return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
+  }
+
+  return NextResponse.json({ success: true });
+}

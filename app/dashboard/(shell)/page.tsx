@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Search, Settings, UploadCloud } from "lucide-react";
+import { motion } from "framer-motion";
+import { FileText, Plus, Search, Settings, UploadCloud } from "lucide-react";
 import { UploadModal } from "@/components/dashboard/UploadModal";
 import { PublicCourseCard } from "@/components/dashboard/PublicCourseCard";
 import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
@@ -17,20 +18,11 @@ import {
 import { MAX_LEITNER_BOX } from "@/lib/srs";
 import type { CurriculumYearData } from "@/types/academic";
 
-/**
- * The client wants the "Mes cours indépendants (Historique)" section to show
- * only these two courses for now, without touching the database (no DELETE)
- * — so this is a pure frontend filter over whatever `/api/courses/list`
- * actually returns. Matched by keyword against the real title, not module_id
- * (e.g. "masterclass : la gastrite" is filed under a real module, but must
- * still show up here), accent/case-insensitive so "Pleurésie" and
- * "pleuresie" both hit.
- */
-const HISTORIQUE_VISIBLE_KEYWORDS = ["pleuresie", "gastrite"];
-
-function normalizeForMatch(text: string): string {
-  return text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-}
+// Module-level (not re-created every render): drives the "Mes cours
+// indépendants" grid's cascade entrance — each card fades/slides in 50ms
+// after the previous one instead of all popping in as a single block.
+const CARD_GRID_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
+const CARD_ITEM_VARIANTS = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -170,26 +162,26 @@ export default function DashboardPage() {
     router.push(`/dashboard/demo/${slug}`);
   }
 
-  function handleDeleted(slug: string) {
+  // useCallback with an empty dependency array — each only uses a setter's
+  // functional-update form, no other closed-over value — so PublicCourseCard
+  // (React.memo-wrapped) receives the SAME function reference across
+  // re-renders and never re-renders itself just because the dashboard page
+  // did (e.g. on every keystroke in the search box above).
+  const handleDeleted = useCallback((slug: string) => {
     setCourses((prev) => prev.filter((c) => c.slug !== slug));
-  }
+  }, []);
 
-  function handleRenamed(slug: string, title: string) {
+  const handleRenamed = useCallback((slug: string, title: string) => {
     setCourses((prev) => prev.map((c) => (c.slug === slug ? { ...c, title } : c)));
-  }
+  }, []);
 
-  function handleModuleChanged(slug: string, moduleId: number) {
+  const handleModuleChanged = useCallback((slug: string, moduleId: number) => {
     setCourses((prev) => prev.map((c) => (c.slug === slug ? { ...c, module_id: moduleId } : c)));
-  }
+  }, []);
 
-  function handleModuleCreated(newModule: ModuleSummary) {
+  const handleModuleCreated = useCallback((newModule: ModuleSummary) => {
     setModules((prev) => (prev.some((m) => m.id === newModule.id) ? prev : [...prev, newModule]));
-  }
-
-  const historiqueCourses = useMemo(
-    () => courses.filter((c) => HISTORIQUE_VISIBLE_KEYWORDS.some((keyword) => normalizeForMatch(c.title).includes(keyword))),
-    [courses]
-  );
+  }, []);
 
   const firstName = profile?.fullName?.split(" ")[0] || "Étudiant(e)";
 
@@ -204,15 +196,6 @@ export default function DashboardPage() {
               ? `Bienvenue dans ton espace de ${curriculumProfile.academicYear.name} — choisis une unité, un module indépendant, ou ajoute un cours indépendant.`
               : "Choisis ta spécialité et ton année dans les Paramètres pour voir ton programme — en attendant, ajoute un cours indépendant."}
           </p>
-        </div>
-
-        <div className="flex shrink-0 flex-wrap items-center gap-3">
-          <Link
-            href="/dashboard/demo"
-            className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-gray-200 dark:hover:bg-neutral-800"
-          >
-            👀 Voir la Démo
-          </Link>
         </div>
       </div>
 
@@ -313,30 +296,44 @@ export default function DashboardPage() {
         {loading ? (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-40 animate-pulse rounded-xl bg-gray-100" />
+              <div key={i} className="h-40 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-900" />
             ))}
           </div>
-        ) : historiqueCourses.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-            Aucun cours pour l'instant.
-          </p>
+        ) : courses.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center dark:border-neutral-800 dark:bg-neutral-900/50">
+            <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+              <FileText className="h-8 w-8 text-slate-300 dark:text-neutral-700" />
+            </motion.div>
+            <p className="text-sm font-medium text-slate-600 dark:text-gray-300">
+              Vous n'avez pas encore de cours indépendants.
+            </p>
+            <p className="max-w-sm text-xs text-slate-400 dark:text-neutral-500">
+              Cliquez sur « Ajouter un cours indépendant » ci-dessus pour importer votre premier cours.
+            </p>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
-            {historiqueCourses.map((course) => (
-              <PublicCourseCard
-                key={course.id}
-                course={course}
-                modules={modules}
-                onDeleted={handleDeleted}
-                onRenamed={handleRenamed}
-                onModuleChanged={handleModuleChanged}
-                onModuleCreated={handleModuleCreated}
-                readingPct={readingProgressByCourseSlug.get(course.slug)}
-                examReadinessPct={examReadinessByCourseSlug.get(course.slug)}
-                srsMasteryPct={srsMasteryByCourseSlug.get(course.slug)}
-              />
+          <motion.div
+            className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4"
+            variants={CARD_GRID_VARIANTS}
+            initial="hidden"
+            animate="show"
+          >
+            {courses.map((course) => (
+              <motion.div key={course.id} variants={CARD_ITEM_VARIANTS}>
+                <PublicCourseCard
+                  course={course}
+                  modules={modules}
+                  onDeleted={handleDeleted}
+                  onRenamed={handleRenamed}
+                  onModuleChanged={handleModuleChanged}
+                  onModuleCreated={handleModuleCreated}
+                  readingPct={readingProgressByCourseSlug.get(course.slug)}
+                  examReadinessPct={examReadinessByCourseSlug.get(course.slug)}
+                  srsMasteryPct={srsMasteryByCourseSlug.get(course.slug)}
+                />
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         )}
       </section>
 

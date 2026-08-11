@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { OfficeParser } from "officeparser";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/document-extraction";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
@@ -9,14 +9,12 @@ export const runtime = "nodejs"; // officeparser needs the Node runtime, not edg
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 Mo — same cap as /api/generate-course.
 
 /**
- * Extracts a PDF's raw text for the generic Studio workspace
+ * Extracts a document's raw text for the generic Studio workspace
  * (app/dashboard/module/[id]/page.tsx). Deliberately does NOT create any
  * Supabase row — unlike /api/generate-course (the real per-course pipeline),
  * this is the lightweight, ephemeral flow: the extracted text is handed back
  * to the client, which holds it in memory (`documentContext`) and resends it
- * with every /api/studio/generate call. Reuses officeparser, the PDF library
- * already used by /api/generate-course, rather than adding a second
- * PDF-parsing dependency for the exact same job.
+ * with every /api/studio/generate call.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -44,9 +42,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Aucun fichier reçu." }, { status: 400 });
   }
 
-  const extension = file.name.split(".").pop()?.toLowerCase();
-  if (extension !== "pdf") {
-    return NextResponse.json({ success: false, error: `Seuls les fichiers PDF sont acceptés (reçu : ".${extension}").` }, { status: 400 });
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (!ACCEPTED_DOCUMENT_EXTENSIONS.includes(extension)) {
+    return NextResponse.json(
+      { success: false, error: `Format non supporté (reçu : ".${extension}"). Formats acceptés : PDF, DOCX, PPTX, TXT.` },
+      { status: 400 }
+    );
   }
 
   if (file.size > MAX_FILE_BYTES) {
@@ -59,11 +60,10 @@ export async function POST(request: NextRequest) {
   let text: string;
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const ast = await OfficeParser.parseOffice(buffer, { fileType: "pdf" });
-    text = sanitizeForPostgres(ast.toText().trim());
+    text = sanitizeForPostgres(await extractDocumentText(buffer, extension));
   } catch (error) {
-    console.error("[upload] Échec de l'extraction PDF (officeparser):", error);
-    return NextResponse.json({ success: false, error: `Extraction PDF échouée : ${errorMessage(error)}` }, { status: 422 });
+    console.error(`[upload] Échec de l'extraction ${extension}:`, error);
+    return NextResponse.json({ success: false, error: `Extraction échouée : ${errorMessage(error)}` }, { status: 422 });
   }
 
   if (text.length < 50) {

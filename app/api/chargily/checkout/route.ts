@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createChargilyCheckout } from "@/lib/chargily";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { isPlanId, PLANS } from "@/lib/pricing";
+import { isPaidPlanId, isPlanId, PLANS } from "@/lib/pricing";
 
 export const runtime = "nodejs";
 
@@ -17,6 +17,10 @@ export async function POST(request: NextRequest) {
 
   if (!isPlanId(plan)) {
     return NextResponse.json({ error: "Formule invalide." }, { status: 400 });
+  }
+
+  if (!isPaidPlanId(plan)) {
+    return NextResponse.json({ error: "Freemium est le niveau par défaut — aucun paiement n'est nécessaire." }, { status: 400 });
   }
 
   const planDetails = PLANS[plan];

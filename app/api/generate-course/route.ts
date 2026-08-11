@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { OfficeParser } from "officeparser";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { errorMessage, sanitizeForPostgres, slugify } from "@/lib/course-generation-shared";
+import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/document-extraction";
 import { getEmbedding } from "@/lib/ai/embeddings";
+import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { canGenerate, recordGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
 
@@ -43,6 +45,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Plan quota gate — before any extraction/embedding/Supabase work, not
+    // after: a rejected upload must never spend a single token. Cache hits
+    // and Smart Clones (both $0) never reach this route at all, so this only
+    // ever gates genuinely billable generations, exactly as intended.
+    const gate = await canGenerate(user);
+    if (!gate.allowed) {
+      return NextResponse.json({ success: false, error: gate.reason }, { status: 403 });
+    }
+
     // --- 1. Réception & validation de l'entrée (fichier PDF OU texte collé) ---
     console.log("[generate-course] (1/3) Réception de la requête...");
 
@@ -57,10 +68,13 @@ export async function POST(request: NextRequest) {
       const file = candidate;
       console.log(`[generate-course] Fichier reçu : "${file.name}" (${file.size} octets, type "${file.type}")`);
 
-      const extension = file.name.split(".").pop()?.toLowerCase();
-      if (extension !== "pdf") {
+      const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+      if (!ACCEPTED_DOCUMENT_EXTENSIONS.includes(extension)) {
         console.error(`[generate-course] Extension refusée : "${extension}"`);
-        return NextResponse.json({ success: false, error: `Seuls les fichiers PDF sont acceptés (reçu : ".${extension}").` }, { status: 400 });
+        return NextResponse.json(
+          { success: false, error: `Format non supporté (reçu : ".${extension}"). Formats acceptés : PDF, DOCX, PPTX, TXT.` },
+          { status: 400 }
+        );
       }
 
       if (file.size > MAX_FILE_BYTES) {
@@ -71,16 +85,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // --- 2. Extraction du texte du PDF -----------------------------------
-      console.log("[generate-course] (2/3) Extraction du texte du PDF...");
+      // --- 2. Extraction du texte du document --------------------------------
+      console.log(`[generate-course] (2/3) Extraction du texte (${extension})...`);
       try {
         const buffer = Buffer.from(await file.arrayBuffer());
-        const ast = await OfficeParser.parseOffice(buffer, { fileType: "pdf" });
-        sourceText = ast.toText().trim();
+        sourceText = await extractDocumentText(buffer, extension);
       } catch (error) {
-        console.error("[generate-course] Échec de l'extraction PDF (officeparser):", error);
+        console.error(`[generate-course] Échec de l'extraction ${extension}:`, error);
         return NextResponse.json(
-          { success: false, error: `Extraction PDF échouée : ${errorMessage(error)}` },
+          { success: false, error: `Extraction échouée : ${errorMessage(error)}` },
           { status: 422 }
         );
       }
@@ -204,6 +217,41 @@ export async function POST(request: NextRequest) {
         { success: false, error: `Exception pendant l'insertion Supabase : ${errorMessage(error)}` },
         { status: 500 }
       );
+    }
+
+    // Counts against the plan's monthly course quota — this course row now
+    // exists regardless of what happens below (chunk indexing is best-effort
+    // and must never affect whether this generation "counted").
+    await recordGeneration(user.id);
+
+    // Chunk-based Smart Clone indexing — fail-open exactly like
+    // content_embedding above, and deliberately AFTER the course row already
+    // exists (course_source_chunks.course_slug references courses.slug).
+    // Chunks the raw text (available now, before any section is generated)
+    // so lib/course-generation-shared.ts can compare this course against
+    // others at the paragraph level, not just as one whole-document vector —
+    // see supabase/schema.sql's course_source_chunks for why this exists
+    // alongside content_embedding rather than instead of it.
+    try {
+      const chunks = buildSourceChunks(sourceText);
+      if (chunks.length > 0) {
+        const chunkEmbeddings = await Promise.all(chunks.map((chunk) => getEmbedding(chunk)));
+        const chunkRows = chunks.map((content, i) => ({
+          course_slug: slug,
+          chunk_index: i,
+          content,
+          embedding: chunkEmbeddings[i],
+        }));
+        const supabase = getSupabaseAdmin();
+        const { error: chunkError } = await supabase.from("course_source_chunks").insert(chunkRows);
+        if (chunkError) {
+          console.error("[generate-course] Échec indexation des chunks source (non bloquant):", chunkError.message);
+        } else {
+          console.log(`[generate-course] ${chunks.length} chunk(s) source indexé(s) pour slug="${slug}".`);
+        }
+      }
+    } catch (error) {
+      console.error("[generate-course] Échec calcul des chunks source (non bloquant, upload continue):", errorMessage(error));
     }
 
     console.log(`[generate-course] Terminé avec succès en ${Date.now() - startedAt} ms. slug="${slug}"`);

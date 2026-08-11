@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
+import { callGemini, GeminiError } from "@/lib/ai/gemini";
 import { generateIdeogramImage, IdeogramError } from "@/lib/ai/ideogram";
 import { STUDIO_MODEL, STUDIO_BYPASS_MOCK, STUDIO_PROMPT_CONFIG, STUDIO_SECTION_KEYS, buildStudioSystemPrompt } from "@/lib/ai/studio-prompts";
 import { STUDIO_SCHEMAS } from "@/lib/ai/studio-schemas";
@@ -90,17 +91,27 @@ export async function POST(request: NextRequest) {
   // injecté DANS le system prompt (pas dans un message user séparé) — voir
   // buildStudioSystemPrompt. Le message user reste minimal, juste le
   // déclencheur final de génération.
+  // Mind Map structuring runs on Gemini instead of OpenRouter/Claude (client
+  // request, GEMINI_API_KEY) — every other tile is untouched, still Claude
+  // via OpenRouter. buildStudioSystemPrompt already bakes the course text
+  // into ONE system-prompt string (this app's established architecture, see
+  // that function's own comment), so it's passed straight through as
+  // Gemini's systemInstruction with the same minimal trigger user message.
   let raw: string;
   try {
-    raw = await callOpenRouter(
-      [
-        { role: "system", content: buildStudioSystemPrompt(actionType, truncatedContext) },
-        { role: "user", content: "Génère le contenu demandé." },
-      ],
-      { model: STUDIO_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
-    );
+    if (actionType === "mind_map") {
+      raw = await callGemini(buildStudioSystemPrompt(actionType, truncatedContext), "Génère le contenu demandé.", { maxTokens });
+    } else {
+      raw = await callOpenRouter(
+        [
+          { role: "system", content: buildStudioSystemPrompt(actionType, truncatedContext) },
+          { role: "user", content: "Génère le contenu demandé." },
+        ],
+        { model: STUDIO_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+      );
+    }
   } catch (error) {
-    if (error instanceof OpenRouterError) {
+    if (error instanceof OpenRouterError || error instanceof GeminiError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }
     console.error(`[studio/generate:${actionType}] Échec appel IA:`, error);

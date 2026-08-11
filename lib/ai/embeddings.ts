@@ -7,6 +7,17 @@ const EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 // will fail with a dimension-mismatch error.
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const EMBEDDING_DIMENSIONS = 1536;
+// text-embedding-3-small's real context ceiling is 8191 tokens. 24,000
+// characters stays safely under that even for dense/accented French text
+// (worst case ~3 chars/token), leaving real headroom instead of cutting
+// right at the edge. Previously capped at 8,000 CHARACTERS (~2,000 tokens —
+// far below the model's actual limit), which meant content_embedding (Smart
+// Clone's whole-document fingerprint, see supabase/schema.sql) only ever
+// "saw" the first ~13% of a max-length (60,000 char) course — a real source
+// of false negatives: two courses identical past their first few paragraphs
+// but with a different cover page or OCR noise up front could miss the 0.90
+// similarity threshold entirely, never being recognized as the same course.
+const EMBEDDING_MAX_INPUT_CHARS = 24_000;
 
 /** FNV-1a — cheap, deterministic string → 32-bit integer, used only to seed the mock vector's PRNG below. Not cryptographic, doesn't need to be. */
 function hashSeed(text: string): number {
@@ -66,9 +77,7 @@ export async function getEmbedding(text: string): Promise<number[]> {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    // Embedding models have their own (usually generous) input limits, but
-    // capping defensively avoids surprises on a pasted essay-length question.
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text.slice(0, 8000) }),
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text.slice(0, EMBEDDING_MAX_INPUT_CHARS) }),
   });
 
   if (!res.ok) {

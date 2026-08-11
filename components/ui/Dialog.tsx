@@ -2,6 +2,7 @@
 
 import { ComponentPropsWithoutRef, ElementRef, forwardRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { motion } from "framer-motion";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,12 +16,25 @@ export const DialogOverlay = forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-black/30 backdrop-blur-sm", className)}
+    className={cn("fixed inset-0 z-50 bg-black/40 backdrop-blur-md", className)}
     {...props}
   />
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+/**
+ * The spring entrance lives on a NESTED motion.div, not on
+ * DialogPrimitive.Content itself: Framer Motion's animated x/y/scale compile
+ * to a single inline `transform`, which would silently clobber the
+ * `-translate-x-1/2 -translate-y-1/2` Tailwind classes Content uses for
+ * centering (inline style always wins over a class targeting the same
+ * property) — nesting keeps Content's centering transform and the motion
+ * div's spring transform on two separate elements so neither overwrites the
+ * other. Entrance-only (no `exit`/AnimatePresence): Radix mounts Content
+ * fresh on every open, which is all `initial` -> `animate` needs to replay
+ * the spring each time; the close transition is an instant unmount, same as
+ * before this change.
+ */
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { overlayClassName?: string }
@@ -36,7 +50,17 @@ export const DialogContent = forwardRef<
       )}
       {...props}
     >
-      {children}
+      {/* Purely for the spring entrance — deliberately unstyled otherwise
+          (no width/border/padding here) so it never fights the sizing/chrome
+          classes callers pass via `className` above, which stay on Content
+          itself exactly as before this animation was added. */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      >
+        {children}
+      </motion.div>
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-lg p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <X className="h-4 w-4" />
         <span className="sr-only">Fermer</span>

@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * Full-page results view for the semantic search (see app/api/search/route.ts).
- * Lives as a sibling of app/dashboard/(shell) and app/dashboard/modules/anatomie
- * — a full-screen surface outside the dashboard shell, with its own header,
- * same pattern established across this app for dedicated workspace pages.
+ * Lives as a sibling of app/dashboard/(shell) — a full-screen surface outside
+ * the dashboard shell, with its own header, same pattern established across
+ * this app for dedicated workspace pages.
  */
 
 interface SearchResult {

@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { DEMO_SECTIONS, buildDemoAskPrompt, buildDemoTranslatePrompt, type DemoSectionId } from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildDemoTranslatePrompt, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
+import { PLEURESIE_DEMO_SLUG } from "@/lib/constants";
 import { COURSE_SLUG_CONTENT, isCourseSlug, type CourseSlugSupabaseData } from "@/lib/course-slug-content";
 import { cn } from "@/lib/utils";
 import {
@@ -23,14 +25,23 @@ import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { SourcesPanel } from "@/components/course/workspace/SourcesPanel";
 import { ChatDocumentPanel, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
 import { StudioPanel, type SectionStatus } from "@/components/course/workspace/StudioPanel";
+import { SourceDocumentPanel } from "@/components/course/workspace/SourceDocumentPanel";
 import { ResumeStudio } from "@/components/course/workspace/ResumeStudio";
 import { CasCliniqueStudio } from "@/components/course/workspace/CasCliniqueStudio";
 import { ExamQcmStudio } from "@/components/course/workspace/ExamQcmStudio";
 import { GastriteResumeStudio } from "@/components/course/workspace/GastriteResumeStudio";
 import { GastriteCasCliniqueStudio } from "@/components/course/workspace/GastriteCasCliniqueStudio";
 import { GastriteQcmsStudio } from "@/components/course/workspace/GastriteQcmsStudio";
-import { MindMapStudio } from "@/components/course/workspace/MindMapStudio";
 import { LazySection } from "@/components/course/workspace/LazySection";
+
+// Lazy-loaded: a hardcoded, static SVG poster (only ever rendered for the
+// single Pleurésie demo course, see showMindMapStudioData below) — no reason
+// to ship its markup/assets in the bundle for every other course's visitors.
+// ssr:false since it's a pan/zoom image viewer with no SEO-relevant content.
+const MindMapStudio = dynamic(
+  () => import("@/components/course/workspace/MindMapStudio").then((m) => m.MindMapStudio),
+  { ssr: false, loading: () => <div className="flex h-[500px] items-center justify-center text-sm text-gray-400 dark:text-gray-500">Chargement de la Mind Map…</div> }
+);
 
 export default function CourseSlugWorkspacePage() {
   const params = useParams<{ slug: string }>();
@@ -76,7 +87,7 @@ const SECTION_LAZY_CONFIG: Partial<
  * (gastrite, ulcère, BPCO, HTIC, ...) from showing this unrelated poster
  * under its own title.
  */
-const PLEURESIE_SLUG = "3-la-pleuresie-purulente-support-du-dr-firan-1785259421242";
+const PLEURESIE_SLUG = PLEURESIE_DEMO_SLUG;
 
 function NotFoundScreen({ slug }: { slug: string }) {
   return (
@@ -141,6 +152,14 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   const sourceFileName = legacySlugData?.source.fileName ?? title;
   const sourceSize = legacySlugData?.source.size ?? "Cours interactif";
 
+  // The Mind Map TILE always stays in this grid — StudioPanel renders every
+  // entry in `sections` unconditionally, tile visibility was never the bug.
+  // What WAS wrong: getSectionStatus("mind_map") returned "available" for
+  // every course, which pushed it into StudioPanel's separate "recent
+  // generations" quick-list (only entries whose status is "available" land
+  // there) — so a brand-new course showed "Mind Map · 1 source" in that
+  // list as if already generated, despite the tile above never having been
+  // clicked. Fixed at the status level below, not by hiding anything.
   const sections = useMemo(
     () =>
       DEMO_SECTIONS.map((section) =>
@@ -176,25 +195,45 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   // Chat header. The Mind Map no longer triggers this: it's now a
   // pan/zoom image viewer (MindMapStudio) with no clickable nodes.
   const [isSplitScreen, setIsSplitScreen] = useState(false);
+  // Which content the split-screen's right-hand pane shows — see the
+  // identical state in app/dashboard/module/[id]/page.tsx for the full
+  // rationale. This page has no separately-stored "raw upload" (these are
+  // hand-authored/AI-generated demo courses, never a student PDF upload), so
+  // "source" here shows the same explicationContent — but through the plain,
+  // non-interactive SourceDocumentPanel rather than the full StudioPanel, so
+  // "Afficher le cours" is still never confused with opening a Studio tile.
+  const [splitScreenView, setSplitScreenView] = useState<"studio" | "source">("studio");
   // Names whatever contextual action is currently awaiting its reply, so the
   // Chat's typing indicator can say "Thinking about X..." instead of a
   // generic message — cleared by every OTHER way of sending a message so a
   // stale label never lingers on an unrelated exchange.
   const [pendingThinkingLabel, setPendingThinkingLabel] = useState<string | null>(null);
+  // The passage "Ask MedArt" quoted — shown as a dismissible citation chip
+  // above the composer (ChatDocumentPanel), prepended as real markdown
+  // ("> ...") only once the student actually sends their own question.
+  const [quotedText, setQuotedText] = useState<string | null>(null);
 
-  /** "Ask MedArt" on a text selection — populates the chat input and focuses it, but doesn't send (student reviews/edits first, per spec). */
+  /** "Ask MedArt" on a text selection — opens the chat (in split-screen if the course workspace is open) and inserts the passage as a citation above the composer; the student still types and reviews their own question before sending, per spec. */
   function handleAskSelection(text: string) {
     setPendingThinkingLabel(null);
     setIsSplitScreen(true);
-    setChatInput(buildDemoAskPrompt(text));
+    setQuotedText(text);
     chatPanelRef.current?.focusInput();
   }
 
-  /** "Translate" on a text selection — sends immediately through the real chat pipeline (a translation is a quick lookup, not something worth reviewing first). */
+  /** "Translate" on a text selection — sends immediately through the real chat pipeline (a translation is a quick lookup, not something worth reviewing first). `translate: true` swaps the server's system prompt for a strict medical-translator persona (arabe + français), not the generic concise-answer one. */
   function handleTranslateSelection(text: string) {
     setPendingThinkingLabel(null);
     setIsSplitScreen(true);
-    sendChatMessage(buildDemoTranslatePrompt(text));
+    sendChatMessage(buildDemoTranslatePrompt(text), {
+      translate: true,
+      // Same one-off-context rule as the Ask MedArt citation below — the
+      // selected passage (and its translation) should inform only this
+      // exchange, not linger in history and bias unrelated later questions
+      // back toward it.
+      excludeFromHistory: true,
+      selectedText: text,
+    });
   }
 
   // Studio panel: null = "browse" view (tile grid + generations list); set =
@@ -221,7 +260,14 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
 
   /** Whether a Studio tile already has real content to show, or still needs generating. */
   function getSectionStatus(id: DemoSectionId): SectionStatus {
-    if (id === "mind_map") return "available"; // fully static/hardcoded — nothing to generate, ever
+    // "available" here means "show up in the recent-generations quick list
+    // as already generated" — true only for the one pilot course with a
+    // real, hardcoded Mind Map poster. Every other course must not claim
+    // this, even though the tile itself stays visible in the grid above
+    // regardless of status (see handleStudioItemClick below for the click
+    // behavior on a "needs_generation" Mind Map, which has no real
+    // generation endpoint to call).
+    if (id === "mind_map") return slug === PLEURESIE_SLUG ? "available" : "needs_generation";
     if (!hasStudioData) return "available"; // legacy-only slug: fixed components/customTabContent, nothing to generate
     if (id === "explication") {
       if (legacySlugData) return "available";
@@ -261,7 +307,29 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     }
   }
 
+  /** "Afficher le cours" from the Sources ⋮ menu — distinct from the Chat header's generic split toggle so it reliably opens the raw source view, never whichever Studio tile happened to be open last. */
+  function handleToggleShowSource() {
+    if (isSplitScreen && splitScreenView === "source") {
+      setIsSplitScreen(false);
+      return;
+    }
+    setSplitScreenView("source");
+    setIsSplitScreen(true);
+  }
+
   function handleStudioItemClick(id: DemoSectionId) {
+    if (id === "mind_map" && slug !== PLEURESIE_SLUG) {
+      // No AI generation path exists for Mind Map on this pipeline (a
+      // single hardcoded poster for one pilot course, not a per-course
+      // generator — see SECTION_LAZY_CONFIG's own comment) — open the
+      // detail view directly so the click always does something honest
+      // (the "bientôt disponible pour ce cours" message) instead of
+      // silently no-oping through generateSection, which has no config
+      // entry for this id and would just return without doing anything.
+      setActiveId(id);
+      setOpenedSection(id);
+      return;
+    }
     if (getSectionStatus(id) === "needs_generation") {
       if (!generatingSection) generateSection(id);
       return;
@@ -425,19 +493,41 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       onInputChange={setChatInput}
       onSend={() => {
         const text = chatInput.trim();
-        if (!text) return;
+        if (!text && !quotedText) return;
+        const isAskMedArt = quotedText !== null;
+        // The citation is real markdown blockquote syntax ("> ...") — it renders as an actual indented quote wherever the message is shown (chat history, MARKDOWN_COMPONENTS already styles "> " blocks app-wide), not just a visual chip in the composer.
+        const fullMessage = buildQuotedChatMessage(quotedText, text);
         setChatInput("");
+        setQuotedText(null);
         setPendingThinkingLabel(null);
-        sendChatMessage(text);
+        sendChatMessage(fullMessage, {
+          // "Ask MedArt" is a quick action like Translate — short answer, and
+          // the quote/reply must never resend in later requests' history.
+          concise: isAskMedArt,
+          excludeFromHistory: isAskMedArt,
+          selectedText: quotedText ?? undefined,
+        });
       }}
       onClearHistory={clearMessages}
       onAskSelection={handleAskSelection}
       onTranslateSelection={handleTranslateSelection}
       pendingThinkingLabel={pendingThinkingLabel}
       isSplitScreen={isSplitScreen}
-      onToggleSplitScreen={() => setIsSplitScreen((v) => !v)}
+      onToggleSplitScreen={() =>
+        setIsSplitScreen((prev) => {
+          const next = !prev;
+          if (next) setSplitScreenView("studio");
+          return next;
+        })
+      }
       dark={isDark}
+      quotedText={quotedText}
+      onClearQuote={() => setQuotedText(null)}
     />
+  );
+
+  const sourceDocumentPanel = (
+    <SourceDocumentPanel title={title || "Cours"} rawText={explicationContent} onClose={() => setIsSplitScreen(false)} />
   );
 
   const studioPanel = (
@@ -483,6 +573,11 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
               dateLabel={today}
               selected={sourceSelected}
               onToggleSelected={setSourceSelected}
+              courseTitle={title || "Cours"}
+              courseSlug={slug}
+              isSplitScreen={isSplitScreen}
+              onToggleSplitScreen={handleToggleShowSource}
+              onClosePanel={() => setIsSplitScreen(true)}
             />
           </aside>
         )}
@@ -495,7 +590,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
           )}
         >
           <main className={panelShellClasses}>{chatPanel}</main>
-          {isSplitScreen && <aside className={panelShellClasses}>{studioPanel}</aside>}
+          {isSplitScreen && <aside className={panelShellClasses}>{splitScreenView === "source" ? sourceDocumentPanel : studioPanel}</aside>}
         </div>
 
         {/* Panneau Droit — Studio (disposition par défaut uniquement ; en écran partagé il vit dans la grille ci-dessus) */}

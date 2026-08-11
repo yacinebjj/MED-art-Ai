@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import Link from "next/link";
 import { BookOpen, FileText, FolderInput, MoreVertical, Pencil, Target, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -84,8 +84,16 @@ function CoursePerformanceIndicators({ readingPct, examReadinessPct }: { reading
  * One course card for the dashboard's "Mes cours" / "Mes modules" sections —
  * the kebab button is a SIBLING of the <Link>, not nested inside it, so
  * opening the menu never triggers navigation (no stopPropagation hack needed).
+ *
+ * Wrapped in React.memo: this renders once per course in the "Mes cours
+ * indépendants" grid, and the dashboard page re-renders on every keystroke
+ * in its (unrelated) search box — without memoization every card would
+ * re-mount its own dialogs and re-run its own hooks on every keystroke, for
+ * no visible reason. Effective as long as the callback props stay
+ * referentially stable — see the useCallback wrappers on the dashboard
+ * page's onDeleted/onRenamed/onModuleChanged/onModuleCreated handlers.
  */
-export function PublicCourseCard({
+export const PublicCourseCard = memo(function PublicCourseCard({
   course,
   modules,
   onDeleted,
@@ -115,11 +123,11 @@ export function PublicCourseCard({
   const [statsOpen, setStatsOpen] = useState(false);
 
   return (
-    <div className="group relative h-40 rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+    <div className="group relative h-40 rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-slate-700 dark:bg-slate-800">
       <div className="absolute right-2 top-2 z-10">
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-slate-600 focus:opacity-100 group-hover:opacity-100"
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-slate-500 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-700 dark:bg-slate-800/80 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-100"
             aria-label="Options du cours"
           >
             <MoreVertical className="h-4 w-4" />
@@ -135,23 +143,23 @@ export function PublicCourseCard({
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
               <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              Statistiques
+              Voir statistiques
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
-              Supprimer
+              Supprimer toutes les sources
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
       <Link href={`/dashboard/demo/${course.slug}`} className="flex h-full flex-col justify-between p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-950/40 dark:text-teal-400">
           <FileText className="h-5 w-5" />
         </div>
         <div className="space-y-1.5">
-          <p className="line-clamp-2 pr-6 text-sm font-semibold text-slate-900">{course.title}</p>
+          <p className="line-clamp-2 pr-6 text-sm font-semibold text-slate-900 dark:text-gray-100">{course.title}</p>
           <CoursePerformanceIndicators readingPct={readingPct} examReadinessPct={examReadinessPct} />
         </div>
       </Link>
@@ -180,4 +188,4 @@ export function PublicCourseCard({
       />
     </div>
   );
-}
+});

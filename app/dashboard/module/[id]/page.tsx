@@ -2,26 +2,51 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { useTheme } from "next-themes";
+import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, FileText, Loader2, PanelLeftClose, Plus, Search } from "lucide-react";
+import { ArrowLeft, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, Plus, Search, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/DropdownMenu";
+import { CourseStatsModal } from "@/components/dashboard/CourseStatsModal";
+import { UploadModal } from "@/components/dashboard/UploadModal";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { ChatDocumentPanel, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
 import { StudioPanel, type SectionStatus } from "@/components/course/workspace/StudioPanel";
+import { SourceDocumentPanel } from "@/components/course/workspace/SourceDocumentPanel";
 import { GastriteResumeStudio } from "@/components/course/workspace/GastriteResumeStudio";
 import { GastriteCasCliniqueStudio } from "@/components/course/workspace/GastriteCasCliniqueStudio";
 import { GastriteQcmsStudio } from "@/components/course/workspace/GastriteQcmsStudio";
-import { DynamicMindMapStudio } from "@/components/course/workspace/DynamicMindMapStudio";
+import { useCourseChat } from "@/hooks/useCourseChat";
+import { MAX_LEITNER_BOX } from "@/lib/srs";
+
+// Lazy-loaded: a large hand-built SVG radial-tree renderer (rough geometry
+// math, dozens of foreignObject text nodes, gradients/shadows/filters) that
+// most visits to this workspace never open (the student has to click the
+// Mind Map tile first) — no reason to ship it in the initial bundle for
+// every Résumé/Cas Clinique/QCM visit. ssr:false because it's entirely
+// client-interactive (zoom/pan, no SEO-relevant content) and reads
+// window-dependent layout at render time.
+const DynamicMindMapStudio = dynamic(
+  () => import("@/components/course/workspace/DynamicMindMapStudio").then((m) => m.DynamicMindMapStudio),
+  { ssr: false, loading: () => <div className="flex h-[500px] items-center justify-center text-sm text-gray-400 dark:text-gray-500">Chargement de la Mind Map…</div> }
+);
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
-import { DEMO_SECTIONS, type DemoSectionId } from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildDemoTranslatePrompt, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
 import { createClient } from "@/lib/supabase/client";
-import type { ChatMessage } from "@/lib/types";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
 
@@ -68,10 +93,9 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
 /**
  * Generic workspace for ANY curriculum module — this is the landing page
  * every module card in <CurriculumView> pushes to (/dashboard/module/[id]),
- * with no exception for filière/année. Same NotebookLM-style 3-column shell
- * as app/dashboard/modules/anatomie/page.tsx (WorkspaceTopbar +
- * ChatDocumentPanel + StudioPanel) — UNCHANGED components; only this page's
- * own state/handlers are real now.
+ * with no exception for filière/année. NotebookLM-style 3-column shell
+ * (WorkspaceTopbar + ChatDocumentPanel + StudioPanel) — UNCHANGED shared
+ * components; only this page's own state/handlers are real.
  *
  * Golden Standard Part 2 (Auto-Save + Multi-Cours): every uploaded course is
  * a real row in Supabase's `studio_courses` table (app/api/studio/courses/*),
@@ -91,24 +115,43 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
 function ModuleSourcesPanel({
   courses,
   activeCourseId,
-  isUploading,
+  isSplitScreen,
   isSwitchingCourse,
-  onFileSelected,
+  onSubmitFile,
+  onSubmitText,
   onSelectCourse,
+  onToggleShowCourse,
+  onDeleteCourse,
+  onClosePanel,
+  courseMasteryBySlug,
 }: {
   courses: StudioCourseSummary[];
   activeCourseId: number | null;
-  isUploading: boolean;
+  isSplitScreen: boolean;
   isSwitchingCourse: boolean;
-  onFileSelected: (file: File) => void;
+  onSubmitFile: (file: File) => Promise<string>;
+  onSubmitText: (text: string, title: string) => Promise<string>;
   onSelectCourse: (id: number) => void;
+  onToggleShowCourse: (id: number) => void;
+  onDeleteCourse: (id: number) => Promise<void>;
+  onClosePanel: () => void;
+  /** Real qcm_attempts-derived mastery, keyed by `studio-course-{id}` — see the `course_mastery` SQL function, which groups purely by course_slug with no join to any courses table, so it already covers this pipeline's synthetic slugs once real attempts exist (they do now that GastriteQcmsStudio here is no longer rendered with isPreview). */
+  courseMasteryBySlug: Map<string, { qcmSuccessPct: number; srsMasteryPct: number }>;
 }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [statsCourse, setStatsCourse] = useState<StudioCourseSummary | null>(null);
+  const [deleteCourse, setDeleteCourse] = useState<StudioCourseSummary | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (file) onFileSelected(file);
+  async function handleConfirmDelete() {
+    if (!deleteCourse) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteCourse(deleteCourse.id);
+      setDeleteCourse(null);
+    } finally {
+      setIsDeleting(false);
+    }
   }
 
   return (
@@ -117,6 +160,7 @@ function ModuleSourcesPanel({
         <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sources</h2>
         <button
           type="button"
+          onClick={onClosePanel}
           aria-label="Fermer le panneau"
           className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100"
         >
@@ -125,17 +169,10 @@ function ModuleSourcesPanel({
       </div>
 
       <div className="flex flex-1 flex-col space-y-4 overflow-y-auto p-4">
-        <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleChange} />
         {/* Always enabled — adding a 2nd, 3rd, ... course never disables this, per the multi-course mandate. */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full rounded-xl"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-        >
-          {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          {isUploading ? "Extraction en cours..." : "Add sources"}
+        <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => setUploadOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Add sources
         </Button>
 
         <div className="relative">
@@ -149,10 +186,12 @@ function ModuleSourcesPanel({
 
         {courses.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-200 p-8 text-center dark:border-neutral-800">
-            <FileText className="h-6 w-6 text-gray-300 dark:text-neutral-700" />
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Aucune source pour l'instant</p>
+            <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+              <FileText className="h-6 w-6 text-gray-300 dark:text-neutral-700" />
+            </motion.div>
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Aucun support n'a été ajouté à ce module</p>
             <p className="text-xs text-gray-400 dark:text-neutral-600">
-              Ajoute un cours pour commencer à discuter avec l'IA.
+              Ajoutez votre premier PDF ou texte pour commencer.
             </p>
           </div>
         ) : (
@@ -161,32 +200,104 @@ function ModuleSourcesPanel({
           <div className="space-y-2">
             {courses.map((course) => {
               const isActive = course.id === activeCourseId;
+              const isShowingThis = isActive && isSplitScreen;
               return (
-                <button
+                <div
                   key={course.id}
-                  type="button"
-                  onClick={() => onSelectCourse(course.id)}
-                  disabled={isSwitchingCourse}
                   className={cn(
-                    "flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition-colors disabled:cursor-wait",
+                    "flex items-start gap-2 rounded-2xl border p-3 transition-colors",
                     isActive
                       ? "border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30"
                       : "border-gray-200 bg-white hover:bg-gray-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:bg-neutral-800"
                   )}
                 >
-                  <FileText className={cn("mt-0.5 h-4 w-4 shrink-0", isActive ? "text-blue-500" : "text-gray-400 dark:text-gray-500")} />
-                  <div className="min-w-0 flex-1">
-                    <p className={cn("truncate text-sm font-medium", isActive ? "text-blue-900 dark:text-blue-200" : "text-gray-900 dark:text-gray-100")}>
-                      {course.title}
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{isActive ? "Cours actif" : "Cliquer pour ouvrir"}</p>
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectCourse(course.id)}
+                    disabled={isSwitchingCourse}
+                    className="flex min-w-0 flex-1 items-start gap-3 text-left disabled:cursor-wait"
+                  >
+                    <FileText className={cn("mt-0.5 h-4 w-4 shrink-0", isActive ? "text-blue-500" : "text-gray-400 dark:text-gray-500")} />
+                    <div className="min-w-0 flex-1">
+                      <p className={cn("truncate text-sm font-medium", isActive ? "text-blue-900 dark:text-blue-200" : "text-gray-900 dark:text-gray-100")}>
+                        {course.title}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{isActive ? "Cours actif" : "Cliquer pour ouvrir"}</p>
+                    </div>
+                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+                      aria-label="Options de la source"
+                    >
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => onToggleShowCourse(course.id)}>
+                        <Columns2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        {isShowingThis ? "Fermer l'écran partagé" : "Afficher le cours"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setStatsCourse(course)}>
+                        <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        Statistiques
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteCourse(course)}>
+                        <Trash2 className="h-4 w-4" />
+                        Supprimer
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               );
             })}
           </div>
         )}
       </div>
+
+      <Dialog open={deleteCourse !== null} onOpenChange={(open) => !open && setDeleteCourse(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Supprimer ce cours ?</DialogTitle>
+            <DialogDescription>
+              « {deleteCourse?.title} » et tout son contenu généré (résumé, QCM, mind map...) seront supprimés définitivement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setDeleteCourse(null)} disabled={isDeleting}>
+              Annuler
+            </Button>
+            <Button type="button" variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Supprimer
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <CourseStatsModal
+        open={statsCourse !== null}
+        onOpenChange={(open) => !open && setStatsCourse(null)}
+        courseTitle={statsCourse?.title ?? ""}
+        courseSlug={statsCourse ? `studio-course-${statsCourse.id}` : ""}
+        stats={{
+          qcmSuccessPct: statsCourse ? courseMasteryBySlug.get(`studio-course-${statsCourse.id}`)?.qcmSuccessPct : undefined,
+          srsMasteryPct: statsCourse ? courseMasteryBySlug.get(`studio-course-${statsCourse.id}`)?.srsMasteryPct : undefined,
+          // No real per-user reading-progress tracking exists anywhere in the app yet — stays an honest "—", never fabricated.
+          readingPct: undefined,
+        }}
+      />
+
+      <UploadModal
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onUploaded={() => {}}
+        onSubmitFile={onSubmitFile}
+        onSubmitText={onSubmitText}
+        title="Ajouter une source"
+        description="Importe un document ou colle du texte pour ce module."
+      />
     </>
   );
 }
@@ -230,10 +341,15 @@ export default function ModuleWorkspacePage() {
   }, [params.id]);
 
   const chatPanelRef = useRef<ChatDocumentPanelHandle>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
   const [isSplitScreen, setIsSplitScreen] = useState(false);
+  // Which content the split-screen's right-hand pane shows: "studio" (the
+  // default, opened via the Chat header's own toggle) or "source" (opened
+  // specifically via a source's "Afficher le cours" menu item) — kept
+  // distinct so that action reliably shows the raw original document, never
+  // the Studio's AI-generated Explication/Résumé, no matter which tile was
+  // last opened.
+  const [splitScreenView, setSplitScreenView] = useState<"studio" | "source">("studio");
+  const [quotedText, setQuotedText] = useState<string | null>(null);
 
   const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
@@ -246,8 +362,16 @@ export default function ModuleWorkspacePage() {
   const [courses, setCourses] = useState<StudioCourseSummary[]>([]);
   const [activeCourse, setActiveCourse] = useState<StudioCourseFull | null>(null);
   const [isSwitchingCourse, setIsSwitchingCourse] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
   const [generatingSection, setGeneratingSection] = useState<DemoSectionId | null>(null);
+
+  // studio_courses has no matching row in the `courses` table the shared
+  // chat endpoint normally looks slugs up against — this slug only ever
+  // needs to be a stable, unique key for course_chat_history and the
+  // semantic cache, so a synthetic one works fine. Course context itself is
+  // sent inline via sendChatMessage's `sourceText` option below instead of
+  // relying on that (nonexistent) DB lookup.
+  const courseChatSlug = activeCourse ? `studio-course-${activeCourse.id}` : undefined;
+  const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, clearMessages } = useCourseChat(courseChatSlug);
 
   useEffect(() => {
     if (!Number.isFinite(moduleId)) return;
@@ -267,55 +391,90 @@ export default function ModuleWorkspacePage() {
     };
   }, [moduleId]);
 
+  // Real QCM mastery (qcm_attempts, aggregated in Postgres by the
+  // course_mastery function — see app/api/srs/course-mastery/route.ts). That
+  // function groups purely by course_slug with no join to any courses table,
+  // so it already covers this page's `studio-course-{id}` slugs the moment
+  // real attempts exist for them. Fetched once per module visit, same
+  // pattern as the dashboard's own courseMastery fetch.
+  const [courseMastery, setCourseMastery] = useState<
+    { course_slug: string; mastery_pct: number; avg_leitner_box: number | null }[]
+  >([]);
+
+  useEffect(() => {
+    fetch("/api/srs/course-mastery")
+      .then((res) => res.json())
+      .then((data) => setCourseMastery(data.mastery ?? []))
+      .catch(() => setCourseMastery([]));
+  }, [moduleId]);
+
+  const courseMasteryBySlug = useMemo(() => {
+    const map = new Map<string, { qcmSuccessPct: number; srsMasteryPct: number }>();
+    for (const row of courseMastery) {
+      const srsMasteryPct =
+        row.avg_leitner_box != null ? Math.max(0, Math.min(100, ((row.avg_leitner_box - 1) / (MAX_LEITNER_BOX - 1)) * 100)) : 0;
+      map.set(row.course_slug, { qcmSuccessPct: row.mastery_pct, srsMasteryPct });
+    }
+    return map;
+  }, [courseMastery]);
+
   const today = new Date().toLocaleDateString("fr-FR");
   const openedSectionLabel = DEMO_SECTIONS.find((s) => s.id === openedSection)?.label ?? "";
   const moduleTitle = module?.title ?? "Module";
 
-  function notYetAvailable(feature: string) {
-    toast({ variant: "info", title: "Bientôt disponible", description: `${feature} arrive dans une prochaine mise à jour.` });
+  /** Applies a newly-created course to sidebar/active state — shared by both the file and pasted-text creation paths below. */
+  function applyCreatedCourse(created: StudioCourseSummary, rawText: string) {
+    setCourses((prev) => [...prev, created]); // appended at the bottom — matches the sidebar's oldest-first order
+    setActiveCourse({
+      id: created.id,
+      title: created.title,
+      rawText,
+      explication: null,
+      resume: null,
+      casClinique: null,
+      qcms: null,
+      mindMap: null,
+      exemplesAnalogies: null,
+    });
+    setOpenedSection(null);
   }
 
-  async function handleFileSelected(file: File) {
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
-      const uploadData = await uploadRes.json().catch(() => ({}));
-      if (!uploadRes.ok || !uploadData.success) throw new Error(uploadData?.error ?? "L'extraction du PDF a échoué.");
+  /** Returns the new course's id (as a string, matching UploadModal's generic contract) or throws — UploadModal shows the thrown message inline instead of a toast, so the student sees exactly why an upload failed without losing the dialog. */
+  async function handleFileSelected(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+    const uploadData = await uploadRes.json().catch(() => ({}));
+    if (!uploadRes.ok || !uploadData.success) throw new Error(uploadData?.error ?? "L'extraction du PDF a échoué.");
 
-      const createRes = await fetch("/api/studio/courses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleId, title: file.name, rawText: uploadData.text }),
-      });
-      const createData = await createRes.json().catch(() => ({}));
-      if (!createRes.ok || !createData.success) throw new Error(createData?.error ?? "La création du cours a échoué.");
+    const createRes = await fetch("/api/studio/courses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moduleId, title: file.name, rawText: uploadData.text }),
+    });
+    const createData = await createRes.json().catch(() => ({}));
+    if (!createRes.ok || !createData.success) throw new Error(createData?.error ?? "La création du cours a échoué.");
 
-      const created: StudioCourseSummary = createData.course;
-      setCourses((prev) => [...prev, created]); // appended at the bottom — matches the sidebar's oldest-first order
-      setActiveCourse({
-        id: created.id,
-        title: created.title,
-        rawText: uploadData.text,
-        explication: null,
-        resume: null,
-        casClinique: null,
-        qcms: null,
-        mindMap: null,
-        exemplesAnalogies: null,
-      });
-      setOpenedSection(null);
-      toast({ variant: "success", title: "Source ajoutée", description: `${file.name} a été importé et sauvegardé.` });
-    } catch (error) {
-      toast({
-        variant: "error",
-        title: "Échec de l'import",
-        description: error instanceof Error ? error.message : "Erreur inconnue.",
-      });
-    } finally {
-      setIsUploading(false);
-    }
+    const created: StudioCourseSummary = createData.course;
+    applyCreatedCourse(created, uploadData.text);
+    toast({ variant: "success", title: "Source ajoutée", description: `${file.name} a été importé et sauvegardé.` });
+    return String(created.id);
+  }
+
+  /** "Texte brut" tab of the unified Add-sources modal — skips /api/upload entirely (no file to extract from) and creates the course directly from the pasted text. */
+  async function handleTextSubmitted(text: string, title: string): Promise<string> {
+    const createRes = await fetch("/api/studio/courses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moduleId, title: title.trim() || "Cours (texte collé)", rawText: text }),
+    });
+    const createData = await createRes.json().catch(() => ({}));
+    if (!createRes.ok || !createData.success) throw new Error(createData?.error ?? "La création du cours a échoué.");
+
+    const created: StudioCourseSummary = createData.course;
+    applyCreatedCourse(created, text);
+    toast({ variant: "success", title: "Source ajoutée", description: `${created.title} a été ajouté.` });
+    return String(created.id);
   }
 
   /**
@@ -464,23 +623,71 @@ export default function ModuleWorkspacePage() {
 
   function handleSend() {
     const text = chatInput.trim();
-    if (!text || isTyping) return;
+    if (!text && !quotedText) return;
+    if (isTyping) return;
 
-    setChatMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content: text }]);
+    const isAskMedArt = quotedText !== null;
+    const fullMessage = buildQuotedChatMessage(quotedText, text);
     setChatInput("");
-    setIsTyping(true);
+    setQuotedText(null);
+    sendChatMessage(fullMessage, {
+      sourceText: activeCourse?.rawText ?? undefined,
+      // "Ask MedArt" is a quick action like Translate — short answer, and
+      // the quote/reply must never resend in later requests' history (see
+      // ChatMessage.excludeFromHistory). selectedText puts the server in
+      // strict highlight isolation (no course text, no history, forced onto
+      // the cheap model) — sourceText above is ignored server-side whenever
+      // this is set, kept only for the plain (non-highlight) send path.
+      concise: isAskMedArt,
+      excludeFromHistory: isAskMedArt,
+      selectedText: quotedText ?? undefined,
+    });
+  }
 
-    setTimeout(() => {
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: `Le Chat IA pour le module ${moduleTitle} arrive bientôt — dès qu'un cours sera ajouté ici, je pourrai répondre à tes questions dessus.`,
-        },
-      ]);
-      setIsTyping(false);
-    }, 700);
+  /** Inserts the selection as a citation chip above the composer — the student still reviews/types their own question before sending, per spec. Opens split-screen so the chat is visible alongside whatever Studio tile (or the sidebar) was open. */
+  function handleAskSelection(text: string) {
+    setQuotedText(text);
+    setIsSplitScreen(true);
+    chatPanelRef.current?.focusInput();
+  }
+
+  /** Directly sends a translation request — no composer round-trip needed. `translate: true` swaps the server's system prompt for a strict medical-translator persona (arabe + français), not the generic concise-answer one. */
+  function handleTranslateSelection(text: string) {
+    sendChatMessage(buildDemoTranslatePrompt(text), {
+      translate: true,
+      sourceText: activeCourse?.rawText ?? undefined,
+      // Same one-off-context rule as the Ask MedArt citation — the selected
+      // passage (and its translation) should inform only this exchange, not
+      // linger in history and bias unrelated later questions back toward it.
+      excludeFromHistory: true,
+      selectedText: text,
+    });
+  }
+
+  async function handleDeleteCourse(courseId: number) {
+    const res = await fetch(`/api/studio/courses/${courseId}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      toast({ variant: "error", title: "Échec de la suppression", description: data?.error ?? "Erreur inconnue." });
+      return;
+    }
+    setCourses((prev) => prev.filter((c) => c.id !== courseId));
+    if (activeCourse?.id === courseId) {
+      setActiveCourse(null);
+      setOpenedSection(null);
+      setIsSplitScreen(false);
+    }
+    toast({ variant: "success", title: "Cours supprimé" });
+  }
+
+  function handleToggleShowCourse(courseId: number) {
+    if (courseId === activeCourse?.id && isSplitScreen && splitScreenView === "source") {
+      setIsSplitScreen(false);
+      return;
+    }
+    if (courseId !== activeCourse?.id) handleSelectCourse(courseId);
+    setSplitScreenView("source");
+    setIsSplitScreen(true);
   }
 
   if (loading) {
@@ -517,15 +724,25 @@ export default function ModuleWorkspacePage() {
       input={chatInput}
       onInputChange={setChatInput}
       onSend={handleSend}
-      onClearHistory={() => setChatMessages([])}
-      onAskSelection={() => notYetAvailable("La réponse sur un extrait sélectionné")}
-      onTranslateSelection={() => notYetAvailable("La traduction d'un extrait sélectionné")}
+      onClearHistory={clearMessages}
+      onAskSelection={handleAskSelection}
+      onTranslateSelection={handleTranslateSelection}
       pendingThinkingLabel={null}
       isSplitScreen={isSplitScreen}
-      onToggleSplitScreen={() => setIsSplitScreen((v) => !v)}
+      onToggleSplitScreen={() =>
+        setIsSplitScreen((prev) => {
+          const next = !prev;
+          if (next) setSplitScreenView("studio");
+          return next;
+        })
+      }
       dark={isDark}
+      quotedText={quotedText}
+      onClearQuote={() => setQuotedText(null)}
     />
   );
+
+  const sourceDocumentPanel = <SourceDocumentPanel title={activeCourse?.title ?? moduleTitle} rawText={activeCourse?.rawText ?? ""} onClose={() => setIsSplitScreen(false)} />;
 
   const studioPanel = (
     <StudioPanel
@@ -546,8 +763,8 @@ export default function ModuleWorkspacePage() {
       }}
       noteContent={noteContent}
       onNoteContentChange={setNoteContent}
-      onAskSelection={() => notYetAvailable("La réponse sur un extrait sélectionné")}
-      onTranslateSelection={() => notYetAvailable("La traduction d'un extrait sélectionné")}
+      onAskSelection={handleAskSelection}
+      onTranslateSelection={handleTranslateSelection}
     >
       {isSwitchingCourse ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 py-20">
@@ -609,7 +826,6 @@ export default function ModuleWorkspacePage() {
               data={activeCourse.qcms}
               courseSlug={`studio-course-${activeCourse.id}`}
               explicationMarkdown={activeCourse.explication ?? undefined}
-              isPreview
             />
           )}
           {openedSection === "mind_map" && activeCourse.mindMap && (
@@ -640,10 +856,15 @@ export default function ModuleWorkspacePage() {
             <ModuleSourcesPanel
               courses={courses}
               activeCourseId={activeCourse?.id ?? null}
-              isUploading={isUploading}
+              isSplitScreen={isSplitScreen}
               isSwitchingCourse={isSwitchingCourse}
-              onFileSelected={handleFileSelected}
+              onSubmitFile={handleFileSelected}
+              onSubmitText={handleTextSubmitted}
               onSelectCourse={handleSelectCourse}
+              onToggleShowCourse={handleToggleShowCourse}
+              onDeleteCourse={handleDeleteCourse}
+              onClosePanel={() => setIsSplitScreen(true)}
+              courseMasteryBySlug={courseMasteryBySlug}
             />
           </aside>
         )}
@@ -655,7 +876,7 @@ export default function ModuleWorkspacePage() {
           )}
         >
           <main className={panelShellClasses}>{chatPanel}</main>
-          {isSplitScreen && <aside className={panelShellClasses}>{studioPanel}</aside>}
+          {isSplitScreen && <aside className={panelShellClasses}>{splitScreenView === "source" ? sourceDocumentPanel : studioPanel}</aside>}
         </div>
 
         {!isSplitScreen && <aside className={cn(panelShellClasses, "w-96 shrink-0")}>{studioPanel}</aside>}

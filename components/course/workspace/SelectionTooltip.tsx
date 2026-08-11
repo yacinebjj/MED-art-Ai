@@ -1,9 +1,24 @@
 "use client";
 
 import { forwardRef } from "react";
+import { createPortal } from "react-dom";
 import { MessageCircleQuestion, Languages } from "lucide-react";
 import type { TextSelectionState } from "@/hooks/useTextSelection";
 
+/**
+ * Rendered through a Portal straight into `document.body` — the bug report
+ * ("only appears when the window is shrunk") is the classic symptom of a
+ * `position: fixed` descendant getting trapped by an ANCESTOR that
+ * establishes its own containing block (any `transform`/`filter`/
+ * `will-change` on something between here and <body>, several of which this
+ * workspace's panel-shell/split-screen transition classes apply). A fixed
+ * element is then positioned relative to THAT ancestor's box instead of the
+ * real viewport, so the (correctly viewport-relative, see
+ * useTextSelection.ts) coordinates land outside of it at most window sizes.
+ * Portaling to `document.body` — which has no such ancestor — sidesteps the
+ * problem entirely regardless of which specific class is the culprit, and is
+ * the standard fix for exactly this class of bug.
+ */
 export const SelectionTooltip = forwardRef<
   HTMLDivElement,
   {
@@ -12,11 +27,13 @@ export const SelectionTooltip = forwardRef<
     onTranslate: (text: string) => void;
   }
 >(function SelectionTooltip({ selection, onAsk, onTranslate }, ref) {
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
       ref={ref}
       style={{ top: selection.top, left: selection.left }}
-      className="fixed z-[60] flex -translate-x-1/2 gap-2 rounded-lg bg-gray-900 p-2 shadow-xl"
+      className="fixed z-[99999] flex -translate-x-1/2 gap-2 rounded-lg bg-gray-900 p-2 shadow-xl"
     >
       <button
         onClick={() => onAsk(selection.text)}
@@ -33,6 +50,7 @@ export const SelectionTooltip = forwardRef<
         <Languages className="h-3.5 w-3.5" />
         Translate
       </button>
-    </div>
+    </div>,
+    document.body
   );
 });

@@ -40,6 +40,35 @@ export function buildDemoTranslatePrompt(selectedText: string): string {
   return `Traduis ce terme ou passage médical en arabe et en français courant : "${selectedText}".`;
 }
 
+/**
+ * Builds the final chat message for the composer's citation flow ("Ask
+ * MedArt" quotes a passage above the input, the student types their own
+ * question and sends). If the student sends without typing anything — a
+ * very common "just explain this" click — the message would otherwise be
+ * nothing but the bare quoted passage, which reads to the model as content
+ * to acknowledge rather than a question to answer, producing a generic,
+ * unfocused reply. Falling back to an explicit instruction here is what
+ * keeps "Ask MedArt" reliably answering ABOUT the selection instead of just
+ * echoing it back.
+ *
+ * The caller is responsible for sending this with `excludeFromHistory: true`
+ * (see hooks/useCourseChat.ts) — the quote (and the resulting reply, which
+ * is just as capable of anchoring later messages back onto the old topic)
+ * must inform only this ONE exchange, never resend in later requests'
+ * history.
+ */
+export function buildQuotedChatMessage(quotedText: string | null, typedText: string): string {
+  const text = typedText.trim();
+  if (!quotedText) return text;
+  const question = text || "Explique ce passage médical sélectionné, en te concentrant précisément dessus.";
+  return `> ${quotedText}\n\n${question}`;
+}
+
+/** Whether `content` is a composer citation built by buildQuotedChatMessage above — used to recognize & re-exclude an "Ask MedArt" exchange loaded back from persisted history (course_chat_history has no separate flag column for this), since a fresh page load otherwise loses the live session's exclusion and reintroduces the same leak on the next message. */
+export function isQuotedChatMessage(content: string): boolean {
+  return content.startsWith("> ") && content.includes("\n\n");
+}
+
 export const DEMO_SECTIONS: DemoSection[] = [
   {
     id: "explication",

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, type ChatMessageInput, type ContentBlock } from "@/lib/ai/openrouter";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import {
-  buildSourceTextUserMessage,
   CAS_CLINIQUE_SYSTEM_PROMPT,
   EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
   EXPLICATION_SYSTEM_PROMPT,
@@ -121,6 +120,21 @@ export type Section = "explication" | "resume" | "cas_clinique" | "qcms" | "mind
  */
 const SIMILAR_COURSE_THRESHOLD = 0.9;
 
+/**
+ * Coverage floor for the CHUNK-BASED Smart Clone check (see
+ * findChunkBasedClone() below) — deliberately NOT 0.90 like
+ * SIMILAR_COURSE_THRESHOLD above. The 0.90 bar is already enforced per
+ * INDIVIDUAL chunk by match_similar_source_chunks() — every chunk counted as
+ * "matched" is independently a near-exact match on its own. Requiring the
+ * SAME strict bar again at the aggregate level would just re-impose the
+ * whole-document dilution problem this check exists to avoid. 55% means
+ * "more than half of this course's real paragraphs already exist
+ * near-verbatim elsewhere" — high enough to exclude two courses that merely
+ * share a boilerplate intro or a common definition, low enough to still
+ * catch a professor's reordered/reformatted version of the same source.
+ */
+const MIN_CHUNK_COVERAGE = 0.55;
+
 /** One row of match_similar_courses_by_slug()'s result — see supabase/schema.sql. Every section column is cast to `text` in SQL regardless of the column's real storage type, so callers always JSON.parse() the "object" ones themselves. */
 interface SimilarCourseRow {
   slug: string;
@@ -159,6 +173,137 @@ const SECTION_CONFIG: Record<Section, SectionConfig> = {
 interface RawCourseRow {
   raw_text: string | null;
   [section: string]: unknown;
+}
+
+/**
+ * Builds the OpenRouter message array for ONE section call, with the source
+ * text placed FIRST in the system message as its own `cache_control`
+ * breakpoint — the section's own instructions come AFTER it, uncached.
+ *
+ * This ordering is deliberate, not arbitrary, and the reverse (instructions
+ * first, source text second) would NOT give the same result: Anthropic's
+ * prompt cache keys each breakpoint on the cumulative byte prefix UP TO AND
+ * INCLUDING it. Putting the source text first means its own breakpoint's key
+ * is just hash(sourceText) — identical across all 6 section calls for the
+ * SAME course (explication, résumé, cas_clinique, qcms, mind_map,
+ * exemples_analogies all read the exact same raw_text). A student who opens
+ * several Studio tabs for one course within the cache TTL turns tabs 2-6
+ * into a 90%-cheaper cache READ on this block instead of a full-price resend
+ * of the whole source document — a saving that requires no other student on
+ * the platform and no prior history, so it applies from this app's very
+ * first course.
+ *
+ * The section instructions are deliberately left OUT of any cache_control:
+ * putting them on a SECOND breakpoint after the source text would key that
+ * breakpoint on hash(sourceText + instructions), which only ever repeats if
+ * the exact same course requests the exact same section twice — impossible
+ * here, since generateCourseSection() already short-circuits with a DB cache
+ * hit before ever reaching this call — or if two courses share near-identical
+ * source text, which Smart Clone (the match_similar_courses_by_slug check
+ * above) already intercepts before this function runs. Marking a block
+ * cache_control when it can structurally never be read back would just add
+ * the 1.25x cache-write premium with zero chance of ever recovering it via a
+ * 0.1x read, so it stays a plain, normally-priced block instead.
+ */
+function buildSectionMessages(systemPrompt: string, sourceText: string): ChatMessageInput[] {
+  const sourceBlock: ContentBlock = {
+    type: "text",
+    text: `Voici le contenu brut extrait du document source :\n"""\n${sourceText}\n"""`,
+    cache_control: { type: "ephemeral" },
+  };
+  const instructionsBlock: ContentBlock = { type: "text", text: systemPrompt };
+
+  return [
+    { role: "system", content: [sourceBlock, instructionsBlock] },
+    { role: "user", content: "Génère le JSON demandé, strictement conforme au schéma et aux règles ci-dessus, à partir du contenu source fourni." },
+  ];
+}
+
+/**
+ * Normalizes a section column's value read via a PLAIN `.from("courses").select(...)`
+ * call (as findChunkBasedClone below does) into the same shape the rest of
+ * generateCourseSection expects: the parsed JS value (object) for
+ * expectedType "object", the raw string for "string". Unlike
+ * match_similar_courses_by_slug's rows (explicitly cast `::text` in SQL, so
+ * always a string), a plain select can hand back either a string OR an
+ * already-parsed object depending on whether the environment stores the
+ * column as jsonb or text — blindly calling JSON.parse() on it, like the
+ * whole-document path below safely can, would throw on a native jsonb value.
+ */
+function normalizeSectionValue(raw: unknown, expectedType: "string" | "object"): unknown {
+  if (raw === null || raw === undefined) return null;
+  if (expectedType === "string") {
+    return typeof raw === "string" && raw.trim() ? raw : null;
+  }
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return raw;
+}
+
+/**
+ * Chunk-based Smart Clone — checked BEFORE the whole-document
+ * (content_embedding) Smart Clone below. A single whole-document cosine
+ * score can miss a real match: two courses whose actual medical content is
+ * 90% identical but whose cover page, OCR artifacts, or section ordering
+ * differ enough dilute that ONE score below the 0.90 threshold. This
+ * compares the new course's raw text chunk-by-chunk instead (see
+ * supabase/schema.sql's match_similar_source_chunks and
+ * course_source_chunks, populated at upload time in
+ * app/api/generate-course/route.ts) — a candidate qualifies once at least
+ * MIN_CHUNK_COVERAGE of THIS course's chunks each individually cross the
+ * same 0.90 cosine bar somewhere in that candidate's chunks, even if the two
+ * documents as a whole would never have matched.
+ *
+ * Fails open exactly like the whole-document check: any error (missing
+ * migration, RPC failure, a course with no indexed chunks yet) returns null
+ * and generateCourseSection falls straight through to the whole-document
+ * check, then to real generation — this can only ever make cloning MORE
+ * likely to fire, never less, and never blocks a student's course.
+ */
+async function findChunkBasedClone(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  slug: string,
+  section: Section,
+  config: SectionConfig
+): Promise<{ candidateSlug: string; coverage: number; value: unknown } | null> {
+  const { data, error } = await supabase.rpc("match_similar_source_chunks", {
+    p_slug: slug,
+    match_threshold: SIMILAR_COURSE_THRESHOLD,
+  });
+
+  if (error || !data) return null;
+
+  const candidates = data as { candidate_slug: string; matched_chunks: number; total_chunks: number }[];
+
+  for (const candidate of candidates) {
+    if (candidate.total_chunks === 0) continue;
+    const coverage = candidate.matched_chunks / candidate.total_chunks;
+    if (coverage < MIN_CHUNK_COVERAGE) continue;
+
+    const rawKey = section === "resume" ? "resume" : config.dbColumn;
+    const aliasedColumn = section === "resume" ? "resume:resumé" : config.dbColumn;
+    const { data: candidateRow } = await supabase
+      .from("courses")
+      .select(aliasedColumn)
+      .eq("slug", candidate.candidate_slug)
+      .maybeSingle();
+
+    const raw = (candidateRow as Record<string, unknown> | null)?.[rawKey];
+    const value = normalizeSectionValue(raw, config.expectedType);
+    if (value !== null) {
+      return { candidateSlug: candidate.candidate_slug, coverage, value };
+    }
+    // This candidate doesn't have the section generated yet — try the next
+    // one down the ranked list instead of giving up on chunk-based cloning
+    // entirely for this call.
+  }
+
+  return null;
 }
 
 /**
@@ -221,7 +366,38 @@ export async function generateCourseSection(slug: string, section: Section): Pro
     return NextResponse.json({ success: true, cached: true, section, data: existing });
   }
 
-  // --- Silent Semantic Deduplication ("Smart Clone") ------------------------
+  // --- Chunk-based Smart Clone (checked FIRST) -------------------------------
+  // See findChunkBasedClone()'s own doc comment for why this runs before the
+  // whole-document check below: it catches real matches the whole-document
+  // score dilutes away. Same fail-open contract as the block below — any
+  // error here just falls through, first to the whole-document check, then
+  // to real generation.
+  try {
+    const chunkClone = await findChunkBasedClone(supabase, slug, section, config);
+    if (chunkClone) {
+      const sanitizedClone = sanitizeForPostgres(chunkClone.value);
+      const { error: cloneUpdateError } = await supabase
+        .from("courses")
+        .update({ [config.dbColumn]: sanitizedClone })
+        .eq("slug", slug);
+
+      if (cloneUpdateError) {
+        console.error(
+          `[generate/${section}] Smart Clone (chunks) — échec sauvegarde de la section clonée (fail-open, poursuite):`,
+          cloneUpdateError.message
+        );
+      } else {
+        console.log(
+          `[generate/${section}] SMART CLONE (CHUNK-BASED) — section clonée depuis slug="${chunkClone.candidateSlug}" (couverture ${(chunkClone.coverage * 100).toFixed(1)}%) — 0$ appel OpenRouter.`
+        );
+        return NextResponse.json({ success: true, cached: false, cloned: true, cloneMethod: "chunks", section, data: sanitizedClone });
+      }
+    }
+  } catch (error) {
+    console.error(`[generate/${section}] Smart Clone (chunks) — exception inattendue (fail-open, poursuite):`, errorMessage(error));
+  }
+
+  // --- Silent Semantic Deduplication ("Smart Clone", whole-document) --------
   // Before paying for a real OpenRouter call, check whether another course —
   // any slug, any faculty, any professor's own phrasing/"كركاسة" — already
   // has near-identical raw_text (cosine similarity > 0.9, computed entirely
@@ -294,13 +470,7 @@ export async function generateCourseSection(slug: string, section: Section): Pro
   let raw: string;
   try {
     const aiStartedAt = Date.now();
-    raw = await callOpenRouter(
-      [
-        { role: "system", content: config.systemPrompt },
-        { role: "user", content: buildSourceTextUserMessage(truncatedText) },
-      ],
-      { maxTokens: config.maxTokens }
-    );
+    raw = await callOpenRouter(buildSectionMessages(config.systemPrompt, truncatedText), { maxTokens: config.maxTokens });
     console.log(`[generate/${section}] Réponse IA reçue en ${Date.now() - aiStartedAt} ms, ${raw.length} caractères.`);
   } catch (error) {
     if (error instanceof OpenRouterError) {

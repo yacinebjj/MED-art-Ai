@@ -19,17 +19,17 @@
  * dr-firan-1785259421242" is the Pleurésie course used to demo this feature,
  * since its QCMs were the ones actually exercised while building this.
  */
-const PLEURESIE_SLUG = "3-la-pleuresie-purulente-support-du-dr-firan-1785259421242";
+import { PLEURESIE_DEMO_SLUG } from "@/lib/constants";
 
 export const MOCK_READING_PROGRESS_BY_COURSE_SLUG: Record<string, number> = {
-  [PLEURESIE_SLUG]: 85,
+  [PLEURESIE_DEMO_SLUG]: 85,
 };
 
 export const MOCK_QCM_FALLBACK_BY_COURSE_SLUG: Record<string, number> = {
-  [PLEURESIE_SLUG]: 78,
+  [PLEURESIE_DEMO_SLUG]: 78,
 };
 
 /** SRS/memorization % fallback — normalized avg_leitner_box, see the Statistiques modal. */
 export const MOCK_SRS_MASTERY_FALLBACK_BY_COURSE_SLUG: Record<string, number> = {
-  [PLEURESIE_SLUG]: 64,
+  [PLEURESIE_DEMO_SLUG]: 64,
 };
