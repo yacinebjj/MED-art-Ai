@@ -3,7 +3,7 @@
 import { memo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, MoreVertical, Trash2, TrendingUp } from "lucide-react";
+import { ChevronDown, FileQuestion, MoreVertical, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
 import { useToast } from "@/components/ui/Toast";
@@ -131,6 +131,10 @@ const IndependentModuleCard = memo(function IndependentModuleCard({ module: mod 
             <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
               <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               Voir statistiques
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => router.push(`/dashboard/module/${mod.id}/exam`)}>
+              <FileQuestion className="h-4 w-4 text-primary-600 dark:text-primary-400" />
+              Générer un examen
             </DropdownMenuItem>
             <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />

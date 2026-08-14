@@ -1,5 +1,3 @@
-"use client";
-
 import { Trophy, BrainCircuit } from "lucide-react";
 import { StudyDashboard } from "@/components/study/StudyDashboard";
 import { WeaknessRadar } from "@/components/study/WeaknessRadar";

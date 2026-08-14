@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { callOpenRouter, OpenRouterError, type ChatMessageInput, type ContentBlock } from "@/lib/ai/openrouter";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { buildSourceChunks } from "@/lib/search/source-chunking";
+import { splitExplicationByChapter } from "@/lib/explication-sections";
 import {
+  buildExplicationDeltaChapterPrompt,
+  buildExplicationWrapperPrompt,
+  buildResumeContextInjectionAddendum,
   CAS_CLINIQUE_SYSTEM_PROMPT,
   EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
+  EXPLICATION_CHUNK_TAGGING_ADDENDUM,
   EXPLICATION_SYSTEM_PROMPT,
   MIND_MAP_SYSTEM_PROMPT,
   QCMS_SYSTEM_PROMPT,
@@ -306,6 +312,274 @@ async function findChunkBasedClone(
   return null;
 }
 
+interface ExplicationChapterRow {
+  chapter_index: number;
+  heading: string;
+  content: string;
+  source_chunk_indices: number[];
+}
+
+interface AssembledChapter {
+  heading: string;
+  content: string;
+  sourceChunkIndices: number[];
+}
+
+/** Parses a model's chapterChunks-style field (array of arrays of 1-indexed extrait numbers) into 0-indexed chunk_index arrays, tolerating malformed/missing entries rather than throwing. */
+function parseChapterChunkNumbers(raw: unknown, fallback: number[]): number[] {
+  if (!Array.isArray(raw)) return fallback;
+  const numbers = raw.filter((n): n is number => typeof n === "number").map((n) => n - 1);
+  return numbers.length > 0 ? numbers : fallback;
+}
+
+/**
+ * Chunk-Based Delta Update for Explication ONLY (the highest-value target:
+ * the single most expensive section, dominated by output tokens, and the
+ * only one with a real chapter structure to slice). Tries each ranked
+ * candidate (from match_similar_source_chunks) in turn until one yields at
+ * least one reusable chapter; returns null (fail open) if none do, so the
+ * caller falls through to full-fresh generation exactly as before this
+ * feature existed.
+ *
+ * Per the executive decision: comparison happens at the PARAGRAPH-chunk
+ * level (course_source_chunks, already built for the whole-section Smart
+ * Clone), not on raw-text "chapter" headings — a raw PDF upload has no
+ * reliable chapter markup before generation, chunk boundaries do.
+ */
+async function runExplicationDeltaPipeline(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  slug: string
+): Promise<string | null> {
+  const { data: candidatesData, error: candidatesError } = await supabase.rpc("match_similar_source_chunks", {
+    p_slug: slug,
+    match_threshold: SIMILAR_COURSE_THRESHOLD,
+  });
+  if (candidatesError || !candidatesData) return null;
+
+  const candidates = candidatesData as { candidate_slug: string; matched_chunks: number; total_chunks: number }[];
+
+  for (const candidate of candidates) {
+    if (candidate.matched_chunks === 0) continue;
+
+    const { data: candidateChapters, error: chaptersError } = await supabase
+      .from("course_explication_chapters")
+      .select("chapter_index, heading, content, source_chunk_indices")
+      .eq("course_slug", candidate.candidate_slug)
+      .order("chapter_index", { ascending: true });
+
+    if (chaptersError || !candidateChapters || candidateChapters.length === 0) continue; // no chapter map on this candidate — try the next one
+
+    const { data: detailedMatches, error: detailError } = await supabase.rpc("match_chunks_against_course", {
+      p_slug: slug,
+      p_candidate_slug: candidate.candidate_slug,
+      match_threshold: SIMILAR_COURSE_THRESHOLD,
+    });
+    if (detailError || !detailedMatches) continue;
+
+    const matchRows = detailedMatches as { target_chunk_index: number; candidate_chunk_index: number; similarity: number }[];
+    const matchedCandidateChunkIndices = new Set(matchRows.map((r) => r.candidate_chunk_index));
+    const matchedTargetChunkIndices = new Set(matchRows.map((r) => r.target_chunk_index));
+
+    const chapterRows = candidateChapters as unknown as ExplicationChapterRow[];
+    const reusableChapters: AssembledChapter[] = chapterRows
+      .filter((ch) => ch.source_chunk_indices.some((idx) => matchedCandidateChunkIndices.has(idx)))
+      .map((ch) => ({ heading: ch.heading, content: ch.content, sourceChunkIndices: ch.source_chunk_indices }));
+
+    if (reusableChapters.length === 0) continue; // nothing usable from this candidate — try the next
+
+    const { data: targetChunksData } = await supabase
+      .from("course_source_chunks")
+      .select("chunk_index")
+      .eq("course_slug", slug)
+      .order("chunk_index", { ascending: true });
+    const targetChunkIndices = ((targetChunksData ?? []) as { chunk_index: number }[]).map((r) => r.chunk_index);
+    const unmatchedChunkIndices = targetChunkIndices.filter((idx) => !matchedTargetChunkIndices.has(idx));
+
+    let newChapters: AssembledChapter[] = [];
+
+    if (unmatchedChunkIndices.length > 0) {
+      const { data: unmatchedChunkRows } = await supabase
+        .from("course_source_chunks")
+        .select("chunk_index, content")
+        .eq("course_slug", slug)
+        .in("chunk_index", unmatchedChunkIndices)
+        .order("chunk_index", { ascending: true });
+
+      const unmatchedText = ((unmatchedChunkRows ?? []) as { chunk_index: number; content: string }[])
+        .map((r) => `Extrait ${r.chunk_index + 1}:\n${r.content}`)
+        .join("\n\n");
+
+      const deltaPrompt = buildExplicationDeltaChapterPrompt(
+        reusableChapters.map((ch) => ch.heading),
+        reusableChapters.length + 1
+      );
+
+      const rawDelta = await callOpenRouter(
+        [
+          { role: "system", content: deltaPrompt },
+          { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
+        ],
+        { maxTokens: 8000, bypassMock: true }
+      );
+
+      const parsedDelta = parseJsonResponse(rawDelta);
+      const newChaptersMarkdown = typeof parsedDelta.newChapters === "string" ? parsedDelta.newChapters : "";
+      const chapterChunksRaw = Array.isArray(parsedDelta.chapterChunks) ? parsedDelta.chapterChunks : [];
+
+      newChapters = splitExplicationByChapter(newChaptersMarkdown).map((section, i) => ({
+        heading: section.headingText,
+        content: section.content,
+        sourceChunkIndices: parseChapterChunkNumbers(chapterChunksRaw[i], unmatchedChunkIndices),
+      }));
+    }
+
+    // Assemble final chapter order: sort reused + new by the minimum chunk
+    // index each covers — an approximation of the original document's
+    // order, not a guarantee, but a reasonable one since chunks themselves
+    // are already in source order.
+    const allChapters = [...reusableChapters, ...newChapters].sort((a, b) => {
+      const aMin = a.sourceChunkIndices.length ? Math.min(...a.sourceChunkIndices) : Number.MAX_SAFE_INTEGER;
+      const bMin = b.sourceChunkIndices.length ? Math.min(...b.sourceChunkIndices) : Number.MAX_SAFE_INTEGER;
+      return aMin - bMin;
+    });
+
+    // The wrapper (intro/Sommaire/Avant-propos/Récapitulatif) is regenerated
+    // every time — a real, disclosed cost, small relative to the chapters
+    // it saved from being regenerated.
+    const wrapperPrompt = buildExplicationWrapperPrompt(allChapters.map((ch) => ch.heading));
+    const rawWrapper = await callOpenRouter(
+      [
+        { role: "system", content: wrapperPrompt },
+        { role: "user", content: "Génère le JSON demandé." },
+      ],
+      { maxTokens: 4000, bypassMock: true }
+    );
+    const parsedWrapper = parseJsonResponse(rawWrapper);
+    const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
+    const sommaire = typeof parsedWrapper.sommaire === "string" ? parsedWrapper.sommaire : "";
+    const avantPropos = typeof parsedWrapper.avantPropos === "string" ? parsedWrapper.avantPropos : "";
+    const recapitulatif = typeof parsedWrapper.recapitulatif === "string" ? parsedWrapper.recapitulatif : "";
+
+    const assembledMarkdown = [intro, sommaire, avantPropos, ...allChapters.map((ch) => ch.content), recapitulatif]
+      .filter(Boolean)
+      .join("\n\n");
+
+    // Persist THIS course's own chapter map (re-numbered/re-ordered) so it
+    // can serve as a future candidate for the next similar upload too.
+    const chapterRowsToInsert = allChapters.map((ch, i) => ({
+      course_slug: slug,
+      chapter_index: i,
+      heading: ch.heading,
+      content: ch.content,
+      source_chunk_indices: ch.sourceChunkIndices,
+    }));
+    if (chapterRowsToInsert.length > 0) {
+      const { error: chapterSaveError } = await supabase
+        .from("course_explication_chapters")
+        .upsert(chapterRowsToInsert, { onConflict: "course_slug,chapter_index" });
+      if (chapterSaveError) {
+        console.error("[generate/explication] Échec sauvegarde de la carte de chapitres (non bloquant):", chapterSaveError.message);
+      }
+    }
+
+    console.log(
+      `[generate/explication] DELTA UPDATE depuis slug="${candidate.candidate_slug}" — ${reusableChapters.length}/${allChapters.length} chapitre(s) réutilisé(s), ${newChapters.length} régénéré(s).`
+    );
+
+    return assembledMarkdown;
+  }
+
+  return null;
+}
+
+/**
+ * Full-fresh Explication generation WITH chapter/chunk tagging — used the
+ * first time a topic is generated (no delta candidate exists yet) so that
+ * FUTURE similar uploads have something to delta against. The only
+ * difference from a plain generation: source text is sent as numbered
+ * extraits instead of one block, and the model is asked for an extra
+ * "explicationChapterChunks" field mapping each chapter to which extraits
+ * informed it — see EXPLICATION_CHUNK_TAGGING_ADDENDUM.
+ */
+async function runExplicationFreshGenerationWithTagging(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  slug: string,
+  truncatedText: string
+): Promise<string> {
+  const chunks = buildSourceChunks(truncatedText);
+  const numberedExtraits = chunks.map((content, i) => `Extrait ${i + 1}:\n${content}`).join("\n\n");
+
+  const raw = await callOpenRouter(
+    [
+      { role: "system", content: EXPLICATION_SYSTEM_PROMPT + EXPLICATION_CHUNK_TAGGING_ADDENDUM },
+      {
+        role: "user",
+        content: `Voici le contenu source, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
+      },
+    ],
+    { maxTokens: SECTION_CONFIG.explication.maxTokens }
+  );
+
+  const parsed = parseJsonResponse(raw);
+  const explicationMarkdown = typeof parsed.explication === "string" ? parsed.explication : "";
+  if (!explicationMarkdown.trim()) {
+    throw new Error("La réponse de l'IA ne contient pas de champ 'explication' exploitable.");
+  }
+
+  const chapterChunksRaw = Array.isArray(parsed.explicationChapterChunks) ? parsed.explicationChapterChunks : [];
+  const sections = splitExplicationByChapter(explicationMarkdown);
+
+  const chapterRows = sections.map((section, i) => ({
+    course_slug: slug,
+    chapter_index: i,
+    heading: section.headingText,
+    content: section.content,
+    source_chunk_indices: parseChapterChunkNumbers(chapterChunksRaw[i], []),
+  }));
+
+  if (chapterRows.length > 0) {
+    const { error } = await supabase
+      .from("course_explication_chapters")
+      .upsert(chapterRows, { onConflict: "course_slug,chapter_index" });
+    if (error) {
+      console.error("[generate/explication] Échec sauvegarde des chapitres taggés (non bloquant):", error.message);
+    }
+  }
+
+  return explicationMarkdown;
+}
+
+/**
+ * Résumé's "Context-Injection" — finds a similar course's already-generated
+ * Résumé (same ranked-candidate RPC as the delta pipeline above, but no
+ * coverage gate: even a partial match is useful as a factual reference) to
+ * inject as a [GROUND TRUTH] the model must use for FACTS only, never copy
+ * structurally. Returns null (fail open) if none found — the caller then
+ * generates Résumé exactly as before this feature existed.
+ */
+async function findBaseResumeForInjection(supabase: ReturnType<typeof getSupabaseAdmin>, slug: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc("match_similar_source_chunks", {
+    p_slug: slug,
+    match_threshold: SIMILAR_COURSE_THRESHOLD,
+  });
+  if (error || !data) return null;
+
+  const candidates = data as { candidate_slug: string; matched_chunks: number; total_chunks: number }[];
+  for (const candidate of candidates) {
+    if (candidate.matched_chunks === 0) continue;
+    const { data: candidateRow } = await supabase
+      .from("courses")
+      .select("resume:resumé")
+      .eq("slug", candidate.candidate_slug)
+      .maybeSingle();
+    const raw = (candidateRow as Record<string, unknown> | null)?.resume;
+    if (raw !== null && raw !== undefined) {
+      return typeof raw === "string" ? raw : JSON.stringify(raw);
+    }
+  }
+  return null;
+}
+
 /**
  * The full modular-generation pipeline for ONE section of ONE course,
  * called by each of the 5 thin route wrappers. Every step is isolated so a
@@ -466,11 +740,58 @@ export async function generateCourseSection(slug: string, section: Section): Pro
 
   const truncatedText = rawText.slice(0, MAX_SOURCE_CHARS);
 
+  // --- Explication: Chunk-Based Delta Update, tried first, fully self-contained ---
+  // Either returns early (delta reuse or tagged-fresh-generation succeeded)
+  // or falls straight through to the plain generic path below, completely
+  // unchanged, on ANY failure — same fail-open contract as every Smart
+  // Clone check above.
+  if (section === "explication") {
+    try {
+      const delta = await runExplicationDeltaPipeline(supabase, slug);
+      const explicationMarkdown = delta ?? (await runExplicationFreshGenerationWithTagging(supabase, slug, truncatedText));
+
+      if (explicationMarkdown && explicationMarkdown.trim().length >= 50) {
+        const sanitizedValue = sanitizeForPostgres(explicationMarkdown);
+        const { error: updateError } = await supabase.from("courses").update({ explication: sanitizedValue }).eq("slug", slug);
+
+        if (!updateError) {
+          console.log(`[generate/explication] Généré via pipeline delta/tagging en ${Date.now() - startedAt} ms (slug="${slug}").`);
+          return NextResponse.json({ success: true, cached: false, section, data: sanitizedValue });
+        }
+        console.error(
+          `[generate/explication] Échec sauvegarde après pipeline delta/tagging (fail-open, bascule génération classique):`,
+          updateError.message
+        );
+      }
+    } catch (error) {
+      console.error(
+        `[generate/explication] Pipeline delta/tagging échoué (fail-open, bascule génération classique):`,
+        errorMessage(error)
+      );
+    }
+    // Nothing above returned — fall through to the exact plain path below.
+  }
+
+  // --- Résumé: Context-Injection — augments the system prompt only, the
+  // generic call/parse/save flow right below stays identical either way. ---
+  let effectiveSystemPrompt = config.systemPrompt;
+  if (section === "resume") {
+    try {
+      const baseResume = await findBaseResumeForInjection(supabase, slug);
+      if (baseResume) {
+        effectiveSystemPrompt = config.systemPrompt + buildResumeContextInjectionAddendum(baseResume);
+        console.log(`[generate/resume] Context-Injection activée depuis un cours similaire (slug="${slug}").`);
+      }
+    } catch (error) {
+      console.error(`[generate/resume] Context-Injection échouée (fail-open, génération classique):`, errorMessage(error));
+    }
+  }
+
   console.log(`[generate/${section}] Appel à OpenRouter (slug="${slug}")...`);
   let raw: string;
   try {
     const aiStartedAt = Date.now();
-    raw = await callOpenRouter(buildSectionMessages(config.systemPrompt, truncatedText), { maxTokens: config.maxTokens });
+    raw = await callOpenRouter(buildSectionMessages(effectiveSystemPrompt, truncatedText), { maxTokens: config.maxTokens });
     console.log(`[generate/${section}] Réponse IA reçue en ${Date.now() - aiStartedAt} ms, ${raw.length} caractères.`);
   } catch (error) {
     if (error instanceof OpenRouterError) {

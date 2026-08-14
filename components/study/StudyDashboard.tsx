@@ -1,413 +1,391 @@
 "use client";
 
 /**
- * Gamification & Study Timer — UI-first prototype.
+ * Smart Anti-Cheat Pomodoro System — replaces the earlier XP-grid prototype
+ * entirely. Zero backend: everything here is local React state, per spec.
  *
- * ZERO backend: everything here is local React state + mock data, per spec.
- * The 6 action trackers below map 1:1 to the 6 study features that actually
- * exist in this codebase today (verified against lib/types.ts's
- * STUDIO_CONTENT_TYPES/STUDIO_CHUNKED_CONTENT_TYPES and lib/demo-content.ts's
- * DEMO_SECTIONS before writing any of this):
- *   - Cours Oral            (components/course/workspace/CenterReader.tsx content)
- *   - Explication Ultra-Détaillée
- *   - Mode Visuel
- *   - Résumé
- *   - Cas Clinique          (CasCliniqueStudio.tsx / CasCliniqueLive.tsx)
- *   - Examen QCMs           (ExamQcmStudio.tsx / ExamQcmLive.tsx)
- * No flashcards, no other invented feature — those are the only 6 that exist.
- * Icons below match the ones already used for each feature elsewhere in the
- * app (StudioSidebar.tsx's Mic for Cours Oral; lib/demo-content.ts's
- * BookOpenText/Workflow/ScrollText/Stethoscope/ListChecks for the rest).
+ * Anti-cheat mechanism: a `visibilitychange` listener auto-pauses the timer
+ * the instant the tab/window loses focus WHILE a study phase is running —
+ * tabbing away to a video, another app, or a different browser tab
+ * immediately stops the clock instead of letting it silently keep counting
+ * unattended "focus" time.
+ *
+ * Notification sound: synthesized with the Web Audio API (a short sine
+ * beep) rather than shipping an embedded base64 audio file — this
+ * guarantees the sound is byte-correct and needs no asset file, while still
+ * satisfying "audio feedback on completion, handled safely." Swap in
+ * `new Audio("/sounds/bell.mp3")` inside playNotificationSound() below if a
+ * real sound asset gets added to /public later; the try/catch around it
+ * already covers browser autoplay-policy rejections either way.
  */
 
 import { useEffect, useRef, useState } from "react";
-import {
-  Trophy,
-  Award,
-  Flame,
-  Play,
-  Pause,
-  Square,
-  Plus,
-  Minus,
-  Clock,
-  Sparkles,
-  Mic,
-  BookOpenText,
-  Workflow,
-  ScrollText,
-  Stethoscope,
-  ListChecks,
-  CheckCircle2,
-  type LucideIcon,
-} from "lucide-react";
+import { BookOpenCheck, Coffee, Minus, Pause, Play, Plus, RotateCcw, ShieldAlert, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/Toast";
 
-/* ----------------------------------------------------------------------- */
-/* Mock header stats — static "lifetime" numbers, independent of the live   */
-/* session below (per spec: section 1 is a mock display, section 4 is the  */
-/* separate live per-session counter).                                     */
-/* ----------------------------------------------------------------------- */
+type TimerMode = "study" | "break";
 
-const MOCK_TOTAL_XP = 2450;
-const MOCK_LEVEL_NUMBER = 4;
-const MOCK_LEVEL_TITLE = "Clinical Clerk";
-const MOCK_STREAK_DAYS = 7;
+const DEFAULT_STUDY_MINUTES = 50;
+const DEFAULT_BREAK_MINUTES = 10;
+const DEFAULT_CYCLES = 4;
+const MIN_DURATION_MINUTES = 5;
+const MAX_DURATION_MINUTES = 120;
+const MIN_CYCLES = 1;
+const MAX_CYCLES = 12;
 
-/* ----------------------------------------------------------------------- */
-/* Action trackers — one per real study feature, with its own XP weight.   */
-/* Literal per-action Tailwind classes (not string-interpolated) so the    */
-/* JIT scanner picks every one of them up.                                 */
-/* ----------------------------------------------------------------------- */
-
-type ActionId = "cours_oral" | "explication" | "mode_visuel" | "resume" | "cas_clinique" | "qcm";
-
-interface ActionConfig {
-  id: ActionId;
-  label: string;
-  icon: LucideIcon;
-  xpPerAction: number;
-  chip: string;
-  ring: string;
-  button: string;
-}
-
-const ACTIONS: ActionConfig[] = [
-  {
-    id: "cours_oral",
-    label: "Cours Oral Écoutés",
-    icon: Mic,
-    xpPerAction: 4,
-    chip: "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400",
-    ring: "border-blue-100 dark:border-blue-900/40",
-    button: "bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60",
-  },
-  {
-    id: "explication",
-    label: "Explications Lues",
-    icon: BookOpenText,
-    xpPerAction: 6,
-    chip: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400",
-    ring: "border-indigo-100 dark:border-indigo-900/40",
-    button: "bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60",
-  },
-  {
-    id: "mode_visuel",
-    label: "Modes Visuels Consultés",
-    icon: Workflow,
-    xpPerAction: 4,
-    chip: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-400",
-    ring: "border-cyan-100 dark:border-cyan-900/40",
-    button: "bg-cyan-100 text-cyan-700 hover:bg-cyan-200 dark:bg-cyan-900/40 dark:text-cyan-300 dark:hover:bg-cyan-900/60",
-  },
-  {
-    id: "resume",
-    label: "Fiches Résumé Révisées",
-    icon: ScrollText,
-    xpPerAction: 8,
-    chip: "bg-teal-50 text-teal-600 dark:bg-teal-950/40 dark:text-teal-400",
-    ring: "border-teal-100 dark:border-teal-900/40",
-    button: "bg-teal-100 text-teal-700 hover:bg-teal-200 dark:bg-teal-900/40 dark:text-teal-300 dark:hover:bg-teal-900/60",
-  },
-  {
-    id: "cas_clinique",
-    label: "Cas Cliniques Complétés",
-    icon: Stethoscope,
-    xpPerAction: 15,
-    chip: "bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400",
-    ring: "border-rose-100 dark:border-rose-900/40",
-    button: "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:hover:bg-rose-900/60",
-  },
-  {
-    id: "qcm",
-    label: "QCM Répondus",
-    icon: ListChecks,
-    xpPerAction: 5,
-    chip: "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400",
-    ring: "border-amber-100 dark:border-amber-900/40",
-    button: "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60",
-  },
+// Mocked lifetime stats — independent of the live timer above, exactly like
+// the header stats in the previous XP prototype were independent of its
+// live session counter. No backend field exists yet for real study-time
+// aggregation; wiring this to qcm_attempts/course_chat_history timestamps
+// (the only real activity timestamps this app has) would be a separate,
+// larger feature.
+const MOCK_STATS = [
+  { label: "Aujourd'hui", value: "2h 15m" },
+  { label: "Cette semaine", value: "14h 30m" },
+  { label: "Ce mois", value: "48h 00m" },
 ];
 
-const XP_PER_MINUTE = 2;
-
-type SessionStatus = "idle" | "running" | "paused" | "ended";
-
-function formatClock(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
+function formatTime(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-const EMPTY_COUNTS: Record<ActionId, number> = {
-  cours_oral: 0,
-  explication: 0,
-  mode_visuel: 0,
-  resume: 0,
-  cas_clinique: 0,
-  qcm: 0,
-};
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** Small labeled stepper for the study/break/cycles settings — disabled entirely while the timer is running, since changing it mid-session would desync timeLeft from a duration the user can no longer see reflected on the clock. */
+function DurationStepper({
+  label,
+  icon: Icon,
+  value,
+  unit,
+  min,
+  max,
+  step = 1,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  icon: typeof Timer;
+  value: number;
+  unit: string;
+  min: number;
+  max: number;
+  step?: number;
+  disabled: boolean;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+      <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+        <Icon className="h-3.5 w-3.5" />
+        <span className="text-[11px] font-semibold uppercase tracking-wide">{label}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onChange(clamp(value - step, min, max))}
+          disabled={disabled || value <= min}
+          aria-label={`Diminuer ${label}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <span className="w-16 text-center text-lg font-black tabular-nums text-slate-900 dark:text-white">
+          {value}
+          <span className="ml-0.5 text-xs font-medium text-slate-400 dark:text-slate-500">{unit}</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => onChange(clamp(value + step, min, max))}
+          disabled={disabled || value >= max}
+          aria-label={`Augmenter ${label}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function StudyDashboard() {
-  const [status, setStatus] = useState<SessionStatus>("idle");
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [counts, setCounts] = useState<Record<ActionId, number>>(EMPTY_COUNTS);
-  const [showSummary, setShowSummary] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { toast } = useToast();
 
-  // Ticks once per second only while "running" — cleared on every status
+  const [studyDuration, setStudyDuration] = useState(DEFAULT_STUDY_MINUTES);
+  const [breakDuration, setBreakDuration] = useState(DEFAULT_BREAK_MINUTES);
+  const [cycles, setCycles] = useState(DEFAULT_CYCLES);
+  const [currentCycle, setCurrentCycle] = useState(1);
+  const [currentMode, setCurrentMode] = useState<TimerMode>("study");
+  const [timeLeft, setTimeLeft] = useState(DEFAULT_STUDY_MINUTES * 60);
+  const [isRunning, setIsRunning] = useState(false);
+  const [cheatWarningVisible, setCheatWarningVisible] = useState(false);
+
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  /** Synthesizes a short two-tone chime — no external asset, so it can never 404 or ship corrupted. */
+  function playNotificationSound() {
+    try {
+      const AudioCtx =
+        window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioContextRef.current) audioContextRef.current = new AudioCtx();
+      const ctx = audioContextRef.current;
+      if (ctx.state === "suspended") void ctx.resume();
+
+      [880, 1108.73].forEach((frequency, i) => {
+        const startAt = ctx.currentTime + i * 0.18;
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(frequency, startAt);
+        gain.gain.setValueAtTime(0.001, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.18, startAt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.5);
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.start(startAt);
+        oscillator.stop(startAt + 0.5);
+      });
+    } catch (error) {
+      // Autoplay policy blocked it, AudioContext unavailable, or the tab was
+      // never interacted with yet — the timer keeps working regardless,
+      // audio feedback is a nice-to-have, never a hard requirement.
+      console.warn("Notification sonore indisponible:", error);
+    }
+  }
+
+  // Ticks once per second, only while running. Cleared on every isRunning
   // change and on unmount, so no interval ever outlives this effect.
   useEffect(() => {
-    if (status !== "running") return;
-
+    if (!isRunning) return;
     intervalRef.current = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
+      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
-
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;
     };
-  }, [status]);
+  }, [isRunning]);
 
-  const minutesActive = elapsedSeconds / 60;
-  const xpFromTime = Math.floor(minutesActive * XP_PER_MINUTE);
-  const xpFromActions = ACTIONS.reduce((sum, action) => sum + counts[action.id] * action.xpPerAction, 0);
-  const sessionXp = xpFromTime + xpFromActions;
+  // Phase-completion transitions — study -> break -> study -> ... until all
+  // cycles are done, then stops. Guarded on timeLeft === 0 so it only fires
+  // once per phase (setTimeLeft below immediately moves it away from 0).
+  useEffect(() => {
+    if (timeLeft !== 0) return;
+    playNotificationSound();
 
-  function adjustCount(id: ActionId, delta: number) {
-    setCounts((prev) => ({ ...prev, [id]: Math.max(0, prev[id] + delta) }));
+    if (currentMode === "study") {
+      if (currentCycle >= cycles) {
+        setIsRunning(false);
+        toast({
+          variant: "success",
+          title: "Session terminée !",
+          description: `${cycles} cycle${cycles > 1 ? "s" : ""} d'étude complété${cycles > 1 ? "s" : ""}. Excellent travail.`,
+        });
+        setCurrentCycle(1);
+        setCurrentMode("study");
+        setTimeLeft(studyDuration * 60);
+      } else {
+        toast({ variant: "info", title: "Pause méritée", description: `${breakDuration} min de pause avant le prochain cycle.` });
+        setCurrentMode("break");
+        setTimeLeft(breakDuration * 60);
+      }
+    } else {
+      toast({ variant: "info", title: "Pause terminée", description: "Retour à l'étude." });
+      setCurrentCycle((c) => c + 1);
+      setCurrentMode("study");
+      setTimeLeft(studyDuration * 60);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
+
+  // Anti-Cheat: the instant the tab/window is hidden during a RUNNING study
+  // phase, pause immediately — never during a break (leaving the tab during
+  // a break is expected and fine) and never when already paused.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.hidden && currentMode === "study" && isRunning) {
+        setIsRunning(false);
+        setCheatWarningVisible(true);
+        toast({
+          variant: "error",
+          title: "Session mise en pause",
+          description: "Activité en arrière-plan détectée. Reste concentré !",
+        });
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [currentMode, isRunning, toast]);
+
+  function handleToggleRunning() {
+    if (!isRunning) setCheatWarningVisible(false);
+    setIsRunning((prev) => !prev);
   }
 
-  function handleStart() {
-    setStatus("running");
+  function handleReset() {
+    setIsRunning(false);
+    setCheatWarningVisible(false);
+    setCurrentMode("study");
+    setCurrentCycle(1);
+    setTimeLeft(studyDuration * 60);
   }
 
-  function handlePause() {
-    setStatus("paused");
+  function handleStudyDurationChange(minutes: number) {
+    setStudyDuration(minutes);
+    if (!isRunning && currentMode === "study") setTimeLeft(minutes * 60);
   }
 
-  function handleEndSession() {
-    setStatus("ended");
-    setShowSummary(true);
+  function handleBreakDurationChange(minutes: number) {
+    setBreakDuration(minutes);
+    if (!isRunning && currentMode === "break") setTimeLeft(minutes * 60);
   }
 
-  function handleSaveAndReset() {
-    setShowSummary(false);
-    setStatus("idle");
-    setElapsedSeconds(0);
-    setCounts(EMPTY_COUNTS);
+  function handleCyclesChange(next: number) {
+    setCycles(next);
+    if (currentCycle > next) setCurrentCycle(1);
   }
 
-  const hasProgress = elapsedSeconds > 0 || Object.values(counts).some((c) => c > 0);
+  const totalPhaseSeconds = (currentMode === "study" ? studyDuration : breakDuration) * 60;
+  const progress = totalPhaseSeconds > 0 ? 1 - timeLeft / totalPhaseSeconds : 0;
+
+  const radius = 92;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - clamp(progress, 0, 1));
+
+  const isStudyMode = currentMode === "study";
 
   return (
-    <div className="w-full mx-auto space-y-6 font-sans text-slate-800 dark:text-slate-200">
-      {/* 1. Header Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-soft">
-          <div className="w-11 h-11 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
-            <Trophy className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Total XP</p>
-            <p className="text-xl font-black text-slate-900 dark:text-white">{MOCK_TOTAL_XP.toLocaleString("fr-FR")} XP</p>
-          </div>
+    <div className="mx-auto w-full max-w-3xl space-y-6 font-sans text-slate-800 dark:text-slate-200">
+      {/* Anti-cheat warning banner — persists (unlike the auto-dismissing toast) until the student explicitly resumes, so it can't be missed if they were away when it fired. */}
+      {cheatWarningVisible && (
+        <div className="flex items-center gap-3 rounded-2xl border-2 border-rose-300 bg-rose-50 p-4 text-rose-800 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+          <ShieldAlert className="h-5 w-5 shrink-0" />
+          <p className="text-sm font-bold">Session en pause : activité en arrière-plan détectée. Reste concentré !</p>
         </div>
+      )}
 
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-soft">
-          <div className="w-11 h-11 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
-            <Award className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Niveau</p>
-            <p className="text-xl font-black text-slate-900 dark:text-white">
-              Niveau {MOCK_LEVEL_NUMBER}: {MOCK_LEVEL_TITLE}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-soft">
-          <div className="w-11 h-11 rounded-xl bg-rose-100 dark:bg-rose-900/40 flex items-center justify-center shrink-0">
-            <Flame className="w-5 h-5 text-rose-600 dark:text-rose-400" />
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Série</p>
-            <p className="text-xl font-black text-slate-900 dark:text-white">{MOCK_STREAK_DAYS} jours d&apos;affilée</p>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. Smart Study Timer */}
-      <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-soft text-center space-y-6">
-        <div className="flex items-center justify-center gap-2 text-slate-400 dark:text-slate-500">
-          <Clock className="w-4 h-4" />
-          <span className="text-xs font-semibold uppercase tracking-widest">Session de révision</span>
-        </div>
-
-        <p className="text-5xl md:text-6xl font-black tracking-tight tabular-nums text-slate-900 dark:text-white">
-          {formatClock(elapsedSeconds)}
-        </p>
-
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          <button
-            onClick={handleStart}
-            disabled={status === "running"}
+      {/* Centralized Pomodoro Timer */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft dark:border-slate-800 dark:bg-slate-900 sm:p-10">
+        <div className="flex flex-col items-center gap-6">
+          <div
             className={cn(
-              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all duration-200",
-              "bg-teal-600 text-white hover:bg-teal-700 active:scale-95",
-              "disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed disabled:active:scale-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
+              "inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition-colors duration-300",
+              isStudyMode
+                ? "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300"
+                : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
             )}
           >
-            <Play className="w-4 h-4" />
-            {status === "paused" ? "Reprendre" : "Start"}
-          </button>
-
-          <button
-            onClick={handlePause}
-            disabled={status !== "running"}
-            className={cn(
-              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all duration-200",
-              "bg-amber-500 text-white hover:bg-amber-600 active:scale-95",
-              "disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed disabled:active:scale-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
-            )}
-          >
-            <Pause className="w-4 h-4" />
-            Pause
-          </button>
-
-          <button
-            onClick={handleEndSession}
-            disabled={!hasProgress}
-            className={cn(
-              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all duration-200",
-              "bg-rose-600 text-white hover:bg-rose-700 active:scale-95",
-              "disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed disabled:active:scale-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
-            )}
-          >
-            <Square className="w-4 h-4" />
-            End Session
-          </button>
-        </div>
-      </div>
-
-      {/* 3. Dynamic Action Trackers */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {ACTIONS.map((action) => {
-          const Icon = action.icon;
-          const count = counts[action.id];
-          return (
-            <div
-              key={action.id}
-              className={cn("rounded-2xl border bg-white dark:bg-slate-900 p-5 shadow-soft space-y-3", action.ring)}
-            >
-              <div className="flex items-center gap-2">
-                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", action.chip)}>
-                  <Icon className="w-4 h-4" />
-                </div>
-                <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{action.label}</p>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-3xl font-black text-slate-900 dark:text-white tabular-nums">{count}</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => adjustCount(action.id, -1)}
-                    disabled={count === 0}
-                    aria-label={`Diminuer ${action.label}`}
-                    className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150",
-                      "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700",
-                      "disabled:opacity-40 disabled:cursor-not-allowed"
-                    )}
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => adjustCount(action.id, 1)}
-                    aria-label={`Augmenter ${action.label}`}
-                    className={cn("w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150", action.button)}
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">+{action.xpPerAction} XP par action</p>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* 4. Real-Time XP Engine */}
-      <div className="rounded-2xl border border-teal-200 dark:border-teal-900/40 bg-gradient-to-br from-teal-50 to-blue-50 dark:from-teal-950/30 dark:to-blue-950/30 p-6 flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white dark:bg-slate-900 flex items-center justify-center shadow-sm shrink-0">
-            <Sparkles className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+            {isStudyMode ? <BookOpenCheck className="h-3.5 w-3.5" /> : <Coffee className="h-3.5 w-3.5" />}
+            {isStudyMode ? "Session d'étude" : "Pause"}
           </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-400">XP Gagnés Cette Session</p>
-            <p className="text-3xl font-black text-slate-900 dark:text-white tabular-nums">{sessionXp} XP</p>
-          </div>
-        </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs text-right">
-          {Math.floor(minutesActive)} min × {XP_PER_MINUTE} XP + actions trackées ci-dessus
-        </p>
-      </div>
 
-      {/* 5. End Session Summary Modal */}
-      {showSummary && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm bg-black/50">
-          <div className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-7 space-y-6">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Session Terminée</p>
-                <h3 className="text-lg font-black text-slate-900 dark:text-white">Bravo pour cette session !</h3>
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">Temps de concentration total</span>
-              <span className="text-lg font-black text-slate-900 dark:text-white tabular-nums">{formatClock(elapsedSeconds)}</span>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                Actions de révision
+          {/* Circular progress ring around the clock */}
+          <div className="relative flex items-center justify-center">
+            <svg width={220} height={220} viewBox="0 0 220 220" className="-rotate-90">
+              <circle cx={110} cy={110} r={radius} fill="none" strokeWidth={12} className="stroke-slate-100 dark:stroke-slate-800" />
+              <circle
+                cx={110}
+                cy={110}
+                r={radius}
+                fill="none"
+                strokeWidth={12}
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                className={cn("transition-[stroke-dashoffset] duration-1000 ease-linear", isStudyMode ? "stroke-teal-500" : "stroke-amber-500")}
+              />
+            </svg>
+            <div className="absolute flex flex-col items-center">
+              <p className="text-5xl font-black tabular-nums tracking-tight text-slate-900 dark:text-white sm:text-6xl">
+                {formatTime(timeLeft)}
               </p>
-              <ul className="space-y-1.5">
-                {ACTIONS.map((action) => (
-                  <li key={action.id} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                      <action.icon className="w-3.5 h-3.5 text-slate-400" />
-                      {action.label}
-                    </span>
-                    <span className="font-bold text-slate-800 dark:text-slate-100 tabular-nums">
-                      {counts[action.id]} × {action.xpPerAction} XP
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <p className="mt-1 text-xs font-semibold text-slate-400 dark:text-slate-500">
+                Cycle {currentCycle} / {cycles}
+              </p>
             </div>
+          </div>
 
-            <div className="rounded-xl border-2 border-teal-300 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/30 p-4 flex items-center justify-between">
-              <span className="text-sm font-black uppercase tracking-wide text-teal-700 dark:text-teal-400">XP Total Gagné</span>
-              <span className="text-2xl font-black text-teal-700 dark:text-teal-300 tabular-nums">+{sessionXp} XP</span>
-            </div>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={handleToggleRunning}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white shadow-sm transition-all duration-200 active:scale-95",
+                isRunning ? "bg-amber-500 hover:bg-amber-600" : "bg-teal-600 hover:bg-teal-700"
+              )}
+            >
+              {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              {isRunning ? "Pause" : timeLeft === totalPhaseSeconds ? "Démarrer" : "Reprendre"}
+            </button>
 
             <button
-              onClick={handleSaveAndReset}
-              className="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold shadow-sm transition-colors duration-200"
+              type="button"
+              onClick={handleReset}
+              className="flex items-center gap-2 rounded-xl bg-slate-100 px-6 py-3 text-sm font-bold text-slate-600 shadow-sm transition-all duration-200 hover:bg-slate-200 active:scale-95 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
             >
-              Save &amp; Reset
+              <RotateCcw className="h-4 w-4" />
+              Réinitialiser
             </button>
           </div>
         </div>
-      )}
+
+        {/* Duration / cycles settings — locked while a phase is actively running */}
+        <div className="mt-8 flex flex-col gap-3 border-t border-slate-100 pt-6 dark:border-slate-800 sm:flex-row">
+          <DurationStepper
+            label="Étude"
+            icon={BookOpenCheck}
+            value={studyDuration}
+            unit="min"
+            min={MIN_DURATION_MINUTES}
+            max={MAX_DURATION_MINUTES}
+            step={5}
+            disabled={isRunning}
+            onChange={handleStudyDurationChange}
+          />
+          <DurationStepper
+            label="Pause"
+            icon={Coffee}
+            value={breakDuration}
+            unit="min"
+            min={MIN_DURATION_MINUTES}
+            max={MAX_DURATION_MINUTES}
+            step={5}
+            disabled={isRunning}
+            onChange={handleBreakDurationChange}
+          />
+          <DurationStepper
+            label="Cycles"
+            icon={Timer}
+            value={cycles}
+            unit="x"
+            min={MIN_CYCLES}
+            max={MAX_CYCLES}
+            disabled={isRunning}
+            onChange={handleCyclesChange}
+          />
+        </div>
+      </div>
+
+      {/* Mocked time-tracking stats */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {MOCK_STATS.map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-soft dark:border-slate-800 dark:bg-slate-900"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Temps d&apos;étude — {stat.label}
+            </p>
+            <p className="mt-1 text-2xl font-black text-slate-900 dark:text-white">{stat.value}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

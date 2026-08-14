@@ -563,10 +563,19 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     <div className="flex h-screen flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
       <WorkspaceTopbar title={title} />
 
-      <div className="flex flex-1 gap-4 overflow-hidden p-4">
+      {/* flex-col on mobile: Sources/Chat/Studio stack full-width, each its
+          own scrollable ~70vh slab, the PAGE scrolls between them (hence
+          overflow-y-auto here instead of overflow-hidden). From md: up,
+          this reverts to the original fixed-width 3-column row exactly as
+          before (md:overflow-hidden — each panel goes back to managing its
+          own internal scroll instead of the page scrolling). Below md,
+          without this, Sources (w-72) + Chat (flex-1) + Studio (w-96) added
+          up to well over a phone's viewport width with no wrap, pushing
+          Studio off-screen entirely. */}
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 md:flex-row md:overflow-hidden">
         {/* Panneau Gauche — Sources (masqué en écran partagé pour laisser Chat/Studio respirer à 50/50) */}
         {!isSplitScreen && (
-          <aside className={cn(panelShellClasses, "w-72 shrink-0")}>
+          <aside className={cn(panelShellClasses, "h-[70vh] w-full shrink-0 md:h-auto md:w-72")}>
             <SourcesPanel
               sourceFileName={sourceFileName}
               sourceSize={sourceSize}
@@ -585,7 +594,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
         {/* Panneau Central — Chat, seul ou en grille 50/50 avec Studio en écran partagé */}
         <div
           className={cn(
-            "grid flex-1 gap-4 overflow-hidden transition-all duration-300",
+            "grid h-[70vh] w-full shrink-0 gap-4 overflow-hidden transition-all duration-300 md:h-auto md:w-auto md:flex-1",
             isSplitScreen ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
           )}
         >
@@ -594,7 +603,9 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
         </div>
 
         {/* Panneau Droit — Studio (disposition par défaut uniquement ; en écran partagé il vit dans la grille ci-dessus) */}
-        {!isSplitScreen && <aside className={cn(panelShellClasses, "w-96 shrink-0")}>{studioPanel}</aside>}
+        {!isSplitScreen && (
+          <aside className={cn(panelShellClasses, "h-[70vh] w-full shrink-0 md:h-auto md:w-96")}>{studioPanel}</aside>
+        )}
       </div>
     </div>
   );

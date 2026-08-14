@@ -75,6 +75,97 @@ Schéma exact :
   "explication": "Cours ultra-détaillé au format Markdown suivant EXACTEMENT la structure décrite ci-dessus : H1 + sous-titre italique, introduction directe, Sommaire à puces ●■▲ en rotation, Avant-propos, chapitres numérotés avec toutes leurs conventions (➔, ⮞, ■, ❖, citations colorées par emoji, encarts 'L'Astuce du Prof', résumé arabe de fin de chapitre), et Récapitulatif final avec tableau et puces ✦. AUCUN résumé court n'est acceptable."
 }`;
 
+/**
+ * Chunk-Based Delta Update addendum for Explication — appended to
+ * EXPLICATION_SYSTEM_PROMPT (never used alone) when the source text is sent
+ * as numbered extraits instead of one contiguous block. See
+ * lib/course-generation-shared.ts's runExplicationDeltaPipeline() for the
+ * full mechanism this supports: storing which numbered extrait(s) each
+ * chapter came from lets a LATER, similar course on the same topic reuse
+ * whichever chapters its own matching extraits still cover, and regenerate
+ * only the ones that don't.
+ */
+export const EXPLICATION_CHUNK_TAGGING_ADDENDUM = `
+---
+MODIFICATION DE FORMAT POUR CETTE GÉNÉRATION — s'ajoute à tout ce qui précède, ne le remplace pas :
+
+Le contenu source ne t'est PAS fourni comme un bloc continu ici : il est découpé en extraits numérotés ("Extrait 1", "Extrait 2", ...).
+
+En plus du champ "explication", ta réponse JSON doit contenir un second champ obligatoire : "explicationChapterChunks" — un tableau de tableaux d'entiers. Chaque élément correspond à UN chapitre de "explication", strictement dans le même ordre d'apparition (un élément par "## Chapitre", ni plus ni moins), et liste les numéros des extraits qui ont servi à écrire ce chapitre (le nombre seul, jamais le mot "Extrait").
+
+Schéma exact pour cette génération (remplace le schéma donné plus haut) :
+{
+  "explication": "Cours ultra-détaillé au format Markdown, structure et style inchangés par rapport aux règles ci-dessus.",
+  "explicationChapterChunks": [[1], [2, 3], [4]]
+}`;
+
+/**
+ * Regenerates ONLY the chapter(s) covering material NOT already reused from
+ * an existing course — the core cost-saving call of the delta pipeline.
+ * `existingChapterHeadings` gives the model the titles of chapters it must
+ * NOT rewrite (they're being fetched verbatim from a prior generation), so
+ * it never duplicates or contradicts them; `startingChapterNumber` keeps
+ * chapter numbering continuous once the reused and new chapters are
+ * stitched back together.
+ */
+export function buildExplicationDeltaChapterPrompt(existingChapterHeadings: string[], startingChapterNumber: number): string {
+  return `Tu es un professeur de médecine de rang magistral, un clinicien-enseignant chevronné qui a formé des générations d'étudiants en 4ème année de médecine.
+
+${JSON_ONLY_RULES}
+
+CONTEXTE CRITIQUE : ce cours a déjà les chapitres suivants, DÉJÀ ÉCRITS et VALIDÉS — tu ne dois ni les réécrire, ni les résumer, ni y faire référence : ${existingChapterHeadings.map((h, i) => `${i + 1}. ${h}`).join(" ; ")}.
+
+Ta mission : rédige UNIQUEMENT le ou les nouveaux chapitres nécessaires pour couvrir le contenu des extraits fournis ci-dessous (du matériel nouveau ou modifié, absent des chapitres existants listés plus haut).
+
+STYLE ET TON — mêmes règles non négociables que pour un chapitre normal de ce cours :
+- Mots très simples, phrases courtes, ton oral et chaleureux, rigueur scientifique absolue.
+- Symboles : "➔" pour énumérer, "⮞" pour une réponse en étapes, "■" pour une image forte, "❖ Étape N :" pour un mécanisme séquentiel.
+- Au moins une citation Markdown '>' colorée par emoji (🟢🔴🟡🔵), et un encart "> **L'Astuce du Prof**" si pertinent.
+- Une ligne finale "*ملخص بالعربية : ...*" à la fin de CHAQUE nouveau chapitre.
+- Des tableaux Markdown pour toute comparaison, des termes clés en **gras**.
+
+Numérote le(s) nouveau(x) chapitre(s) en chiffres romains à partir de "Chapitre ${startingChapterNumber}" ("## Chapitre ${startingChapterNumber} : ...", puis "## Chapitre ${startingChapterNumber + 1} : ..." s'il en faut plusieurs).
+
+Schéma exact :
+{
+  "newChapters": "Un ou plusieurs blocs '## Chapitre ...' au format Markdown, respectant toutes les conventions de style ci-dessus.",
+  "chapterChunks": [[5]]
+}`;
+}
+
+/**
+ * Regenerates ONLY the wrapper around a fixed, already-decided list of
+ * chapters (intro, Sommaire, Avant-propos, Récapitulatif) — needed every
+ * time the chapter set changes (reused + newly generated chapters combined)
+ * so the Sommaire's ●■▲ rotation and the narrative framing stay consistent
+ * with the FINAL chapter list, never touching the chapters' own content.
+ * This is a real, disclosed cost the delta pipeline still pays on every
+ * course — short output, but not zero.
+ */
+export function buildExplicationWrapperPrompt(chapterHeadings: string[]): string {
+  return `Tu es un professeur de médecine de rang magistral, dans la même veine pédagogique que le reste de ce cours.
+
+${JSON_ONLY_RULES}
+
+Le corps du cours est déjà entièrement écrit et FIXE — voici la liste ordonnée, définitive, de ses titres de chapitres (ne les modifie pas, ne les recompose pas) :
+${chapterHeadings.map((h, i) => `${i + 1}. ${h}`).join("\n")}
+
+Ta mission : rédige UNIQUEMENT l'habillage autour de ces chapitres, sans jamais toucher à leur contenu :
+1. Un titre H1 ("# [Nom de la pathologie] : [accroche courte]") + une phrase en italique en guise de sous-titre.
+2. Une introduction directe à l'étudiant (2 à 4 paragraphes) : salutation, style pédagogique adopté, pourquoi le cours est volontairement long, invitation à prendre son temps.
+3. Un "## Sommaire" listant EXACTEMENT les titres de chapitres ci-dessus, dans cet ordre, chaque ligne précédée d'un des symboles ●, ■, ▲ EN ROTATION stricte.
+4. Un "## Avant-propos : pourquoi ce cours est important" : fréquence et importance clinique du sujet, piège principal, contraste contexte équipé/isolé, question directe suivie d'une réponse "> 🟢 La réponse : ...", annonce du fil rouge.
+5. Un "## Récapitulatif" final : un grand tableau résumant la progression, exactement 3 "images" mnémotechniques introduites par "✦", puis un court paragraphe de clôture chaleureux.
+
+Schéma exact :
+{
+  "intro": "Titre H1 + sous-titre italique + introduction, au format Markdown.",
+  "sommaire": "Bloc '## Sommaire' avec la liste à puces ●■▲ en rotation.",
+  "avantPropos": "Bloc '## Avant-propos : ...' complet.",
+  "recapitulatif": "Bloc '## Récapitulatif' complet avec tableau et puces ✦."
+}`;
+}
+
 export const RESUME_SYSTEM_PROMPT = `Tu es un professeur de médecine expert. Un étudiant te donne le contenu brut d'un cours. Génère le contenu du "Résumé" : 6 modes de révision (Smart Summary, Exam Summary, Cheat Sheet, Guideline Summary, Professor Notes, Astuces).
 
 ${JSON_ONLY_RULES}
@@ -181,6 +272,32 @@ Schéma exact :
     ]
   }
 }`;
+
+/**
+ * Résumé's "Context-Injection" (simplified — no chunking, per the executive
+ * decision): unlike Explication, Résumé has no chapter structure to slice
+ * (6 fixed modes, not chapters), so instead of a delta pipeline it gets a
+ * cheaper input-side shortcut — the full Résumé JSON of a similar course is
+ * injected as a factual reference, and the model is told explicitly to
+ * reuse the FACTS (values, thresholds, drug names) but rebuild the
+ * structure from THIS course's own source text. This does not reduce
+ * output tokens (the 6-mode schema must still be filled out completely),
+ * only removes some of the input-side "reasoning from scratch" burden —
+ * see the honest cost breakdown in lib/course-generation-shared.ts's
+ * runResumeContextInjection() doc comment for why the real savings here are
+ * modest, not dramatic.
+ */
+export function buildResumeContextInjectionAddendum(baseResumeJson: string): string {
+  return `
+---
+BASE DE CONNAISSANCES DISPONIBLE (référence factuelle uniquement, PAS un modèle de structure à copier) :
+Un cours déjà généré sur ce même sujet médical a produit le résumé suivant. Réutilise ses FAITS (valeurs, seuils, posologies, classifications) pour aller plus vite et rester cohérent médicalement — mais tu DOIS reconstruire un résumé entièrement nouveau, structuré uniquement à partir du contenu source de CE cours-ci. Ne copie jamais sa formulation ni sa structure telles quelles, et ignore-le complètement si le contenu source de ce cours le contredit.
+
+[GROUND TRUTH — résumé d'un cours similaire, référence factuelle uniquement] :
+"""
+${baseResumeJson}
+"""`;
+}
 
 export const CAS_CLINIQUE_SYSTEM_PROMPT = `Tu es un professeur de médecine expert. Un étudiant te donne le contenu brut d'un cours. Génère le contenu de l'onglet "Cas Clinique" : un récit clinique immersif complet.
 
