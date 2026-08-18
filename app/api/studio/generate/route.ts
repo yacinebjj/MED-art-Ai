@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
-import { callGemini, GeminiError } from "@/lib/ai/gemini";
-import { generateIdeogramImage, IdeogramError } from "@/lib/ai/ideogram";
 import { STUDIO_MODEL, STUDIO_BYPASS_MOCK, STUDIO_PROMPT_CONFIG, STUDIO_SECTION_KEYS, buildStudioSystemPrompt } from "@/lib/ai/studio-prompts";
 import { STUDIO_SCHEMAS } from "@/lib/ai/studio-schemas";
 import { errorMessage, MAX_SOURCE_CHARS, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
+import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import type { DemoSectionId } from "@/lib/demo-content";
 
@@ -27,21 +26,11 @@ function isValidActionType(value: unknown): value is DemoSectionId {
 /**
  * Generates one Studio tile's content for the generic curriculum module
  * workspace (app/dashboard/module/[id]/page.tsx), from whatever text
- * /api/upload just extracted. Stateless and unauthenticated-to-Supabase on
- * purpose — see lib/ai/studio-prompts.ts's header comment. Returns the
- * validated, structured JSON for that tile (never Markdown) — the caller
- * renders it directly with the exact same components Pleurésie/Gastrite use
- * (GastriteResumeStudio, GastriteCasCliniqueStudio, GastriteQcmsStudio in
- * preview mode) for résumé/cas clinique/QCM. Mind Map is a Golden Standard
- * hybrid (v7, the restored v5): the {nodes, links} graph is always
- * returned and rendered as HTML by DynamicMindMapStudio (never dependent on
- * an external service); a real Ideogram image is ADDITIONALLY generated
- * from the model's own text-free "ideogram_prompt" and attached as
- * `ideogramImageUrl` — but that call fails OPEN (see below), so a flaky or
- * erroring Ideogram request never blocks the reliable board. A v6 attempt
- * at baking the whole poster's text into one Ideogram image was tried for
- * real and reverted after producing garbled, unreadable output — see
- * lib/ai/studio-prompts.ts's header comment for the full history.
+ * /api/upload just extracted. Returns the validated, structured JSON for
+ * that tile (never Markdown) — the caller renders it directly with the exact
+ * same components Pleurésie/Gastrite use (GastriteResumeStudio,
+ * GastriteCasCliniqueStudio, GastriteQcmsStudio in preview mode) for
+ * résumé/cas clinique/QCM.
  *
  * Parsing/validation mirrors lib/course-generation-shared.ts's proven
  * production pipeline (strip Markdown fences → JSON.parse → extract the
@@ -49,6 +38,19 @@ function isValidActionType(value: unknown): value is DemoSectionId {
  * pass on top (lib/ai/studio-schemas.ts) — deep structural validation the
  * production pipeline doesn't have, since a malformed shape here would
  * otherwise reach a real React component instead of a database column.
+ *
+ * ATOMIC generate-then-save, mirroring app/api/studio/regenerate/route.ts:
+ * this route now takes `courseId` and persists the validated result to
+ * `studio_courses` itself, BEFORE returning success. Used to be "stateless
+ * and unauthenticated-to-Supabase on purpose," returning the raw JSON and
+ * leaving the caller to fire a separate PATCH /api/studio/courses/[id]
+ * afterward — that left a real window where a paid OpenRouter call could
+ * complete but the result never reach Supabase (a refresh/tab-close between
+ * this response and that PATCH burned the credits for nothing). If the save
+ * itself fails, this now returns a real error instead of `success: true`
+ * with content the client would display but never be able to reload —
+ * better an honest "réessaie" than a receipt for content that vanishes on
+ * refresh.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -71,7 +73,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { actionType, documentContext } = (body ?? {}) as { actionType?: unknown; documentContext?: unknown };
+  const { actionType, documentContext, courseId } = (body ?? {}) as {
+    actionType?: unknown;
+    documentContext?: unknown;
+    courseId?: unknown;
+  };
 
   if (!isValidActionType(actionType)) {
     return NextResponse.json(
@@ -82,6 +88,13 @@ export async function POST(request: NextRequest) {
   if (typeof documentContext !== "string" || documentContext.trim().length < 50) {
     return NextResponse.json({ success: false, error: "'documentContext' est requis (texte extrait d'un PDF, ≥ 50 caractères)." }, { status: 400 });
   }
+  if (typeof courseId !== "number" || !Number.isFinite(courseId)) {
+    return NextResponse.json({ success: false, error: "'courseId' est requis et doit être un nombre." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
 
   const truncatedContext = documentContext.slice(0, MAX_SOURCE_CHARS);
   const { maxTokens } = STUDIO_PROMPT_CONFIG[actionType];
@@ -91,27 +104,17 @@ export async function POST(request: NextRequest) {
   // injecté DANS le system prompt (pas dans un message user séparé) — voir
   // buildStudioSystemPrompt. Le message user reste minimal, juste le
   // déclencheur final de génération.
-  // Mind Map structuring runs on Gemini instead of OpenRouter/Claude (client
-  // request, GEMINI_API_KEY) — every other tile is untouched, still Claude
-  // via OpenRouter. buildStudioSystemPrompt already bakes the course text
-  // into ONE system-prompt string (this app's established architecture, see
-  // that function's own comment), so it's passed straight through as
-  // Gemini's systemInstruction with the same minimal trigger user message.
   let raw: string;
   try {
-    if (actionType === "mind_map") {
-      raw = await callGemini(buildStudioSystemPrompt(actionType, truncatedContext), "Génère le contenu demandé.", { maxTokens });
-    } else {
-      raw = await callOpenRouter(
-        [
-          { role: "system", content: buildStudioSystemPrompt(actionType, truncatedContext) },
-          { role: "user", content: "Génère le contenu demandé." },
-        ],
-        { model: STUDIO_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
-      );
-    }
+    raw = await callOpenRouter(
+      [
+        { role: "system", content: buildStudioSystemPrompt(actionType, truncatedContext) },
+        { role: "user", content: "Génère le contenu demandé." },
+      ],
+      { model: STUDIO_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+    );
   } catch (error) {
-    if (error instanceof OpenRouterError || error instanceof GeminiError) {
+    if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }
     console.error(`[studio/generate:${actionType}] Échec appel IA:`, error);
@@ -134,27 +137,26 @@ export async function POST(request: NextRequest) {
       throw new Error(`La réponse de l'IA pour "${actionType}" ne respecte pas le schéma attendu.`);
     }
 
-    let data: unknown = result.data;
-    if (actionType === "mind_map") {
-      // Fails OPEN: the {nodes, links} graph above is already valid and
-      // renderable on its own. An Ideogram outage/error must never turn a
-      // perfectly good graph into a 502 for the whole tile — it just means
-      // no bonus illustration this time (ideogramImageUrl stays null).
-      const mindMap = result.data as { ideogram_prompt: string };
-      let ideogramImageUrl: string | null = null;
-      try {
-        ideogramImageUrl = await generateIdeogramImage(mindMap.ideogram_prompt);
-      } catch (error) {
-        if (error instanceof IdeogramError) {
-          console.error(`[studio/generate:mind_map] Ideogram a échoué (${error.status}) — graphe conservé sans image :`, error.message);
-        } else {
-          console.error("[studio/generate:mind_map] Ideogram a échoué (exception) — graphe conservé sans image :", errorMessage(error));
-        }
-      }
-      data = { ...mindMap, ideogramImageUrl };
+    // Persist BEFORE returning success — see this route's header comment.
+    // "qcm" -> "qcms" is the one mismatch, identity otherwise; sectionKey
+    // already carries that mapping (same one used to pull the value out of
+    // the AI's JSON above), so it doubles as the studio_courses column name.
+    const supabase = getSupabaseAdmin();
+    const { error: saveError, count } = await supabase
+      .from("studio_courses")
+      .update({ [sectionKey]: result.data, updated_at: new Date().toISOString() }, { count: "exact" })
+      .eq("id", courseId)
+      .eq("user_id", user.id);
+
+    if (saveError) {
+      console.error(`[studio/generate:${actionType}] Échec sauvegarde Supabase:`, saveError);
+      return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${saveError.message}` }, { status: 500 });
+    }
+    if (count === 0) {
+      return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true, actionType, data });
+    return NextResponse.json({ success: true, actionType, data: result.data });
   } catch (error) {
     console.error(`[studio/generate:${actionType}] Parsing/validation échoué :`, error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });

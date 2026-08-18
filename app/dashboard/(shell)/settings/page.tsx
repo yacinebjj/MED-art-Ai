@@ -1,14 +1,18 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/providers/AuthProvider";
+import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
+import { PushOptInButton } from "@/components/push/PushOptInButton";
 import type { StudentProfile } from "@/lib/types";
 import type { AcademicYear, Specialty } from "@/types/academic";
 
@@ -41,6 +45,7 @@ const EMPTY_FORM: StudentProfile = {
  */
 export default function SettingsPage() {
   const { profile, refreshUser, refreshCurriculumProfile } = useAuth();
+  const { toast } = useToast();
   const [form, setForm] = useState<StudentProfile>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -52,6 +57,12 @@ export default function SettingsPage() {
   const [specialtyId, setSpecialtyId] = useState<number | null>(null);
   const [academicYearId, setAcademicYearId] = useState<number | null>(null);
   const [yearsLoading, setYearsLoading] = useState(false);
+  // Once a student has registered with a year, it's permanent — set from the
+  // bootstrap fetch below the moment a saved academicYearId is found, never
+  // cleared afterward (even if academicYearId itself later changes for some
+  // other reason, this stays true — the rule is "was it EVER set", not "is
+  // it currently set").
+  const [yearLocked, setYearLocked] = useState(false);
 
   // Set by the bootstrap effect right after it fetches years for the saved
   // specialty — tells the live "specialty changed" effect below to skip its
@@ -95,6 +106,7 @@ export default function SettingsPage() {
         setAcademicYearId(savedAcademicYearId);
       }
 
+      if (savedAcademicYearId != null) setYearLocked(true);
       setReady(true);
     }
 
@@ -191,7 +203,16 @@ export default function SettingsPage() {
   }
 
   const specialtyOptions = specialties.map((s) => ({ value: String(s.id), label: s.name }));
-  const yearOptions = years.map((y) => ({ value: String(y.id), label: y.name }));
+  const selectedSpecialtyName = specialties.find((s) => s.id === specialtyId)?.name;
+  const yearOptions = years.map((y) => ({
+    value: String(y.id),
+    label: y.name,
+    disabled: isLockedInternYear(selectedSpecialtyName, y),
+  }));
+
+  function handleDisabledYearClick() {
+    toast({ variant: "info", title: INTERN_YEAR_LOCKED_MESSAGE });
+  }
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -202,8 +223,8 @@ export default function SettingsPage() {
 
       <Card className="mt-6 p-6">
         {!ready ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+            <BrandLoader className="h-6 w-6" />
             Chargement de ton profil...
           </div>
         ) : (
@@ -238,15 +259,23 @@ export default function SettingsPage() {
                 value={specialtyId != null ? String(specialtyId) : ""}
                 onValueChange={handleSpecialtyChange}
               />
-              <Select
-                label="Année"
-                name="academicYear"
-                placeholder={specialtyId == null ? "Choisis d'abord une spécialité" : yearsLoading ? "Chargement..." : "Choisis"}
-                options={yearOptions}
-                value={academicYearId != null ? String(academicYearId) : ""}
-                onValueChange={handleYearChange}
-                disabled={specialtyId == null || yearsLoading}
-              />
+              <div>
+                <Select
+                  label="Année"
+                  name="academicYear"
+                  placeholder={specialtyId == null ? "Choisis d'abord une spécialité" : yearsLoading ? "Chargement..." : "Choisis"}
+                  options={yearOptions}
+                  value={academicYearId != null ? String(academicYearId) : ""}
+                  onValueChange={handleYearChange}
+                  disabled={specialtyId == null || yearsLoading || yearLocked}
+                  onDisabledOptionClick={handleDisabledYearClick}
+                />
+                {yearLocked && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    L&apos;année d&apos;étude ne peut pas être modifiée après l&apos;inscription.
+                  </p>
+                )}
+              </div>
             </div>
             <Button type="submit" isLoading={isSaving} disabled={isSaving}>
               {saved && !isSaving && <Check className="h-4 w-4" />}
@@ -254,6 +283,17 @@ export default function SettingsPage() {
             </Button>
           </form>
         )}
+      </Card>
+
+      <Card className="mt-6 p-6">
+        <h2 className="text-sm font-bold text-foreground">Rappels flash</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Reçois de temps en temps une notification de ton navigateur avec une flashcard de tes modules actifs — même
+          quand l&apos;onglet n&apos;est pas ouvert.
+        </p>
+        <div className="mt-4">
+          <PushOptInButton />
+        </div>
       </Card>
     </div>
   );

@@ -4,7 +4,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-const TOTAL_SECTIONS = 6; // explication, resume, cas_clinique, qcms, mind_map, exemples_analogies
+const TOTAL_SECTIONS = 5; // explication, resume, cas_clinique, qcms, exemples_analogies
 
 interface StudioCourseProgressRow {
   id: number;
@@ -13,7 +13,6 @@ interface StudioCourseProgressRow {
   resume: unknown;
   cas_clinique: unknown;
   qcms: unknown;
-  mind_map: unknown;
   exemples_analogies: string | null;
 }
 
@@ -49,7 +48,7 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("studio_courses")
-    .select("id, title, explication, resume, cas_clinique, qcms, mind_map, exemples_analogies")
+    .select("id, title, explication, resume, cas_clinique, qcms, exemples_analogies")
     .eq("user_id", user.id)
     .eq("curriculum_module_id", moduleId)
     .order("created_at", { ascending: true });
@@ -69,7 +68,7 @@ export async function GET(request: NextRequest) {
 
   const rows = (data ?? []) as StudioCourseProgressRow[];
   const courses = rows.map((row) => {
-    const generatedSections = [row.explication, row.resume, row.cas_clinique, row.qcms, row.mind_map, row.exemples_analogies].filter(
+    const generatedSections = [row.explication, row.resume, row.cas_clinique, row.qcms, row.exemples_analogies].filter(
       (value) => value !== null && value !== undefined
     ).length;
     return {

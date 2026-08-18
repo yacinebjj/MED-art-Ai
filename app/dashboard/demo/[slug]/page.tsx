@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { DEMO_SECTIONS, buildDemoTranslatePrompt, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
-import { PLEURESIE_DEMO_SLUG } from "@/lib/constants";
 import { COURSE_SLUG_CONTENT, isCourseSlug, type CourseSlugSupabaseData } from "@/lib/course-slug-content";
 import { cn } from "@/lib/utils";
 import {
@@ -33,15 +32,6 @@ import { GastriteResumeStudio } from "@/components/course/workspace/GastriteResu
 import { GastriteCasCliniqueStudio } from "@/components/course/workspace/GastriteCasCliniqueStudio";
 import { GastriteQcmsStudio } from "@/components/course/workspace/GastriteQcmsStudio";
 import { LazySection } from "@/components/course/workspace/LazySection";
-
-// Lazy-loaded: a hardcoded, static SVG poster (only ever rendered for the
-// single Pleurésie demo course, see showMindMapStudioData below) — no reason
-// to ship its markup/assets in the bundle for every other course's visitors.
-// ssr:false since it's a pan/zoom image viewer with no SEO-relevant content.
-const MindMapStudio = dynamic(
-  () => import("@/components/course/workspace/MindMapStudio").then((m) => m.MindMapStudio),
-  { ssr: false, loading: () => <div className="flex h-[500px] items-center justify-center text-sm text-gray-400 dark:text-gray-500">Chargement de la Mind Map…</div> }
-);
 
 export default function CourseSlugWorkspacePage() {
   const params = useParams<{ slug: string }>();
@@ -68,26 +58,7 @@ const SECTION_LAZY_CONFIG: Partial<
     endpoint: "/api/generate/exemples-analogies",
     label: "les Exemples & Analogies",
   },
-  // No "mind_map" entry: the Mind Map is now a fully static, hardcoded
-  // component (MindMapStudio) — nothing to generate, no endpoint to call.
-  // (One now-orphaned, still-functional route remains from an earlier
-  // iteration — app/api/generate/mind-map/route.ts, the original
-  // {nodes,links}-graph pipeline — kept but disconnected. Its sibling,
-  // app/api/generate-mindmap/route.ts — the OpenRouter+Ideogram image
-  // pipeline behind three failed attempts at generating this exact poster —
-  // was deleted outright: that approach is permanently abandoned, not
-  // paused, so keeping the route around only invited someone to try a
-  // fourth time.)
 };
-
-/**
- * MindMapStudio is a single hardcoded poster for ONE course (Pleurésie) —
- * not a generic per-course renderer. Gating it by exact slug, rather than
- * just `hasStudioData`, is what stops every other Supabase-backed course
- * (gastrite, ulcère, BPCO, HTIC, ...) from showing this unrelated poster
- * under its own title.
- */
-const PLEURESIE_SLUG = PLEURESIE_DEMO_SLUG;
 
 function NotFoundScreen({ slug }: { slug: string }) {
   return (
@@ -110,7 +81,7 @@ function NotFoundScreen({ slug }: { slug: string }) {
 function LoadingScreen() {
   return (
     <div className="flex h-screen w-full items-center justify-center bg-gray-100 dark:bg-neutral-950">
-      <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
+      <BrandLoader />
     </div>
   );
 }
@@ -152,14 +123,6 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   const sourceFileName = legacySlugData?.source.fileName ?? title;
   const sourceSize = legacySlugData?.source.size ?? "Cours interactif";
 
-  // The Mind Map TILE always stays in this grid — StudioPanel renders every
-  // entry in `sections` unconditionally, tile visibility was never the bug.
-  // What WAS wrong: getSectionStatus("mind_map") returned "available" for
-  // every course, which pushed it into StudioPanel's separate "recent
-  // generations" quick-list (only entries whose status is "available" land
-  // there) — so a brand-new course showed "Mind Map · 1 source" in that
-  // list as if already generated, despite the tile above never having been
-  // clicked. Fixed at the status level below, not by hiding anything.
   const sections = useMemo(
     () =>
       DEMO_SECTIONS.map((section) =>
@@ -192,8 +155,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   // Split-screen: Chat + Studio share a balanced 50/50 grid (Sources hidden)
   // instead of the default 3-column layout — auto-triggered by a contextual
   // action (Ask MedArt, Translate) and otherwise toggleable by hand from the
-  // Chat header. The Mind Map no longer triggers this: it's now a
-  // pan/zoom image viewer (MindMapStudio) with no clickable nodes.
+  // Chat header.
   const [isSplitScreen, setIsSplitScreen] = useState(false);
   // Which content the split-screen's right-hand pane shows — see the
   // identical state in app/dashboard/module/[id]/page.tsx for the full
@@ -247,6 +209,36 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
 
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [noteContent, setNoteContent] = useState("");
+  const [isSavingNote, setIsSavingNote] = useState(false);
+
+  /** Studio's "Add note" panel real save — posts to /api/notes (Mes notes), same generic per-user feature as app/dashboard/module/[id]/page.tsx's own handleSaveNote; unrelated to this page's own courses-table pipeline. */
+  async function handleSaveNote() {
+    const content = noteContent.trim();
+    if (!content) return;
+
+    setIsSavingNote(true);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title || "Cours", content }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
+
+      setIsNoteOpen(false);
+      setNoteContent("");
+      toast({ variant: "success", title: "Note enregistrée", description: "Retrouve-la dans « Mes notes »." });
+    } catch (error) {
+      toast({
+        variant: "error",
+        title: "Échec de l'enregistrement",
+        description: error instanceof Error ? error.message : "Erreur inconnue.",
+      });
+    } finally {
+      setIsSavingNote(false);
+    }
+  }
 
   // Lazy loading: a freshly-uploaded course's row has every content column
   // (resume/cas_clinique/qcms/explication) set to null. Each is
@@ -260,14 +252,6 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
 
   /** Whether a Studio tile already has real content to show, or still needs generating. */
   function getSectionStatus(id: DemoSectionId): SectionStatus {
-    // "available" here means "show up in the recent-generations quick list
-    // as already generated" — true only for the one pilot course with a
-    // real, hardcoded Mind Map poster. Every other course must not claim
-    // this, even though the tile itself stays visible in the grid above
-    // regardless of status (see handleStudioItemClick below for the click
-    // behavior on a "needs_generation" Mind Map, which has no real
-    // generation endpoint to call).
-    if (id === "mind_map") return slug === PLEURESIE_SLUG ? "available" : "needs_generation";
     if (!hasStudioData) return "available"; // legacy-only slug: fixed components/customTabContent, nothing to generate
     if (id === "explication") {
       if (legacySlugData) return "available";
@@ -318,18 +302,6 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   }
 
   function handleStudioItemClick(id: DemoSectionId) {
-    if (id === "mind_map" && slug !== PLEURESIE_SLUG) {
-      // No AI generation path exists for Mind Map on this pipeline (a
-      // single hardcoded poster for one pilot course, not a per-course
-      // generator — see SECTION_LAZY_CONFIG's own comment) — open the
-      // detail view directly so the click always does something honest
-      // (the "bientôt disponible pour ce cours" message) instead of
-      // silently no-oping through generateSection, which has no config
-      // entry for this id and would just return without doing anything.
-      setActiveId(id);
-      setOpenedSection(id);
-      return;
-    }
     if (getSectionStatus(id) === "needs_generation") {
       if (!generatingSection) generateSection(id);
       return;
@@ -357,8 +329,6 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   const showResumeStudioData = hasStudioData && activeId === "resume";
   const showCasCliniqueStudioData = hasStudioData && activeId === "cas_clinique";
   const showQcmsStudioData = hasStudioData && activeId === "qcm";
-  const showMindMapStudioData = hasStudioData && activeId === "mind_map" && slug === PLEURESIE_SLUG;
-  const showMindMapUnavailable = activeId === "mind_map" && !showMindMapStudioData;
 
   // No legacy content, and Supabase confirmed there's no row for this slug either.
   if (!legacySlugData && supabaseData === null) {
@@ -407,15 +377,6 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     >
       {(data) => <GastriteQcmsStudio data={data} courseSlug={slug} explicationMarkdown={explicationContent} />}
     </LazySection>
-  ) : showMindMapStudioData ? (
-    <MindMapStudio />
-  ) : showMindMapUnavailable ? (
-    <div className="flex h-full flex-col items-center justify-center gap-2 py-20 text-center">
-      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Mind Map — bientôt disponible pour ce cours</p>
-      <p className="max-w-sm text-xs text-gray-500 dark:text-gray-400">
-        Cette carte mentale visuelle n'existe pour l'instant que pour un cours pilote (Pleurésie). Elle arrivera pour les autres cours une fois la version générique prête.
-      </p>
-    </div>
   ) : customTabContent ? (
     <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
@@ -549,6 +510,8 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       }}
       noteContent={noteContent}
       onNoteContentChange={setNoteContent}
+      onSaveNote={handleSaveNote}
+      isSavingNote={isSavingNote}
       onAskSelection={handleAskSelection}
       onTranslateSelection={handleTranslateSelection}
     >

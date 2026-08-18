@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { isQuotedChatMessage } from "@/lib/demo-content";
+import { useToast } from "@/components/ui/Toast";
 import type { ChatMessage } from "@/lib/types";
 
 interface UseCourseChatResult {
@@ -22,8 +23,8 @@ interface UseCourseChatResult {
       excludeFromHistory?: boolean;
     }
   ) => Promise<void>;
-  /** Clears the on-screen conversation. Local only — does not delete the persisted `course_chat_history` rows. */
-  clearMessages: () => void;
+  /** A real reset, not just a local one: wipes this course's `course_chat_history` rows server-side (DELETE /api/courses/chat) and only clears the on-screen conversation once that succeeds — a failed delete leaves the transcript on screen with an error toast instead of silently keeping stale rows the student was told were gone. */
+  clearMessages: () => Promise<void>;
 }
 
 /**
@@ -33,6 +34,7 @@ interface UseCourseChatResult {
  * both files, now one real, streaming implementation).
  */
 export function useCourseChat(slug?: string): UseCourseChatResult {
+  const { toast } = useToast();
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -149,8 +151,28 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
     }
   }
 
-  function clearMessages() {
-    setChatMessages([]);
+  async function clearMessages() {
+    // No course identity (the plain /dashboard/demo overview) — nothing
+    // persisted for this to wipe, same guard as the load effect above.
+    if (!slug) {
+      setChatMessages([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/courses/chat?slug=${encodeURIComponent(slug)}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data?.error ?? "La suppression a échoué.");
+      setChatMessages([]);
+    } catch (error) {
+      // Deliberately does NOT clear local state on failure — the whole point
+      // is that "Nouvelle conversation" must not look reset while the old
+      // rows are still sitting in course_chat_history.
+      toast({
+        variant: "error",
+        title: "Échec de la réinitialisation",
+        description: error instanceof Error ? error.message : "Impossible de contacter le serveur.",
+      });
+    }
   }
 
   return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, clearMessages };

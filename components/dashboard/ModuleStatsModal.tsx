@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { AlertTriangle, BarChart3, CircleCheck, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -44,9 +44,20 @@ export function ModuleStatsModal({
 }) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ModuleStatsResponse | null>(null);
+  // Keyed by moduleId — re-opening this same module's stats within the page
+  // visit (e.g. closing then reopening the dropdown) is then instant.
+  const cacheRef = useRef<Map<number, ModuleStatsResponse>>(new Map());
 
   useEffect(() => {
     if (!open) return;
+
+    const cached = cacheRef.current.get(moduleId);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setData(null);
@@ -54,7 +65,9 @@ export function ModuleStatsModal({
     fetch(`/api/studio/courses/stats?moduleId=${moduleId}`)
       .then((res) => res.json())
       .then((body: ModuleStatsResponse) => {
-        if (!cancelled && body.success) setData(body);
+        if (cancelled || !body.success) return;
+        cacheRef.current.set(moduleId, body);
+        setData(body);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

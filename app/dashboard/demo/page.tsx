@@ -17,7 +17,7 @@ import {
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useCourseChat } from "@/hooks/useCourseChat";
-import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
+import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
 import { ChatPanel } from "@/components/course/workspace/ChatPanel";
 import { ResumeStudio } from "@/components/course/workspace/ResumeStudio";
 import { CasCliniqueStudio } from "@/components/course/workspace/CasCliniqueStudio";
@@ -234,7 +234,7 @@ export default function DemoWorkspacePage() {
         </div>
 
         {selection && (
-          <SelectionTooltip
+          <TextSelectionToolbar
             ref={tooltipRef}
             selection={selection}
             onAsk={handleAsk}

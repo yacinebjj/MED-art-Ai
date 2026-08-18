@@ -3,7 +3,6 @@ import {
   CAS_CLINIQUE_SYSTEM_PROMPT,
   EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
   EXPLICATION_SYSTEM_PROMPT,
-  MIND_MAP_SYSTEM_PROMPT,
   QCMS_SYSTEM_PROMPT,
   RESUME_SYSTEM_PROMPT,
 } from "@/lib/prompts/public-course-sections";
@@ -14,8 +13,8 @@ import {
  * production-proven, JSON-schema system prompts that generate real Supabase
  * courses (lib/prompts/public-course-sections.ts — the ones "La Pleurésie"
  * and "Gastrite" were themselves generated with) for explication and
- * exemples_analogies unmodified, and overrides résumé/cas clinique/QCM/mind
- * map with additional Golden Standard mandates — always by APPENDING to the
+ * exemples_analogies unmodified, and overrides résumé/cas clinique/QCM
+ * with additional Golden Standard mandates — always by APPENDING to the
  * shared prompt, never editing it, so the production per-course pipeline
  * (app/api/generate/*) is never affected.
  *
@@ -82,59 +81,6 @@ const STUDIO_QCMS_SYSTEM_PROMPT = `${QCMS_SYSTEM_PROMPT}
 
 SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "qcms" doit contenir un MINIMUM ABSOLU DE TRENTE (30) QCM, et le tableau "qrocs" un minimum de CINQ (5) QROC — jamais moins, quelle que soit la longueur du cours source. Les questions doivent être de niveau Résidanat, réellement difficiles (distracteurs plausibles, questions à réponses multiples incluses), avec une explication complète pour chaque option existante (A à E). Numérote "id" séquentiellement à partir de 1, sans trou, pour chacun des deux tableaux.`;
 
-/**
- * Mind Map — Golden Standard hybrid, v7 (= v5, restored). v6 ("AI
- * Infographic Image Pipeline" — a single Ideogram image with the whole
- * poster's text baked in) was tried for real and produced exactly the
- * failure this codebase already had 3 documented prior attempts of: garbled
- * title ("OTITTÉ MÉDICAL AIGUÀ" instead of "OTITE MOYENNE AIGUË"), every
- * label unreadable/invented, and the requested layout (cascade, protocol
- * grid, warning box) ignored outright by the model. Seen firsthand, then
- * reverted back to this hybrid on the client's own instruction.
- *
- * Split of responsibilities:
- *  1. The RELIABLE part — this prompt's {nodes, links} extraction, each
- *     node short-labeled (2-5 words) and tagged with its own specific icon
- *     — renders as HTML (DynamicMindMapStudio: sticker clusters, a numbered
- *     mechanism cascade, a numbered treatment protocol grid, a red warning
- *     box built from complications) via lib/lucide-icon-lookup.ts, never
- *     dependent on an external image model getting clinical terminology
- *     right.
- *  2. The Ideogram part is an EXTRA field on the same object,
- *     "ideogram_prompt" — explicitly required to contain "no text, no
- *     letters, no words, no numbers anywhere in the image", since every
- *     documented failure (3 before, now 4) was specifically about
- *     rendering TEXT. An image that never asks for text cannot fail that
- *     way. app/api/studio/generate/route.ts calls Ideogram with this prompt
- *     and fails OPEN — the HTML board still renders even if the image call
- *     errors, a bonus accent illustration, never a blocker.
- */
-const STUDIO_MIND_MAP_SYSTEM_PROMPT = `${MIND_MAP_SYSTEM_PROMPT}
-
-SURCHARGE OBLIGATOIRE — FORMAT "MASTERCLASS INFOGRAPHIC" (renforce, sans jamais réduire, le nombre de nœuds/liens demandé ci-dessus) : le rendu final est une planche d'infographie unique, sans le moindre défilement — chaque "label" de nœud DOIT donc être un mot-clé ou une expression ultra-courte de 2 À 5 MOTS MAXIMUM, jamais une phrase complète ni une explication. Chaque "label" de lien (la relation entre deux nœuds) doit être UN SEUL VERBE OU UNE EXPRESSION DE 1 À 3 MOTS ("cause", "révèle", "traite", "se complique en"...), jamais une justification développée. Si un concept est complexe, découpe-le en plusieurs nœuds courts reliés entre eux plutôt que d'écrire un label long.
-
-SURCHARGE OBLIGATOIRE — UNE ICÔNE PAR NŒUD (ajoute un champ "icon" à CHAQUE objet du tableau "nodes", en plus de "id"/"label"/"type") : choisis, pour CHAQUE nœud individuellement, l'icône qui représente le MIEUX son contenu spécifique — jamais un choix générique basé uniquement sur "type", mais sur le sens précis du "label" (ex : un nœud sur la fièvre → "flame" ou "thermometer" ; un nœud sur une bactérie → "bug" ; un nœud sur le cerveau/système nerveux → "brain" ; un nœud sur une piqûre/injection/vaccin → "syringe" ; un nœud sur un examen de laboratoire → "microscope" ou "test-tube" ; un nœud sur l'oreille → "ear" ; un nœud sur l'œil → "eye" ; un nœud sur un délai/une urgence → "clock" ou "hourglass" ; un nœud sur un saignement/liquide → "droplet" ; un nœud sur une fracture/os → "bone" ; un nœud sur un décès/gravité extrême → "skull" ; un nœud sur une alerte grave → "shield-alert" ou "siren" ; un nœud sur un nourrisson/enfant → "baby" ; un nœud sur un traitement médicamenteux → "pill". La valeur de "icon" doit être EXACTEMENT l'une de ces chaînes (kebab-case) : shield, bug, pill, flame, stethoscope, activity, alert-triangle, bar-chart-3, check-circle-2, wind, zap, heart-pulse, brain, thermometer, syringe, microscope, ear, eye, droplet, clock, skull, waves, baby, bone, test-tube, siren, scan-line, heart-crack, shield-alert, hourglass. N'utilise JAMAIS la même icône pour tous les nœuds d'une même section — varie-la selon le contenu réel de chaque label.
-
-SURCHARGE OBLIGATOIRE — UNE PRÉCISION CLINIQUE PAR NŒUD (ajoute un champ "detail" à CHAQUE objet du tableau "nodes", en plus de "id"/"label"/"type"/"icon") : contrairement à "label" (mot-clé très court), "detail" est UNE SEULE PHRASE COURTE (10 À 16 MOTS MAXIMUM) qui apporte une vraie précision clinique tirée directement et strictement du cours source — un mécanisme précis, une valeur ou un score, une classification, un seuil diagnostique, ou la complication associée. Interdiction absolue de reformuler vaguement le label ou d'écrire une phrase générique/creuse ("cette notion est importante à connaître" est INTERDIT) : si le cours ne fournit aucune précision réelle pour un nœud, laisse "detail" en chaîne vide plutôt que d'inventer du contenu. Exemple : label "Score de Glasgow" → detail "Évalue ouverture des yeux, réponse verbale et motrice (3 à 15 points)". Exploite pleinement l'espace de tokens disponible pour ces précisions sur un maximum de nœuds, sans jamais dépasser la limite de mots ni transformer "label" en phrase longue.
-
-SURCHARGE OBLIGATOIRE (ajoute un champ supplémentaire à l'objet "mind_map" ci-dessus — ne retire et ne modifie RIEN d'autre) : ajoute un champ "ideogram_prompt" contenant un prompt de génération d'image en ANGLAIS, destiné à l'API Ideogram, décrivant une illustration PUREMENT CONCEPTUELLE, ARTISTIQUE ET SYMBOLIQUE du sujet central du cours (métaphore visuelle, ambiance, formes, couleurs, composition picturale) — inspirée du sujet mais jamais un diagramme, jamais une infographie.
-
-RÈGLE ABSOLUE ET NON NÉGOCIABLE POUR "ideogram_prompt" : cette image ne doit contenir STRICTEMENT AUCUN TEXTE, AUCUNE LETTRE, AUCUN MOT, AUCUN CHIFFRE, AUCUNE ÉTIQUETTE, nulle part dans l'image. Inclus littéralement dans le prompt la phrase "no text, no letters, no words, no numbers, no labels anywhere in the image". Décris uniquement des formes organiques ou abstraites, une palette de couleurs médicale cohérente, et une composition visuelle évocatrice du sujet (ex : pour une pathologie pulmonaire, des formes évoquant des poumons stylisés et des particules flottantes symbolisant l'inflammation, sans aucun mot nulle part). Le prompt doit faire au moins 80 mots et être entièrement en anglais.
-
-Schéma exact (complet, avec les champs ajoutés) :
-{
-  "mind_map": {
-    "nodes": [
-      { "id": "n1", "label": "...", "type": "symptome", "icon": "flame", "detail": "..." },
-      { "id": "n2", "label": "...", "type": "mecanisme", "icon": "brain", "detail": "..." }
-    ],
-    "links": [
-      { "source": "n1", "target": "n2", "label": "..." }
-    ],
-    "ideogram_prompt": "Purely artistic, symbolic illustration, no text, no letters, no words, no numbers, no labels anywhere in the image, describing shapes, colors and composition evoking the course's central medical concept."
-  }
-}`;
-
 interface StudioPromptConfig {
   systemPrompt: string;
   /**
@@ -151,22 +97,12 @@ interface StudioPromptConfig {
   maxTokens: number;
 }
 
-/** Only the 6 tiles the existing Studio UI actually renders (lib/demo-content.ts's DEMO_SECTIONS) get a prompt — there is no 7th tile to add one for. */
+/** Only the tiles the existing Studio UI actually renders (lib/demo-content.ts's DEMO_SECTIONS) get a prompt — there is no 6th tile to add one for. */
 export const STUDIO_PROMPT_CONFIG: Record<DemoSectionId, StudioPromptConfig> = {
   explication: { systemPrompt: EXPLICATION_SYSTEM_PROMPT, maxTokens: 32000 },
   resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 32000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 32000 },
   qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 32000 },
-  // 16000 (was 8000): the v11 "ultra-detailed" radial Mind Map explicitly
-  // asks the model to mine richer, deeper courses for more nodes (scores,
-  // classifications, precise clinical detail) without shortening the
-  // per-label brevity rule — a denser source course was observed hitting
-  // the old 8000 cap mid-generation (finish_reason: "length") well before
-  // reaching the JSON's closing brace. Bumped, not removed: the per-label
-  // "2 à 5 mots" rule is what keeps DynamicMindMapStudio.tsx's radial
-  // layout math safe, so richness must come from MORE nodes, never longer
-  // labels.
-  mind_map: { systemPrompt: STUDIO_MIND_MAP_SYSTEM_PROMPT, maxTokens: 16000 },
   exemples_analogies: { systemPrompt: EXEMPLES_ANALOGIES_SYSTEM_PROMPT, maxTokens: 32000 },
 };
 
@@ -176,7 +112,6 @@ export const STUDIO_SECTION_KEYS: Record<DemoSectionId, string> = {
   resume: "resume",
   cas_clinique: "cas_clinique",
   qcm: "qcms",
-  mind_map: "mind_map",
   exemples_analogies: "exemples_analogies",
 };
 
@@ -199,4 +134,48 @@ Voici le texte intégral du cours :
 ${courseContent}
 
 Basé strictement sur ce texte, génère le contenu demandé, au format JSON exact spécifié ci-dessus, sans jamais inventer d'information absente de ce texte.`;
+}
+
+/**
+ * Per-type rewrite/regenerate instruction — see buildStudioRegeneratePrompt.
+ * Explication/résumé/exemples_analogies ask for a light rewrite (same facts,
+ * new phrasing/formatting, bounded percentage); cas_clinique/qcm ask for
+ * genuinely NEW content on the same medical topics instead, since a "light
+ * rewrite" of a clinical case or a QCM question would just be the same
+ * question reworded, not a fresh one worth practicing with again.
+ */
+const REGENERATE_INSTRUCTIONS: Record<DemoSectionId, string> = {
+  explication:
+    "Réécris cette explication. Garde exactement les mêmes informations mais change le style, la formulation et le vocabulaire d'environ 20%.",
+  resume:
+    "Modifie légèrement le formatage, les puces et la structure de ce résumé (changement maximum de 20%), en conservant tous les faits essentiels.",
+  cas_clinique:
+    "En te basant sur le contexte médical de ces cas cliniques, génère des cas cliniques COMPLÈTEMENT NOUVEAUX et différents (autres archétypes, autre présentation clinique), sur les mêmes sujets médicaux. Ne réutilise aucun des cas ci-dessous.",
+  qcm: "Lis ces QCM. Maintenant, génère des questions QCM COMPLÈTEMENT NOUVELLES et DIFFÉRENTES sur les mêmes sujets médicaux. Ne répète jamais exactement les mêmes questions ni les mêmes formulations.",
+  exemples_analogies:
+    "Réécris ces exemples et analogies avec de légères variations (changement d'environ 10%), en gardant les mêmes idées de fond.",
+};
+
+/**
+ * Builds the system prompt for a "Regénérer" call (see
+ * app/api/studio/regenerate/route.ts). CRITICAL cost/token difference from
+ * buildStudioSystemPrompt above: the original source document is NEVER
+ * refetched or resent here. Only the section's OWN already-generated content
+ * (read straight from studio_courses, no source join) is sent back to the
+ * model — together with the exact same JSON-shape instructions the original
+ * generation used (so STUDIO_SCHEMAS validation still passes unchanged) plus
+ * the type-specific rewrite/regenerate instruction above.
+ */
+export function buildStudioRegeneratePrompt(actionType: DemoSectionId, existingContent: string): string {
+  const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
+  const instruction = REGENERATE_INSTRUCTIONS[actionType];
+  return `${basePrompt}
+
+Voici le contenu DÉJÀ GÉNÉRÉ pour cette section (c'est ta SEULE base de travail — le document source original n'est pas fourni ici, ne suppose rien au-delà de ce contenu) :
+
+${existingContent}
+
+${instruction}
+
+Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
 }

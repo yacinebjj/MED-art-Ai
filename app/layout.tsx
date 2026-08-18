@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { ToastProvider } from "@/components/ui/Toast";
+import { PushClientFallbackProvider } from "@/providers/PushClientFallbackProvider";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -23,7 +24,9 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
           <TooltipProvider delayDuration={200}>
-            <ToastProvider>{children}</ToastProvider>
+            <ToastProvider>
+              <PushClientFallbackProvider>{children}</PushClientFallbackProvider>
+            </ToastProvider>
           </TooltipProvider>
         </ThemeProvider>
       </body>

@@ -1,4 +1,4 @@
-import { Spinner } from "@/components/ui/Spinner";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 
 /**
  * Route-level Suspense fallback for every /dashboard/** navigation that
@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/Spinner";
 export default function DashboardLoading() {
   return (
     <div className="flex h-full min-h-[50vh] w-full items-center justify-center">
-      <Spinner className="h-6 w-6 text-primary-600 dark:text-primary-400" />
+      <BrandLoader className="h-6 w-6" />
     </div>
   );
 }

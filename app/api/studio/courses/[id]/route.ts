@@ -14,7 +14,6 @@ const SECTION_TO_COLUMN: Record<DemoSectionId, string> = {
   resume: "resume",
   cas_clinique: "cas_clinique",
   qcm: "qcms",
-  mind_map: "mind_map",
   exemples_analogies: "exemples_analogies",
 };
 
@@ -35,8 +34,8 @@ interface StudioCourseFullRow {
   resume: StudioCourseFull["resume"];
   cas_clinique: StudioCourseFull["casClinique"];
   qcms: StudioCourseFull["qcms"];
-  mind_map: StudioCourseFull["mindMap"];
   exemples_analogies: string | null;
+  source_file_url: string | null;
 }
 
 function toFullCourse(row: StudioCourseFullRow): StudioCourseFull {
@@ -48,8 +47,8 @@ function toFullCourse(row: StudioCourseFullRow): StudioCourseFull {
     resume: row.resume,
     casClinique: row.cas_clinique,
     qcms: row.qcms,
-    mindMap: row.mind_map,
     exemplesAnalogies: row.exemples_analogies,
+    sourceFileUrl: row.source_file_url,
   };
 }
 
@@ -72,7 +71,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("studio_courses")
-    .select("id, title, raw_text, explication, resume, cas_clinique, qcms, mind_map, exemples_analogies")
+    .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();

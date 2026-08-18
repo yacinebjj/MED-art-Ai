@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
@@ -8,9 +8,11 @@ import { useTheme } from "next-themes";
 import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, Plus, Search, Trash2, TrendingUp } from "lucide-react";
+import { ArrowLeft, Camera, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, Plus, Search, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { useToast } from "@/components/ui/Toast";
+import { BrandLoader } from "@/components/ui/BrandLoader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
@@ -26,29 +28,45 @@ import { UploadModal } from "@/components/dashboard/UploadModal";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { ChatDocumentPanel, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
 import { StudioPanel, type SectionStatus } from "@/components/course/workspace/StudioPanel";
-import { SourceDocumentPanel } from "@/components/course/workspace/SourceDocumentPanel";
-import { GastriteResumeStudio } from "@/components/course/workspace/GastriteResumeStudio";
-import { GastriteCasCliniqueStudio } from "@/components/course/workspace/GastriteCasCliniqueStudio";
-import { GastriteQcmsStudio } from "@/components/course/workspace/GastriteQcmsStudio";
+import { FileViewerModal } from "@/components/course/workspace/FileViewerModal";
+import { StudioTileSkeleton } from "@/components/course/workspace/StudioTileSkeleton";
+import { MobileWorkspaceTabBar, type MobileWorkspaceTab } from "@/components/course/workspace/MobileWorkspaceTabBar";
+import { MobileStudioCards } from "@/components/course/workspace/MobileStudioCards";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useCourseChat } from "@/hooks/useCourseChat";
 import { MAX_LEITNER_BOX } from "@/lib/srs";
-
-// Lazy-loaded: a large hand-built SVG radial-tree renderer (rough geometry
-// math, dozens of foreignObject text nodes, gradients/shadows/filters) that
-// most visits to this workspace never open (the student has to click the
-// Mind Map tile first) — no reason to ship it in the initial bundle for
-// every Résumé/Cas Clinique/QCM visit. ssr:false because it's entirely
-// client-interactive (zoom/pan, no SEO-relevant content) and reads
-// window-dependent layout at render time.
-const DynamicMindMapStudio = dynamic(
-  () => import("@/components/course/workspace/DynamicMindMapStudio").then((m) => m.DynamicMindMapStudio),
-  { ssr: false, loading: () => <div className="flex h-[500px] items-center justify-center text-sm text-gray-400 dark:text-gray-500">Chargement de la Mind Map…</div> }
-);
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
-import { DEMO_SECTIONS, buildDemoTranslatePrompt, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
+
+/** A stable (module-scope, allocated once ever) no-op — passed to ModuleSourcesPanel's mobile variant, which never renders the close button `onClosePanel` guards, so its identity never needs to matter, but a literal `() => {}` written inline would still needlessly recreate on every render and defeat memo comparisons on props next to it. */
+const NOOP = () => {};
+
+/**
+ * Each of these 3 is a genuinely heavy render tree (multi-mode tabs,
+ * dozens of cards, a full interactive quiz engine) that most visits to this
+ * page never even open — code-splitting them out of the initial bundle via
+ * `next/dynamic` (rather than a static import) means their JS only downloads
+ * the moment a student actually opens that specific Studio tile, with the
+ * `<Suspense>` boundary around them (see the render below) showing
+ * `StudioTileSkeleton` for that brief moment instead of blocking the click.
+ * `ssr: false` is safe here — this whole page is already client-rendered
+ * (useParams + client-only state), so there's no SSR output to lose.
+ */
+const GastriteResumeStudio = dynamic(
+  () => import("@/components/course/workspace/GastriteResumeStudio").then((m) => m.GastriteResumeStudio),
+  { ssr: false }
+);
+const GastriteCasCliniqueStudio = dynamic(
+  () => import("@/components/course/workspace/GastriteCasCliniqueStudio").then((m) => m.GastriteCasCliniqueStudio),
+  { ssr: false }
+);
+const GastriteQcmsStudio = dynamic(
+  () => import("@/components/course/workspace/GastriteQcmsStudio").then((m) => m.GastriteQcmsStudio),
+  { ssr: false }
+);
 
 /**
  * Reads/writes one Studio tile's value on a StudioCourseFull — the single
@@ -66,8 +84,6 @@ function getSectionValue(course: StudioCourseFull, section: DemoSectionId): unkn
       return course.casClinique;
     case "qcm":
       return course.qcms;
-    case "mind_map":
-      return course.mindMap;
     case "exemples_analogies":
       return course.exemplesAnalogies;
   }
@@ -83,8 +99,6 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
       return { ...course, casClinique: value };
     case "qcm":
       return { ...course, qcms: value };
-    case "mind_map":
-      return { ...course, mindMap: value };
     case "exemples_analogies":
       return { ...course, exemplesAnalogies: value };
   }
@@ -106,42 +120,61 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
  * rendered through the EXACT same luxurious components Pleurésie/Gastrite
  * use (GastriteResumeStudio, GastriteCasCliniqueStudio, GastriteQcmsStudio in
  * preview mode) for résumé/cas clinique/QCM, never a bespoke Markdown
- * renderer. Mind Map renders via DynamicMindMapStudio — a deterministic
- * Mermaid graph plus a real Ideogram illustration (generated server-side,
- * see app/api/studio/generate/route.ts) — see lib/ai/studio-prompts.ts's
- * header comment for the full Golden Standard hybrid rationale.
+ * renderer.
  */
 
-function ModuleSourcesPanel({
+// React.memo — the caller (ModuleWorkspacePage below) passes every handler
+// prop here as a useCallback-stabilized reference specifically so this skips
+// re-rendering on unrelated state changes (a chat-input keystroke, a note
+// being typed) instead of re-rendering the whole source list + its dropdown
+// menus on every one of them.
+const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   courses,
   activeCourseId,
-  isSplitScreen,
   isSwitchingCourse,
   onSubmitFile,
   onSubmitText,
   onSelectCourse,
-  onToggleShowCourse,
+  onShowCourseFile,
   onDeleteCourse,
   onClosePanel,
   courseMasteryBySlug,
+  variant = "desktop",
 }: {
   courses: StudioCourseSummary[];
   activeCourseId: number | null;
-  isSplitScreen: boolean;
   isSwitchingCourse: boolean;
   onSubmitFile: (file: File) => Promise<string>;
   onSubmitText: (text: string, title: string) => Promise<string>;
   onSelectCourse: (id: number) => void;
-  onToggleShowCourse: (id: number) => void;
+  onShowCourseFile: (id: number) => void;
   onDeleteCourse: (id: number) => Promise<void>;
   onClosePanel: () => void;
   /** Real qcm_attempts-derived mastery, keyed by `studio-course-{id}` — see the `course_mastery` SQL function, which groups purely by course_slug with no join to any courses table, so it already covers this pipeline's synthetic slugs once real attempts exist (they do now that GastriteQcmsStudio here is no longer rendered with isPreview). */
   courseMasteryBySlug: Map<string, { qcmSuccessPct: number; srsMasteryPct: number }>;
+  /**
+   * "mobile" (the NotebookLM-mobile Sources tab) drops the desktop-only
+   * header/close-button and top "Add sources" button/search box — the bottom
+   * tab bar already provides navigation, and the source-adding affordance
+   * moves to a dedicated bottom action bar (camera icon + "+ Ajouter une
+   * source" pill) per the mobile redesign spec. The course list itself
+   * (with its full ⋮ menu — Afficher le cours/Statistiques/Supprimer) is
+   * identical in both variants.
+   */
+  variant?: "desktop" | "mobile";
 }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [statsCourse, setStatsCourse] = useState<StudioCourseSummary | null>(null);
   const [deleteCourse, setDeleteCourse] = useState<StudioCourseSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [webSearchQuery, setWebSearchQuery] = useState("");
+
+  function handleWebSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    const query = webSearchQuery.trim();
+    if (!query) return;
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer");
+  }
 
   async function handleConfirmDelete() {
     if (!deleteCourse) return;
@@ -156,33 +189,41 @@ function ModuleSourcesPanel({
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sources</h2>
-        <button
-          type="button"
-          onClick={onClosePanel}
-          aria-label="Fermer le panneau"
-          className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100"
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
-      </div>
+      {variant === "desktop" && (
+        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sources</h2>
+          <button
+            type="button"
+            onClick={onClosePanel}
+            aria-label="Fermer le panneau"
+            className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-1 flex-col space-y-4 overflow-y-auto p-4">
-        {/* Always enabled — adding a 2nd, 3rd, ... course never disables this, per the multi-course mandate. */}
-        <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => setUploadOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Add sources
-        </Button>
+        {variant === "desktop" && (
+          <>
+            {/* Always enabled — adding a 2nd, 3rd, ... course never disables this, per the multi-course mandate. */}
+            <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => setUploadOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add sources
+            </Button>
 
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-          <Input
-            placeholder="Search the web..."
-            disabled
-            className="border-none bg-gray-100 pl-9 shadow-none dark:bg-neutral-800 dark:text-gray-100 dark:placeholder:text-gray-500"
-          />
-        </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+              <Input
+                placeholder="Search the web..."
+                value={webSearchQuery}
+                onChange={(e) => setWebSearchQuery(e.target.value)}
+                onKeyDown={handleWebSearchKeyDown}
+                className="border-none bg-gray-100 pl-9 shadow-none dark:bg-neutral-800 dark:text-gray-100 dark:placeholder:text-gray-500"
+              />
+            </div>
+          </>
+        )}
 
         {courses.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-200 p-8 text-center dark:border-neutral-800">
@@ -200,7 +241,6 @@ function ModuleSourcesPanel({
           <div className="space-y-2">
             {courses.map((course) => {
               const isActive = course.id === activeCourseId;
-              const isShowingThis = isActive && isSplitScreen;
               return (
                 <div
                   key={course.id}
@@ -234,9 +274,9 @@ function ModuleSourcesPanel({
                       <MoreVertical className="h-3.5 w-3.5" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => onToggleShowCourse(course.id)}>
+                      <DropdownMenuItem onSelect={() => onShowCourseFile(course.id)}>
                         <Columns2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                        {isShowingThis ? "Fermer l'écran partagé" : "Afficher le cours"}
+                        Afficher le cours
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => setStatsCourse(course)}>
                         <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -255,6 +295,24 @@ function ModuleSourcesPanel({
           </div>
         )}
       </div>
+
+      {variant === "mobile" && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 p-4 dark:border-neutral-800">
+          <Button
+            variant="outline"
+            size="icon"
+            className="shrink-0 rounded-full"
+            aria-label="Scanner un document"
+            onClick={() => setUploadOpen(true)}
+          >
+            <Camera className="h-4 w-4" />
+          </Button>
+          <Button className="flex-1 rounded-full" onClick={() => setUploadOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Ajouter une source
+          </Button>
+        </div>
+      )}
 
       <Dialog open={deleteCourse !== null} onOpenChange={(open) => !open && setDeleteCourse(null)}>
         <DialogContent className="max-w-sm">
@@ -300,7 +358,7 @@ function ModuleSourcesPanel({
       />
     </>
   );
-}
+});
 
 export default function ModuleWorkspacePage() {
   const params = useParams<{ id: string }>();
@@ -340,20 +398,29 @@ export default function ModuleWorkspacePage() {
     };
   }, [params.id]);
 
+  // NotebookLM-mobile redesign: below md, the 3-column desktop shell is
+  // replaced entirely by a single-view-at-a-time tabbed layout (bottom nav —
+  // see MobileWorkspaceTabBar). `useMediaQuery` (rather than pure CSS
+  // `hidden md:flex`) picks ONE of the two branches to actually mount, so a
+  // phone never pays the cost of a hidden desktop ChatDocumentPanel instance
+  // sitting in the DOM (and vice versa on desktop).
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const [mobileTab, setMobileTab] = useState<MobileWorkspaceTab>("chat");
+
   const chatPanelRef = useRef<ChatDocumentPanelHandle>(null);
   const [isSplitScreen, setIsSplitScreen] = useState(false);
-  // Which content the split-screen's right-hand pane shows: "studio" (the
-  // default, opened via the Chat header's own toggle) or "source" (opened
-  // specifically via a source's "Afficher le cours" menu item) — kept
-  // distinct so that action reliably shows the raw original document, never
-  // the Studio's AI-generated Explication/Résumé, no matter which tile was
-  // last opened.
-  const [splitScreenView, setSplitScreenView] = useState<"studio" | "source">("studio");
   const [quotedText, setQuotedText] = useState<string | null>(null);
+  // Which quick action staged `quotedText` — Ask MedArt and Translate share
+  // the exact same "citation chip + review before sending" composer flow,
+  // but need different server-side flags on actual send (concise vs.
+  // translate, see handleSend below), so this is the one bit of state that
+  // tells them apart. Cleared alongside quotedText everywhere it's cleared.
+  const [quotedMode, setQuotedMode] = useState<"ask" | "translate" | null>(null);
 
   const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [noteContent, setNoteContent] = useState("");
+  const [isSavingNote, setIsSavingNote] = useState(false);
 
   // Golden Standard Part 2: every course is a real Supabase row
   // (studio_courses, see app/api/studio/courses/*) — `courses` is the
@@ -361,8 +428,30 @@ export default function ModuleWorkspacePage() {
   // one is currently open (fetched on demand, not all at once).
   const [courses, setCourses] = useState<StudioCourseSummary[]>([]);
   const [activeCourse, setActiveCourse] = useState<StudioCourseFull | null>(null);
+  // Mirrors StudioPanel's own internal collapse toggle purely so this page's
+  // fixed-width <aside> wrapper (which StudioPanel doesn't own) can shrink in
+  // lockstep — see StudioPanel's onCollapsedChange doc comment.
+  const [isStudioCollapsed, setIsStudioCollapsed] = useState(false);
+  // Client-side cache of every full course row fetched this page visit,
+  // keyed by id — switching back to a course you already opened is instant
+  // (no network roundtrip), and every place that mutates `activeCourse`
+  // (generate, regenerate, a fresh upload) mirrors its result in here too so
+  // a later cache hit is never stale. A plain ref (not state) since writing
+  // to it must never itself trigger a re-render — only `activeCourse` does.
+  const courseCacheRef = useRef<Map<number, StudioCourseFull>>(new Map());
   const [isSwitchingCourse, setIsSwitchingCourse] = useState(false);
   const [generatingSection, setGeneratingSection] = useState<DemoSectionId | null>(null);
+  const [regeneratingSection, setRegeneratingSection] = useState<DemoSectionId | null>(null);
+  // "Afficher le cours" — a self-contained modal (FileViewerModal), decoupled
+  // from the isSplitScreen/studioPanel system entirely, showing whichever
+  // course's file was requested from the Sources list.
+  const [fileViewerCourse, setFileViewerCourse] = useState<StudioCourseFull | null>(null);
+  // Marks the state updates that swap in a heavy detail pane (a freshly
+  // switched-to course, or a just-opened Studio tile rendering
+  // GastriteQcmsStudio's 30+ interactive questions) as non-urgent, so React
+  // keeps the click responsive and the CURRENT view visible/interactive
+  // instead of the update blocking the main thread synchronously.
+  const [, startNavTransition] = useTransition();
 
   // studio_courses has no matching row in the `courses` table the shared
   // chat endpoint normally looks slugs up against — this slug only ever
@@ -422,10 +511,10 @@ export default function ModuleWorkspacePage() {
   const openedSectionLabel = DEMO_SECTIONS.find((s) => s.id === openedSection)?.label ?? "";
   const moduleTitle = module?.title ?? "Module";
 
-  /** Applies a newly-created course to sidebar/active state — shared by both the file and pasted-text creation paths below. */
-  function applyCreatedCourse(created: StudioCourseSummary, rawText: string) {
+  /** Applies a newly-created course to sidebar/active state — shared by both the file and pasted-text creation paths below. useCallback with empty deps: only ever touches stable setState dispatchers and the stable courseCacheRef, so this reference never changes across the component's lifetime. */
+  const applyCreatedCourse = useCallback((created: StudioCourseSummary, rawText: string, sourceFileUrl: string | null) => {
     setCourses((prev) => [...prev, created]); // appended at the bottom — matches the sidebar's oldest-first order
-    setActiveCourse({
+    const fullCourse: StudioCourseFull = {
       id: created.id,
       title: created.title,
       rawText,
@@ -433,36 +522,39 @@ export default function ModuleWorkspacePage() {
       resume: null,
       casClinique: null,
       qcms: null,
-      mindMap: null,
       exemplesAnalogies: null,
-    });
+      sourceFileUrl,
+    };
+    courseCacheRef.current.set(created.id, fullCourse);
+    setActiveCourse(fullCourse);
     setOpenedSection(null);
-  }
+  }, []);
 
-  /** Returns the new course's id (as a string, matching UploadModal's generic contract) or throws — UploadModal shows the thrown message inline instead of a toast, so the student sees exactly why an upload failed without losing the dialog. */
-  async function handleFileSelected(file: File): Promise<string> {
+  /** Returns the new course's id (as a string, matching UploadModal's generic contract) or throws — UploadModal shows the thrown message inline instead of a toast, so the student sees exactly why an upload failed without losing the dialog. useCallback so ModuleSourcesPanel's React.memo isn't defeated by a fresh reference every render. */
+  const handleFileSelected = useCallback(async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append("file", file);
     const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
     const uploadData = await uploadRes.json().catch(() => ({}));
     if (!uploadRes.ok || !uploadData.success) throw new Error(uploadData?.error ?? "L'extraction du PDF a échoué.");
 
+    const sourceFileUrl: string | null = uploadData.fileUrl ?? null;
     const createRes = await fetch("/api/studio/courses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moduleId, title: file.name, rawText: uploadData.text }),
+      body: JSON.stringify({ moduleId, title: file.name, rawText: uploadData.text, sourceFileUrl }),
     });
     const createData = await createRes.json().catch(() => ({}));
     if (!createRes.ok || !createData.success) throw new Error(createData?.error ?? "La création du cours a échoué.");
 
     const created: StudioCourseSummary = createData.course;
-    applyCreatedCourse(created, uploadData.text);
+    applyCreatedCourse(created, uploadData.text, sourceFileUrl);
     toast({ variant: "success", title: "Source ajoutée", description: `${file.name} a été importé et sauvegardé.` });
     return String(created.id);
-  }
+  }, [moduleId, applyCreatedCourse, toast]);
 
   /** "Texte brut" tab of the unified Add-sources modal — skips /api/upload entirely (no file to extract from) and creates the course directly from the pasted text. */
-  async function handleTextSubmitted(text: string, title: string): Promise<string> {
+  const handleTextSubmitted = useCallback(async (text: string, title: string): Promise<string> => {
     const createRes = await fetch("/api/studio/courses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -472,10 +564,10 @@ export default function ModuleWorkspacePage() {
     if (!createRes.ok || !createData.success) throw new Error(createData?.error ?? "La création du cours a échoué.");
 
     const created: StudioCourseSummary = createData.course;
-    applyCreatedCourse(created, text);
+    applyCreatedCourse(created, text, null);
     toast({ variant: "success", title: "Source ajoutée", description: `${created.title} a été ajouté.` });
     return String(created.id);
-  }
+  }, [moduleId, applyCreatedCourse, toast]);
 
   /**
    * Context switching: clears the detail pane immediately (the Studio must
@@ -484,26 +576,41 @@ export default function ModuleWorkspacePage() {
    * generated before, since nothing here ever re-calls the AI for content
    * that already exists.
    */
-  async function handleSelectCourse(courseId: number) {
-    if (courseId === activeCourse?.id) return;
+  /** Returns the loaded course (or the already-active one, or null on failure) — handleShowCourseFile below needs the freshly-loaded row immediately, not just the fire-and-forget state update. useCallback (dep on the full `activeCourse` object, not just its id, so the early-return path is never stale) so ModuleSourcesPanel's React.memo isn't defeated by a fresh reference every render. */
+  const handleSelectCourse = useCallback(async (courseId: number): Promise<StudioCourseFull | null> => {
+    if (courseId === activeCourse?.id) return activeCourse;
 
-    setOpenedSection(null);
+    startNavTransition(() => setOpenedSection(null));
+
+    // Cache hit — this course was already fully loaded once this page visit
+    // (kept in sync by every mutation site: generate, regenerate, upload).
+    // Switching back to it is then a pure state update, zero network
+    // roundtrip, so it never needs the "Chargement du cours..." spinner.
+    const cached = courseCacheRef.current.get(courseId);
+    if (cached) {
+      startNavTransition(() => setActiveCourse(cached));
+      return cached;
+    }
+
     setIsSwitchingCourse(true);
     try {
       const res = await fetch(`/api/studio/courses/${courseId}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "Impossible de charger ce cours.");
-      setActiveCourse(data.course);
+      courseCacheRef.current.set(courseId, data.course);
+      startNavTransition(() => setActiveCourse(data.course));
+      return data.course as StudioCourseFull;
     } catch (error) {
       toast({
         variant: "error",
         title: "Échec du chargement",
         description: error instanceof Error ? error.message : "Erreur inconnue.",
       });
+      return null;
     } finally {
       setIsSwitchingCourse(false);
     }
-  }
+  }, [activeCourse, toast]);
 
   // Matches the Pleurésie "Golden Standard" flow exactly, using only
   // StudioPanel's existing, UNCHANGED contract (generatingSection +
@@ -520,7 +627,12 @@ export default function ModuleWorkspacePage() {
   //     the grid tile again) is what opens the detail pane full-screen.
   //  3. Currently generating (a click on the spinning list row, or a second
   //     click before it resolves) -> ignored, nothing to open yet.
-  async function handleStudioItemClick(id: DemoSectionId) {
+  // Wrapped in useCallback (not a plain function statement) specifically so
+  // MobileStudioCards' React.memo actually holds: without a stable identity
+  // here, every unrelated parent re-render (a chat-input keystroke, a typing
+  // indicator toggling) would recreate this function and force the memoized
+  // card grid to re-render right along with it.
+  const handleStudioItemClick = useCallback(async (id: DemoSectionId) => {
     if (!activeCourse) {
       toast({
         variant: "info",
@@ -531,7 +643,7 @@ export default function ModuleWorkspacePage() {
     }
 
     if (getSectionValue(activeCourse, id)) {
-      setOpenedSection(id);
+      startNavTransition(() => setOpenedSection(id));
       return;
     }
 
@@ -542,25 +654,28 @@ export default function ModuleWorkspacePage() {
 
     setGeneratingSection(id);
     try {
-      const { res, data } = await postStudioGenerate(id, rawText);
-      if (!res.ok || !data.success) throw new Error(data?.error ?? "La génération a échoué.");
-
-      // Persist immediately — this is the Auto-Save: a refresh tomorrow reloads this straight from Supabase.
-      const patchRes = await fetch(`/api/studio/courses/${courseId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ section: id, data: data.data }),
-      });
-      if (!patchRes.ok) {
-        toast({
-          variant: "error",
-          title: "Sauvegarde indisponible",
-          description: "Le contenu s'affiche mais n'a pas pu être enregistré — il faudra le régénérer si tu quittes la page.",
-        });
+      // /api/studio/generate now saves to Supabase itself before returning
+      // success (atomic generate-then-save — see that route's header
+      // comment), so there's no separate PATCH here anymore: a refresh
+      // right after this resolves already reloads straight from Supabase,
+      // and a refresh/tab-close mid-generation never burns an OpenRouter
+      // call for a result that never gets saved.
+      const { res, data } = await postStudioGenerate(id, rawText, courseId);
+      if (!res.ok || !data.success) {
+        throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
       }
 
-      // Only apply if the student hasn't switched to a different course while this was generating.
-      setActiveCourse((prev) => (prev && prev.id === courseId ? withSectionValue(prev, id, data.data) : prev));
+      // Keyed off the cache (not the `activeCourse` closure, which may now
+      // point at a different course if the student switched mid-generation)
+      // so the cache stays the single source of truth for this id regardless
+      // of what's currently on screen.
+      const baseCourse = courseCacheRef.current.get(courseId);
+      if (baseCourse) {
+        const updated = withSectionValue(baseCourse, id, data.data);
+        courseCacheRef.current.set(courseId, updated);
+        // Only apply to the visible state if the student hasn't switched to a different course while this was generating.
+        setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
+      }
     } catch (error) {
       toast({
         variant: "error",
@@ -570,7 +685,23 @@ export default function ModuleWorkspacePage() {
     } finally {
       setGeneratingSection(null);
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCourse, generatingSection, toast]);
+
+  /** Stable reference so the desktop ModuleSourcesPanel instance's React.memo actually holds. */
+  const handleCloseSourcesPanel = useCallback(() => setIsSplitScreen(true), []);
+
+  /** Stable reference so MobileWorkspaceTabBar's React.memo actually holds. */
+  const handleMobileTabChange = useCallback((tab: MobileWorkspaceTab) => {
+    startNavTransition(() => setMobileTab(tab));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Shared by both the desktop studioPanel and MobileStudioCards — one stable reference (useCallback) instead of two separate inline arrows recreated every render. */
+  const getSectionStatus = useCallback(
+    (id: DemoSectionId): SectionStatus => (activeCourse && getSectionValue(activeCourse, id) ? "available" : "needs_generation"),
+    [activeCourse]
+  );
 
   /**
    * One attempt at /api/studio/generate — network errors (fetch() itself
@@ -579,11 +710,11 @@ export default function ModuleWorkspacePage() {
    * distinguish "the request never landed" from "it landed and the server
    * said no".
    */
-  async function requestStudioGeneration(actionType: DemoSectionId, context: string) {
+  async function requestStudioGeneration(actionType: DemoSectionId, context: string, courseId: number) {
     const res = await fetch("/api/studio/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionType, documentContext: context }),
+      body: JSON.stringify({ actionType, documentContext: context, courseId }),
     });
     const data = await res.json().catch(() => ({}));
     return { res, data };
@@ -604,18 +735,18 @@ export default function ModuleWorkspacePage() {
    *     from that transient race instead of surfacing a false "you're
    *     logged out" error mid-generation.
    */
-  async function postStudioGenerate(actionType: DemoSectionId, context: string) {
+  async function postStudioGenerate(actionType: DemoSectionId, context: string, courseId: number) {
     let attempt: { res: Response; data: any };
     try {
-      attempt = await requestStudioGeneration(actionType, context);
+      attempt = await requestStudioGeneration(actionType, context, courseId);
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      attempt = await requestStudioGeneration(actionType, context);
+      attempt = await requestStudioGeneration(actionType, context, courseId);
     }
 
     if (attempt.res.status === 401) {
       await supabase.auth.getUser();
-      attempt = await requestStudioGeneration(actionType, context);
+      attempt = await requestStudioGeneration(actionType, context, courseId);
     }
 
     return attempt;
@@ -626,51 +757,62 @@ export default function ModuleWorkspacePage() {
     if (!text && !quotedText) return;
     if (isTyping) return;
 
-    const isAskMedArt = quotedText !== null;
+    const isQuoted = quotedText !== null;
+    const isTranslate = quotedMode === "translate";
     const fullMessage = buildQuotedChatMessage(quotedText, text);
     setChatInput("");
     setQuotedText(null);
+    setQuotedMode(null);
     sendChatMessage(fullMessage, {
       sourceText: activeCourse?.rawText ?? undefined,
-      // "Ask MedArt" is a quick action like Translate — short answer, and
-      // the quote/reply must never resend in later requests' history (see
+      // "Ask MedArt" and "Translate" are both quick actions staged the same
+      // way (see handleAskSelection/handleTranslateSelection below) — short
+      // answer for Ask MedArt (concise), the dedicated translator persona
+      // for Translate (translate), never both. Either way the quote/reply
+      // must never resend in later requests' history (see
       // ChatMessage.excludeFromHistory). selectedText puts the server in
       // strict highlight isolation (no course text, no history, forced onto
       // the cheap model) — sourceText above is ignored server-side whenever
       // this is set, kept only for the plain (non-highlight) send path.
-      concise: isAskMedArt,
-      excludeFromHistory: isAskMedArt,
+      concise: isQuoted && !isTranslate,
+      translate: isTranslate,
+      excludeFromHistory: isQuoted,
       selectedText: quotedText ?? undefined,
     });
   }
 
-  /** Inserts the selection as a citation chip above the composer — the student still reviews/types their own question before sending, per spec. Opens split-screen so the chat is visible alongside whatever Studio tile (or the sidebar) was open. */
-  function handleAskSelection(text: string) {
+  /** Shared by Ask MedArt and Translate — both insert the selection as a citation chip above the composer and let the student review/edit before sending, rather than firing immediately. Opens split-screen so the chat is visible alongside whatever Studio tile (or the sidebar) was open. */
+  function stageQuotedSelection(text: string, mode: "ask" | "translate") {
     setQuotedText(text);
-    setIsSplitScreen(true);
+    setQuotedMode(mode);
+    // Split-screen is a desktop-only concept — on mobile, "seeing the chat
+    // alongside what you selected" instead means switching to the Chat tab.
+    if (isDesktop) {
+      setIsSplitScreen(true);
+    } else {
+      setMobileTab("chat");
+    }
     chatPanelRef.current?.focusInput();
   }
 
-  /** Directly sends a translation request — no composer round-trip needed. `translate: true` swaps the server's system prompt for a strict medical-translator persona (arabe + français), not the generic concise-answer one. */
-  function handleTranslateSelection(text: string) {
-    sendChatMessage(buildDemoTranslatePrompt(text), {
-      translate: true,
-      sourceText: activeCourse?.rawText ?? undefined,
-      // Same one-off-context rule as the Ask MedArt citation — the selected
-      // passage (and its translation) should inform only this exchange, not
-      // linger in history and bias unrelated later questions back toward it.
-      excludeFromHistory: true,
-      selectedText: text,
-    });
+  function handleAskSelection(text: string) {
+    stageQuotedSelection(text, "ask");
   }
 
-  async function handleDeleteCourse(courseId: number) {
+  /** Used to send immediately with no review step — now mirrors Ask MedArt exactly: stages the citation chip and pre-fills the composer with a translate instruction the student can still edit before sending. */
+  function handleTranslateSelection(text: string) {
+    stageQuotedSelection(text, "translate");
+    setChatInput("Traduis ce texte : ");
+  }
+
+  const handleDeleteCourse = useCallback(async (courseId: number) => {
     const res = await fetch(`/api/studio/courses/${courseId}`, { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) {
       toast({ variant: "error", title: "Échec de la suppression", description: data?.error ?? "Erreur inconnue." });
       return;
     }
+    courseCacheRef.current.delete(courseId);
     setCourses((prev) => prev.filter((c) => c.id !== courseId));
     if (activeCourse?.id === courseId) {
       setActiveCourse(null);
@@ -678,22 +820,86 @@ export default function ModuleWorkspacePage() {
       setIsSplitScreen(false);
     }
     toast({ variant: "success", title: "Cours supprimé" });
+  }, [activeCourse, toast]);
+
+  /** "Afficher le cours" — opens FileViewerModal for this course, loading it first if it isn't already the active one. Fully decoupled from the chat/Studio split-screen. */
+  const handleShowCourseFile = useCallback(async (courseId: number) => {
+    const course = await handleSelectCourse(courseId);
+    if (course) setFileViewerCourse(course);
+  }, [handleSelectCourse]);
+
+  /** "Regénérer" — see app/api/studio/regenerate/route.ts's own doc comment for why this deliberately never resends the source document. */
+  async function handleRegenerateSection(id: DemoSectionId) {
+    if (!activeCourse || regeneratingSection || generatingSection) return;
+
+    const courseId = activeCourse.id;
+    setRegeneratingSection(id);
+    try {
+      const res = await fetch("/api/studio/regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId, section: id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La régénération a échoué.");
+      }
+
+      const baseCourse = courseCacheRef.current.get(courseId);
+      if (baseCourse) {
+        const updated = withSectionValue(baseCourse, id, data.data);
+        courseCacheRef.current.set(courseId, updated);
+        setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
+      }
+      toast({
+        variant: "success",
+        title: "Contenu régénéré",
+        description: `${DEMO_SECTIONS.find((s) => s.id === id)?.label ?? "Le contenu"} a été régénéré.`,
+      });
+    } catch (error) {
+      toast({
+        variant: "error",
+        title: "Échec de la régénération",
+        description: error instanceof Error ? error.message : "Erreur inconnue.",
+      });
+    } finally {
+      setRegeneratingSection(null);
+    }
   }
 
-  function handleToggleShowCourse(courseId: number) {
-    if (courseId === activeCourse?.id && isSplitScreen && splitScreenView === "source") {
-      setIsSplitScreen(false);
-      return;
+  /** Studio's "Add note" panel real save — posts to /api/notes (Mes notes), defaulting the title to the active course's own title. */
+  async function handleSaveNote() {
+    const content = noteContent.trim();
+    if (!content) return;
+
+    setIsSavingNote(true);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: activeCourse?.title ?? moduleTitle, content }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
+
+      setIsNoteOpen(false);
+      setNoteContent("");
+      toast({ variant: "success", title: "Note enregistrée", description: "Retrouve-la dans « Mes notes »." });
+    } catch (error) {
+      toast({
+        variant: "error",
+        title: "Échec de l'enregistrement",
+        description: error instanceof Error ? error.message : "Erreur inconnue.",
+      });
+    } finally {
+      setIsSavingNote(false);
     }
-    if (courseId !== activeCourse?.id) handleSelectCourse(courseId);
-    setSplitScreenView("source");
-    setIsSplitScreen(true);
   }
 
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-100 dark:bg-neutral-950">
-        <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+        <BrandLoader />
       </div>
     );
   }
@@ -729,20 +935,55 @@ export default function ModuleWorkspacePage() {
       onTranslateSelection={handleTranslateSelection}
       pendingThinkingLabel={null}
       isSplitScreen={isSplitScreen}
-      onToggleSplitScreen={() =>
-        setIsSplitScreen((prev) => {
-          const next = !prev;
-          if (next) setSplitScreenView("studio");
-          return next;
-        })
-      }
+      onToggleSplitScreen={() => setIsSplitScreen((prev) => !prev)}
       dark={isDark}
       quotedText={quotedText}
-      onClearQuote={() => setQuotedText(null)}
+      onClearQuote={() => {
+        setQuotedText(null);
+        setQuotedMode(null);
+      }}
+      moduleId={moduleId}
+      courseTitle={activeCourse?.title}
+      sourceTextLength={activeCourse?.rawText?.length}
     />
   );
 
-  const sourceDocumentPanel = <SourceDocumentPanel title={activeCourse?.title ?? moduleTitle} rawText={activeCourse?.rawText ?? ""} onClose={() => setIsSplitScreen(false)} />;
+  // Mobile's Chat tab — same underlying panel, but split-screen has no
+  // meaning on a single-view-at-a-time tabbed layout (hidden entirely rather
+  // than wired to a no-op), and the source-count badge becomes a real
+  // course switcher instead of a plain count.
+  const mobileChatPanel = (
+    <ChatDocumentPanel
+      ref={chatPanelRef}
+      title={moduleTitle}
+      dateLabel={today}
+      sourceCount={courses.length}
+      messages={chatMessages}
+      isTyping={isTyping}
+      input={chatInput}
+      onInputChange={setChatInput}
+      onSend={handleSend}
+      onClearHistory={clearMessages}
+      onAskSelection={handleAskSelection}
+      onTranslateSelection={handleTranslateSelection}
+      pendingThinkingLabel={null}
+      isSplitScreen={false}
+      onToggleSplitScreen={() => {}}
+      showSplitScreenToggle={false}
+      dark={isDark}
+      quotedText={quotedText}
+      onClearQuote={() => {
+        setQuotedText(null);
+        setQuotedMode(null);
+      }}
+      sources={courses.map((c) => ({ id: c.id, title: c.title }))}
+      activeSourceId={activeCourse?.id ?? null}
+      onSelectSource={handleSelectCourse}
+      moduleId={moduleId}
+      courseTitle={activeCourse?.title}
+      sourceTextLength={activeCourse?.rawText?.length}
+    />
+  );
 
   const studioPanel = (
     <StudioPanel
@@ -751,8 +992,10 @@ export default function ModuleWorkspacePage() {
       openedLabel={openedSectionLabel}
       onItemClick={handleStudioItemClick}
       onCloseSection={() => setOpenedSection(null)}
-      getSectionStatus={(id): SectionStatus => (activeCourse && getSectionValue(activeCourse, id) ? "available" : "needs_generation")}
+      getSectionStatus={getSectionStatus}
       generatingSection={generatingSection}
+      regeneratingSection={regeneratingSection}
+      onRegenerateSection={handleRegenerateSection}
       sourceCount={courses.length}
       isNoteOpen={isNoteOpen}
       onOpenNote={() => setIsNoteOpen(true)}
@@ -763,17 +1006,22 @@ export default function ModuleWorkspacePage() {
       }}
       noteContent={noteContent}
       onNoteContentChange={setNoteContent}
+      onSaveNote={handleSaveNote}
+      isSavingNote={isSavingNote}
       onAskSelection={handleAskSelection}
       onTranslateSelection={handleTranslateSelection}
+      moduleId={moduleId}
+      courseTitle={activeCourse?.title}
+      onCollapsedChange={setIsStudioCollapsed}
     >
       {isSwitchingCourse ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+          <BrandLoader className="h-6 w-6" />
           <p className="text-sm text-gray-500 dark:text-gray-400">Chargement du cours...</p>
         </div>
       ) : openedSection && generatingSection === openedSection ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+          <BrandLoader className="h-6 w-6" />
           <p className="text-sm text-gray-500 dark:text-gray-400">Génération en cours...</p>
         </div>
       ) : openedSection && activeCourse && getSectionValue(activeCourse, openedSection) ? (
@@ -808,29 +1056,28 @@ export default function ModuleWorkspacePage() {
             course switch, so each course's tiles always start from a clean
             slate.
           */}
-          {openedSection === "resume" && activeCourse.resume && (
-            <GastriteResumeStudio
-              key={activeCourse.id}
-              data={{ slug: `studio-course-${activeCourse.id}`, section: "resume", ...activeCourse.resume }}
-            />
-          )}
-          {openedSection === "cas_clinique" && activeCourse.casClinique && (
-            <GastriteCasCliniqueStudio
-              key={activeCourse.id}
-              data={{ slug: `studio-course-${activeCourse.id}`, section: "cas_clinique", ...activeCourse.casClinique }}
-            />
-          )}
-          {openedSection === "qcm" && activeCourse.qcms && (
-            <GastriteQcmsStudio
-              key={activeCourse.id}
-              data={activeCourse.qcms}
-              courseSlug={`studio-course-${activeCourse.id}`}
-              explicationMarkdown={activeCourse.explication ?? undefined}
-            />
-          )}
-          {openedSection === "mind_map" && activeCourse.mindMap && (
-            <DynamicMindMapStudio key={activeCourse.id} data={activeCourse.mindMap} dark={isDark} title={activeCourse.title} />
-          )}
+          <Suspense fallback={<StudioTileSkeleton />}>
+            {openedSection === "resume" && activeCourse.resume && (
+              <GastriteResumeStudio
+                key={activeCourse.id}
+                data={{ slug: `studio-course-${activeCourse.id}`, section: "resume", ...activeCourse.resume }}
+              />
+            )}
+            {openedSection === "cas_clinique" && activeCourse.casClinique && (
+              <GastriteCasCliniqueStudio
+                key={activeCourse.id}
+                data={{ slug: `studio-course-${activeCourse.id}`, section: "cas_clinique", ...activeCourse.casClinique }}
+              />
+            )}
+            {openedSection === "qcm" && activeCourse.qcms && (
+              <GastriteQcmsStudio
+                key={activeCourse.id}
+                data={activeCourse.qcms}
+                courseSlug={`studio-course-${activeCourse.id}`}
+                explicationMarkdown={activeCourse.explication ?? undefined}
+              />
+            )}
+          </Suspense>
         </div>
       ) : openedSection && !activeCourse ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 py-20 text-center">
@@ -850,48 +1097,97 @@ export default function ModuleWorkspacePage() {
     <div className="flex h-screen flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
       <WorkspaceTopbar title={moduleTitle} />
 
-      {/* flex-col on mobile: Sources/Chat/Studio stack full-width, each its
-          own scrollable ~70vh slab, the PAGE scrolls between them (hence
-          overflow-y-auto here instead of overflow-hidden). From md: up,
-          this reverts to the original fixed-width 3-column row exactly as
-          before (md:overflow-hidden — each panel goes back to managing its
-          own internal scroll instead of the page scrolling). Below md,
-          without this, Sources (w-72) + Chat (flex-1) + Studio (w-96) added
-          up to well over a phone's viewport width with no wrap, pushing
-          Studio off-screen entirely. Mirrors app/dashboard/demo/[slug]/page.tsx's identical fix. */}
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 md:flex-row md:overflow-hidden">
-        {!isSplitScreen && (
-          <aside className={cn(panelShellClasses, "h-[70vh] w-full shrink-0 md:h-auto md:w-72")}>
-            <ModuleSourcesPanel
-              courses={courses}
-              activeCourseId={activeCourse?.id ?? null}
-              isSplitScreen={isSplitScreen}
-              isSwitchingCourse={isSwitchingCourse}
-              onSubmitFile={handleFileSelected}
-              onSubmitText={handleTextSubmitted}
-              onSelectCourse={handleSelectCourse}
-              onToggleShowCourse={handleToggleShowCourse}
-              onDeleteCourse={handleDeleteCourse}
-              onClosePanel={() => setIsSplitScreen(true)}
-              courseMasteryBySlug={courseMasteryBySlug}
-            />
-          </aside>
-        )}
-
-        <div
-          className={cn(
-            "grid h-[70vh] w-full shrink-0 gap-4 overflow-hidden transition-all duration-300 md:h-auto md:w-auto md:flex-1",
-            isSplitScreen ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
+      {/* Desktop (md+) — the original fixed-width 3-column shell, completely
+          unchanged. `isDesktop` (useMediaQuery, not a CSS class) gates which
+          of this block or the mobile one below actually mounts, so neither
+          pays the cost of the other sitting hidden in the DOM. */}
+      {isDesktop && (
+        <div className="flex flex-1 flex-row gap-4 overflow-hidden p-4">
+          {!isSplitScreen && (
+            <aside className={cn(panelShellClasses, "w-72 shrink-0")}>
+              <ModuleSourcesPanel
+                courses={courses}
+                activeCourseId={activeCourse?.id ?? null}
+                isSwitchingCourse={isSwitchingCourse}
+                onSubmitFile={handleFileSelected}
+                onSubmitText={handleTextSubmitted}
+                onSelectCourse={handleSelectCourse}
+                onShowCourseFile={handleShowCourseFile}
+                onDeleteCourse={handleDeleteCourse}
+                onClosePanel={handleCloseSourcesPanel}
+                courseMasteryBySlug={courseMasteryBySlug}
+              />
+            </aside>
           )}
-        >
-          <main className={panelShellClasses}>{chatPanel}</main>
-          {isSplitScreen && <aside className={panelShellClasses}>{splitScreenView === "source" ? sourceDocumentPanel : studioPanel}</aside>}
-        </div>
 
-        {!isSplitScreen && (
-          <aside className={cn(panelShellClasses, "h-[70vh] w-full shrink-0 md:h-auto md:w-96")}>{studioPanel}</aside>
-        )}
-      </div>
+          <div
+            className={cn(
+              "grid flex-1 gap-4 overflow-hidden transition-all duration-300",
+              isSplitScreen ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
+            )}
+          >
+            <main className={panelShellClasses}>{chatPanel}</main>
+            {isSplitScreen && <aside className={panelShellClasses}>{studioPanel}</aside>}
+          </div>
+
+          {!isSplitScreen && (
+            <aside className={cn(panelShellClasses, "shrink-0 transition-all duration-300", isStudioCollapsed ? "w-20" : "w-96")}>
+              {studioPanel}
+            </aside>
+          )}
+        </div>
+      )}
+
+      {/* Mobile (<md) — NotebookLM-mobile-style: exactly one of
+          Sources/Chat/Studio visible at a time, switched via the bottom tab
+          bar, never split-screen (that's a wide-viewport-only concept). The
+          Studio tab shows the same detail view (studioPanel) as desktop once
+          a section is opened — only the "browse" grid gets a mobile-specific
+          large-card treatment (MobileStudioCards) instead of duplicating the
+          markdown/GastriteXXXStudio rendering logic a second time. */}
+      {!isDesktop && (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className={cn(panelShellClasses, "m-4 flex-1")}>
+            {mobileTab === "sources" && (
+              <ModuleSourcesPanel
+                variant="mobile"
+                courses={courses}
+                activeCourseId={activeCourse?.id ?? null}
+                isSwitchingCourse={isSwitchingCourse}
+                onSubmitFile={handleFileSelected}
+                onSubmitText={handleTextSubmitted}
+                onSelectCourse={handleSelectCourse}
+                onShowCourseFile={handleShowCourseFile}
+                onDeleteCourse={handleDeleteCourse}
+                onClosePanel={NOOP}
+                courseMasteryBySlug={courseMasteryBySlug}
+              />
+            )}
+            {mobileTab === "chat" && mobileChatPanel}
+            {mobileTab === "studio" &&
+              (openedSection ? (
+                studioPanel
+              ) : (
+                <MobileStudioCards
+                  sections={DEMO_SECTIONS}
+                  getSectionStatus={getSectionStatus}
+                  generatingSection={generatingSection}
+                  onItemClick={handleStudioItemClick}
+                />
+              ))}
+          </div>
+
+          <MobileWorkspaceTabBar active={mobileTab} onChange={handleMobileTabChange} />
+        </div>
+      )}
+
+      <FileViewerModal
+        open={fileViewerCourse !== null}
+        onOpenChange={(open) => !open && setFileViewerCourse(null)}
+        title={fileViewerCourse?.title ?? ""}
+        fileUrl={fileViewerCourse?.sourceFileUrl ?? null}
+        rawText={fileViewerCourse?.rawText ?? ""}
+      />
     </div>
   );
 }

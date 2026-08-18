@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { Copy, Moon, Settings, Share2, Stethoscope, Sun } from "lucide-react";
+import { ArrowLeft, Copy, Moon, Settings, Stethoscope, Sun } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import {
   DropdownMenu,
@@ -34,6 +34,20 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-2 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex min-w-0 items-center gap-3">
+        {/* Explicit back control — distinct from the logo below, which reads
+            as branding rather than navigation to a hurried student. Neither
+            module/[id]/page.tsx nor demo/[slug]/page.tsx render any other
+            "back to dashboard" affordance in their normal (loaded) state, so
+            without this the only way out was the browser's own back button. */}
+        <Link
+          href="/dashboard"
+          aria-label="Retour au dashboard"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="hidden sm:inline">Retour</span>
+        </Link>
+        <span className="hidden h-6 w-px shrink-0 bg-gray-200 dark:bg-neutral-700 sm:block" />
         <Link href="/dashboard" className="flex shrink-0 items-center gap-2">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-secondary-600 text-white">
             <Stethoscope className="h-4 w-4" />
@@ -47,15 +61,8 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button asChild size="sm" className="rounded-full">
-          <Link href="/dashboard">Créer des notes</Link>
-        </Button>
-
         <Button variant="ghost" size="icon" aria-label="Copier le lien">
           <Copy className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-        </Button>
-        <Button variant="ghost" size="icon" aria-label="Partager">
-          <Share2 className="h-4 w-4 text-gray-500 dark:text-gray-400" />
         </Button>
 
         <Button

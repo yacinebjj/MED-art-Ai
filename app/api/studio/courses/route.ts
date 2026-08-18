@@ -82,7 +82,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { moduleId, title, rawText } = (body ?? {}) as { moduleId?: unknown; title?: unknown; rawText?: unknown };
+  const { moduleId, title, rawText, sourceFileUrl } = (body ?? {}) as {
+    moduleId?: unknown;
+    title?: unknown;
+    rawText?: unknown;
+    sourceFileUrl?: unknown;
+  };
 
   if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) {
     return NextResponse.json({ success: false, error: "'moduleId' est requis et doit être un nombre." }, { status: 400 });
@@ -92,6 +97,11 @@ export async function POST(request: NextRequest) {
   }
   if (typeof rawText !== "string" || rawText.trim().length < 50) {
     return NextResponse.json({ success: false, error: "'rawText' est requis (≥ 50 caractères)." }, { status: 400 });
+  }
+  // Optional — only present when this course came from a real uploaded file
+  // (see app/api/upload/route.ts's uploadSourceFile); absent/null for pasted text.
+  if (sourceFileUrl !== undefined && sourceFileUrl !== null && typeof sourceFileUrl !== "string") {
+    return NextResponse.json({ success: false, error: "'sourceFileUrl' doit être une chaîne ou null." }, { status: 400 });
   }
 
   if (!isSupabaseConfigured()) {
@@ -106,6 +116,7 @@ export async function POST(request: NextRequest) {
       curriculum_module_id: moduleId,
       title: sanitizeForPostgres(title.trim()),
       raw_text: sanitizeForPostgres(rawText),
+      source_file_url: sourceFileUrl ?? null,
     })
     .select("id, title, created_at")
     .single();

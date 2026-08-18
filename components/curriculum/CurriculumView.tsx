@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useEffect, useState, type KeyboardEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, FileQuestion, MoreVertical, Trash2, TrendingUp } from "lucide-react";
+import { Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Sparkles, Target, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
 import { useToast } from "@/components/ui/Toast";
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import { ModuleStatsModal } from "@/components/dashboard/ModuleStatsModal";
+import { GlobalSummaryModal } from "@/components/dashboard/GlobalSummaryModal";
 import type { CurriculumModule, CurriculumYearData, TeachingUnitWithModules } from "@/types/academic";
 
 /**
@@ -54,32 +56,40 @@ const TITLE_CLASSES = "line-clamp-2 px-2 text-center text-lg font-bold text-slat
 const BENTO_GRID_CLASSES = "grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4";
 
 function SubModulePill({ module: mod }: { module: CurriculumModule }) {
-  const router = useRouter();
-
-  function handleClick(e: MouseEvent) {
-    // The pill lives inside an accordion card that toggles on click — stop
-    // the click from also bubbling up and collapsing the UE it just
-    // navigated away from.
-    e.stopPropagation();
-    router.push(`/dashboard/module/${mod.id}`);
-  }
-
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <Link
+      href={`/dashboard/module/${mod.id}`}
+      // The pill lives inside an accordion card that toggles on click — stop
+      // the click from also bubbling up and collapsing the UE it just
+      // navigated away from. A real <Link> (vs. the previous router.push)
+      // also gets Next.js's automatic viewport prefetching, so the module
+      // workspace's JS is often already cached by the time this is clicked.
+      onClick={(e) => e.stopPropagation()}
       className="rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
     >
       {mod.title}
-    </button>
+    </Link>
   );
 }
 
-const IndependentModuleCard = memo(function IndependentModuleCard({ module: mod }: { module: CurriculumModule }) {
+const IndependentModuleCard = memo(function IndependentModuleCard({
+  module: mod,
+  isFlashcardsActive,
+  onToggleFlashcards,
+  isWeaknessesActive,
+  onToggleWeaknesses,
+}: {
+  module: CurriculumModule;
+  isFlashcardsActive: boolean;
+  onToggleFlashcards: (moduleId: number, nextActive: boolean) => void;
+  isWeaknessesActive: boolean;
+  onToggleWeaknesses: (moduleId: number, nextActive: boolean) => void;
+}) {
   const router = useRouter();
   const { toast } = useToast();
   const illustration = getCartoonIllustration(mod.title);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [globalSummaryOpen, setGlobalSummaryOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -132,9 +142,23 @@ const IndependentModuleCard = memo(function IndependentModuleCard({ module: mod 
               <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               Voir statistiques
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => router.push(`/dashboard/module/${mod.id}/exam`)}>
-              <FileQuestion className="h-4 w-4 text-primary-600 dark:text-primary-400" />
-              Générer un examen
+            <DropdownMenuItem onSelect={() => setGlobalSummaryOpen(true)}>
+              <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              Résumé global du module
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href={`/dashboard/module/${mod.id}/exam`}>
+                <FileQuestion className="h-4 w-4 text-primary-600 dark:text-primary-400" />
+                Générer un examen
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onToggleFlashcards(mod.id, !isFlashcardsActive)}>
+              <Brain className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+              {isFlashcardsActive ? "Désactiver les Flashcards" : "Activer les Flashcards"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onToggleWeaknesses(mod.id, !isWeaknessesActive)}>
+              <Target className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+              {isWeaknessesActive ? "Désactiver les points faibles" : "Activer les points faibles"}
             </DropdownMenuItem>
             <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
@@ -143,6 +167,23 @@ const IndependentModuleCard = memo(function IndependentModuleCard({ module: mod 
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {(isFlashcardsActive || isWeaknessesActive) && (
+        <div className="absolute left-2 top-2 z-10 flex flex-col items-start gap-1">
+          {isFlashcardsActive && (
+            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700 shadow-sm dark:bg-violet-900/50 dark:text-violet-300">
+              <Brain className="h-3 w-3" />
+              Flashcards actives
+            </span>
+          )}
+          {isWeaknessesActive && (
+            <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700 shadow-sm dark:bg-rose-900/50 dark:text-rose-300">
+              <Target className="h-3 w-3" />
+              Points faibles actifs
+            </span>
+          )}
+        </div>
+      )}
 
       {/* TODO: Remplacer le bloc div ci-dessous par
           <img src={`/illustrations/${mod.id}.png`} className="w-24 h-24 object-contain mb-4" alt={mod.title} />
@@ -171,6 +212,7 @@ const IndependentModuleCard = memo(function IndependentModuleCard({ module: mod 
 
       <div onClick={(e) => e.stopPropagation()}>
         <ModuleStatsModal open={statsOpen} onOpenChange={setStatsOpen} moduleTitle={mod.title} moduleId={mod.id} />
+        <GlobalSummaryModal open={globalSummaryOpen} onOpenChange={setGlobalSummaryOpen} moduleTitle={mod.title} moduleId={mod.id} />
       </div>
     </div>
   );
@@ -266,8 +308,108 @@ export function CurriculumViewSkeleton() {
  * every card inside it for no reason.
  */
 export const CurriculumView = memo(function CurriculumView({ data }: { data: CurriculumYearData }) {
+  const { toast } = useToast();
   const [expandedUnitId, setExpandedUnitId] = useState<number | null>(null);
+  // A Set, not a single id: several modules/courses can be active for
+  // flashcards at once (see app/api/modules/[id]/flashcards/route.ts's
+  // header comment) — the study deck pools and shuffles across all of them.
+  const [activeFlashcardModuleIds, setActiveFlashcardModuleIds] = useState<Set<number>>(new Set());
+  const [activeWeaknessModuleIds, setActiveWeaknessModuleIds] = useState<Set<number>>(new Set());
   const hasTeachingUnits = data.teachingUnits.length > 0;
+
+  // One fetch for the whole grid, not one per card — GET /api/modules/flashcards
+  // already returns every activated module id for this student in one shot.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/modules/flashcards")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (!cancelled && body?.success) setActiveFlashcardModuleIds(new Set(body.activeModuleIds as number[]));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Same one-fetch-for-the-whole-grid pattern as flashcards above, for
+  // "Points Faibles & Plan de Remédiation" (GET /api/modules/weaknesses).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/modules/weaknesses")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (!cancelled && body?.success) setActiveWeaknessModuleIds(new Set(body.activeModuleIds as number[]));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Optimistic toggle — reverted with a toast if the PATCH actually fails, so the badge/menu label never silently lies about the saved state. */
+  async function handleToggleFlashcards(moduleId: number, nextActive: boolean) {
+    setActiveFlashcardModuleIds((prev) => {
+      const next = new Set(prev);
+      if (nextActive) next.add(moduleId);
+      else next.delete(moduleId);
+      return next;
+    });
+
+    try {
+      const res = await fetch(`/api/modules/${moduleId}/flashcards`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: nextActive }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.success) throw new Error(body?.error ?? "Erreur inconnue.");
+    } catch (error) {
+      setActiveFlashcardModuleIds((prev) => {
+        const reverted = new Set(prev);
+        if (nextActive) reverted.delete(moduleId);
+        else reverted.add(moduleId);
+        return reverted;
+      });
+      toast({
+        variant: "error",
+        title: "Échec de la mise à jour",
+        description: error instanceof Error ? error.message : "Impossible de contacter le serveur.",
+      });
+    }
+  }
+
+  /** Mirrors handleToggleFlashcards exactly, for the "points faibles" toggle. */
+  async function handleToggleWeaknesses(moduleId: number, nextActive: boolean) {
+    setActiveWeaknessModuleIds((prev) => {
+      const next = new Set(prev);
+      if (nextActive) next.add(moduleId);
+      else next.delete(moduleId);
+      return next;
+    });
+
+    try {
+      const res = await fetch(`/api/modules/${moduleId}/weaknesses`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: nextActive }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.success) throw new Error(body?.error ?? "Erreur inconnue.");
+    } catch (error) {
+      setActiveWeaknessModuleIds((prev) => {
+        const reverted = new Set(prev);
+        if (nextActive) reverted.delete(moduleId);
+        else reverted.add(moduleId);
+        return reverted;
+      });
+      toast({
+        variant: "error",
+        title: "Échec de la mise à jour",
+        description: error instanceof Error ? error.message : "Impossible de contacter le serveur.",
+      });
+    }
+  }
 
   return (
     <div className="space-y-10">
@@ -298,10 +440,32 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
           <motion.div className={BENTO_GRID_CLASSES} variants={BENTO_GRID_VARIANTS} initial="hidden" animate="show">
             {data.independentModules.map((mod) => (
               <motion.div key={mod.id} variants={BENTO_ITEM_VARIANTS}>
-                <IndependentModuleCard module={mod} />
+                <IndependentModuleCard
+                  module={mod}
+                  isFlashcardsActive={activeFlashcardModuleIds.has(mod.id)}
+                  onToggleFlashcards={handleToggleFlashcards}
+                  isWeaknessesActive={activeWeaknessModuleIds.has(mod.id)}
+                  onToggleWeaknesses={handleToggleWeaknesses}
+                />
               </motion.div>
             ))}
           </motion.div>
+        </div>
+      )}
+
+      {/* Neither branch above rendered anything — a chosen specialty/year
+          combination the curriculum hasn't been seeded for yet. Previously
+          this fell through to a silent, blank <div className="space-y-10">
+          with nothing in it, right under the "Mon Programme" heading — this
+          gives that dead end an actual message instead. */}
+      {!hasTeachingUnits && data.independentModules.length === 0 && (
+        <div className="flex flex-col items-center gap-3 rounded-3xl border border-dashed border-slate-300 bg-slate-50/60 py-16 text-center dark:border-slate-700 dark:bg-slate-900/40">
+          <FolderOpen className="h-10 w-10 text-slate-400 dark:text-slate-600" />
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Aucun module disponible pour le moment.</p>
+          <p className="max-w-sm text-xs text-slate-500 dark:text-slate-500">
+            Le programme officiel de ta spécialité/année n&apos;est pas encore disponible ici — tu peux en attendant
+            ajouter un cours indépendant depuis le bouton ci-dessus.
+          </p>
         </div>
       )}
     </div>

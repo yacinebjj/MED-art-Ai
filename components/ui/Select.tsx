@@ -55,6 +55,8 @@ SelectItem.displayName = SelectPrimitive.Item.displayName;
 interface SelectOption {
   value: string;
   label: string;
+  /** Locks this one option (e.g. an "Interne" year not yet open to students) without disabling the whole field. */
+  disabled?: boolean;
 }
 
 interface SelectProps {
@@ -70,6 +72,18 @@ interface SelectProps {
   disabled?: boolean;
   id?: string;
   className?: string;
+  /**
+   * Fires when the student clicks an option with `disabled: true`. Radix
+   * marks a disabled Item `pointer-events: none` (see SelectItem's own
+   * `data-[disabled]:pointer-events-none` below), which means the item
+   * itself can never receive the click — the click instead hit-tests
+   * through to whatever's directly behind it, which in this layout is
+   * always the wrapping `<div>` rendered around exactly that option below.
+   * That wrapper's `onClick` is this callback — the standard way to surface
+   * "why is this locked?" feedback (e.g. a toast) for a genuinely
+   * unselectable Radix item.
+   */
+  onDisabledOptionClick?: (option: SelectOption) => void;
 }
 
 export function Select({
@@ -85,6 +99,7 @@ export function Select({
   disabled,
   id,
   className,
+  onDisabledOptionClick,
 }: SelectProps) {
   const selectId = id ?? name;
 
@@ -116,11 +131,19 @@ export function Select({
           </SelectPrimitive.Icon>
         </SelectPrimitive.Trigger>
         <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
+          {options.map((option) =>
+            option.disabled ? (
+              <div key={option.value} onClick={() => onDisabledOptionClick?.(option)}>
+                <SelectItem value={option.value} disabled>
+                  {option.label}
+                </SelectItem>
+              </div>
+            ) : (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            )
+          )}
         </SelectContent>
       </SelectPrimitive.Root>
       {error && <p className="mt-1.5 text-xs text-destructive">{error}</p>}

@@ -220,25 +220,6 @@ export interface GastriteQcmsData {
   qrocs: QrocItem[];
 }
 
-/** One node of the AI Mind Map graph — shape matches MIND_MAP_SYSTEM_PROMPT's schema exactly (lib/prompts/public-course-sections.ts). */
-export interface MindMapNode {
-  id: string;
-  label: string;
-  type: "symptome" | "mecanisme" | "diagnostic" | "examen" | "traitement";
-}
-
-export interface MindMapLink {
-  source: string;
-  target: string;
-  label: string;
-}
-
-/** No `slug`/`section` wrapper here (unlike the Gastrite*Data types above) — the AI's raw JSON output for this section is exactly `{ nodes, links }`, nothing more. */
-export interface MindMapData {
-  nodes: MindMapNode[];
-  links: MindMapLink[];
-}
-
 /**
  * The full `courses` table row for one slug, as returned by GET
  * /api/courses/slug/[slug] — any slug, not just gastrite.
@@ -256,7 +237,6 @@ export interface CourseSlugSupabaseData {
   resume: GastriteResumeData | null;
   cas_clinique: GastriteCasCliniqueData | null;
   qcms: GastriteQcmsData | null;
-  mind_map: MindMapData | null;
   /** Markdown, like `explication` — Darija (Arabic script) mixed with French medical terms. See lib/prompts/public-course-sections.ts's EXEMPLES_ANALOGIES_SYSTEM_PROMPT. */
   exemples_analogies: string | null;
 }

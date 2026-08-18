@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Settings, CreditCard, Trophy, LogOut, ChevronsUpDown, Sparkles, X } from "lucide-react";
+import { LayoutDashboard, Settings, CreditCard, Brain, NotebookPen, LogOut, ChevronsUpDown, Sparkles, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,8 @@ import {
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/dashboard/assistant", label: "MedArt Assistant", icon: Sparkles },
-  { href: "/study", label: "Espace Étude", icon: Trophy },
+  { href: "/study", label: "Espace Étude", icon: Brain },
+  { href: "/dashboard/notes", label: "Mes notes", icon: NotebookPen },
   { href: "/dashboard/billing", label: "Abonnement", icon: CreditCard },
   { href: "/dashboard/settings", label: "Paramètres", icon: Settings },
 ];
@@ -73,7 +74,19 @@ export function Sidebar({
 
           <nav className="flex-1 space-y-1 px-3 py-4">
             {NAV_ITEMS.map((item) => {
-              const isActive = pathname === item.href;
+              // "Tableau de bord" also covers the two course-workspace
+              // routes (/dashboard/module/[id], /dashboard/demo/[slug]) —
+              // neither has its own sidebar entry (they're reached BY
+              // clicking a card ON the dashboard), so without this the whole
+              // sidebar went blank the moment a student opened a course,
+              // making it look like they'd left the app's main section
+              // rather than being in its most-used feature. Every other item
+              // keeps strict equality — this must never also light up while
+              // on e.g. /dashboard/notes or /dashboard/settings.
+              const isActive =
+                item.href === "/dashboard"
+                  ? pathname === "/dashboard" || pathname.startsWith("/dashboard/module/") || pathname.startsWith("/dashboard/demo/")
+                  : pathname === item.href;
               const Icon = item.icon;
               return (
                 <Link

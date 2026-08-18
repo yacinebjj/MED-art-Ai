@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { DemoSectionId } from "@/lib/demo-content";
 
 /**
- * Zod mirrors of lib/course-slug-content.ts's Gastrite-prefixed/MindMap interfaces —
+ * Zod mirrors of lib/course-slug-content.ts's Gastrite-prefixed interfaces —
  * the exact shapes the real Studio components (GastriteResumeStudio,
  * GastriteCasCliniqueStudio, GastriteQcmsStudio) require as props.
  * Validation is strict on TYPES/SHAPE (every required field present, right
@@ -152,55 +152,11 @@ export const StudioQcmsSchema = z.object({
 
 const StudioTextSchema = z.string().min(50);
 
-export const MindMapNodeSchema = z.object({
-  id: z.string(),
-  label: z.string(),
-  type: z.enum(["symptome", "mecanisme", "diagnostic", "examen", "traitement"]),
-  /**
-   * Not a strict enum on purpose — resolveLucideIcon (lib/lucide-icon-lookup.ts)
-   * already falls back to a sensible default on any unrecognized value, the
-   * same lenient pattern GastriteRawCaseSchema uses for its own "icon"
-   * field. Rejecting a whole generation over one slightly-off icon name
-   * the model picked would hurt reliability more than a generic fallback
-   * icon ever would. Rendered directly as a React icon component by
-   * DynamicMindMapStudio (v7, the restored HTML hybrid) — see that file's
-   * header comment for why the "bake it into the Ideogram image instead"
-   * approach (v6) was tried and reverted.
-   */
-  icon: z.string().optional().default("stethoscope"),
-  /** Short real clinical elaboration (score/classification/mechanism precision) shown under the node's label in DynamicMindMapStudio's v11 radial cards — optional/lenient like "icon" above, since a missing detail on one node must never fail the whole generation. */
-  detail: z.string().optional().default(""),
-});
-const MindMapLinkSchema = z.object({
-  source: z.string(),
-  target: z.string(),
-  label: z.string().optional().default(""),
-});
-
-export type MindMapNodeData = z.infer<typeof MindMapNodeSchema>;
-
-/**
- * Golden Standard hybrid (v7, = v5 restored): the reliable {nodes, links}
- * graph, rendered as HTML, PLUS an "ideogram_prompt" field — a text-free
- * image prompt sent to the real Ideogram API by
- * app/api/studio/generate/route.ts, fails open (a bonus accent
- * illustration, never a blocker). ~480 chars is a conservative floor under
- * the prompt's own "at least 80 words" ask (average English word ≈ 6 chars
- * incl. trailing space), left with margin so a slightly shorter but still
- * substantive prompt isn't falsely rejected.
- */
-export const StudioMindMapSchema = z.object({
-  nodes: z.array(MindMapNodeSchema).min(1),
-  links: z.array(MindMapLinkSchema),
-  ideogram_prompt: z.string().min(480),
-});
-
 /** One schema per Studio tile, keyed the same way as STUDIO_PROMPT_CONFIG/STUDIO_SECTION_KEYS in lib/ai/studio-prompts.ts. */
 export const STUDIO_SCHEMAS: Record<DemoSectionId, z.ZodTypeAny> = {
   explication: StudioTextSchema,
   resume: StudioResumeSchema,
   cas_clinique: StudioCasCliniqueSchema,
   qcm: StudioQcmsSchema,
-  mind_map: StudioMindMapSchema,
   exemples_analogies: StudioTextSchema,
 };

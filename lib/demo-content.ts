@@ -3,7 +3,6 @@ import {
   ScrollText,
   Stethoscope,
   ListChecks,
-  Network,
   Lightbulb,
   type LucideIcon,
 } from "lucide-react";
@@ -13,7 +12,6 @@ export type DemoSectionId =
   | "resume"
   | "cas_clinique"
   | "qcm"
-  | "mind_map"
   | "exemples_analogies";
 
 export interface DemoSection {
@@ -668,21 +666,6 @@ C. Une douleur uniquement nocturne
 D. Une contracture généralisée
 
 > **Réponses :** 1-B, 2-B, 3-B. Si tu as tout bon, tu es prêt(e) pour la garde de chirurgie !`,
-  },
-  {
-    id: "mind_map",
-    label: "Mind Map",
-    icon: Network,
-    accent: {
-      active: "border-violet-300 bg-violet-50 text-violet-800",
-      chip: "bg-violet-100 text-violet-600",
-      hover: "hover:-translate-y-1 hover:bg-violet-50 hover:text-violet-600 hover:shadow-md",
-    },
-    // Rendu réel géré par <MindMapStudio /> dans page.tsx (graphe Mermaid interactif,
-    // pas du markdown) — ce contenu ne sert que de repli si jamais affiché tel quel.
-    content: `## Mind Map
-
-Ce mode transforme le cours en carte mentale interactive : symptômes, mécanismes, examens diagnostiques et traitements reliés entre eux par des flèches.`,
   },
   {
     id: "exemples_analogies",

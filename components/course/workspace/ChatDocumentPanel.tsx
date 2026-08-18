@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Columns2, Copy, Loader2, MoreVertical, Pin, Quote, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { ArrowUp, Check, Columns2, Copy, Info, Loader2, MoreVertical, Pin, Quote, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   PROSE_CLASSES,
@@ -12,6 +12,7 @@ import {
   DARK_MARKDOWN_COMPONENTS,
   normalizeCallouts,
 } from "@/lib/markdown";
+import { CHAT_MAX_CONTEXT_CHARS } from "@/lib/chat-constants";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -21,7 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
-import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
+import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
 import type { ChatMessage } from "@/lib/types";
 
 export interface ChatDocumentPanelHandle {
@@ -44,10 +45,21 @@ interface ChatDocumentPanelProps {
   pendingThinkingLabel: string | null;
   isSplitScreen: boolean;
   onToggleSplitScreen: () => void;
+  /** Split-screen is a wide-viewport-only concept (there's no room for it on the mobile tabbed layout) — the mobile ChatDocumentPanel instance hides this button entirely rather than wiring it to a no-op, which would be a dead/confusing control. Defaults to true so every existing (desktop) caller is unaffected. */
+  showSplitScreenToggle?: boolean;
   dark: boolean;
   /** The passage "Ask MedArt" inserted as a citation above the composer — shown as a dismissible blockquote-style chip, prepended to the actual message (as real markdown "> ...") only when the student sends. */
   quotedText: string | null;
   onClearQuote: () => void;
+  /** Every course in the current module, for the composer's source-selector badge — lets the student switch which one they're chatting with without leaving the Chat tab. Optional: omitted, the badge stays a plain read-only count (its original behavior). */
+  sources?: { id: number; title: string }[];
+  activeSourceId?: number | null;
+  onSelectSource?: (id: number) => void;
+  /** Passed straight through to TextSelectionToolbar's "Add Note" — see that component's own doc comment. Optional: omitted by callers with no module in scope. `courseTitle` is the active SOURCE's title (not `title` above, which is this panel's module-level heading) so an aggregated note correctly tags which course an excerpt came from. */
+  moduleId?: number;
+  courseTitle?: string;
+  /** Length (characters) of the active course's raw source text, if the caller has it client-side. The server hard-truncates context at CHAT_MAX_CONTEXT_CHARS with zero indication to the student (see app/api/courses/chat/route.ts) — when this is provided and exceeds that cap, a banner surfaces that truncation instead of leaving it silent. Optional: omitted by callers without a cheap client-side source length (e.g. the legacy demo pipeline, which never loads the full raw text into the browser). */
+  sourceTextLength?: number;
 }
 
 /**
@@ -72,9 +84,16 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     pendingThinkingLabel,
     isSplitScreen,
     onToggleSplitScreen,
+    showSplitScreenToggle = true,
     dark,
     quotedText,
     onClearQuote,
+    sources,
+    activeSourceId,
+    onSelectSource,
+    moduleId,
+    courseTitle,
+    sourceTextLength,
   },
   ref
 ) {
@@ -112,6 +131,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chat</h2>
         <div className="flex items-center gap-1">
+          {showSplitScreenToggle && (
           <button
             type="button"
             onClick={onToggleSplitScreen}
@@ -126,6 +146,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           >
             <Columns2 className="h-4 w-4" />
           </button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -151,6 +172,13 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             {sourceCount} source{sourceCount > 1 ? "s" : ""} · {dateLabel}
           </p>
         </div>
+
+        {sourceTextLength !== undefined && sourceTextLength > CHAT_MAX_CONTEXT_CHARS && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-300">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <p>Ce cours est très long. L&apos;IA se concentrera sur les parties les plus pertinentes.</p>
+          </div>
+        )}
 
         {messages.length === 0 && (
           <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -207,7 +235,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       </div>
 
       {selection && (
-        <SelectionTooltip
+        <TextSelectionToolbar
           ref={tooltipRef}
           selection={selection}
           onAsk={(text) => {
@@ -218,6 +246,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             onTranslateSelection(text);
             clearSelection();
           }}
+          moduleId={moduleId}
+          courseTitle={courseTitle}
         />
       )}
 
@@ -244,17 +274,32 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             ref={inputRef}
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
-            placeholder="Start typing..."
+            placeholder={`Demande à ${sourceCount} source${sourceCount > 1 ? "s" : ""}...`}
             className="flex-1 bg-transparent px-3 text-sm text-gray-900 outline-none placeholder:text-gray-500 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
-          <button type="button" className="shrink-0">
-            <Badge
-              variant="neutral"
-              className="cursor-pointer hover:bg-gray-200 dark:hover:bg-neutral-700"
-            >
+          {sources && sources.length > 0 && onSelectSource ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="shrink-0">
+                  <Badge variant="neutral" className="cursor-pointer hover:bg-gray-200 dark:hover:bg-neutral-700">
+                    {sourceCount} source{sourceCount > 1 ? "s" : ""}
+                  </Badge>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {sources.map((source) => (
+                  <DropdownMenuItem key={source.id} onSelect={() => onSelectSource(source.id)}>
+                    {source.id === activeSourceId && <Check className="h-4 w-4" />}
+                    <span className="truncate">{source.title}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Badge variant="neutral" className="shrink-0">
               {sourceCount} source{sourceCount > 1 ? "s" : ""}
             </Badge>
-          </button>
+          )}
           <Button
             type="submit"
             size="icon"

@@ -13,14 +13,15 @@ import {
   Minimize2,
   MoreVertical,
   PanelRightClose,
+  PanelRightOpen,
   Redo2,
+  RefreshCw,
   SlidersHorizontal,
   SquarePen,
   Trash2,
   Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useToast } from "@/components/ui/Toast";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { Button } from "@/components/ui/Button";
 import {
@@ -29,7 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
-import { SelectionTooltip } from "@/components/course/workspace/SelectionTooltip";
+import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
 import type { DemoSection, DemoSectionId } from "@/lib/demo-content";
 
 export type SectionStatus = "available" | "needs_generation";
@@ -42,6 +43,9 @@ interface StudioPanelProps {
   onCloseSection: () => void;
   getSectionStatus: (id: DemoSectionId) => SectionStatus;
   generatingSection: DemoSectionId | null;
+  /** Optional — omitted entirely by pages backed by a data model "Regénérer" doesn't support yet (see app/dashboard/demo/[slug]/page.tsx's legacy production pipeline), in which case the menu item is simply not rendered. */
+  regeneratingSection?: DemoSectionId | null;
+  onRegenerateSection?: (id: DemoSectionId) => void;
   sourceCount: number;
   isNoteOpen: boolean;
   onOpenNote: () => void;
@@ -49,8 +53,15 @@ interface StudioPanelProps {
   onDeleteNote: () => void;
   noteContent: string;
   onNoteContentChange: (value: string) => void;
+  onSaveNote: () => void;
+  isSavingNote: boolean;
   onAskSelection: (text: string) => void;
   onTranslateSelection: (text: string) => void;
+  /** Passed straight through to TextSelectionToolbar's "Add Note" — see that component's own doc comment. Optional: omitted by callers with no module in scope. */
+  moduleId?: number;
+  courseTitle?: string;
+  /** Notified whenever the internal collapse toggle fires — the panel's own root controls its ephemeral (w-20 vs w-full) width, but the page-level `<aside>` wrapping it may want to shrink/grow its own fixed width in lockstep (see app/dashboard/module/[id]/page.tsx). Optional: a caller that omits this still gets a fully working collapse, just without the outer wrapper reacting. */
+  onCollapsedChange?: (collapsed: boolean) => void;
   children: React.ReactNode;
 }
 
@@ -75,12 +86,11 @@ const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
   resume: "bg-blue-50 dark:bg-blue-950",
   cas_clinique: "bg-amber-50 dark:bg-amber-950",
   qcm: "bg-purple-50 dark:bg-purple-950",
-  mind_map: "bg-pink-50 dark:bg-pink-950",
   exemples_analogies: "bg-yellow-50 dark:bg-yellow-950",
 };
 
-/** Soft tint per study mode — light-mode pastel + a discreet dark-mode counterpart. */
-const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string }> = {
+/** Soft tint per study mode — light-mode pastel + a discreet dark-mode counterpart. Exported for reuse by MobileStudioCards' large-card grid, so both surfaces share the exact same per-section color identity. */
+export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string }> = {
   explication: {
     bg: "bg-emerald-50/80 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-900/40",
     icon: "text-emerald-600 dark:text-emerald-400",
@@ -96,10 +106,6 @@ const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string }> = {
   qcm: {
     bg: "bg-purple-50/80 dark:bg-purple-950/20 border-purple-200/50 dark:border-purple-900/40",
     icon: "text-purple-600 dark:text-purple-400",
-  },
-  mind_map: {
-    bg: "bg-pink-50/80 dark:bg-pink-950/20 border-pink-200/50 dark:border-pink-900/40",
-    icon: "text-pink-600 dark:text-pink-400",
   },
   exemples_analogies: {
     bg: "bg-yellow-50/80 dark:bg-yellow-950/20 border-yellow-200/50 dark:border-yellow-900/40",
@@ -124,6 +130,8 @@ export function StudioPanel({
   onCloseSection,
   getSectionStatus,
   generatingSection,
+  regeneratingSection,
+  onRegenerateSection,
   sourceCount,
   isNoteOpen,
   onOpenNote,
@@ -131,13 +139,26 @@ export function StudioPanel({
   onDeleteNote,
   noteContent,
   onNoteContentChange,
+  onSaveNote,
+  isSavingNote,
   onAskSelection,
   onTranslateSelection,
+  moduleId,
+  courseTitle,
+  onCollapsedChange,
   children,
 }: StudioPanelProps) {
-  const { toast } = useToast();
   const [isSectionExpanded, setIsSectionExpanded] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
+
+  function toggleCollapsed() {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      onCollapsedChange?.(next);
+      return next;
+    });
+  }
 
   const detailBg = openedSection ? SECTION_DETAIL_BG[openedSection] : "";
 
@@ -147,6 +168,21 @@ export function StudioPanel({
   useEffect(() => {
     setIsSectionExpanded(false);
   }, [openedSection]);
+
+  // Escape closes the expanded overlay, matching every real Dialog in this
+  // app (Radix's DismissableLayer closes on Escape by default) — this
+  // overlay is a hand-rolled portal, not a Dialog, so it never got that for
+  // free. Only listens while actually expanded, so it can never intercept
+  // Escape meant for something else (a Radix Dialog stacked on top, a
+  // browser feature) the rest of the time.
+  useEffect(() => {
+    if (!isSectionExpanded) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsSectionExpanded(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isSectionExpanded]);
 
   // Portal-mount guard: `document` doesn't exist during SSR, and mounting a
   // portal on the very first client render (before hydration settles) can
@@ -162,7 +198,12 @@ export function StudioPanel({
   );
 
   return (
-    <>
+    <div
+      className={cn(
+        "flex h-full flex-col overflow-hidden transition-all duration-300",
+        isCollapsed ? "w-20" : "w-full"
+      )}
+    >
       <div
         className={cn(
           "flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800",
@@ -176,7 +217,7 @@ export function StudioPanel({
             className={cn(PANEL_ICON_BUTTON_CLASSES, "flex items-center gap-2 !px-3 text-sm font-medium")}
           >
             <ArrowLeft className="h-4 w-4 shrink-0" />
-            Studio
+            {!isCollapsed && "Studio"}
           </button>
         ) : openedSection ? (
           <button
@@ -185,15 +226,17 @@ export function StudioPanel({
             className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100"
           >
             <ArrowLeft className="h-4 w-4 shrink-0" />
-            <span className="truncate">{openedLabel}</span>
+            {!isCollapsed && <span className="truncate">{openedLabel}</span>}
           </button>
         ) : (
-          <div className="flex items-center gap-2">
-            <button type="button" aria-label="Filtrer" className={TOOLBAR_BUTTON_CLASSES}>
-              <SlidersHorizontal className="h-4 w-4" />
-            </button>
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Studio</h2>
-          </div>
+          !isCollapsed && (
+            <div className="flex items-center gap-2">
+              <button type="button" aria-label="Filtrer" className={TOOLBAR_BUTTON_CLASSES}>
+                <SlidersHorizontal className="h-4 w-4" />
+              </button>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Studio</h2>
+            </div>
+          )
         )}
 
         <div className="flex items-center gap-1">
@@ -208,7 +251,7 @@ export function StudioPanel({
             </button>
           ) : (
             <>
-              {openedSection && (
+              {openedSection && !isCollapsed && (
                 <button
                   type="button"
                   onClick={() => setIsSectionExpanded(true)}
@@ -218,8 +261,14 @@ export function StudioPanel({
                   <Maximize2 className="h-4 w-4" />
                 </button>
               )}
-              <button type="button" aria-label="Fermer le panneau" className={PANEL_ICON_BUTTON_CLASSES}>
-                <PanelRightClose className="h-4 w-4" />
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                aria-label={isCollapsed ? "Ouvrir le panneau" : "Réduire le panneau"}
+                aria-pressed={isCollapsed}
+                className={PANEL_ICON_BUTTON_CLASSES}
+              >
+                {isCollapsed ? <PanelRightOpen className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
               </button>
             </>
           )}
@@ -235,8 +284,8 @@ export function StudioPanel({
               </div>
             )
           ) : (
-            <div className="space-y-6 p-4 pb-24">
-              <div className="grid grid-cols-2 gap-2">
+            <div className={cn("space-y-6 p-4 pb-24", isCollapsed && "px-2")}>
+              <div className={cn("grid gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-2")}>
                 {sections.map((section) => {
                   const Icon = section.icon;
                   const isGenerating = generatingSection === section.id;
@@ -247,27 +296,30 @@ export function StudioPanel({
                       type="button"
                       disabled={isGenerating}
                       onClick={() => onItemClick(section.id)}
+                      title={isCollapsed ? section.label : undefined}
                       className={cn(
-                        "flex items-center justify-between gap-2 rounded-xl border p-3 text-left text-sm font-medium text-gray-700 transition-all hover:scale-[1.01] hover:shadow-sm disabled:cursor-wait disabled:opacity-70 disabled:hover:scale-100 dark:text-gray-200",
+                        "flex items-center gap-2 rounded-xl border text-sm font-medium text-gray-700 transition-all hover:scale-[1.01] hover:shadow-sm disabled:cursor-wait disabled:opacity-70 disabled:hover:scale-100 dark:text-gray-200",
+                        isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between p-3 text-left",
                         tint.bg
                       )}
                     >
-                      <span className="truncate">{section.label}</span>
+                      {!isCollapsed && <span className="truncate">{section.label}</span>}
                       {isGenerating ? (
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />
+                        <Loader2 className={cn("shrink-0 animate-spin text-gray-400", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
                       ) : (
-                        <Icon className={cn("h-4 w-4 shrink-0", tint.icon)} />
+                        <Icon className={cn("shrink-0", isCollapsed ? "h-5 w-5" : "h-4 w-4", tint.icon)} />
                       )}
                     </button>
                   );
                 })}
               </div>
 
-              {generations.length > 0 && (
+              {!isCollapsed && generations.length > 0 && (
                 <div className="flex flex-col gap-1">
                   {generations.map((section) => {
                     const Icon = section.icon;
                     const isGenerating = generatingSection === section.id;
+                    const isRegenerating = regeneratingSection === section.id;
 
                     if (isGenerating) {
                       return (
@@ -280,6 +332,18 @@ export function StudioPanel({
                             Generating {section.label.toLowerCase()}... based on {sourceCount} source
                             {sourceCount > 1 ? "s" : ""}
                           </span>
+                        </div>
+                      );
+                    }
+
+                    if (isRegenerating) {
+                      return (
+                        <div
+                          key={section.id}
+                          className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm text-gray-500 dark:text-gray-400"
+                        >
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                          <span className="truncate">Régénération de {section.label.toLowerCase()}...</span>
                         </div>
                       );
                     }
@@ -314,7 +378,12 @@ export function StudioPanel({
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>Renommer</DropdownMenuItem>
+                            {onRegenerateSection && (
+                              <DropdownMenuItem onSelect={() => onRegenerateSection(section.id)}>
+                                <RefreshCw className="h-4 w-4" />
+                                Regénérer
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem>Supprimer</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -331,10 +400,14 @@ export function StudioPanel({
           <button
             type="button"
             onClick={onOpenNote}
-            className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-gray-900 px-6 py-3 text-sm font-medium text-white shadow-lg transition-transform hover:scale-105 dark:bg-gray-100 dark:text-gray-900"
+            title={isCollapsed ? "Add note" : undefined}
+            className={cn(
+              "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-gray-900 text-sm font-medium text-white shadow-lg transition-transform hover:scale-105 dark:bg-gray-100 dark:text-gray-900",
+              isCollapsed ? "p-3" : "px-6 py-3"
+            )}
           >
             <SquarePen className="h-4 w-4" />
-            Add note
+            {!isCollapsed && "Add note"}
           </button>
         )}
 
@@ -376,18 +449,13 @@ export function StudioPanel({
 
             <div className="border-t border-gray-200 p-4 dark:border-neutral-800">
               <Button
-                variant="outline"
                 size="sm"
                 className="w-full rounded-xl"
-                onClick={() =>
-                  toast({
-                    variant: "info",
-                    title: "Bientôt disponible",
-                    description: "La conversion d'une note en source arrive dans une prochaine mise à jour.",
-                  })
-                }
+                onClick={onSaveNote}
+                disabled={isSavingNote || !noteContent.trim()}
               >
-                Convert to source
+                {isSavingNote && <Loader2 className="h-4 w-4 animate-spin" />}
+                Sauvegarder
               </Button>
             </div>
           </div>
@@ -395,7 +463,7 @@ export function StudioPanel({
       </div>
 
       {selection && (
-        <SelectionTooltip
+        <TextSelectionToolbar
           ref={tooltipRef}
           selection={selection}
           onAsk={(text) => {
@@ -406,6 +474,8 @@ export function StudioPanel({
             onTranslateSelection(text);
             clearSelection();
           }}
+          moduleId={moduleId}
+          courseTitle={courseTitle}
         />
       )}
 
@@ -444,6 +514,6 @@ export function StudioPanel({
           </div>,
           document.body
         )}
-    </>
+    </div>
   );
 }

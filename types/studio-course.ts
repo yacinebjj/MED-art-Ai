@@ -1,5 +1,4 @@
 import type { GastriteCasCliniqueData, GastriteQcmsData, GastriteResumeData } from "@/lib/course-slug-content";
-import type { DynamicMindMapData } from "@/components/course/workspace/DynamicMindMapStudio";
 
 /** Lightweight row for the sidebar list — GET /api/studio/courses?moduleId=X. */
 export interface StudioCourseSummary {
@@ -24,6 +23,7 @@ export interface StudioCourseFull {
   resume: Omit<GastriteResumeData, "slug" | "section"> | null;
   casClinique: Omit<GastriteCasCliniqueData, "slug" | "section"> | null;
   qcms: GastriteQcmsData | null;
-  mindMap: DynamicMindMapData | null;
   exemplesAnalogies: string | null;
+  /** Public Supabase Storage URL of the originally uploaded file (see app/api/upload/route.ts's uploadSourceFile) — null for courses created from pasted text, or uploaded before this column existed. Powers FileViewerModal's "Afficher le cours". */
+  sourceFileUrl: string | null;
 }

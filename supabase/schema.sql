@@ -965,6 +965,140 @@ create trigger curriculum_modules_year_consistency
   for each row execute function enforce_curriculum_module_year_matches_unit();
 
 -- ---------------------------------------------------------------------------
+-- SUPERSEDED — kept only so a project that already ran this isn't left with
+-- an orphaned table; current app code no longer reads or writes it. This
+-- table's own PostgREST schema-cache entry never picked up in practice (a
+-- "Could not find the table 'public.user_module_flashcards' in the schema
+-- cache" error persisted even after `NOTIFY pgrst, 'reload schema'`), so the
+-- toggle was moved onto `profiles.flashcard_active_module_ids` below instead
+-- — an ALREADY-recognized table (see specialty_id/academic_year_id columns
+-- added to `profiles` further up, both working in production), so adding
+-- one more column to it needs no fresh table for PostgREST to discover.
+-- ---------------------------------------------------------------------------
+create table if not exists user_module_flashcards (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  curriculum_module_id bigint not null references curriculum_modules (id) on delete cascade,
+  active boolean not null default true,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, curriculum_module_id)
+);
+
+create index if not exists user_module_flashcards_active_idx
+  on user_module_flashcards (user_id) where active = true;
+
+alter table user_module_flashcards enable row level security;
+drop policy if exists "Users manage their own flashcard activations" on user_module_flashcards;
+create policy "Users manage their own flashcard activations"
+  on user_module_flashcards for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
+-- Current home of the "Activer les Flashcards" toggle (dashboard module
+-- card, CurriculumView.tsx) — a plain integer array on the student's own
+-- `profiles` row, not a join table. Never a column on `curriculum_modules`
+-- itself — that table has no user_id and is shared/public-read across every
+-- student (see its own "Public read access" policy above), so a boolean
+-- there would mean one student's toggle silently activates/deactivates
+-- flashcards for every other student on that same official module.
+-- ---------------------------------------------------------------------------
+alter table profiles add column if not exists flashcard_active_module_ids integer[] not null default '{}';
+
+-- ---------------------------------------------------------------------------
+-- Anki-style Q&A flashcard queue — one array PER COURSE, on `studio_courses`
+-- itself, mirroring that table's own `qcms` jsonb column exactly (same
+-- table, same proven-working PostgREST pattern, rather than a brand-new
+-- table). Each element is `{id, question, answer}`, appended to by
+-- app/api/flashcards/generate/route.ts and read by
+-- app/api/flashcards/pool/route.ts across every course in the student's
+-- active modules. `studio_courses` itself isn't defined in this file (see
+-- app/api/studio/courses/route.ts's header comment — it's created/migrated
+-- manually in the Supabase SQL editor), so run this directly too.
+-- ---------------------------------------------------------------------------
+alter table studio_courses add column if not exists flashcard_queue jsonb not null default '[]';
+
+-- ---------------------------------------------------------------------------
+-- Web Push subscriptions — a JSONB array of standard PushSubscription
+-- objects ({endpoint, keys: {p256dh, auth}}) on the student's own `profiles`
+-- row, one entry per browser/device they've opted in from. Deliberately a
+-- column on `profiles`, not a new table — see flashcard_active_module_ids
+-- just above for why: a fresh table's PostgREST schema-cache entry never
+-- picked up in this project even after a manual cache reload, while
+-- `profiles` has repeatedly proven to work the moment a new column is added
+-- to it. Written by app/api/push/subscribe & unsubscribe, read by
+-- app/api/push/dispatch & dispatch-self (lib/push/dispatch.ts).
+-- ---------------------------------------------------------------------------
+alter table profiles add column if not exists push_subscriptions jsonb not null default '[]';
+
+-- ---------------------------------------------------------------------------
+-- "Points Faibles & Plan de Remédiation" — same safe, proven pattern as
+-- flashcard_active_module_ids just above (a plain array column on the
+-- student's own `profiles` row, never a join table or a column on the
+-- shared `curriculum_modules`). Deliberately does NOT reuse the existing
+-- `weakness_radar` SQL function above — that one joins
+-- qcm_attempts -> courses -> the ad-hoc `modules` table, which structurally
+-- never matches a Studio course's "studio-course-{id}" slug, so it always
+-- returns zero rows for anyone using only Studio courses. This feature's
+-- own aggregation (app/api/study/remediation-plan/generate/route.ts) reuses
+-- `course_weak_qcms` instead — that one is a pure `qcm_attempts` filter with
+-- no join, and already works correctly for Studio course slugs (confirmed
+-- via CourseStatsModal's existing usage).
+--
+-- weakness_remediation_plan/generated_at cache the AI's last analysis so
+-- opening /study never re-spends tokens by itself — only an explicit
+-- "Générer"/"Régénérer" click in WeaknessRemediationPlan.tsx does.
+-- ---------------------------------------------------------------------------
+alter table profiles add column if not exists weakness_active_module_ids integer[] not null default '{}';
+alter table profiles add column if not exists weakness_remediation_plan jsonb;
+alter table profiles add column if not exists weakness_remediation_generated_at timestamptz;
+
+-- ---------------------------------------------------------------------------
+-- Native file viewer for "Afficher le cours" — the original uploaded
+-- document's public Supabase Storage URL (bucket "course-sources", see
+-- app/api/upload/route.ts's uploadSourceFile), so the workspace can render
+-- the REAL PDF/DOCX/PPTX (components/course/workspace/FileViewerModal.tsx)
+-- instead of only the raw extracted text. NULL for courses created from
+-- pasted text (no original file) or uploaded before this column existed —
+-- FileViewerModal falls back to raw_text in both cases.
+-- ---------------------------------------------------------------------------
+alter table studio_courses add column if not exists source_file_url text;
+
+-- ---------------------------------------------------------------------------
+-- "Mes notes" — free-standing student notes. Table `user_notes` (id,
+-- user_id, title, content, created_at) was created manually in the Supabase
+-- SQL editor, same convention as `studio_courses` (see
+-- app/api/studio/courses/route.ts's header comment).
+--
+-- `module_id` — added for the "aggregate notes by module" behavior: a text
+-- selection captured via TextSelectionToolbar's "Add Note" from inside a
+-- curriculum module's workspace (app/dashboard/module/[id]/page.tsx, the
+-- only surface with a real curriculum_module_id — the legacy per-slug demo
+-- pipeline has no such id) appends into ONE note per module instead of
+-- creating a new row every time, keyed by this column. Deliberately
+-- `integer` referencing curriculum_modules(id), NOT text — every other
+-- "module id" column in this schema (e.g. studio_courses.curriculum_module_id)
+-- is an integer FK to the same table, and there is no natural text
+-- identifier for a module here; a text column would just be an
+-- inconsistent, unjoinable copy of the same integer id as a string. NULL
+-- for notes created any other way (the Studio's own note editor, a plain
+-- "Nouvelle note" from /dashboard/notes, or a capture from the legacy demo
+-- pipeline) — those keep the original "always a new row" behavior.
+-- ---------------------------------------------------------------------------
+alter table user_notes add column if not exists module_id integer references curriculum_modules (id) on delete set null;
+
+-- ---------------------------------------------------------------------------
+-- "Résumé global du module" — one AI-generated synthesis PER module, keyed
+-- by module id (as a string — JSON object keys always are) inside a single
+-- jsonb map on the student's own `profiles` row. Same "extend `profiles`
+-- with a new column" pattern as flashcard_active_module_ids/weakness_*
+-- above, for the same reason: a brand-new table's PostgREST schema-cache
+-- entry has never reliably been picked up in this project. Written by
+-- POST app/api/modules/[id]/global-summary, read (cached, no AI call) by
+-- its own GET.
+-- ---------------------------------------------------------------------------
+alter table profiles add column if not exists module_global_summaries jsonb not null default '{}';
+
+-- ---------------------------------------------------------------------------
 -- Seed — Médecine 2ème et 3ème année, exactement comme spécifié. Chaque
 -- insertion est protégée par un NOT EXISTS contre les index uniques
 -- ci-dessus : ce bloc est idempotent, le ré-exécuter ne duplique jamais rien.

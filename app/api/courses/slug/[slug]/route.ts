@@ -46,7 +46,6 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
     resume: unknown;
     cas_clinique: unknown;
     qcms: unknown;
-    mind_map: unknown;
     exemples_analogies: string | null;
   }
 
@@ -58,7 +57,7 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
   // "mode_visuel" is deliberately NOT selected — the "Mode Visuel" feature was
   // removed; an old row may still physically have this column populated, but
   // never selecting it means the app never reads or parses that stale data.
-  const selectColumns = "slug, title, explication, resume:resumé, cas_clinique, qcms, mind_map, exemples_analogies";
+  const selectColumns = "slug, title, explication, resume:resumé, cas_clinique, qcms, exemples_analogies";
 
   const { data, error } = (await supabase
     .from("courses")
@@ -77,7 +76,6 @@ export async function GET(request: NextRequest, { params }: { params: { slug: st
     resume: parseJsonColumn(data.resume),
     cas_clinique: parseJsonColumn(data.cas_clinique),
     qcms: parseJsonColumn(data.qcms),
-    mind_map: parseJsonColumn(data.mind_map),
     exemples_analogies: data.exemples_analogies,
   });
 }

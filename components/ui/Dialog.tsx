@@ -37,10 +37,18 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  */
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { overlayClassName?: string }
->(({ className, overlayClassName, children, ...props }, ref) => (
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { overlayClassName?: string; onOverlayClick?: () => void }
+>(({ className, overlayClassName, onOverlayClick, children, ...props }, ref) => (
   <DialogPrimitive.Portal>
-    <DialogOverlay className={overlayClassName} />
+    {/* Radix's own DismissableLayer already closes on outside pointerdown by
+        default (every other caller of this component relies on that, purely
+        via `open`/`onOpenChange` on <Dialog>) — `onOverlayClick` is an
+        additional, explicit, opt-in handler for callers (e.g.
+        FileViewerModal) that want the "click the blurred background to
+        close" behavior spelled out literally rather than implicit. Purely
+        additive: omitted by every other Dialog user, so their behavior is
+        byte-for-byte unchanged. */}
+    <DialogOverlay className={overlayClassName} onClick={onOverlayClick} />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(

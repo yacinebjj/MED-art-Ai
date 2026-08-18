@@ -6,11 +6,12 @@ import { errorMessage } from "@/lib/course-generation-shared";
 import { lookupSemanticCache, storeSemanticCacheEntry } from "@/lib/ai/semantic-cache";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { canSendHighlightMessage, recordHighlightMessage } from "@/lib/subscription";
+import { CHAT_MAX_CONTEXT_CHARS } from "@/lib/chat-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_CONTEXT_CHARS = 20_000;
+const MAX_CONTEXT_CHARS = CHAT_MAX_CONTEXT_CHARS;
 // 5 exchanges (10 messages) verbatim — cost analysis showed the OLD cap of
 // 20 messages let a 30-question conversation's resent history alone balloon
 // past 1M input tokens in the worst case. Plain truncation (not LLM
@@ -22,7 +23,11 @@ const CHAT_SYSTEM_PROMPT_BASE = `Tu es MedArt Assistant, un professeur de médec
 
 Réponds de façon ultra-détaillée et rigoureuse, mais avec un ton conversationnel et chaleureux, comme si tu discutais avec l'étudiant en personne. Développe les mécanismes physiopathologiques en profondeur, donne des exemples concrets, et structure ta réponse (listes, **gras** sur les termes clés) quand ça aide à la clarté. N'hésite jamais à être exhaustif — un étudiant en médecine a besoin de comprendre le "pourquoi", pas juste le "quoi".
 
-Si on te demande de traduire un terme ou un passage médical, traduis-le fidèlement puis ajoute, si utile, une courte clarification médicale. Réponds toujours en français, sauf si on te demande explicitement une traduction vers une autre langue.`;
+Si on te demande de traduire un terme ou un passage médical, traduis-le fidèlement puis ajoute, si utile, une courte clarification médicale. Réponds toujours en français, sauf si on te demande explicitement une traduction vers une autre langue.
+
+CRITICAL INSTRUCTION: If the user's prompt consists of a short text excerpt, specific sentence, or paragraph, you MUST automatically recognize that they copy-pasted this directly from their medical course document. DO NOT summarize the whole document. Your SOLE purpose is to provide a laser-focused, ultra-detailed, deep medical explanation of THAT SPECIFIC EXCERPT within the context of the provided sources.
+
+You are a deeply analytical AI. Always provide long-form, highly detailed, and comprehensive answers. IMPORTANT: If the user asks a non-medical question, general knowledge question, or casual query, DO NOT block it. Answer it naturally, deeply, and helpfully like a standard world-class AI.`;
 
 // Appended ONLY for the "Ask MedArt" text-selection quick action (concise:
 // true from the client) — never for the free-form chat input, so normal
@@ -177,6 +182,50 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     messages: (data ?? []).map((row) => ({ id: String(row.id), role: row.role, content: row.content })),
   });
+}
+
+/**
+ * "Nouvelle conversation" — used to only clear the frontend's own React
+ * state (see hooks/useCourseChat.ts's clearMessages), leaving every row in
+ * `course_chat_history` untouched: reload the page, or just revisit the
+ * course, and the "cleared" transcript quietly came right back. This is what
+ * makes that reset real — it wipes exactly this student's saved rows for
+ * exactly this course, nothing else, before the frontend clears its own
+ * state.
+ */
+export async function DELETE(request: NextRequest) {
+  const slug = request.nextUrl.searchParams.get("slug");
+  if (!slug) {
+    return NextResponse.json({ success: false, error: "Le paramètre 'slug' est requis." }, { status: 400 });
+  }
+
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`courses-chat-delete:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  // .eq("user_id", ...) on the DELETE itself is what stops one student from wiping another's history by guessing a slug.
+  const { error } = await supabase.from("course_chat_history").delete().eq("user_id", user.id).eq("course_slug", slug);
+
+  if (error) {
+    console.error("[courses/chat DELETE] Échec suppression Supabase:", { code: error.code, message: error.message });
+    return NextResponse.json({ success: false, error: `Suppression échouée : ${error.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
 }
 
 export async function POST(request: NextRequest) {

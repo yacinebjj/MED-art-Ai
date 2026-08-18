@@ -74,6 +74,28 @@ export function sanitizeForPostgres<T>(value: T): T {
   return value;
 }
 
+/**
+ * Server-side defensive strip for HTML content coming from a `contentEditable`
+ * surface (see app/api/notes/route.ts — "Mes notes" saves `innerHTML`, which
+ * can carry pasted `<script>`/event-handler attributes/`javascript:` URIs).
+ * This is a coarse regex backstop, NOT a full sanitizer — the real, thorough
+ * allowlist sanitization is `lib/highlight.ts`'s `sanitizeNoteHtml`, which
+ * runs client-side before every save (it needs DOM APIs, unavailable here).
+ * This function exists because a client can always bypass the browser and
+ * POST/PUT directly to this route, so the server must not rely on the client
+ * having sanitized anything — it strips the specific, genuinely dangerous
+ * constructs (script/style execution, inline event handlers, javascript:
+ * navigation) regardless of what the client already did.
+ */
+export function stripDangerousHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
+    .replace(/<(iframe|object|embed|link|meta|form)\b[^>]*>/gi, "")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*')/gi, "");
+}
+
 /** Formats any thrown value into a plain string message, never leaking `[object Object]`. */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;

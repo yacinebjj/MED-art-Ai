@@ -7,9 +7,11 @@ import { MailCheck } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
+import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
 import type { AcademicYear, Specialty } from "@/types/academic";
 
 const FACULTY_OPTIONS = ALGERIAN_FACULTIES.map((name) => ({ value: name, label: name }));
@@ -55,6 +57,7 @@ const INITIAL_STATE: FormState = {
  */
 export function RegisterForm() {
   const router = useRouter();
+  const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
   const [error, setError] = useState<string | null>(null);
@@ -199,7 +202,16 @@ export function RegisterForm() {
   }
 
   const specialtyOptions = specialties.map((s) => ({ value: String(s.id), label: s.name }));
-  const yearOptions = years.map((y) => ({ value: String(y.id), label: y.name }));
+  const selectedSpecialtyName = specialties.find((s) => s.id === specialtyId)?.name;
+  const yearOptions = years.map((y) => ({
+    value: String(y.id),
+    label: y.name,
+    disabled: isLockedInternYear(selectedSpecialtyName, y),
+  }));
+
+  function handleDisabledYearClick() {
+    toast({ variant: "info", title: INTERN_YEAR_LOCKED_MESSAGE });
+  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -269,6 +281,7 @@ export function RegisterForm() {
           disabled={specialtyId == null || yearsLoading}
           value={academicYearId != null ? String(academicYearId) : ""}
           onValueChange={handleYearChange}
+          onDisabledOptionClick={handleDisabledYearClick}
         />
       </div>
 
