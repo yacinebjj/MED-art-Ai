@@ -375,58 +375,19 @@ export async function reserveChatMessageDaily(user: GateUser): Promise<GateResul
   return { allowed: true };
 }
 
-/**
- * Atomically reserves up to `requested` flashcards against flashcardCap and
- * returns how many were actually granted (0..requested) — the caller MUST
- * clamp its batch size to this return value before generating, and call
- * refundFlashcards() with the difference between what it reserved and what
- * it actually produced (or the full amount on a hard failure). Uses a
- * row-locking PL/pgSQL function (see reserve_flashcards_used in
- * supabase/schema.sql) rather than a single UPDATE...WHERE, since a variable
- * batch size needs to read the current value before computing the delta —
- * the row lock is what closes the race for this variable-count case.
- * Returns `requested` unchanged for trial students, missing subscription
- * rows, or an unconfigured server — fails open, same as every other gate.
- */
-export async function reserveFlashcards(user: GateUser, requested: number): Promise<number> {
-  if (!isSupabaseConfigured() || !user?.id) return requested;
-
-  const [subRaw, profile] = await Promise.all([getSubscription(user.id), getProfile(user.id)]);
-
-  if (isTrialActive(profile, user.created_at)) return requested;
-  if (!subRaw) return requested;
-
-  const sub = await ensureFreshUsagePeriod(user.id, subRaw);
-  const effectivePlanId = resolveEffectivePlan(sub);
-  const plan = PLANS[effectivePlanId];
-
-  if (process.env.NODE_ENV === "development") return requested;
-
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.rpc("reserve_flashcards_used", {
-    p_user_id: user.id,
-    p_requested: requested,
-    p_cap: plan.flashcardCap,
-  });
-
-  if (error) {
-    console.error("[subscription] reserve_flashcards_used RPC failed — fail-open (granting requested amount):", error.message);
-    return requested;
-  }
-  return typeof data === "number" ? data : 0;
-}
-
-/** Refunds `count` flashcards after generation produced fewer than reserved, or 0 on a hard failure (refund the full reserved amount). Best-effort. */
-export async function refundFlashcards(userId: string, count: number): Promise<void> {
-  if (!userId || !isSupabaseConfigured() || count <= 0) return;
-  try {
-    const { error } = await getSupabaseAdmin().rpc("refund_flashcards_used", { p_user_id: userId, p_count: count });
-    if (error) console.warn("refund_flashcards_used RPC unavailable:", error.message);
-  } catch (error) {
-    console.warn("refund_flashcards_used threw:", error);
-  }
-}
-
+// reserveFlashcards()/refundFlashcards() (per-card quota, variable batch
+// size) were removed here — the flashcard architecture moved to a
+// definitive-set model (see app/api/flashcards/generate/route.ts and
+// lib/flashcards-content-cache.ts) where a course's flashcards are
+// generated ONCE ever, cross-student, and every subsequent serve is a free
+// cache hit. That route now reserves against courseCap via
+// reserveGeneration()/refundGeneration() instead — ONE unit per real
+// generation EVENT, not per card, since "cards produced" no longer
+// corresponds to real spend once caching dominates. The underlying
+// reserve_flashcards_used/refund_flashcards_used SQL functions (and their
+// REVOKE) are left in place, unused, rather than dropped — consistent with
+// this file's existing policy of not casually removing DB functions old
+// rows or a rollback might still reference.
 
 function addMonths(date: Date, months: number): Date {
   const result = new Date(date);

@@ -16,6 +16,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { lookupStudioContentCache, recordStudioCacheHit, storeStudioContentCache } from "@/lib/studio-content-cache";
+import { normalizeText, sha256 } from "@/lib/content-similarity";
 import type { DemoSectionId } from "@/lib/demo-content";
 
 export const runtime = "nodejs";
@@ -233,10 +234,21 @@ export async function POST(request: NextRequest) {
   // already carries that mapping (same one used to pull the value out of
   // the AI's JSON above, or out of the cache), so it doubles as the
   // studio_courses column name.
+  //
+  // content_hash is stamped alongside it — the SAME hash
+  // lookupStudioContentCache/storeStudioContentCache already compute
+  // internally to key studio_content_cache, now also stored directly on
+  // this row so app/api/studio/regenerate can key studio_content_variations
+  // off it without re-fetching or re-hashing raw_text on every regenerate
+  // click. Recomputed on every section's save (cheap, pure JS) rather than
+  // only on the first — harmless if unchanged, and correctly updates a row
+  // whose raw_text somehow differs from an earlier section's save.
+  const contentHash = sha256(normalizeText(truncatedContext));
+
   const supabase = getSupabaseAdmin();
   const { error: saveError, count } = await supabase
     .from("studio_courses")
-    .update({ [sectionKey]: finalData, updated_at: new Date().toISOString() }, { count: "exact" })
+    .update({ [sectionKey]: finalData, content_hash: contentHash, updated_at: new Date().toISOString() }, { count: "exact" })
     .eq("id", courseId)
     .eq("user_id", user.id);
 

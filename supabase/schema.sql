@@ -1423,6 +1423,106 @@ create policy "Users manage their own studio courses" on studio_courses
 alter table studio_courses add column if not exists flashcard_queue jsonb not null default '[]';
 
 -- ---------------------------------------------------------------------------
+-- content_hash: sha256(normalizeText(raw source text)) — the SAME value
+-- studio_content_cache already computes internally (lib/content-similarity.ts)
+-- to decide whether two students' uploads are "the same course", now also
+-- stored directly on the student's own row so app/api/studio/regenerate can
+-- key studio_content_variations (below) off it WITHOUT re-fetching or
+-- re-hashing raw_text on every regenerate click. Nullable: rows generated
+-- before this column existed simply have no variation caching (regenerate
+-- falls back to its original always-fresh behavior for them — see that
+-- route's own comment).
+-- ---------------------------------------------------------------------------
+alter table studio_courses add column if not exists content_hash text;
+create index if not exists studio_courses_content_hash_idx on studio_courses (content_hash);
+
+-- ---------------------------------------------------------------------------
+-- flashcards_content_cache: cross-student cache for the "definitive set"
+-- flashcard architecture (replaces per-call random-excerpt sampling — see
+-- lib/ai/flashcard-prompts.ts's buildDefinitiveFlashcardSetPrompt and
+-- app/api/flashcards/generate/route.ts). Keyed by content_hash of the
+-- COURSE'S EXPLICATION TEXT specifically (not raw_text — the definitive set
+-- is generated FROM the explication, so that's the text that actually
+-- determines its content; a different hash flavor than studio_courses'
+-- raw_text-based content_hash above, computed inline where it's used, not
+-- worth a dedicated column since it's cheap pure-JS hashing on demand).
+-- One row per distinct explication text, ever, platform-wide: student #1
+-- studying "Asthme" pays for the generation; students #2-700 studying the
+-- byte-identical (or normalized-identical) explication hit this table for
+-- $0. Deny-all RLS — every access goes through the service-role client in
+-- the route above, exactly like studio_content_cache.
+-- ---------------------------------------------------------------------------
+create table if not exists flashcards_content_cache (
+  content_hash text primary key,
+  cards_data jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz
+);
+
+alter table flashcards_content_cache enable row level security;
+drop policy if exists "Deny all client access" on flashcards_content_cache;
+create policy "Deny all client access" on flashcards_content_cache for all using (false);
+
+create or replace function increment_flashcards_content_cache_hit_count(p_content_hash text)
+returns void
+language sql
+as $$
+  update flashcards_content_cache set hit_count = hit_count + 1, last_hit_at = now() where content_hash = p_content_hash;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- studio_content_variations: caches "Régénérer" output cross-student, capped
+-- at 10 variations per (course, section) — see
+-- app/api/studio/regenerate/route.ts. Keyed by studio_courses.content_hash
+-- (the raw-source-text hash above) + section_key (a DemoSectionId, e.g.
+-- "explication"/"qcm" — matching studio_content_cache's own `section`
+-- convention, not the "qcm"->"qcms" column-name mapping used elsewhere).
+--
+-- HONEST PRODUCT TRADEOFF, not hidden: this changes "Régénérer" from
+-- unlimited fresh rewrites into "pick one of at most 10 pre-generated
+-- alternates, shared across every student on this course/section." A
+-- student's 11th+ click on the same section will re-serve an earlier
+-- variation verbatim, and two different students clicking "Régénérer" on
+-- the same course may eventually see byte-identical "freshly regenerated"
+-- content once the pool is exhausted (less likely to be noticed at 10 than
+-- at 2, but not impossible). Explicitly specified this way by product
+-- direction — flagged here so the tradeoff is documented in the schema
+-- itself, not just in a chat message.
+--
+-- The unique constraint is what makes concurrent-insert safety possible:
+-- two students racing to create variation N+1 for the same (content_hash,
+-- section_key) will have one INSERT succeed and one hit a 23505 unique-
+-- violation, which the route catches and treats as "someone else just
+-- created it — re-read and serve what's there" rather than an error.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_content_variations (
+  id uuid primary key default gen_random_uuid(),
+  content_hash text not null,
+  section_key text not null,
+  variation_index integer not null,
+  content jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz,
+  unique (content_hash, section_key, variation_index)
+);
+
+create index if not exists studio_content_variations_lookup_idx
+  on studio_content_variations (content_hash, section_key);
+
+alter table studio_content_variations enable row level security;
+drop policy if exists "Deny all client access" on studio_content_variations;
+create policy "Deny all client access" on studio_content_variations for all using (false);
+
+create or replace function increment_variation_hit_count(p_variation_id uuid)
+returns void
+language sql
+as $$
+  update studio_content_variations set hit_count = hit_count + 1, last_hit_at = now() where id = p_variation_id;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Web Push subscriptions — a JSONB array of standard PushSubscription
 -- objects ({endpoint, keys: {p256dh, auth}}) on the student's own `profiles`
 -- row, one entry per browser/device they've opted in from. Deliberately a
