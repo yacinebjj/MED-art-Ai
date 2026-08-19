@@ -1472,6 +1472,81 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- ARCHITECTURAL PIVOT (superseding the original module_synthesis_cache):
+-- caching by the SET of selected courses combinatorially exploded — student
+-- A selecting {course1,course2,course3} and student B selecting
+-- {course1,course2,course3,course4} produce two completely different group
+-- hashes despite sharing 3 of 4 courses, so B's request is a 100% cache
+-- miss that re-generates content for course1-3 it already had cached under
+-- A's key. At realistic 10-20-course selections, near-zero combinations
+-- repeat exactly, so the group-level cache barely ever hits in practice.
+--
+-- course_workspace_cache fixes this by caching at the COURSE level instead
+-- of the combination level: one row per (course, generation_type), holding
+-- ONLY that single course's modular chunk (never a multi-course narrative).
+-- A request for N selected courses becomes: look up all N course-level
+-- hashes in one query, generate ONLY the ones missing (in a single batched
+-- OpenRouter call covering every miss, not one call per miss), cache each
+-- new chunk individually, then stitch the complete set together
+-- deterministically server-side. See app/api/workspace/module-synthesis/route.ts.
+--
+-- HONEST CONSEQUENCE for generation_type = 'summary_chunk': the ORIGINAL
+-- "Résumé Global" prompt's #1 rule was "never juxtapose one summary per
+-- course after another — find the REAL links between courses." That
+-- capability requires seeing multiple courses in one call and is
+-- structurally incompatible with course-level-isolated caching (a chunk
+-- generated for course X, cached independently of what it's ever combined
+-- with, cannot reference course Y). This pivot trades that cross-course
+-- synthesis away for near-zero marginal cost at scale — a deliberate
+-- product decision, not an oversight; flagged here so the tradeoff is
+-- documented in the schema itself, matching this file's convention for
+-- every other such decision (studio_content_variations' own comment).
+-- ---------------------------------------------------------------------------
+drop function if exists increment_module_synthesis_cache_hit_count(text, text);
+drop table if exists module_synthesis_cache;
+
+create table if not exists course_workspace_cache (
+  course_content_hash text not null,
+  generation_type text not null check (generation_type in ('summary_chunk', 'keyword_row_v2')),
+  content jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz,
+  primary key (course_content_hash, generation_type)
+);
+
+-- MIGRATION: 'keyword_row' -> 'keyword_row_v2'. The per-course keyword
+-- chunk's STORED SHAPE changed (was `KeywordRow[]` — {concept, term, trap}
+-- triples destined for one small table per course; now a single object of
+-- 4 category arrays — {mots_cles_principaux, signes_cliniques,
+-- examens_diagnostic, traitements} — destined for one row in one global
+-- table). Reusing the old 'keyword_row' key against the new code would
+-- silently read old-shaped JSON as if it were new-shaped (undefined
+-- category arrays, broken cells) — bumping the generation_type instead of
+-- reusing it means old cached rows are simply never looked up again, no
+-- runtime type confusion, no manual DELETE needed. This ALTER is what makes
+-- that safe on an already-existing production table (CREATE TABLE IF NOT
+-- EXISTS above is a no-op there, same reasoning as this file's other
+-- ALTER-based constraint fixes — see studio_courses.curriculum_module_id's
+-- own comment for the identical pattern).
+alter table course_workspace_cache drop constraint if exists course_workspace_cache_generation_type_check;
+alter table course_workspace_cache add constraint course_workspace_cache_generation_type_check
+  check (generation_type in ('summary_chunk', 'keyword_row_v2'));
+
+alter table course_workspace_cache enable row level security;
+drop policy if exists "Deny all client access" on course_workspace_cache;
+create policy "Deny all client access" on course_workspace_cache for all using (false);
+
+create or replace function increment_course_workspace_cache_hit_count(p_course_content_hash text, p_generation_type text)
+returns void
+language sql
+as $$
+  update course_workspace_cache
+  set hit_count = hit_count + 1, last_hit_at = now()
+  where course_content_hash = p_course_content_hash and generation_type = p_generation_type;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- studio_content_variations: caches "Régénérer" output cross-student, capped
 -- at 10 variations per (course, section) — see
 -- app/api/studio/regenerate/route.ts. Keyed by studio_courses.content_hash

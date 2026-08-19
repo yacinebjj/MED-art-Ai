@@ -4,7 +4,7 @@ import { memo, useEffect, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Sparkles, Target, Trash2, TrendingUp } from "lucide-react";
+import { BookOpenText, Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Sparkles, Target, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
 import { useToast } from "@/components/ui/Toast";
@@ -145,6 +145,17 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
             <DropdownMenuItem onSelect={() => setGlobalSummaryOpen(true)}>
               <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               Résumé global du module
+            </DropdownMenuItem>
+            {/* New dedicated full-screen Workspace (see app/dashboard/workspace/module/[moduleId]/page.tsx),
+                deliberately kept alongside "Résumé global du module" above rather than replacing it for
+                this first phase: the existing modal is a quick single-summary action, the Workspace is a
+                deeper multi-course session (summary + keyword table, per-source selection). Worth
+                revisiting whether the modal becomes redundant once the Workspace fully ships. */}
+            <DropdownMenuItem asChild>
+              <Link href={`/dashboard/workspace/module/${mod.id}`}>
+                <BookOpenText className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                Générer un résumé
+              </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href={`/dashboard/module/${mod.id}/exam`}>
