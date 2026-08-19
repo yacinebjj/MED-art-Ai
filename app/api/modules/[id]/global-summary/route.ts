@@ -6,6 +6,7 @@ import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
 import { buildGlobalSummaryPrompt } from "@/lib/ai/global-summary-prompts";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -132,6 +133,19 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: false, error: "Aucun cours sélectionné trouvé dans ce module." }, { status: 400 });
   }
 
+  // Plan quota RESERVATION — this route made a real, billable OpenRouter
+  // call with no quota check at all before, unlike every other generation
+  // route in the app. Shares courseCap with Studio generate/regenerate
+  // (see reserveGeneration's own comment in lib/subscription.ts). Atomic
+  // check-and-increment, done here (after validating there's real work to
+  // do, before the real call below) so a malformed/empty request never
+  // burns a unit, and refundGeneration() undoes it if the call then fails.
+  // Found during a security/UX audit.
+  const quotaGate = await reserveGeneration(user);
+  if (!quotaGate.allowed) {
+    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+  }
+
   try {
     const prompt = buildGlobalSummaryPrompt(
       eligibleCourses.map((course) => ({ title: course.title, rawText: course.raw_text.slice(0, MAX_SOURCE_CHARS_PER_COURSE) }))
@@ -178,6 +192,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     return NextResponse.json({ success: true, summary: result });
   } catch (error) {
+    await refundGeneration(user.id);
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }

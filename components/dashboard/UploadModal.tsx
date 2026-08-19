@@ -57,6 +57,13 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   }
 
   function handleOpenChange(next: boolean) {
+    // Radix routes the built-in X button, Escape, AND an overlay click all
+    // through this same callback — blocking it here while a submission is
+    // in flight covers all three at once. Without this, closing mid-upload
+    // (no request is ever aborted) let the student reopen and resubmit
+    // immediately, firing two concurrent course-creation requests from one
+    // upload. Found during a security/UX audit.
+    if (!next && (isSubmitting || isDriveImporting)) return;
     if (!next) reset();
     onOpenChange(next);
   }

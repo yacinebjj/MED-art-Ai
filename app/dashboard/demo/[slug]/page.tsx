@@ -99,6 +99,19 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   // keeps its legacy explication but still gets its Studio tiles from here.
   const [supabaseData, setSupabaseData] = useState<CourseSlugSupabaseData | null | undefined>(undefined);
 
+  // Always holds the CURRENT slug, readable from inside a stale async
+  // closure — `slug` itself is just this render's captured prop value, so a
+  // fetch started on course A that resolves after the student has already
+  // navigated to course B would otherwise apply A's generated content to
+  // B's state (this component is reused across a slug change, never
+  // remounted — no `key` on it in the parent). Every generation callback
+  // below compares the slug it was STARTED for against this ref before
+  // touching state. Found during a security/UX audit.
+  const currentSlugRef = useRef(slug);
+  useEffect(() => {
+    currentSlugRef.current = slug;
+  }, [slug]);
+
   useEffect(() => {
     let cancelled = false;
     setSupabaseData(undefined);
@@ -246,7 +259,15 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   // <LazySection> once opened, or generateSection() below directly from the
   // tile grid) rather than all being generated at once at upload time (that
   // single mega-call routinely got truncated on larger source documents).
-  function handleSectionGenerated<K extends keyof CourseSlugSupabaseData>(dataKey: K, data: CourseSlugSupabaseData[K]) {
+  function handleSectionGenerated<K extends keyof CourseSlugSupabaseData>(
+    forSlug: string,
+    dataKey: K,
+    data: CourseSlugSupabaseData[K]
+  ) {
+    // Discard a stale response — the student navigated to a different
+    // course before this one's generation finished. See currentSlugRef's
+    // own comment above for why this can't just check `slug` directly.
+    if (currentSlugRef.current !== forSlug) return;
     setSupabaseData((prev) => (prev ? { ...prev, [dataKey]: data } : prev));
   }
 
@@ -271,23 +292,26 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     const config = SECTION_LAZY_CONFIG[id];
     if (!config) return;
 
+    const requestSlug = slug; // captured now — this render's course, not whatever's current when the fetch resolves
     setGeneratingSection(id);
     try {
       const res = await fetch(config.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug }),
+        body: JSON.stringify({ slug: requestSlug }),
       });
       const body = await res.json().catch(() => ({}));
+      if (currentSlugRef.current !== requestSlug) return; // navigated away — see currentSlugRef's comment
       if (res.ok && body?.success) {
-        handleSectionGenerated(config.dataKey, body.data);
+        handleSectionGenerated(requestSlug, config.dataKey, body.data);
       } else {
         toast({ variant: "error", title: "Échec de la génération", description: body?.error ?? "Réessaie." });
       }
     } catch {
+      if (currentSlugRef.current !== requestSlug) return;
       toast({ variant: "error", title: "Échec de la génération", description: "Impossible de contacter le serveur." });
     } finally {
-      setGeneratingSection(null);
+      if (currentSlugRef.current === requestSlug) setGeneratingSection(null);
     }
   }
 
@@ -351,7 +375,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       label={SECTION_LAZY_CONFIG.resume!.label}
       endpoint={SECTION_LAZY_CONFIG.resume!.endpoint}
       slug={slug}
-      onGenerated={(data) => handleSectionGenerated("resume", data)}
+      onGenerated={(data) => handleSectionGenerated(slug, "resume", data)}
     >
       {(data) => <GastriteResumeStudio data={data} />}
     </LazySection>
@@ -362,7 +386,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       label={SECTION_LAZY_CONFIG.cas_clinique!.label}
       endpoint={SECTION_LAZY_CONFIG.cas_clinique!.endpoint}
       slug={slug}
-      onGenerated={(data) => handleSectionGenerated("cas_clinique", data)}
+      onGenerated={(data) => handleSectionGenerated(slug, "cas_clinique", data)}
     >
       {(data) => <GastriteCasCliniqueStudio data={data} />}
     </LazySection>
@@ -373,7 +397,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       label={SECTION_LAZY_CONFIG.qcm!.label}
       endpoint={SECTION_LAZY_CONFIG.qcm!.endpoint}
       slug={slug}
-      onGenerated={(data) => handleSectionGenerated("qcms", data)}
+      onGenerated={(data) => handleSectionGenerated(slug, "qcms", data)}
     >
       {(data) => <GastriteQcmsStudio data={data} courseSlug={slug} explicationMarkdown={explicationContent} />}
     </LazySection>
@@ -396,7 +420,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       label={SECTION_LAZY_CONFIG.explication!.label}
       endpoint={SECTION_LAZY_CONFIG.explication!.endpoint}
       slug={slug}
-      onGenerated={(data) => handleSectionGenerated("explication", data)}
+      onGenerated={(data) => handleSectionGenerated(slug, "explication", data)}
     >
       {(content) => (
         <article className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "animate-fade-in")}>
@@ -416,7 +440,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       label={SECTION_LAZY_CONFIG.exemples_analogies!.label}
       endpoint={SECTION_LAZY_CONFIG.exemples_analogies!.endpoint}
       slug={slug}
-      onGenerated={(data) => handleSectionGenerated("exemples_analogies", data)}
+      onGenerated={(data) => handleSectionGenerated(slug, "exemples_analogies", data)}
     >
       {(content) => (
         // dir="auto" — this content is predominantly Darija (Arabic script,

@@ -56,6 +56,16 @@ const TRANSLATE_SYSTEM_PROMPT = `Tu es un traducteur médical expert. Traduis st
 // which is worse than making the student re-select a shorter passage.
 const MAX_HIGHLIGHT_CHARS = 800;
 
+// The free-form chat `message` field had NO length cap at all — every other
+// user-controlled input into this route (selectedText above, adjacentContext,
+// sourceText via MAX_CONTEXT_CHARS, history via MAX_HISTORY_MESSAGES) was
+// bounded, but a student could paste an arbitrarily large message directly
+// into the prompt, undermining every token-budget assumption this cost
+// model relies on. Found during a security audit. 4000 chars is generous
+// for a real question (well above what a highlight quick-action's
+// "instruction" text ever needs) while still bounding worst-case spend.
+const MAX_MESSAGE_CHARS = 4000;
+
 // Cap on the small pre/post excerpt taken from the SAME course text
 // immediately around the highlighted passage — e.g. an abbreviation defined
 // two lines earlier, or a dosage unit given in the preceding sentence.
@@ -326,6 +336,12 @@ export async function POST(request: NextRequest) {
 
   if (typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Le champ 'message' est requis." }, { status: 400 });
+  }
+  if (message.length > MAX_MESSAGE_CHARS) {
+    return NextResponse.json(
+      { error: `Ton message est trop long (${message.length} caractères, max ${MAX_MESSAGE_CHARS}). Raccourcis-le et réessaie.` },
+      { status: 400 }
+    );
   }
 
   const isBareGreetingMessage = isBareGreeting(message);

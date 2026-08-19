@@ -42,13 +42,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Layers, Loader2, AlertTriangle, LogIn, PartyPopper, RotateCcw } from "lucide-react";
+import { Layers, Loader2, AlertTriangle, LogIn, Lock, PartyPopper, RotateCcw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { FlipFlashcard } from "@/components/study/FlipFlashcard";
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
-type Status = "loading" | "needs-auth" | "error" | "no-modules-active" | "empty-pool" | "ready";
+type Status = "loading" | "needs-auth" | "error" | "no-modules-active" | "empty-pool" | "quota-exceeded" | "ready";
 
 /** Once fewer than this many UNSEEN cards remain in the loaded deck, a background top-up fires. */
 const LOW_WATER_MARK = 5;
@@ -131,16 +131,23 @@ async function fetchPool(): Promise<
   };
 }
 
+interface RequestMoreCardsResult {
+  items: FlashcardPoolItem[];
+  /** A 403 specifically means the plan's monthly flashcard quota is exhausted — distinct from every OTHER non-ok status (network error, 429, 500), which just means "try again," not "upgrade your plan." Previously any non-ok response silently became an empty array, indistinguishable from "genuinely no more content" — see the two call sites below for why that was actively misleading. Found during a security/UX audit. */
+  quotaExceeded: boolean;
+}
+
 /** `sessionCount` lets the backend enforce SESSION_CAP itself rather than trusting the frontend not to ask again. */
-async function requestMoreCards(sessionCount: number): Promise<FlashcardPoolItem[]> {
+async function requestMoreCards(sessionCount: number): Promise<RequestMoreCardsResult> {
   const res = await fetch("/api/flashcards/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sessionCount }),
   }).catch(() => null);
-  if (!res || !res.ok) return [];
+  if (!res) return { items: [], quotaExceeded: false };
+  if (!res.ok) return { items: [], quotaExceeded: res.status === 403 };
   const body = await res.json().catch(() => ({}));
-  return Array.isArray(body.items) ? body.items : [];
+  return { items: Array.isArray(body.items) ? body.items : [], quotaExceeded: false };
 }
 
 export function ActiveFlashcardsDeck() {
@@ -162,6 +169,11 @@ export function ActiveFlashcardsDeck() {
   const [flipped, setFlipped] = useState(false);
   const [score, setScore] = useState({ correct: 0, incorrect: 0 });
   const [isGeneratingMore, setIsGeneratingMore] = useState(false);
+  // Set when a background top-up (not the initial load — see quota-exceeded
+  // Status for that) hits the plan's flashcard cap. Read only by the
+  // "ran off the end of the deck" render below, to distinguish "you hit
+  // your quota" from the genuine completion message.
+  const [backgroundQuotaExceeded, setBackgroundQuotaExceeded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   // Which localStorage slot this session belongs to — derived from the
   // active module ids returned by the pool fetch, so it's only known once
@@ -219,16 +231,22 @@ export function ActiveFlashcardsDeck() {
       setScore({ correct: 0, incorrect: 0 });
 
       let items = pool.items;
+      let quotaExceededWithNoCards = false;
       if (items.length < INITIAL_BATCH_TARGET && items.length < SESSION_CAP) {
         // Cached pool didn't already cover a full initial batch — generate
         // just enough to reach the target in this one blocking round-trip.
         const topUp = await requestMoreCards(items.length);
         if (cancelled) return;
-        if (topUp.length > 0) items = [...items, ...topUp];
+        if (topUp.items.length > 0) items = [...items, ...topUp.items];
+        else if (topUp.quotaExceeded) quotaExceededWithNoCards = true;
       }
 
       if (items.length === 0) {
-        setStatus("empty-pool");
+        // Distinct from "empty-pool" — the student's plan cap is the reason
+        // there's nothing to show, not "no content exists yet." Showing the
+        // generic empty-pool message here would send them to go generate an
+        // Explication that would ALSO immediately fail on the same cap.
+        setStatus(quotaExceededWithNoCards ? "quota-exceeded" : "empty-pool");
         return;
       }
 
@@ -300,10 +318,14 @@ export function ActiveFlashcardsDeck() {
     generatingRef.current = true;
     setIsGeneratingMore(true);
     requestMoreCards(deckRef.current.length)
-      .then((newItems) => {
+      .then((result) => {
         // Appends only — index is never touched, so the student's current
         // card and scroll position never jump when a background batch lands.
-        if (newItems.length > 0) setDeck((prev) => [...prev, ...newItems].slice(0, SESSION_CAP));
+        if (result.items.length > 0) {
+          setDeck((prev) => [...prev, ...result.items].slice(0, SESSION_CAP));
+        } else if (result.quotaExceeded) {
+          setBackgroundQuotaExceeded(true);
+        }
       })
       .finally(() => {
         generatingRef.current = false;
@@ -390,6 +412,18 @@ export function ActiveFlashcardsDeck() {
     );
   }
 
+  if (status === "quota-exceeded") {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+          <Lock className="h-8 w-8 text-amber-500" />
+          <p className="text-sm font-semibold text-foreground">Limite de flashcards atteinte pour ta formule ce mois-ci.</p>
+          <p className="max-w-sm text-xs text-muted-foreground">Passe à une formule supérieure pour continuer à générer des flashcards.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const current = deck[index];
 
   if (!current) {
@@ -403,6 +437,22 @@ export function ActiveFlashcardsDeck() {
             <>
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               <p className="text-sm text-muted-foreground">Génération de nouvelles flashcards...</p>
+            </>
+          ) : backgroundQuotaExceeded && deck.length < SESSION_CAP ? (
+            // Distinct from the completion message below — the reason no
+            // more cards arrived is the plan's monthly cap, not "genuinely
+            // no more content exists." Previously this branch was
+            // unreachable — a quota-exceeded background top-up silently
+            // returned an empty array, indistinguishable from real
+            // completion, so a student who hit their cap was told "Bravo !"
+            // instead of being told to upgrade. Found during a security/UX
+            // audit. Guarded by `deck.length < SESSION_CAP` — if the
+            // session cap was ALSO reached, that's a genuine, unrelated
+            // completion and gets the normal message instead.
+            <>
+              <Lock className="h-8 w-8 text-amber-500" />
+              <p className="text-sm font-semibold text-foreground">Limite de flashcards atteinte pour ta formule ce mois-ci.</p>
+              <p className="max-w-sm text-xs text-muted-foreground">Passe à une formule supérieure pour continuer à générer des flashcards.</p>
             </>
           ) : (
             <>

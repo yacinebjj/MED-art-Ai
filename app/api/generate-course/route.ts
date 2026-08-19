@@ -48,7 +48,17 @@ export async function POST(request: NextRequest) {
     // --- 1. Réception & validation de l'entrée (fichier PDF OU texte collé) ---
     console.log("[generate-course] (1/3) Réception de la requête...");
 
-    const formData = await request.formData();
+    // Was previously unguarded — a malformed multipart body (bad boundary,
+    // wrong Content-Type) threw here and was only caught by this route's
+    // outer catch-all, returning 500 for what's actually a client input
+    // error. Matches app/api/upload/route.ts's own established pattern for
+    // the identical situation. Found during a security audit.
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch (error) {
+      return NextResponse.json({ success: false, error: `Corps de requête invalide : ${errorMessage(error)}` }, { status: 400 });
+    }
     const candidate = formData.get("file");
     const pastedText = formData.get("text");
 
