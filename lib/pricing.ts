@@ -14,6 +14,12 @@ export interface Plan {
   courseCap: number;
   /** Messages chat "highlight" (Ask MedArt / Translate sur sélection) par mois. */
   highlightMessageCap: number;
+  /** Messages chat libres (question ouverte dans l'assistant, hors sélection) par mois — distinct de highlightMessageCap car ce n'est ni la même UI ni le même usage. */
+  chatMessageCap: number;
+  /** Flashcards générées (cartes, pas appels) par mois — app/api/flashcards/generate génère par lots de 20, clampés à ce qu'il reste de ce quota. */
+  flashcardCap: number;
+  /** Plans de remédiation des points faibles générés par mois. */
+  remediationCap: number;
   features: string[];
 }
 
@@ -35,6 +41,9 @@ export const PLANS: Record<PlanId, Plan> = {
     durationMonths: 1,
     courseCap: 1,
     highlightMessageCap: 1 * HIGHLIGHT_MESSAGES_PER_COURSE,
+    chatMessageCap: 15,
+    flashcardCap: 50,
+    remediationCap: 0,
     features: ["1 cours généré par mois", "10 messages chat (sélection) par mois", "Accès illimité aux cours déjà en cache"],
   },
   basic: {
@@ -45,6 +54,9 @@ export const PLANS: Record<PlanId, Plan> = {
     durationMonths: 1,
     courseCap: 10,
     highlightMessageCap: 10 * HIGHLIGHT_MESSAGES_PER_COURSE,
+    chatMessageCap: 50,
+    flashcardCap: 200,
+    remediationCap: 2,
     features: ["10 cours générés par mois", "100 messages chat (sélection) par mois", "Les 6 sections complètes par cours"],
   },
   pro: {
@@ -55,6 +67,9 @@ export const PLANS: Record<PlanId, Plan> = {
     durationMonths: 1,
     courseCap: 20,
     highlightMessageCap: 20 * HIGHLIGHT_MESSAGES_PER_COURSE,
+    chatMessageCap: 150,
+    flashcardCap: 500,
+    remediationCap: 5,
     features: ["20 cours générés par mois", "200 messages chat (sélection) par mois", "Les 6 sections complètes par cours"],
   },
   max: {
@@ -65,6 +80,9 @@ export const PLANS: Record<PlanId, Plan> = {
     durationMonths: 1,
     courseCap: 30,
     highlightMessageCap: 30 * HIGHLIGHT_MESSAGES_PER_COURSE,
+    chatMessageCap: 300,
+    flashcardCap: 1000,
+    remediationCap: 10,
     features: ["30 cours générés par mois", "300 messages chat (sélection) par mois", "Les 6 sections complètes par cours"],
   },
   semester: {
@@ -75,6 +93,9 @@ export const PLANS: Record<PlanId, Plan> = {
     durationMonths: 3,
     courseCap: 30,
     highlightMessageCap: 30 * HIGHLIGHT_MESSAGES_PER_COURSE,
+    chatMessageCap: 300,
+    flashcardCap: 1000,
+    remediationCap: 10,
     features: ["Accès complet Max pendant 3 mois", "30 cours/mois, 300 messages chat/mois", "Facturé une fois, sans réabonnement mensuel"],
   },
   annual: {
@@ -85,6 +106,9 @@ export const PLANS: Record<PlanId, Plan> = {
     durationMonths: 12,
     courseCap: 30,
     highlightMessageCap: 30 * HIGHLIGHT_MESSAGES_PER_COURSE,
+    chatMessageCap: 300,
+    flashcardCap: 1000,
+    remediationCap: 10,
     features: ["Accès complet Max pendant 12 mois", "30 cours/mois, 300 messages chat/mois", "Le tarif le plus avantageux à l'année"],
   },
 };

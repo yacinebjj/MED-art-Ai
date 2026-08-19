@@ -5,7 +5,13 @@ import { HAIKU_MODEL, OpenRouterError, streamOpenRouter, type ChatMessageInput }
 import { errorMessage } from "@/lib/course-generation-shared";
 import { lookupSemanticCache, storeSemanticCacheEntry } from "@/lib/ai/semantic-cache";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { canSendHighlightMessage, recordHighlightMessage } from "@/lib/subscription";
+import {
+  reserveChatMessage,
+  refundChatMessage,
+  reserveChatMessageDaily,
+  reserveHighlightMessage,
+  refundHighlightMessage,
+} from "@/lib/subscription";
 import { CHAT_MAX_CONTEXT_CHARS } from "@/lib/chat-constants";
 
 export const runtime = "nodejs";
@@ -303,12 +309,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Plan quota gate — highlight mode only. The free-form chat input and
-  // normal quick-context questions aren't metered by plan (only by the
-  // generic per-route rate limit above); this is deliberately scoped to the
-  // one mode the 6 plans actually specify a "messages highlight" cap for.
+  // Plan quota gate — highlight mode's own pool (chatMessageCap, the
+  // free-form pool below, is checked separately after the semantic-cache
+  // lookup — see the CAS 2 section below for why it can't be checked here).
   if (isHighlightMode) {
-    const gate = await canSendHighlightMessage(user);
+    const gate = await reserveHighlightMessage(user);
     if (!gate.allowed) {
       return NextResponse.json({ error: gate.reason }, { status: 403 });
     }
@@ -346,14 +351,47 @@ export async function POST(request: NextRequest) {
 
   // Save the student's message BEFORE anything else (cache lookup or model
   // call) — if either fails a moment later, their question is still on record.
+  // The row's own id is captured (not just discarded) so the streaming
+  // flush() below can detect a real, otherwise-invisible race: if the
+  // student clicks "Nouvelle conversation" (DELETE /api/courses/chat, see
+  // that route) while THIS reply is still generating, that row gets wiped
+  // mid-flight — without this check, the assistant's reply would still
+  // land in course_chat_history once the stream finishes, resurrecting a
+  // one-sided, orphaned message right after the student was told the
+  // conversation was cleared.
+  let userMessageId: number | null = null;
   if (supabase && user) {
-    const { error } = await supabase
+    const { data: insertedRow, error } = await supabase
       .from("course_chat_history")
-      .insert({ user_id: user.id, course_slug: courseSlug, role: "user", content: message });
+      .insert({ user_id: user.id, course_slug: courseSlug, role: "user", content: message })
+      .select("id")
+      .single();
     if (error) {
       console.error("[courses/chat POST] Échec sauvegarde message utilisateur:", { code: error.code, message: error.message });
       // Not fatal — the student can still get an answer even if we failed
       // to log their side of it.
+    } else {
+      userMessageId = (insertedRow as { id: number }).id;
+    }
+  }
+
+  // Daily chat gate — ATOMICALLY reserves (checks AND increments in one
+  // step, see reserveChatMessageDaily's own comment) BEFORE the semantic-
+  // cache lookup below, so it applies to cache HITS too, not just real
+  // generations. Deliberate: DAILY_CHAT_LIMIT exists to bound request
+  // VOLUME (abuse/scraping prevention), not spend — a script hammering
+  // already-cached questions 500 times a day is exactly what this must
+  // still block, even though every one of those answers is free.
+  // reserveChatMessage's monthly chatMessageCap is NOT reserved here — that
+  // cap represents paid-usage value to the student, and a $0 cache hit
+  // shouldn't eat into it (unlike the daily cap, which is purely an
+  // anti-abuse throttle, not a value ledger). No refund path needed for
+  // this one: a cache hit can't fail, and the real-generation path reserves
+  // it here, before anywhere the call could fail.
+  if (!isHighlightMode) {
+    const dailyGate = await reserveChatMessageDaily(user);
+    if (!dailyGate.allowed) {
+      return NextResponse.json({ error: dailyGate.reason }, { status: 403 });
     }
   }
 
@@ -391,6 +429,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // No separate "record" call needed here anymore — reserveChatMessageDaily
+    // above already incremented the daily counter atomically before this
+    // cache lookup even ran. The monthly value cap (chatMessageCap) was
+    // never reserved for this path, and stays that way — only the abuse
+    // throttle applies to a free hit.
+
     return new NextResponse(cacheHit.answer, {
       status: 200,
       headers: {
@@ -400,6 +444,21 @@ export async function POST(request: NextRequest) {
         "X-Cache-Similarity": cacheHit.similarity.toFixed(4),
       },
     });
+  }
+
+  // Monthly value cap — atomically RESERVED only here, after the semantic-
+  // cache lookup came back empty: this is a genuine paid generation about to
+  // happen, and a $0 cache hit must never consume it, mirroring
+  // reserveGeneration's "cache hits don't count" rule. The daily
+  // abuse-throttle was already reserved earlier (before the cache lookup)
+  // since it applies to hits too. isHighlightMode is excluded — it already
+  // reserved its own separate pool above. If the generation below then
+  // fails before producing a reply, refundChatMessage() undoes this.
+  if (!isHighlightMode) {
+    const chatGate = await reserveChatMessage(user);
+    if (!chatGate.allowed) {
+      return NextResponse.json({ error: chatGate.reason }, { status: 403 });
+    }
   }
 
   // CAS 2 — Cache Miss: resolve the course's source text (deferred to here —
@@ -418,7 +477,17 @@ export async function POST(request: NextRequest) {
     sourceText = typeof inlineSourceText === "string" && inlineSourceText.trim() ? inlineSourceText : null;
     if (!sourceText && courseSlug && isSupabaseConfigured()) {
       const admin = getSupabaseAdmin();
-      const { data } = await admin.from("courses").select("raw_text").eq("slug", courseSlug).maybeSingle();
+      // Previously ignored `error` entirely — a genuine DB failure here was
+      // indistinguishable from "this course has no raw_text", so the chat
+      // silently answered with zero course context instead of surfacing
+      // the failure. Still fails open (log, don't 500): the assistant can
+      // legitimately answer general questions with no course loaded, so a
+      // transient read failure on this ONE course's context shouldn't take
+      // the whole chat down. Found during a security audit.
+      const { data, error } = await admin.from("courses").select("raw_text").eq("slug", courseSlug).maybeSingle();
+      if (error) {
+        console.error("[courses/chat POST] Échec lecture raw_text (contexte de cours perdu pour cette réponse):", { code: error.code, message: error.message });
+      }
       sourceText = (data as { raw_text: string | null } | null)?.raw_text ?? null;
     }
   }
@@ -475,6 +544,25 @@ export async function POST(request: NextRequest) {
         await Promise.all([
           (async () => {
             if (!supabase || !user) return;
+
+            // If this exchange's own user-message row is gone, the
+            // conversation was explicitly reset (DELETE /api/courses/chat,
+            // "Nouvelle conversation") while this reply was still
+            // generating — persisting it now would resurrect a one-sided,
+            // orphaned message right after the student was told the
+            // history was cleared. Only checked when an id was actually
+            // captured; if that first insert itself failed for an
+            // unrelated reason, there's no conflicting row to worry about
+            // and the reply is persisted as before.
+            if (userMessageId !== null) {
+              const { data: stillExists } = await supabase
+                .from("course_chat_history")
+                .select("id")
+                .eq("id", userMessageId)
+                .maybeSingle();
+              if (!stillExists) return;
+            }
+
             const { error } = await supabase
               .from("course_chat_history")
               .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: fullReply });
@@ -485,7 +573,9 @@ export async function POST(request: NextRequest) {
           isQuickAction || isBareGreetingMessage
             ? Promise.resolve()
             : storeSemanticCacheEntry({ question: message, answer: fullReply, courseSlug }),
-          isHighlightMode ? recordHighlightMessage(user.id) : Promise.resolve(),
+          // No "record usage" call needed here anymore — reserveHighlightMessage
+          // / reserveChatMessage / reserveChatMessageDaily above already
+          // incremented atomically, before streamOpenRouter was even called.
         ]);
       },
     });
@@ -499,6 +589,19 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    // Refunds the reservation(s) taken above — but only covers a failure
+    // while SETTING UP the stream (streamOpenRouter() itself throwing,
+    // e.g. connection/auth/upstream-rate-limit errors before any bytes
+    // stream back). A failure mid-stream, AFTER this function has already
+    // returned the Response to Next.js, is a known, separate gap this fix
+    // does not close — flush() may not even run in that case, so neither
+    // persistence nor a refund happens today. Flagged, not silently claimed
+    // as solved; a real fix needs an error handler on the stream itself.
+    if (isHighlightMode) {
+      await refundHighlightMessage(user.id);
+    } else {
+      await refundChatMessage(user.id);
+    }
     if (error instanceof OpenRouterError) {
       console.error(`[courses/chat POST] Erreur OpenRouter (status ${error.status}):`, error.message);
       return NextResponse.json({ error: error.message }, { status: error.status });

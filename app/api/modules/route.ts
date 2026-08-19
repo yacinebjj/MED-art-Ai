@@ -7,14 +7,31 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Public list of every module (id, name) — powers the dashboard's "Mes modules" section and the module picker in the move-course dialog. */
+/**
+ * SECURITY FIX: this used to be a genuinely unscoped SELECT ("Public list of
+ * every module") despite `modules` being documented as each student's own
+ * personal, ad-hoc folder (see supabase/schema.sql's comment on this table)
+ * — every student saw and could collide with every other student's custom
+ * folder names. Now requires auth and scopes to the caller's own rows.
+ * Powers the dashboard's "Mes modules" section and the module picker in the
+ * move-course dialog.
+ */
 export async function GET() {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ modules: [] });
   }
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.from("modules").select("id, name").order("name", { ascending: true });
+  const { data, error } = await supabase
+    .from("modules")
+    .select("id, name")
+    .eq("user_id", user.id)
+    .order("name", { ascending: true });
 
   if (error || !data) {
     return NextResponse.json({ modules: [] });
@@ -55,13 +72,24 @@ export async function POST(request: NextRequest) {
   }
   const name = sanitizeForPostgres(rawName.trim());
 
+  // SECURITY FIX: previously inserted with no user_id at all, into a table
+  // globally unique on `name` alone — a second student naming a folder the
+  // same thing as an existing one would silently reuse (and corrupt) that
+  // other student's row. Now scoped: the uniqueness constraint itself is
+  // (user_id, name), so two students CAN both have a "Cardiologie" folder.
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.from("modules").insert({ name }).select("id, name").single();
+  const { data, error } = await supabase.from("modules").insert({ name, user_id: user.id }).select("id, name").single();
 
   if (error) {
-    // Unique violation: the module already exists — return it instead of failing the whole action.
+    // Unique violation: THIS student already has a module with this name —
+    // return their existing row instead of failing the whole action.
     if (error.code === "23505") {
-      const { data: existing } = await supabase.from("modules").select("id, name").eq("name", name).maybeSingle();
+      const { data: existing } = await supabase
+        .from("modules")
+        .select("id, name")
+        .eq("user_id", user.id)
+        .eq("name", name)
+        .maybeSingle();
       if (existing) {
         return NextResponse.json({ success: true, module: existing });
       }

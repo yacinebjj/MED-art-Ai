@@ -12,6 +12,7 @@ import {
 import { STUDIO_SCHEMAS } from "@/lib/ai/studio-schemas";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import type { DemoSectionId } from "@/lib/demo-content";
 
 export const runtime = "nodejs";
@@ -33,6 +34,10 @@ function isValidSection(value: unknown): value is DemoSectionId {
  * document just to tweak one already-generated tile. Persists straight to
  * the same column (no new row), mirroring
  * app/api/studio/courses/[id]/route.ts's PATCH.
+ *
+ * Gated by reserveGeneration()/refundGeneration() (lib/subscription.ts) —
+ * shares the plan's courseCap pool with /api/studio/generate, since this
+ * always makes a real OpenRouter call (no cache tier here).
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -103,6 +108,20 @@ export async function POST(request: NextRequest) {
   const { maxTokens } = STUDIO_PROMPT_CONFIG[section];
   const sectionKey = STUDIO_SECTION_KEYS[section];
 
+  // Plan quota RESERVATION — deliberately here, after every validation/
+  // existence check above (a malformed request or "rien à régénérer" never
+  // reaches this point, so it never burns a quota unit for a call that was
+  // always going to fail before touching OpenRouter), and deliberately
+  // BEFORE the real call below: atomic check-and-increment in one step (see
+  // reserveGeneration's own comment — closes a TOCTOU race the previous
+  // check-then-record split had). refundGeneration() undoes it below if the
+  // call then fails. Shares courseCap with /api/studio/generate — a
+  // regeneration is a real, billable OpenRouter call too.
+  const quotaGate = await reserveGeneration(user);
+  if (!quotaGate.allowed) {
+    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+  }
+
   let raw: string;
   try {
     raw = await callOpenRouter(
@@ -113,6 +132,7 @@ export async function POST(request: NextRequest) {
       { model: STUDIO_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
     );
   } catch (error) {
+    await refundGeneration(user.id);
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }
@@ -137,6 +157,7 @@ export async function POST(request: NextRequest) {
     }
     sanitized = result.data;
   } catch (error) {
+    await refundGeneration(user.id);
     console.error(`[studio/regenerate:${section}] Parsing/validation échoué :`, error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
   }
@@ -152,6 +173,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${updateError.message}` }, { status: 500 });
   }
   if (count === 0) {
+    // Content WAS generated (real cost incurred, reserved above) but the
+    // save failed — not refunded, same policy as /api/studio/generate: the
+    // quota tracks real AI spend, not whether the subsequent DB write also
+    // succeeded.
     return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
   }
 

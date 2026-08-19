@@ -3,6 +3,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { isAdminUser } from "@/lib/admin";
 
 export const runtime = "nodejs";
 // Without this, Next.js treats this GET Route Handler as static and caches
@@ -93,6 +94,27 @@ export async function PATCH(request: NextRequest, { params }: { params: { slug: 
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
   }
 
+  // SECURITY FIX: `courses` is the shared, hand-authored showcase catalog
+  // (Gastrite, Pleurésie, ...) — it has NO user_id/ownership column at all,
+  // unlike studio_courses. This PATCH previously had no ownership check
+  // whatsoever: any authenticated student could rename or re-module ANY
+  // shared course via the dashboard's "Renommer"/"Ajouter à un module"
+  // kebab menu (components/dashboard/RenameCourseDialog.tsx,
+  // MoveToModuleDialog.tsx), corrupting shared content for every student.
+  // Found during a security audit. Since there's no per-row owner to scope
+  // by (and no admin/role system exists anywhere in this codebase), this
+  // now restricts the write to a small env-driven admin allowlist (see
+  // lib/admin.ts) rather than any authenticated user. If curating the
+  // shared catalog should actually be open to all students, that's a real
+  // product decision to make explicitly — not something to default back to
+  // silently by leaving this unrestricted.
+  if (!isAdminUser(user.id)) {
+    return NextResponse.json(
+      { success: false, error: "Réservé aux administrateurs — ce cours fait partie du catalogue partagé." },
+      { status: 403 }
+    );
+  }
+
   const rl = rateLimit(`courses-patch:${user.id}`, RATE_LIMITS.mutation);
   if (!rl.allowed) {
     return NextResponse.json(
@@ -167,6 +189,16 @@ export async function DELETE(_request: NextRequest, { params }: { params: { slug
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  // SECURITY FIX — same issue and same fix as PATCH above: `courses` has no
+  // owner column, this had no access check at all, and any student could
+  // permanently delete a shared showcase course for everyone.
+  if (!isAdminUser(user.id)) {
+    return NextResponse.json(
+      { success: false, error: "Réservé aux administrateurs — ce cours fait partie du catalogue partagé." },
+      { status: 403 }
+    );
   }
 
   const rl = rateLimit(`courses-delete:${user.id}`, RATE_LIMITS.mutation);

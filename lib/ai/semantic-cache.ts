@@ -65,12 +65,19 @@ export async function lookupSemanticCache(params: {
     }
 
     const matches = data as CacheMatchRow[] | null;
-    if (!matches || matches.length === 0) return null;
+    if (!matches || matches.length === 0) {
+      // Real hit/miss telemetry — added so the actual cache hit-rate can be
+      // measured from production logs instead of assumed for a financial
+      // projection. Only logged when this function genuinely ran and found
+      // nothing (RPC succeeded, zero matches above SEMANTIC_CACHE_THRESHOLD)
+      // — NOT for the quick-action/bare-greeting cases that skip this
+      // function entirely, which aren't cache misses, they're not lookups.
+      console.log("[SEMANTIC_CACHE] 🔴 MISS - Falling back to OpenRouter. Course:", params.courseSlug ?? "aucun");
+      return null;
+    }
 
     const best = matches[0];
-    console.log(
-      `[SEMANTIC CACHE] HIT - 0$ API cost (similarité ${best.similarity.toFixed(4)}, seuil ${SEMANTIC_CACHE_THRESHOLD}, cours="${params.courseSlug ?? "toutes"}")`
-    );
+    console.log("[SEMANTIC_CACHE] 🟢 HIT - Score:", best.similarity.toFixed(4), "Course:", params.courseSlug ?? "toutes");
     return { answer: best.answer, similarity: best.similarity, matchedQuestion: best.question };
   } catch (error) {
     console.error(

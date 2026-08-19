@@ -138,17 +138,26 @@ Basé strictement sur ce texte, génère le contenu demandé, au format JSON exa
 
 /**
  * Per-type rewrite/regenerate instruction — see buildStudioRegeneratePrompt.
- * Explication/résumé/exemples_analogies ask for a light rewrite (same facts,
- * new phrasing/formatting, bounded percentage); cas_clinique/qcm ask for
- * genuinely NEW content on the same medical topics instead, since a "light
- * rewrite" of a clinical case or a QCM question would just be the same
- * question reworded, not a fresh one worth practicing with again.
+ * Explication/résumé ask for a 90/10 light rewrite (90% of substance,
+ * structure and facts held IDENTICAL, only ~10% of phrasing/transitions/
+ * style reworked); exemples_analogies keeps its own separate ~10% variation
+ * wording; cas_clinique/qcm ask for genuinely NEW content on the same
+ * medical topics instead, since a "light rewrite" of a clinical case or a
+ * QCM question would just be the same question reworded, not a fresh one
+ * worth practicing with again.
+ *
+ * NOTE on token cost: this wording change does NOT reduce completion
+ * tokens — a 90%-preserved rewrite is, by definition, the same LENGTH as
+ * the original (only ~10% of wording changes, not 10% of the length), so
+ * maxTokens stays at the section's full cap in buildStudioRegeneratePrompt
+ * below, same as before. See that function's own comment for what this
+ * change actually does and doesn't save.
  */
 const REGENERATE_INSTRUCTIONS: Record<DemoSectionId, string> = {
   explication:
-    "Réécris cette explication. Garde exactement les mêmes informations mais change le style, la formulation et le vocabulaire d'environ 20%.",
+    "Réécris cette explication en gardant 90% du contenu IDENTIQUE : mêmes informations médicales, même structure, même exactitude factuelle, mot pour mot là où c'est déjà correct. Modifie UNIQUEMENT environ 10% — la formulation, les mots de transition, le rythme des phrases — pour que ça sonne fraîchement écrit, sans jamais sacrifier la continuité pédagogique ni la longueur du contenu.",
   resume:
-    "Modifie légèrement le formatage, les puces et la structure de ce résumé (changement maximum de 20%), en conservant tous les faits essentiels.",
+    "Modifie ce résumé en gardant 90% du contenu IDENTIQUE : mêmes faits essentiels, même structure de puces, même niveau de détail. Modifie UNIQUEMENT environ 10% — le formatage, l'ordre de présentation, quelques tournures — sans jamais retirer d'information ni raccourcir le résumé.",
   cas_clinique:
     "En te basant sur le contexte médical de ces cas cliniques, génère des cas cliniques COMPLÈTEMENT NOUVEAUX et différents (autres archétypes, autre présentation clinique), sur les mêmes sujets médicaux. Ne réutilise aucun des cas ci-dessous.",
   qcm: "Lis ces QCM. Maintenant, génère des questions QCM COMPLÈTEMENT NOUVELLES et DIFFÉRENTES sur les mêmes sujets médicaux. Ne répète jamais exactement les mêmes questions ni les mêmes formulations.",
@@ -158,13 +167,29 @@ const REGENERATE_INSTRUCTIONS: Record<DemoSectionId, string> = {
 
 /**
  * Builds the system prompt for a "Regénérer" call (see
- * app/api/studio/regenerate/route.ts). CRITICAL cost/token difference from
- * buildStudioSystemPrompt above: the original source document is NEVER
- * refetched or resent here. Only the section's OWN already-generated content
- * (read straight from studio_courses, no source join) is sent back to the
- * model — together with the exact same JSON-shape instructions the original
- * generation used (so STUDIO_SCHEMAS validation still passes unchanged) plus
- * the type-specific rewrite/regenerate instruction above.
+ * app/api/studio/regenerate/route.ts). The original source document is
+ * NEVER refetched or resent here — only the section's OWN already-generated
+ * content (read straight from studio_courses, no source join) goes back to
+ * the model — together with the exact same JSON-shape instructions the
+ * original generation used (so STUDIO_SCHEMAS validation still passes
+ * unchanged) plus the type-specific rewrite/regenerate instruction above.
+ * This was ALREADY true before the 90/10 wording above — it isn't new.
+ *
+ * Honest cost note: this does NOT mean regenerate is cheaper than a fresh
+ * generation. Prompt tokens here are the previously-generated content itself
+ * (e.g. ~21,700 tokens for a full Explication, per this project's own
+ * measured data), which is larger than a fresh call's prompt (the source
+ * text truncated to MAX_SOURCE_CHARS, ~3,800 tokens measured) — so prompt
+ * tokens actually GROW for content-heavy sections. And completion tokens
+ * (the dominant cost driver — priced ~5x prompt tokens, and normally ~85%+
+ * of total tokens on a full section) are UNCHANGED: maxTokens stays at the
+ * section's full cap, because a 90%-preserved rewrite is still the same
+ * LENGTH of output, not a shorter one. There is no safe way to shrink
+ * completion tokens for a "keep 90%" task without risking truncating
+ * legitimate preserved content. Net effect: a light-rewrite regenerate call
+ * costs roughly the SAME as a fresh generation for that section, sometimes
+ * slightly more — "not resending the raw PDF" was never the expensive part
+ * to begin with.
  */
 export function buildStudioRegeneratePrompt(actionType: DemoSectionId, existingContent: string): string {
   const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
@@ -178,4 +203,51 @@ ${existingContent}
 ${instruction}
 
 Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
+}
+
+/**
+ * Builds the system prompt for the studio_content_cache FUZZY-match path
+ * (see lib/studio-content-cache.ts and app/api/studio/generate/route.ts) —
+ * a student's uploaded text came back ~85%+ similar (MinHash) to another
+ * student's already-cached course, meaning it's genuinely the same
+ * reference material with real differences (a different professor's
+ * formatting/titles, added local notes), not a fresh, unrelated course.
+ *
+ * Deliberately NOT a full regeneration from scratch (that would throw away
+ * the whole cost-saving point of the cache) and NOT a verbatim serve of the
+ * cached original either (the new student's actual uploaded text may say
+ * something the cached version doesn't — silently ignoring that would be
+ * wrong, not just unoptimized). Instead: the model gets BOTH the cached
+ * base output and the new source text, and is instructed to adapt only
+ * where they genuinely differ, at a much smaller maxTokens ceiling than a
+ * fresh generation (see STUDIO_DELTA_MAX_TOKENS below) — an edit pass, not
+ * a rewrite.
+ */
+export function buildStudioDeltaAdaptationPrompt(actionType: DemoSectionId, baseContentJson: string, newSourceText: string): string {
+  const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
+  return `${basePrompt}
+
+Un autre étudiant a déjà généré le contenu suivant pour un cours quasi-identique (même matière médicale de fond) :
+
+${baseContentJson}
+
+Voici maintenant le texte source EXACT fourni par CE nouvel étudiant, qui correspond à la même matière mais avec des différences réelles (formulation, titres, notes de cours spécifiques à sa faculté, informations supplémentaires) :
+
+${newSourceText}
+
+INSTRUCTION D'ADAPTATION (delta uniquement — PAS une réécriture complète) : compare les deux et adapte le contenu ci-dessus UNIQUEMENT là où le nouveau texte source diffère réellement (titres, terminologie spécifique, informations supplémentaires présentes dans le nouveau texte mais absentes du contenu de référence, structure). Conserve strictement identique tout ce qui est déjà exact et commun aux deux — ne réinvente jamais une information déjà correcte. Si le nouveau texte source ne contient aucune information qui contredit ou complète le contenu de référence, renvoie-le tel quel.
+
+Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
+}
+
+/**
+ * A fraction of the full generation's own ceiling — this is an EDIT pass
+ * over already-generated content, not a fresh generation, so it should
+ * never need anywhere near as much output. Applied per actionType (each
+ * section's own STUDIO_PROMPT_CONFIG maxTokens), never a flat constant,
+ * since explication/qcm/cas_clinique already have very different ceilings
+ * from each other for the SAME reason at full-generation time.
+ */
+export function studioDeltaMaxTokens(actionType: DemoSectionId): number {
+  return Math.round(STUDIO_PROMPT_CONFIG[actionType].maxTokens * 0.35);
 }

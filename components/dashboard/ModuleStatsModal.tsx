@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, BarChart3, CircleCheck, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
+import { ErrorState } from "@/components/ui/ErrorState";
 
 interface ModuleCourseProgress {
   id: number;
@@ -44,9 +45,15 @@ export function ModuleStatsModal({
 }) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ModuleStatsResponse | null>(null);
+  // Distinct from `data === null && !loading` (genuinely 0 courses) — a
+  // failed fetch used to fall through to the exact same "Aucun cours" empty
+  // state, silently telling a student they have no data when the request
+  // actually failed. Found during a security audit.
+  const [loadError, setLoadError] = useState(false);
   // Keyed by moduleId — re-opening this same module's stats within the page
   // visit (e.g. closing then reopening the dropdown) is then instant.
   const cacheRef = useRef<Map<number, ModuleStatsResponse>>(new Map());
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -55,19 +62,30 @@ export function ModuleStatsModal({
     if (cached) {
       setData(cached);
       setLoading(false);
+      setLoadError(false);
       return;
     }
 
     let cancelled = false;
     setLoading(true);
     setData(null);
+    setLoadError(false);
 
     fetch(`/api/studio/courses/stats?moduleId=${moduleId}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((body: ModuleStatsResponse) => {
-        if (cancelled || !body.success) return;
+        if (cancelled) return;
+        if (!body.success) throw new Error("La réponse indique un échec.");
         cacheRef.current.set(moduleId, body);
         setData(body);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("[ModuleStatsModal] Échec du chargement des statistiques:", error);
+        setLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -76,7 +94,7 @@ export function ModuleStatsModal({
     return () => {
       cancelled = true;
     };
-  }, [open, moduleId]);
+  }, [open, moduleId, retryToken]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -95,6 +113,8 @@ export function ModuleStatsModal({
               <div key={i} className="h-10 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
             ))}
           </div>
+        ) : loadError ? (
+          <ErrorState message="Échec du chargement des statistiques du module." onRetry={() => setRetryToken((t) => t + 1)} />
         ) : !data || data.courseCount === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 py-10 text-center dark:border-slate-700 dark:bg-slate-800/40">
             <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>

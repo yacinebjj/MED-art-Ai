@@ -5,6 +5,7 @@ import { animate, motion, useMotionValue } from "framer-motion";
 import { ArrowDownRight, BarChart3, BookOpen, Brain, CircleCheck, Target, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent } from "@/components/ui/Dialog";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { computeGlobalScore, scoreColorTier, type CourseStats } from "@/lib/course-stats";
 import { resolveWeakChapters, type WeakChapter, type WeakQcmRow } from "@/lib/weak-points";
 
@@ -165,7 +166,19 @@ function LinearStatRow({
  * fallback when the course's content can't be parsed (e.g. the hardcoded
  * legacy Appendicite course, which has no real `courses` row).
  */
-function WeakPointsSection({ loading, chapters, fallbackCount }: { loading: boolean; chapters: WeakChapter[] | null; fallbackCount: number }) {
+function WeakPointsSection({
+  loading,
+  loadError,
+  chapters,
+  fallbackCount,
+  onRetry,
+}: {
+  loading: boolean;
+  loadError: boolean;
+  chapters: WeakChapter[] | null;
+  fallbackCount: number;
+  onRetry: () => void;
+}) {
   return (
     <div className="mt-8 border-t border-slate-100 pt-6 dark:border-slate-800">
       <div className="mb-3 flex items-center gap-2">
@@ -179,6 +192,8 @@ function WeakPointsSection({ loading, chapters, fallbackCount }: { loading: bool
             <div key={i} className="h-9 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
           ))}
         </div>
+      ) : loadError ? (
+        <ErrorState message="Échec du chargement des points faibles." onRetry={onRetry} />
       ) : chapters !== null && chapters.length > 0 ? (
         <div className="space-y-2">
           {chapters.slice(0, 4).map((chapter) => (
@@ -221,6 +236,13 @@ export function CourseStatsModal({ open, onOpenChange, courseTitle, courseSlug, 
   const [weakLoading, setWeakLoading] = useState(false);
   const [weakChapters, setWeakChapters] = useState<WeakChapter[] | null>(null);
   const [weakRawCount, setWeakRawCount] = useState(0);
+  // Distinct from "chapters === [] " (genuinely zero weak points) — a
+  // network failure previously fell through to the exact same "Aucun point
+  // faible identifié" positive message a struggling student could see when
+  // the request to find their weak points simply failed. Found during a
+  // security audit.
+  const [weakLoadError, setWeakLoadError] = useState(false);
+  const [weakRetryToken, setWeakRetryToken] = useState(0);
 
   // One instance of this modal is reused across every course in the module
   // (see ModuleSourcesPanel) — caching by courseSlug means re-opening stats
@@ -240,11 +262,13 @@ export function CourseStatsModal({ open, onOpenChange, courseTitle, courseSlug, 
       setWeakChapters(cached.weakChapters);
       setWeakRawCount(cached.weakRawCount);
       setWeakLoading(false);
+      setWeakLoadError(false);
       return;
     }
 
     let cancelled = false;
     setWeakLoading(true);
+    setWeakLoadError(false);
 
     (async () => {
       try {
@@ -257,7 +281,8 @@ export function CourseStatsModal({ open, onOpenChange, courseTitle, courseSlug, 
           fetch(`/api/srs/course-weak-points?courseSlug=${encodeURIComponent(courseSlug)}`),
           fetch(`/api/courses/slug/${courseSlug}`),
         ]);
-        const weakBody = await weakRes.json().catch(() => ({}));
+        if (!weakRes.ok) throw new Error(`HTTP ${weakRes.status} sur course-weak-points`);
+        const weakBody = await weakRes.json();
         const weakQcms: WeakQcmRow[] = weakBody.weakQcms ?? [];
         if (cancelled) return;
 
@@ -275,6 +300,10 @@ export function CourseStatsModal({ open, onOpenChange, courseTitle, courseSlug, 
         cacheRef.current.set(courseSlug, { weakChapters: chapters, weakRawCount: weakQcms.length });
         setWeakRawCount(weakQcms.length);
         setWeakChapters(chapters);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("[CourseStatsModal] Échec du chargement des points faibles:", error);
+        setWeakLoadError(true);
       } finally {
         if (!cancelled) setWeakLoading(false);
       }
@@ -283,7 +312,7 @@ export function CourseStatsModal({ open, onOpenChange, courseTitle, courseSlug, 
     return () => {
       cancelled = true;
     };
-  }, [open, courseSlug]);
+  }, [open, courseSlug, weakRetryToken]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -325,7 +354,13 @@ export function CourseStatsModal({ open, onOpenChange, courseTitle, courseSlug, 
                   <LinearStatRow icon={BookOpen} label="Avancement des chapitres" pct={stats.readingPct} active={open} delay={0.45} />
                 </div>
 
-                <WeakPointsSection loading={weakLoading} chapters={weakChapters} fallbackCount={weakRawCount} />
+                <WeakPointsSection
+                  loading={weakLoading}
+                  loadError={weakLoadError}
+                  chapters={weakChapters}
+                  fallbackCount={weakRawCount}
+                  onRetry={() => setWeakRetryToken((t) => t + 1)}
+                />
               </>
             )}
           </motion.div>

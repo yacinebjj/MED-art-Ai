@@ -12,6 +12,12 @@ export interface SubscriptionRow {
   generations_used: number;
   generations_period_start: string | null;
   highlight_messages_used: number;
+  chat_messages_used: number;
+  flashcards_used: number;
+  remediation_used: number;
+  /** Daily counter, deliberately on its OWN 24h clock — see ensureFreshDailyChatPeriod — not the monthly generations_period_start every other counter shares. */
+  daily_chat_messages_used: number;
+  daily_chat_reset_at: string | null;
 }
 
 export async function getSubscription(userId: string): Promise<SubscriptionRow | null> {
@@ -22,7 +28,7 @@ export async function getSubscription(userId: string): Promise<SubscriptionRow |
     const { data, error } = await supabase
       .from("subscriptions")
       .select(
-        "user_id, email, plan, status, period_start, period_end, generations_used, generations_period_start, highlight_messages_used"
+        "user_id, email, plan, status, period_start, period_end, generations_used, generations_period_start, highlight_messages_used, chat_messages_used, flashcards_used, remediation_used, daily_chat_messages_used, daily_chat_reset_at"
       )
       .eq("user_id", userId)
       .maybeSingle();
@@ -80,11 +86,12 @@ async function ensureFreshUsagePeriod(userId: string, sub: SubscriptionRow): Pro
   if (!isUsagePeriodStale(sub.generations_period_start)) return sub;
 
   const now = new Date().toISOString();
+  const reset = { generations_used: 0, highlight_messages_used: 0, chat_messages_used: 0, flashcards_used: 0, remediation_used: 0 };
   try {
     const supabase = getSupabaseAdmin();
     const { error } = await supabase
       .from("subscriptions")
-      .update({ generations_used: 0, highlight_messages_used: 0, generations_period_start: now, updated_at: now })
+      .update({ ...reset, generations_period_start: now, updated_at: now })
       .eq("user_id", userId);
 
     if (error) {
@@ -96,7 +103,45 @@ async function ensureFreshUsagePeriod(userId: string, sub: SubscriptionRow): Pro
     return sub;
   }
 
-  return { ...sub, generations_used: 0, highlight_messages_used: 0, generations_period_start: now };
+  return { ...sub, ...reset, generations_period_start: now };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Flat, plan-independent daily cap on free-form chat — 20 msgs/day for every tier, distinct from chatMessageCap's monthly-per-plan pool. Both must pass; whichever is tighter for a given student blocks first. */
+const DAILY_CHAT_LIMIT = 20;
+
+function isDailyPeriodStale(resetAt: string | null): boolean {
+  if (!resetAt) return true;
+  return Date.now() - new Date(resetAt).getTime() >= DAY_MS;
+}
+
+/**
+ * Same lazy-rollover shape as ensureFreshUsagePeriod, but on its OWN 24h
+ * clock (daily_chat_reset_at) instead of the monthly generations_period_start
+ * every other counter shares — a daily cap must reset every day regardless
+ * of where a student is in their monthly billing cycle.
+ */
+async function ensureFreshDailyChatPeriod(userId: string, sub: SubscriptionRow): Promise<SubscriptionRow> {
+  if (!isDailyPeriodStale(sub.daily_chat_reset_at)) return sub;
+
+  const now = new Date().toISOString();
+  try {
+    const supabase = getSupabaseAdmin();
+    const { error } = await supabase
+      .from("subscriptions")
+      .update({ daily_chat_messages_used: 0, daily_chat_reset_at: now, updated_at: now })
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Failed to roll over daily chat quota (fail-open, using stale count)", error);
+      return sub;
+    }
+  } catch (error) {
+    console.error("Daily chat quota rollover threw (fail-open, using stale count)", error);
+    return sub;
+  }
+
+  return { ...sub, daily_chat_messages_used: 0, daily_chat_reset_at: now };
 }
 
 interface GateUser {
@@ -108,18 +153,27 @@ interface GateUser {
 type GateResult = { allowed: true } | { allowed: false; reason: string };
 
 /**
- * Shared gate logic for both quota kinds (course generations, highlight chat
- * messages) — trial first (unlimited, unchanged from before Freemium
- * existed), then the effective plan's monthly cap. A missing subscriptions
- * row (pre-migration account, or a signup-trigger hiccup) fails OPEN rather
- * than blocking: the trigger is expected to create one for every account
- * going forward, so hitting `null` here should be rare and must never lock
- * a real student out entirely.
+ * SECURITY FIX (replaces the old checkQuota + separate record*() pattern):
+ * that pattern read `used`, compared to `cap` in application code, then
+ * incremented in a SEPARATE call after the OpenRouter response — a real
+ * TOCTOU race, since N concurrent requests could all read the same
+ * pre-increment value and all pass the check before any of them wrote back.
+ * Found during a security audit; confirmed exploitable up to the generic
+ * per-route rate limit's burst size (20 requests/5min), repeatable every
+ * window.
+ *
+ * reserveQuota does the check-and-increment as ONE atomic SQL statement
+ * (see reserve_*_used in supabase/schema.sql) — Postgres serializes
+ * concurrent UPDATEs to the same row, so two callers can never both slip
+ * through. Called BEFORE the OpenRouter call now, not after; the
+ * corresponding refund*() function below undoes the reservation if the
+ * call then fails, preserving the pre-existing "a failed generation
+ * shouldn't cost you a quota unit" guarantee without reopening the race.
  */
-async function checkQuota(
+async function reserveQuota(
   user: GateUser,
-  usedField: "generations_used" | "highlight_messages_used",
-  capField: "courseCap" | "highlightMessageCap",
+  capField: "courseCap" | "highlightMessageCap" | "chatMessageCap" | "remediationCap",
+  reserveRpc: "reserve_generations_used" | "reserve_highlight_messages_used" | "reserve_chat_messages_used" | "reserve_remediation_used",
   exceededMessage: (planLabel: string, cap: number) => string
 ): Promise<GateResult> {
   if (!isSupabaseConfigured()) {
@@ -134,79 +188,245 @@ async function checkQuota(
   if (isTrialActive(profile, user.created_at)) {
     return { allowed: true };
   }
-
   if (!subRaw) {
     return { allowed: true };
   }
 
+  // Rolls the period over BEFORE reserving, so a stale used-count from last
+  // month never wrongly blocks against this month's fresh allowance.
   const sub = await ensureFreshUsagePeriod(user.id, subRaw);
   const effectivePlanId = resolveEffectivePlan(sub);
   const plan = PLANS[effectivePlanId];
-  const used = sub[usedField];
   const cap = plan[capField];
 
-  if (used >= cap) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn(`[dev] ${usedField} quota exceeded for user ${user.id} — bypassing (NODE_ENV=development).`);
-      return { allowed: true };
-    }
-    return { allowed: false, reason: exceededMessage(plan.label, cap) };
+  // Dev bypass: skip reservation entirely rather than call the atomic RPC
+  // with a fake cap — dev/local testing doesn't need real usage counters
+  // building up, and the RPC's WHERE clause has no NODE_ENV awareness (nor
+  // should it; that's an application concern, not a DB one).
+  if (process.env.NODE_ENV === "development") {
+    return { allowed: true };
   }
 
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.rpc(reserveRpc, { p_user_id: user.id, p_cap: cap });
+
+  if (error) {
+    console.error(`[subscription] ${reserveRpc} RPC failed — fail-open (allowing):`, error.message);
+    return { allowed: true };
+  }
+  if (data === null) {
+    return { allowed: false, reason: exceededMessage(plan.label, cap) };
+  }
   return { allowed: true };
 }
 
-/** Gate for real Studio generations (cache hits and Smart Clones never call this — they cost nothing, so they shouldn't consume quota). */
-export async function canGenerate(user: GateUser): Promise<GateResult> {
-  return checkQuota(
+/**
+ * Reserves one unit against courseCap for a real Studio generation — call
+ * BEFORE the OpenRouter call, call refundGeneration() if it then fails.
+ * Cache hits and Smart Clones never call this (they cost nothing). Also
+ * used by app/api/studio/regenerate/route.ts's "Régénérer" — a regeneration
+ * is still a real, billable OpenRouter call for one section of a course
+ * already counted against this same monthly pool, so it shares this cap
+ * rather than needing a second one.
+ */
+export async function reserveGeneration(user: GateUser): Promise<GateResult> {
+  return reserveQuota(
     user,
-    "generations_used",
     "courseCap",
+    "reserve_generations_used",
     (planLabel, cap) =>
       `Tu as atteint la limite de ${cap} cours pour ta formule "${planLabel}" ce mois-ci. Passe à une formule supérieure pour continuer.`
   );
 }
 
-/** Gate for the chat's highlight quick actions (Ask MedArt / Translate on a selection) — never for the free-form chat input, which isn't quota-limited by plan (only by the generic per-route rate limit). */
-export async function canSendHighlightMessage(user: GateUser): Promise<GateResult> {
-  return checkQuota(
+/** Undoes reserveGeneration() after a failed OpenRouter call/parse/validation. Best-effort. */
+export async function refundGeneration(userId: string): Promise<void> {
+  if (!userId || !isSupabaseConfigured()) return;
+  try {
+    const { error } = await getSupabaseAdmin().rpc("refund_generations_used", { p_user_id: userId });
+    if (error) console.warn("refund_generations_used RPC unavailable:", error.message);
+  } catch (error) {
+    console.warn("refund_generations_used threw:", error);
+  }
+}
+
+/** Reserves one unit against highlightMessageCap (Ask MedArt / Translate on a selection). Distinct pool from chat message reservation below. */
+export async function reserveHighlightMessage(user: GateUser): Promise<GateResult> {
+  return reserveQuota(
     user,
-    "highlight_messages_used",
     "highlightMessageCap",
+    "reserve_highlight_messages_used",
     (planLabel, cap) =>
       `Tu as atteint la limite de ${cap} messages "sélection" pour ta formule "${planLabel}" ce mois-ci. Passe à une formule supérieure pour continuer.`
   );
 }
 
-/** Called after a successful (billable) Studio generation. Best-effort. */
-export async function recordGeneration(userId: string): Promise<void> {
+/** Undoes reserveHighlightMessage() after a failed reply. Best-effort. */
+export async function refundHighlightMessage(userId: string): Promise<void> {
   if (!userId || !isSupabaseConfigured()) return;
-
   try {
-    const supabase = getSupabaseAdmin();
-    const { error } = await supabase.rpc("increment_generations_used", { p_user_id: userId });
-    if (error) {
-      console.warn("increment_generations_used RPC unavailable:", error.message);
-    }
+    const { error } = await getSupabaseAdmin().rpc("refund_highlight_messages_used", { p_user_id: userId });
+    if (error) console.warn("refund_highlight_messages_used RPC unavailable:", error.message);
   } catch (error) {
-    console.warn("increment_generations_used threw:", error);
+    console.warn("refund_highlight_messages_used threw:", error);
   }
 }
 
-/** Called after a successful highlight chat reply. Best-effort. */
-export async function recordHighlightMessage(userId: string): Promise<void> {
-  if (!userId || !isSupabaseConfigured()) return;
+/**
+ * Reserves one unit against chatMessageCap for a free-form chat turn — only
+ * called once app/api/courses/chat/route.ts's semantic-cache lookup comes
+ * back empty (a $0 cache hit must never consume this), and BEFORE the
+ * OpenRouter call. Call refundChatMessage() if the call then fails.
+ */
+export async function reserveChatMessage(user: GateUser): Promise<GateResult> {
+  return reserveQuota(
+    user,
+    "chatMessageCap",
+    "reserve_chat_messages_used",
+    (planLabel, cap) =>
+      `Tu as atteint la limite de ${cap} messages chat pour ta formule "${planLabel}" ce mois-ci. Passe à une formule supérieure pour continuer.`
+  );
+}
 
+/** Undoes reserveChatMessage() after a failed reply. Best-effort. */
+export async function refundChatMessage(userId: string): Promise<void> {
+  if (!userId || !isSupabaseConfigured()) return;
   try {
-    const supabase = getSupabaseAdmin();
-    const { error } = await supabase.rpc("increment_highlight_messages_used", { p_user_id: userId });
-    if (error) {
-      console.warn("increment_highlight_messages_used RPC unavailable:", error.message);
-    }
+    const { error } = await getSupabaseAdmin().rpc("refund_chat_messages_used", { p_user_id: userId });
+    if (error) console.warn("refund_chat_messages_used RPC unavailable:", error.message);
   } catch (error) {
-    console.warn("increment_highlight_messages_used threw:", error);
+    console.warn("refund_chat_messages_used threw:", error);
   }
 }
+
+/** Reserves one unit against remediationCap (app/api/study/remediation-plan/generate) — only reserved once real wrong/fragile QCM attempts exist to build a plan from; the "pas assez de données" early-return never calls this. Call refundRemediation() if the call then fails. */
+export async function reserveRemediation(user: GateUser): Promise<GateResult> {
+  return reserveQuota(
+    user,
+    "remediationCap",
+    "reserve_remediation_used",
+    (planLabel, cap) =>
+      cap === 0
+        ? `Les plans de remédiation ne sont pas inclus dans ta formule "${planLabel}". Passe à une formule supérieure pour y accéder.`
+        : `Tu as atteint la limite de ${cap} plans de remédiation pour ta formule "${planLabel}" ce mois-ci. Passe à une formule supérieure pour continuer.`
+  );
+}
+
+/** Undoes reserveRemediation() after a failed generation. Best-effort. */
+export async function refundRemediation(userId: string): Promise<void> {
+  if (!userId || !isSupabaseConfigured()) return;
+  try {
+    const { error } = await getSupabaseAdmin().rpc("refund_remediation_used", { p_user_id: userId });
+    if (error) console.warn("refund_remediation_used RPC unavailable:", error.message);
+  } catch (error) {
+    console.warn("refund_remediation_used threw:", error);
+  }
+}
+
+/**
+ * Flat 24h gate for free-form chat, independent of and IN ADDITION TO
+ * reserveChatMessage's monthly chatMessageCap — a student must pass both.
+ * Unlike the monthly cap, this ALSO reserves on a semantic-cache HIT (see
+ * app/api/courses/chat/route.ts) — it's an abuse/scraping throttle on
+ * request volume, not a spend ledger, so a free hit still counts. No refund
+ * function: nothing that reserves this ever fails after the fact (a cache
+ * hit can't fail; the one real-generation path reserves this before the
+ * semantic-cache lookup even runs, ahead of anywhere the call could fail).
+ */
+export async function reserveChatMessageDaily(user: GateUser): Promise<GateResult> {
+  if (!isSupabaseConfigured()) {
+    return { allowed: false, reason: "La vérification d'abonnement n'est pas configurée sur le serveur (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY manquants)." };
+  }
+  if (!user?.id) {
+    return { allowed: false, reason: "Compte introuvable. Reconnecte-toi puis réessaie." };
+  }
+
+  const [subRaw, profile] = await Promise.all([getSubscription(user.id), getProfile(user.id)]);
+
+  if (isTrialActive(profile, user.created_at)) {
+    return { allowed: true };
+  }
+  if (!subRaw) {
+    return { allowed: true };
+  }
+
+  // Rolls the 24h period over before reserving — nothing further is derived
+  // from its return value; reserve_daily_chat_messages_used below reads the
+  // (now-fresh) count straight from the DB itself.
+  await ensureFreshDailyChatPeriod(user.id, subRaw);
+
+  if (process.env.NODE_ENV === "development") {
+    return { allowed: true };
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.rpc("reserve_daily_chat_messages_used", { p_user_id: user.id, p_cap: DAILY_CHAT_LIMIT });
+
+  if (error) {
+    console.error("[subscription] reserve_daily_chat_messages_used RPC failed — fail-open (allowing):", error.message);
+    return { allowed: true };
+  }
+  if (data === null) {
+    return {
+      allowed: false,
+      reason: `Tu as atteint la limite de ${DAILY_CHAT_LIMIT} messages par jour pour l'assistant. Réessaie demain.`,
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Atomically reserves up to `requested` flashcards against flashcardCap and
+ * returns how many were actually granted (0..requested) — the caller MUST
+ * clamp its batch size to this return value before generating, and call
+ * refundFlashcards() with the difference between what it reserved and what
+ * it actually produced (or the full amount on a hard failure). Uses a
+ * row-locking PL/pgSQL function (see reserve_flashcards_used in
+ * supabase/schema.sql) rather than a single UPDATE...WHERE, since a variable
+ * batch size needs to read the current value before computing the delta —
+ * the row lock is what closes the race for this variable-count case.
+ * Returns `requested` unchanged for trial students, missing subscription
+ * rows, or an unconfigured server — fails open, same as every other gate.
+ */
+export async function reserveFlashcards(user: GateUser, requested: number): Promise<number> {
+  if (!isSupabaseConfigured() || !user?.id) return requested;
+
+  const [subRaw, profile] = await Promise.all([getSubscription(user.id), getProfile(user.id)]);
+
+  if (isTrialActive(profile, user.created_at)) return requested;
+  if (!subRaw) return requested;
+
+  const sub = await ensureFreshUsagePeriod(user.id, subRaw);
+  const effectivePlanId = resolveEffectivePlan(sub);
+  const plan = PLANS[effectivePlanId];
+
+  if (process.env.NODE_ENV === "development") return requested;
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.rpc("reserve_flashcards_used", {
+    p_user_id: user.id,
+    p_requested: requested,
+    p_cap: plan.flashcardCap,
+  });
+
+  if (error) {
+    console.error("[subscription] reserve_flashcards_used RPC failed — fail-open (granting requested amount):", error.message);
+    return requested;
+  }
+  return typeof data === "number" ? data : 0;
+}
+
+/** Refunds `count` flashcards after generation produced fewer than reserved, or 0 on a hard failure (refund the full reserved amount). Best-effort. */
+export async function refundFlashcards(userId: string, count: number): Promise<void> {
+  if (!userId || !isSupabaseConfigured() || count <= 0) return;
+  try {
+    const { error } = await getSupabaseAdmin().rpc("refund_flashcards_used", { p_user_id: userId, p_count: count });
+    if (error) console.warn("refund_flashcards_used RPC unavailable:", error.message);
+  } catch (error) {
+    console.warn("refund_flashcards_used threw:", error);
+  }
+}
+
 
 function addMonths(date: Date, months: number): Date {
   const result = new Date(date);
@@ -217,9 +437,11 @@ function addMonths(date: Date, months: number): Date {
 /**
  * Activates (or renews/upgrades) a subscription after a paid Chargily
  * checkout. Called only from the webhook handler, once the signature is
- * verified. Resets BOTH quota counters and their shared rollover clock —
- * an upgrade mid-month must not inherit whatever the old plan (or Freemium)
- * had already used.
+ * verified. Resets every MONTHLY quota counter and their shared rollover
+ * clock — an upgrade mid-month must not inherit whatever the old plan (or
+ * Freemium) had already used. Does NOT touch daily_chat_messages_used /
+ * daily_chat_reset_at — that cap is flat and plan-independent, so an
+ * upgrade has no reason to reset it.
  */
 export async function activateSubscription(params: {
   userId: string;
@@ -246,6 +468,9 @@ export async function activateSubscription(params: {
       generations_used: 0,
       generations_period_start: now.toISOString(),
       highlight_messages_used: 0,
+      chat_messages_used: 0,
+      flashcards_used: 0,
+      remediation_used: 0,
       chargily_checkout_id: params.chargilyCheckoutId,
       updated_at: now.toISOString(),
     },

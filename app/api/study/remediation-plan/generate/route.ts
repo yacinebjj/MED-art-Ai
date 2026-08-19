@@ -6,6 +6,7 @@ import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
 import { buildRemediationPrompt, type RemediationSourceItem } from "@/lib/ai/remediation-prompts";
 import { RemediationPlanSchema } from "@/lib/ai/remediation-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { reserveRemediation, refundRemediation } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 import type { GastriteQcmsData } from "@/lib/course-slug-content";
 import type { RemediationPlan } from "@/types/remediation";
@@ -116,6 +117,13 @@ export async function POST(_request: NextRequest) {
     );
   }
 
+  // Tracks whether reserveRemediation() below actually succeeded, so the
+  // catch block at the end of this one big try — which handles errors from
+  // BEFORE and AFTER the reservation alike — only refunds when a unit was
+  // genuinely reserved (an error while fetching weak QCMs, before any
+  // reservation, must never trigger a refund of nothing).
+  let reserved = false;
+
   try {
     const perCourseWeakItems = await Promise.all(
       eligibleCourses.map(async (course) => {
@@ -139,9 +147,21 @@ export async function POST(_request: NextRequest) {
     if (items.length === 0) {
       // Modules ARE active and have QCMs, but the student has no recorded
       // wrong/fragile attempts yet — an honest "not enough data" outcome,
-      // never a fabricated plan.
+      // never a fabricated plan. Deliberately checked BEFORE the quota gate
+      // below: a no-op response must never cost a Freemium student their
+      // (0-cap) quota.
       return NextResponse.json({ success: true, noData: true });
     }
+
+    // Plan quota RESERVATION — atomic check-and-increment (see
+    // reserveRemediation's own comment — closes a TOCTOU race the old
+    // check-then-record split had). Only reached once there's real data to
+    // build a plan from, i.e. only right before the real OpenRouter call.
+    const quotaGate = await reserveRemediation(user);
+    if (!quotaGate.allowed) {
+      return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+    }
+    reserved = true;
 
     const prompt = buildRemediationPrompt(items);
     const raw = await callOpenRouter(
@@ -174,6 +194,7 @@ export async function POST(_request: NextRequest) {
     const plan: RemediationPlan = { weakSpots: result.data.weakSpots, generatedAt };
     return NextResponse.json({ success: true, plan });
   } catch (error) {
+    if (reserved) await refundRemediation(user.id);
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }

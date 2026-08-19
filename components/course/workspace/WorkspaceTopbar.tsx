@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import { Avatar, AvatarFallback } from "@/components/ui/Avatar";
+import { useToast } from "@/components/ui/Toast";
 
 interface WorkspaceTopbarProps {
   title: string;
@@ -22,6 +23,7 @@ interface WorkspaceTopbarProps {
 /** NotebookLM-style topbar: logo + course title on the left, action cluster on the right. */
 export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   const { resolvedTheme, setTheme } = useTheme();
+  const { toast } = useToast();
   const isDark = resolvedTheme === "dark";
   // next-themes only knows the real theme after mount (it reads
   // localStorage client-side) — rendering Sun/Moon from `isDark` before that
@@ -30,6 +32,14 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   // guard as components/layout/ThemeToggle.tsx.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  /** Was a dead button (no onClick at all) — found during a static review pass. Copies the current workspace URL so a student can share/bookmark this exact course. */
+  function handleCopyLink() {
+    navigator.clipboard
+      ?.writeText(window.location.href)
+      .then(() => toast({ variant: "success", title: "Lien copié" }))
+      .catch(() => toast({ variant: "error", title: "Échec de la copie", description: "Impossible d'accéder au presse-papiers." }));
+  }
 
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-2 dark:border-neutral-800 dark:bg-neutral-900">
@@ -61,7 +71,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" aria-label="Copier le lien">
+        <Button variant="ghost" size="icon" aria-label="Copier le lien" onClick={handleCopyLink}>
           <Copy className="h-4 w-4 text-gray-500 dark:text-gray-400" />
         </Button>
 

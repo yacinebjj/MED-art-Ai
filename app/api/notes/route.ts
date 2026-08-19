@@ -147,7 +147,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, note: toNote(data as UserNoteRow) });
     }
 
-    const { data: moduleRow } = await supabase.from("curriculum_modules").select("title").eq("id", finalModuleId).maybeSingle();
+    // Enrichment only (a nicer default title using the module's real name) —
+    // previously ignored `error` entirely, so a genuine DB failure here was
+    // indistinguishable from "no module selected" and silently fell back to
+    // finalTitle with no record of why. Still fails open: the note itself
+    // must not fail to save over a title-cosmetics lookup.
+    const { data: moduleRow, error: moduleRowError } = await supabase.from("curriculum_modules").select("title").eq("id", finalModuleId).maybeSingle();
+    if (moduleRowError) {
+      console.error("[notes:create] Échec lecture curriculum_modules (titre par défaut) :", moduleRowError.message);
+    }
     const moduleTitle = (moduleRow as { title?: string } | null)?.title ?? finalTitle;
 
     const { data, error } = await supabase

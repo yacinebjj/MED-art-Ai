@@ -8,6 +8,7 @@ import { buildFlashcardGenerationPrompt } from "@/lib/ai/flashcard-prompts";
 import { FlashcardGenerationSchema } from "@/lib/ai/flashcard-schemas";
 import { pickRandomExcerpt } from "@/lib/flashcard-excerpt";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { reserveFlashcards, refundFlashcards } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
@@ -73,7 +74,25 @@ export async function POST(request: NextRequest) {
     // generate. Not an error: this is the expected, quiet end of a session.
     return NextResponse.json({ success: true, items: [] });
   }
-  const batchSize = Math.min(BATCH_SIZE, SESSION_CAP - sessionCount);
+  const requestedBatchSize = Math.min(BATCH_SIZE, SESSION_CAP - sessionCount);
+
+  // Plan quota RESERVATION — atomically reserves up to requestedBatchSize
+  // against the monthly card cap and returns how many were actually granted
+  // (see reserveFlashcards's own comment — closes a TOCTOU race the old
+  // read-then-clamp split had: two concurrent requests could both read "8
+  // remaining" and both generate 8, landing 8 over cap). Clamped rather than
+  // blocked outright — a student with 8 cards left should still get 8, same
+  // spirit as the SESSION_CAP clamp above. Only a fully exhausted quota (0
+  // granted) returns an error. If generation below produces fewer cards
+  // than reserved, or fails outright, refundFlashcards() gives back the
+  // difference/full amount.
+  let batchSize = await reserveFlashcards(user, requestedBatchSize);
+  if (batchSize <= 0) {
+    return NextResponse.json(
+      { success: false, error: "Tu as atteint la limite de flashcards de ta formule ce mois-ci. Passe à une formule supérieure pour continuer." },
+      { status: 403 }
+    );
+  }
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -159,6 +178,14 @@ export async function POST(request: NextRequest) {
       // still hand it to the frontend even if it won't survive a reload.
     }
 
+    // The model can return fewer cards than requested even on a schema-
+    // valid response — refund the unused portion of the reservation rather
+    // than silently overcharge the student's monthly allowance for cards
+    // they never actually received.
+    if (newItems.length < batchSize) {
+      await refundFlashcards(user.id, batchSize - newItems.length);
+    }
+
     const items: FlashcardPoolItem[] = newItems.map((item) => ({
       ...item,
       courseTitle: course.title,
@@ -167,6 +194,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, items });
   } catch (error) {
+    // Full reservation refunded — nothing was generated at all.
+    await refundFlashcards(user.id, batchSize);
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }

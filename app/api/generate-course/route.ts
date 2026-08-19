@@ -6,7 +6,7 @@ import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/documen
 import { getEmbedding } from "@/lib/ai/embeddings";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { canGenerate, recordGeneration } from "@/lib/subscription";
+import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
 
@@ -43,15 +43,6 @@ export async function POST(request: NextRequest) {
         { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
         { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
       );
-    }
-
-    // Plan quota gate — before any extraction/embedding/Supabase work, not
-    // after: a rejected upload must never spend a single token. Cache hits
-    // and Smart Clones (both $0) never reach this route at all, so this only
-    // ever gates genuinely billable generations, exactly as intended.
-    const gate = await canGenerate(user);
-    if (!gate.allowed) {
-      return NextResponse.json({ success: false, error: gate.reason }, { status: 403 });
     }
 
     // --- 1. Réception & validation de l'entrée (fichier PDF OU texte collé) ---
@@ -131,6 +122,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY manquants)." }, { status: 500 });
     }
 
+    // Plan quota RESERVATION — moved here (was previously checked before
+    // even file validation) so a rejected upload (bad extension, too large,
+    // too short) never burns a reservation for work that was never going to
+    // happen. Placed before the embedding call below (a real, if small, API
+    // cost) rather than after, atomically reserving in one step (see
+    // reserveGeneration's own comment — closes a TOCTOU race the old
+    // check-then-record split had). If the Supabase insert below then fails,
+    // refundGeneration() undoes it — this route's original intent (see the
+    // comment above the old recordGeneration call) was that quota tracks
+    // "did a course row actually get created", not "did we spend anything".
+    const gate = await reserveGeneration(user);
+    if (!gate.allowed) {
+      return NextResponse.json({ success: false, error: gate.reason }, { status: 403 });
+    }
+
     const slug = `${slugify(title)}-${Date.now()}`;
     console.log(`[generate-course] Slug généré : "${slug}"`);
 
@@ -191,6 +197,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (insertError) {
+        await refundGeneration(user.id);
         console.error("[generate-course] Échec insertion Supabase — détail complet:", {
           code: insertError.code,
           message: insertError.message,
@@ -212,6 +219,7 @@ export async function POST(request: NextRequest) {
         );
       }
     } catch (error) {
+      await refundGeneration(user.id);
       console.error("[generate-course] Exception non gérée pendant l'insertion Supabase:", error);
       return NextResponse.json(
         { success: false, error: `Exception pendant l'insertion Supabase : ${errorMessage(error)}` },
@@ -219,10 +227,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Counts against the plan's monthly course quota — this course row now
-    // exists regardless of what happens below (chunk indexing is best-effort
-    // and must never affect whether this generation "counted").
-    await recordGeneration(user.id);
+    // No separate "record usage" call needed here anymore — reserveGeneration
+    // above already incremented atomically, before the embedding call even
+    // ran. The course row now exists, so the reservation correctly stands.
 
     // Chunk-based Smart Clone indexing — fail-open exactly like
     // content_embedding above, and deliberately AFTER the course row already

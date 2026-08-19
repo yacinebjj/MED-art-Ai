@@ -30,10 +30,26 @@ const MAX_CHUNKS_PER_REQUEST = 40;
 const MATCH_COUNT = 10;
 
 async function ensureCoursesIndexed(supabase: ReturnType<typeof getSupabaseAdmin>) {
-  const { data: indexedRows } = await supabase.from("course_chunks").select("course_slug");
+  // Both reads below used to silently ignore `error` — a persistent
+  // permission/RLS failure made EVERY course look unindexed on EVERY
+  // request, triggering a real embedding call each time instead of the
+  // intended "index once, then skip" behavior. Found during a security
+  // audit. Bailing out here (not indexing anything this request) rather
+  // than throwing — this is a best-effort pre-warm for the REAL search
+  // below, which must still run even if this step can't determine what
+  // needs indexing.
+  const { data: indexedRows, error: indexedError } = await supabase.from("course_chunks").select("course_slug");
+  if (indexedError) {
+    console.error("[search:ensureCoursesIndexed] Échec lecture course_chunks — indexation ignorée ce tour-ci:", indexedError.message);
+    return;
+  }
   const indexedSlugs = new Set((indexedRows ?? []).map((r: { course_slug: string }) => r.course_slug));
 
-  const { data: allCourses } = await supabase.from("courses").select("slug");
+  const { data: allCourses, error: allCoursesError } = await supabase.from("courses").select("slug");
+  if (allCoursesError) {
+    console.error("[search:ensureCoursesIndexed] Échec lecture courses — indexation ignorée ce tour-ci:", allCoursesError.message);
+    return;
+  }
   const missingSlugs = (allCourses ?? [])
     .map((c: { slug: string }) => c.slug)
     .filter((slug: string) => !indexedSlugs.has(slug))
@@ -150,11 +166,21 @@ export async function POST(request: NextRequest) {
   const rows = (matches ?? []) as { course_slug: string; section_label: string; content: string; similarity: number }[];
   const uniqueSlugs = Array.from(new Set(rows.map((r) => r.course_slug)));
 
-  const { data: courseRows } = await supabase.from("courses").select("slug, title, module_id").in("slug", uniqueSlugs);
+  // Enrichment only (titles/module names for display) — the real match
+  // results above are already valid without it, so a failure here logs and
+  // degrades to unlabeled results rather than failing the whole search.
+  // Previously silently ignored `error` entirely (no logging at all).
+  const { data: courseRows, error: courseRowsError } = await supabase.from("courses").select("slug, title, module_id").in("slug", uniqueSlugs);
+  if (courseRowsError) {
+    console.error("[search] Échec lecture courses (enrichissement titres/modules):", courseRowsError.message);
+  }
   const moduleIds = Array.from(new Set((courseRows ?? []).map((c: { module_id: number | null }) => c.module_id).filter((id: number | null): id is number => id != null)));
-  const { data: moduleRows } = moduleIds.length
+  const { data: moduleRows, error: moduleRowsError } = moduleIds.length
     ? await supabase.from("modules").select("id, name").in("id", moduleIds)
-    : { data: [] as { id: number; name: string }[] };
+    : { data: [] as { id: number; name: string }[], error: null };
+  if (moduleRowsError) {
+    console.error("[search] Échec lecture modules (enrichissement titres/modules):", moduleRowsError.message);
+  }
 
   const courseBySlug = new Map((courseRows ?? []).map((c: { slug: string; title: string; module_id: number | null }) => [c.slug, c]));
   const moduleById = new Map((moduleRows ?? []).map((m: { id: number; name: string }) => [m.id, m.name]));

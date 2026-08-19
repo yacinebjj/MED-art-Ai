@@ -31,6 +31,18 @@ create index if not exists courses_cache_file_hash_idx on courses_cache (file_ha
 
 alter table courses_cache enable row level security;
 
+-- EXPLICIT zero-trust policy, replacing reliance on the file-header comment
+-- above ("RLS enabled with no public policies") as the only documentation
+-- of intent. RLS-enabled-with-zero-policies already denies all anon/
+-- authenticated access by default — this makes that a per-table, reviewed
+-- decision instead of an inferred global rule, so a future policy added
+-- elsewhere in this file can't accidentally reopen this table without
+-- someone having to consciously replace this one first. Found during a
+-- security audit — every access path already goes through the service-role
+-- client (bypasses RLS), so this changes no real behavior.
+drop policy if exists "Deny all client access" on courses_cache;
+create policy "Deny all client access" on courses_cache for all using (false);
+
 -- Atomic hit-counter bump, called on every cache hit (see lib/course-cache.ts).
 create or replace function increment_cache_hit_count(p_file_hash text)
 returns void
@@ -63,6 +75,13 @@ create table if not exists subscriptions (
 create index if not exists subscriptions_user_id_idx on subscriptions (user_id);
 
 alter table subscriptions enable row level security;
+
+-- EXPLICIT zero-trust policy — see courses_cache's identical comment above
+-- for why this is written out per-table rather than left as an inferred
+-- global rule. `subscriptions` holds plan/email/usage-counter data, making
+-- this one of the higher-value tables to have this documented explicitly.
+drop policy if exists "Deny all client access" on subscriptions;
+create policy "Deny all client access" on subscriptions for all using (false);
 
 -- Atomic quota-usage bump, called after every billable AI generation
 -- (see lib/subscription.ts recordGeneration).
@@ -105,12 +124,214 @@ as $$
   where user_id = p_user_id;
 $$;
 
+-- Free-form chat quota (the open assistant question box) — a THIRD, separate
+-- counter from highlight_messages_used above: same monthly rollover clock
+-- (generations_period_start, via lib/subscription.ts's ensureFreshUsagePeriod),
+-- but its own cap per plan (Plan.chatMessageCap in lib/pricing.ts), because
+-- free-form chat and highlight quick-actions are different UI surfaces with
+-- different usage patterns. Added after discovering, during a cost stress
+-- test, that free-form chat was the one AI-cost surface with neither a cache
+-- nor a quota — see app/api/courses/chat/route.ts's canSendChatMessage call.
+alter table subscriptions add column if not exists chat_messages_used integer not null default 0;
+
+-- Flashcard, weak-point-remediation, and daily-chat quotas — closes the
+-- three remaining unmetered AI-cost surfaces found during a cost audit (see
+-- app/api/flashcards/generate and app/api/study/remediation-plan/generate,
+-- neither of which checked any quota before this; and free-form chat, which
+-- previously had only a monthly cap with no daily ceiling).
+alter table subscriptions add column if not exists flashcards_used integer not null default 0;
+alter table subscriptions add column if not exists remediation_used integer not null default 0;
+-- Deliberately its OWN 24h clock, not generations_period_start — a daily cap
+-- must reset every day regardless of where a student is in their monthly
+-- billing cycle. See lib/subscription.ts's ensureFreshDailyChatPeriod.
+alter table subscriptions add column if not exists daily_chat_messages_used integer not null default 0;
+alter table subscriptions add column if not exists daily_chat_reset_at timestamptz;
+
+create or replace function increment_flashcards_used(p_user_id text, p_count integer)
+returns void
+language sql
+as $$
+  update subscriptions set flashcards_used = flashcards_used + p_count, updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+create or replace function increment_remediation_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set remediation_used = remediation_used + 1, updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+create or replace function increment_daily_chat_messages_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set daily_chat_messages_used = daily_chat_messages_used + 1, updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+create or replace function increment_chat_messages_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set chat_messages_used = chat_messages_used + 1, updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Atomic reserve/refund functions — replace the old "read used, compare to
+-- cap in application code, increment later" pattern (canGenerate() then a
+-- separate recordGeneration() call after the OpenRouter response), which had
+-- a real TOCTOU race: N concurrent requests inside one rate-limit window
+-- could all read the same pre-increment `used`, all pass the check, and all
+-- bill a real OpenRouter call before any of them wrote back — landing `used`
+-- at up to cap + N instead of stopping at cap. Found during a security audit.
+--
+-- Each `reserve_*` function does the check AND the increment in ONE
+-- statement. Postgres serializes concurrent UPDATEs to the same row (the
+-- second waits for the first's transaction to finish, then re-evaluates its
+-- own WHERE clause against the now-committed value), so two callers can
+-- never both slip through — one gets the new value back, the other gets
+-- NULL (no row matched `used < cap`) and must not proceed.
+--
+-- The reservation happens BEFORE the OpenRouter call, not after — so a
+-- `refund_*` function un-does it if the call then fails, preserving the
+-- existing "a failed generation shouldn't cost you a quota unit" guarantee
+-- without reopening the race.
+-- ---------------------------------------------------------------------------
+
+create or replace function reserve_generations_used(p_user_id text, p_cap integer)
+returns integer
+language sql
+as $$
+  update subscriptions set generations_used = generations_used + 1, updated_at = now()
+  where user_id = p_user_id and generations_used < p_cap
+  returning generations_used;
+$$;
+
+create or replace function refund_generations_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set generations_used = greatest(generations_used - 1, 0), updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+-- Not explicitly requested in the remediation directive (which named
+-- canGenerate/canSendChatMessage/canSendChatMessageDaily/flashcards) but the
+-- exact same race exists here too — canSendHighlightMessage used the same
+-- read-then-write checkQuota() helper. Fixed for real completeness rather
+-- than leaving one of the five gated resources exploitable.
+create or replace function reserve_highlight_messages_used(p_user_id text, p_cap integer)
+returns integer
+language sql
+as $$
+  update subscriptions set highlight_messages_used = highlight_messages_used + 1, updated_at = now()
+  where user_id = p_user_id and highlight_messages_used < p_cap
+  returning highlight_messages_used;
+$$;
+
+create or replace function refund_highlight_messages_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set highlight_messages_used = greatest(highlight_messages_used - 1, 0), updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+create or replace function reserve_chat_messages_used(p_user_id text, p_cap integer)
+returns integer
+language sql
+as $$
+  update subscriptions set chat_messages_used = chat_messages_used + 1, updated_at = now()
+  where user_id = p_user_id and chat_messages_used < p_cap
+  returning chat_messages_used;
+$$;
+
+create or replace function refund_chat_messages_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set chat_messages_used = greatest(chat_messages_used - 1, 0), updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+-- No refund function for the daily counter: it gates cache hits too (see
+-- app/api/courses/chat/route.ts), which never fail after being counted, and
+-- the one real-generation path that DOES fail also fails BEFORE this ever
+-- gets reserved in that flow — see the route's own ordering.
+create or replace function reserve_daily_chat_messages_used(p_user_id text, p_cap integer)
+returns integer
+language sql
+as $$
+  update subscriptions set daily_chat_messages_used = daily_chat_messages_used + 1, updated_at = now()
+  where user_id = p_user_id and daily_chat_messages_used < p_cap
+  returning daily_chat_messages_used;
+$$;
+
+create or replace function reserve_remediation_used(p_user_id text, p_cap integer)
+returns integer
+language sql
+as $$
+  update subscriptions set remediation_used = remediation_used + 1, updated_at = now()
+  where user_id = p_user_id and remediation_used < p_cap
+  returning remediation_used;
+$$;
+
+create or replace function refund_remediation_used(p_user_id text)
+returns void
+language sql
+as $$
+  update subscriptions set remediation_used = greatest(remediation_used - 1, 0), updated_at = now()
+  where user_id = p_user_id;
+$$;
+
+-- Flashcards reserve a VARIABLE count (a batch, clamped to whatever quota
+-- remains) rather than a fixed 1 — needs an explicit row lock (SELECT ...
+-- FOR UPDATE) instead of a single UPDATE...WHERE, since the "how much do I
+-- have room for" computation depends on reading the current value first.
+-- The row lock is what closes the race: a second concurrent caller blocks
+-- on SELECT ... FOR UPDATE until the first transaction commits, then reads
+-- the already-updated value. Returns how many of p_requested were actually
+-- granted (0..p_requested) — the caller must clamp its batch to this.
+create or replace function reserve_flashcards_used(p_user_id text, p_requested integer, p_cap integer)
+returns integer
+language plpgsql
+as $$
+declare
+  v_current integer;
+  v_allowed integer;
+begin
+  select flashcards_used into v_current from subscriptions where user_id = p_user_id for update;
+  if v_current is null then
+    return p_requested;
+  end if;
+
+  v_allowed := greatest(least(p_requested, p_cap - v_current), 0);
+  if v_allowed > 0 then
+    update subscriptions set flashcards_used = flashcards_used + v_allowed, updated_at = now()
+    where user_id = p_user_id;
+  end if;
+
+  return v_allowed;
+end;
+$$;
+
+create or replace function refund_flashcards_used(p_user_id text, p_count integer)
+returns void
+language sql
+as $$
+  update subscriptions set flashcards_used = greatest(flashcards_used - p_count, 0), updated_at = now()
+  where user_id = p_user_id;
+$$;
+
 -- Backfill: every account created before this migration (or whose signup
 -- trigger hiccupped) gets an implicit Freemium row too, exactly like the
 -- profiles backfill below. Accounts that already have a row (paid or not)
 -- are left untouched by the ON CONFLICT.
-insert into subscriptions (user_id, email, plan, status, period_start, generations_used, generations_period_start, highlight_messages_used)
-select id::text, email, 'freemium', 'active', now(), 0, now(), 0 from auth.users
+insert into subscriptions (user_id, email, plan, status, period_start, generations_used, generations_period_start, highlight_messages_used, chat_messages_used)
+select id::text, email, 'freemium', 'active', now(), 0, now(), 0, 0 from auth.users
 on conflict (user_id) do nothing;
 
 -- ---------------------------------------------------------------------------
@@ -133,6 +354,12 @@ create index if not exists payments_user_id_idx on payments (user_id);
 create index if not exists payments_chargily_checkout_id_idx on payments (chargily_checkout_id);
 
 alter table payments enable row level security;
+
+-- EXPLICIT zero-trust policy — see courses_cache's identical comment further
+-- up for why. `payments` holds billing amounts and Chargily's raw webhook
+-- payload — a real one to have this documented, not just inferred.
+drop policy if exists "Deny all client access" on payments;
+create policy "Deny all client access" on payments for all using (false);
 
 -- ---------------------------------------------------------------------------
 -- profiles: one row per auth user, created automatically on sign-up via the
@@ -171,8 +398,8 @@ begin
   -- 10 messages highlight/mois) — see lib/subscription.ts's resolveEffectivePlan
   -- for why a Freemium row (not a null one) is what makes quota gating never
   -- need a lazy upsert race in application code.
-  insert into public.subscriptions (user_id, email, plan, status, period_start, generations_used, generations_period_start, highlight_messages_used)
-  values (new.id::text, new.email, 'freemium', 'active', now(), 0, now(), 0)
+  insert into public.subscriptions (user_id, email, plan, status, period_start, generations_used, generations_period_start, highlight_messages_used, chat_messages_used)
+  values (new.id::text, new.email, 'freemium', 'active', now(), 0, now(), 0, 0)
   on conflict (user_id) do nothing;
 
   return new;
@@ -311,6 +538,49 @@ create table if not exists modules (
 );
 
 alter table modules enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- SECURITY FIX: `modules` was documented (see the comment further down, near
+-- curriculum_modules, explaining why THAT table is named differently) as
+-- "le dossier PERSONNEL et ad-hoc qu'un étudiant crée lui-même via 'Ajouter
+-- à un module'" — but the actual table/API never enforced that: `name` was
+-- globally unique with zero user scoping, `app/api/modules/route.ts` did an
+-- unscoped SELECT/INSERT, and RLS was enabled with ZERO policies (meaning,
+-- under RLS, unscoped anon/authenticated access was already denied by
+-- default — but every real read/write went through the service-role client,
+-- which bypasses RLS entirely, so the app-level lack of scoping was the
+-- actual live hole). Two different students both creating a "Cardiologie"
+-- folder collided into the SAME shared row, mixing their courses together.
+-- Found during a security audit.
+--
+-- MIGRATION HAZARD, read before running: this table may already have real
+-- rows with no owner (created before this fix existed). Adding `user_id`
+-- as NOT NULL would make this ALTER TABLE fail outright against a non-empty
+-- table with no sensible default to backfill (there is no way to know who
+-- "owns" an existing shared row — the data model never tracked that). This
+-- adds the column NULLABLE instead: legacy rows keep user_id = NULL, and
+-- the RLS policies below (auth.uid() = user_id) mean those legacy rows
+-- become invisible to EVERYONE going forward (auth.uid() never equals
+-- NULL) — they don't leak, but they also don't silently get reassigned to
+-- whoever happens to look first. This is a real behavior change worth a
+-- deliberate decision (delete the orphaned rows, or manually assign real
+-- owners) rather than something to script blindly.
+alter table modules add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+-- Replaces the old bare `unique (name)` (module.name is unique(name) at
+-- table-create time above; if that constraint still exists in a live
+-- database, drop it manually before relying on this one) — two different
+-- students must be able to both have a "Cardiologie" folder without
+-- colliding into the same row.
+drop index if exists modules_name_key;
+alter table modules drop constraint if exists modules_name_key;
+create unique index if not exists modules_user_id_name_uidx on modules (user_id, name);
+
+drop policy if exists "Users manage their own modules" on modules;
+create policy "Users manage their own modules" on modules
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 create table if not exists courses (
   id bigint generated by default as identity primary key,
@@ -463,6 +733,14 @@ create index if not exists semantic_cache_course_slug_idx on semantic_cache (cou
 
 alter table semantic_cache enable row level security;
 
+-- EXPLICIT zero-trust policy — see courses_cache's identical comment further
+-- up for why. (Also correcting a naming mismatch from an earlier directive:
+-- this is `semantic_cache`, not `course_faq_cache` — no such table exists in
+-- this codebase; renaming a working table for no functional reason was
+-- deliberately not done, see the earlier RAG-audit turn.)
+drop policy if exists "Deny all client access" on semantic_cache;
+create policy "Deny all client access" on semantic_cache for all using (false);
+
 -- Cosine-similarity search, filtered by course when match_course_slug is
 -- given, across all courses when it's null (see the comment on
 -- getCachedOrGenerate() in lib/ai/semantic-cache.ts for why cross-course
@@ -606,6 +884,11 @@ create index if not exists course_source_chunks_course_slug_idx on course_source
 
 alter table course_source_chunks enable row level security;
 
+-- EXPLICIT zero-trust policy — see courses_cache's identical comment further
+-- up for why.
+drop policy if exists "Deny all client access" on course_source_chunks;
+create policy "Deny all client access" on course_source_chunks for all using (false);
+
 -- For every chunk of p_slug, finds its single closest match among every
 -- OTHER course's chunks (lateral join, top-1 per chunk — cheap, and enough:
 -- the caller only needs to know IF a chunk matched somewhere strongly
@@ -691,6 +974,11 @@ create index if not exists course_explication_chapters_course_slug_idx
 
 alter table course_explication_chapters enable row level security;
 
+-- EXPLICIT zero-trust policy — see courses_cache's identical comment further
+-- up for why.
+drop policy if exists "Deny all client access" on course_explication_chapters;
+create policy "Deny all client access" on course_explication_chapters for all using (false);
+
 -- Unlike match_similar_source_chunks above (which finds the best match
 -- across ALL other courses, aggregated), this compares p_slug's chunks
 -- against ONE SPECIFIC candidate course only, and returns the per-chunk
@@ -754,6 +1042,11 @@ create index if not exists course_chunks_embedding_idx
 create index if not exists course_chunks_course_slug_idx on course_chunks (course_slug);
 
 alter table course_chunks enable row level security;
+
+-- EXPLICIT zero-trust policy — see courses_cache's identical comment further
+-- up for why.
+drop policy if exists "Deny all client access" on course_chunks;
+create policy "Deny all client access" on course_chunks for all using (false);
 
 -- Cosine-similarity search across every indexed chunk, regardless of course
 -- or module — app/api/search/route.ts resolves course title/module name
@@ -1005,15 +1298,68 @@ create policy "Users manage their own flashcard activations"
 alter table profiles add column if not exists flashcard_active_module_ids integer[] not null default '{}';
 
 -- ---------------------------------------------------------------------------
+-- studio_courses: a student's own AI-generated courses (uploaded PDF/DOCX/
+-- pasted text -> Studio's Explication/Résumé/Cas Clinique/QCM/Exemples
+-- tiles). Was NEVER defined in this file — created/migrated by hand in the
+-- Supabase SQL editor since this table's introduction, per
+-- app/api/studio/courses/route.ts's own header comment — meaning until now
+-- there was no versioned source of truth for it at all, and no way to
+-- confirm RLS was ever actually enabled on the single most sensitive table
+-- in this product. Found during a security audit.
+--
+-- Columns and types below were reverse-engineered from EVERY real call site
+-- across 10 files (app/api/studio/*, app/api/flashcards/*,
+-- app/api/study/remediation-plan/*, app/api/modules/[id]/global-summary,
+-- lib/push/dispatch.ts) — not guessed. `CREATE TABLE IF NOT EXISTS` is a
+-- pure no-op if this table already exists in production (Postgres doesn't
+-- diff columns on IF NOT EXISTS), so this cannot break or alter a single
+-- existing row — worst case, if a type below is wrong, it simply never
+-- takes effect. Two residual uncertainties, flagged rather than guessed
+-- past: `explication`/`exemples_analogies` are inferred `text` (every code
+-- path treats them as plain strings, zod-validated with `z.string().min(50)`
+-- — but a jsonb column holding a JSON string would look identical through
+-- PostgREST, so this isn't proven); `updated_at` is inferred nullable/
+-- defaulted because three routes write it but nothing ever reads it back.
+-- Verify both against the real production table before trusting this file
+-- as authoritative for either.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_courses (
+  id bigint generated by default as identity primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  curriculum_module_id bigint not null references curriculum_modules (id) on delete cascade,
+  title text not null,
+  raw_text text not null,
+  source_file_url text,
+  explication text,
+  resume jsonb,
+  cas_clinique jsonb,
+  qcms jsonb,
+  exemples_analogies text,
+  flashcard_queue jsonb not null default '[]',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists studio_courses_user_id_idx on studio_courses (user_id);
+create index if not exists studio_courses_curriculum_module_id_idx on studio_courses (curriculum_module_id);
+
+alter table studio_courses enable row level security;
+
+drop policy if exists "Users manage their own studio courses" on studio_courses;
+create policy "Users manage their own studio courses" on studio_courses
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
 -- Anki-style Q&A flashcard queue — one array PER COURSE, on `studio_courses`
 -- itself, mirroring that table's own `qcms` jsonb column exactly (same
 -- table, same proven-working PostgREST pattern, rather than a brand-new
 -- table). Each element is `{id, question, answer}`, appended to by
 -- app/api/flashcards/generate/route.ts and read by
 -- app/api/flashcards/pool/route.ts across every course in the student's
--- active modules. `studio_courses` itself isn't defined in this file (see
--- app/api/studio/courses/route.ts's header comment — it's created/migrated
--- manually in the Supabase SQL editor), so run this directly too.
+-- active modules. Harmless no-op now that studio_courses is defined above
+-- with this same column — kept for whoever's production table predates it.
 -- ---------------------------------------------------------------------------
 alter table studio_courses add column if not exists flashcard_queue jsonb not null default '[]';
 
@@ -1064,10 +1410,49 @@ alter table profiles add column if not exists weakness_remediation_generated_at 
 alter table studio_courses add column if not exists source_file_url text;
 
 -- ---------------------------------------------------------------------------
+-- user_notes: free-standing student notes ("Mes notes"). Like studio_courses
+-- above, this was never defined in this file — created by hand in the
+-- Supabase SQL editor, per this section's own pre-existing comment below.
+-- Found undocumented during the same security audit that found
+-- studio_courses undocumented.
+--
+-- Reverse-engineered from every real call site in app/api/notes/route.ts and
+-- app/api/notes/[id]/route.ts. `CREATE TABLE IF NOT EXISTS` is a pure no-op
+-- against an already-existing production table (see studio_courses' own
+-- comment above for why this can't break anything). ONE genuine, flagged
+-- uncertainty: this table's `id` type was never pinned down anywhere in the
+-- application code itself (see app/api/notes/[id]/route.ts's own
+-- parseNoteId comment) — every route treats it as an opaque string, never
+-- Number()-coerced, specifically so it would keep working regardless of
+-- whether the real column is bigint or uuid. `bigint generated by default
+-- as identity` is used here only because every OTHER auto-PK table in this
+-- schema (studio_courses, courses, curriculum_modules, ...) uses that
+-- convention — verify against the real production column before treating
+-- this as authoritative.
+-- ---------------------------------------------------------------------------
+create table if not exists user_notes (
+  id bigint generated by default as identity primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  title text not null,
+  content text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists user_notes_user_id_idx on user_notes (user_id);
+
+alter table user_notes enable row level security;
+
+drop policy if exists "Users manage their own notes" on user_notes;
+create policy "Users manage their own notes" on user_notes
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
 -- "Mes notes" — free-standing student notes. Table `user_notes` (id,
 -- user_id, title, content, created_at) was created manually in the Supabase
 -- SQL editor, same convention as `studio_courses` (see
--- app/api/studio/courses/route.ts's header comment).
+-- app/api/studio/courses/route.ts's header comment). Now defined above too.
 --
 -- `module_id` — added for the "aggregate notes by module" behavior: a text
 -- selection captured via TextSelectionToolbar's "Add Note" from inside a
@@ -1501,3 +1886,67 @@ begin
     ) as m(title, ord)
     where not exists (select 1 from curriculum_modules where year_id = v_year_id and teaching_unit_id is null and title = m.title);
 end $$;
+
+-- ===========================================================================
+-- studio_content_cache: cross-student, content-addressed cache for
+-- Studio's deterministic whole-course generations (explication/résumé/
+-- cas_clinique/qcm/exemples_analogies — see app/api/studio/generate/route.ts
+-- and lib/studio-content-cache.ts for the full design rationale, including
+-- exactly why flashcards, the weakness remediation plan, and "Générer un
+-- examen" are all deliberately EXCLUDED from this cache).
+--
+-- Genuinely a NEW, GLOBAL table (no user_id) — unlike every other extension
+-- in this file, this can't be a column on an existing per-user table,
+-- because the whole point is that the same row is read by many different
+-- students. This is a real, working precedent in this project's own
+-- history: an earlier `courses_cache` table (see the very top of this
+-- file) did exactly this — file-hash-keyed, shared across students — before
+-- being retired in favor of the per-user `course_content_cache` when the
+-- product pivoted to a per-user-ownership model. This reintroduces the same
+-- idea for the Studio pipeline specifically, with two upgrades: content is
+-- hashed after NORMALIZATION (not raw file bytes, so formatting-only
+-- differences still hit) and a fuzzy MinHash tier catches near-duplicates
+-- an exact hash would miss entirely — see lib/content-similarity.ts.
+--
+-- IMPORTANT — run this in the Supabase SQL editor, then reload PostgREST's
+-- schema cache (Settings > API > "Reload schema", or `NOTIFY pgrst, 'reload
+-- schema';`) before deploying code that queries it. This project's own
+-- history (see the superseded `user_module_flashcards` table further up)
+-- shows PostgREST can keep returning "Could not find the table in the
+-- schema cache" for a brand-new table until that reload happens, even
+-- though the table exists and the query would otherwise be valid.
+-- ===========================================================================
+create table if not exists studio_content_cache (
+  id uuid primary key default gen_random_uuid(),
+  section text not null,
+  content_hash text not null,
+  minhash_signature integer[] not null,
+  normalized_length integer not null,
+  data jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz,
+  unique (section, content_hash)
+);
+
+create index if not exists studio_content_cache_section_idx on studio_content_cache (section);
+
+alter table studio_content_cache enable row level security;
+
+-- Shared reference data, readable by every signed-in student — same shape
+-- as curriculum_specialties/curriculum_modules's own "Public read access"
+-- policy above. No insert/update/delete policy is defined: every write goes
+-- through app/api/studio/generate/route.ts's service-role client
+-- (getSupabaseAdmin), which bypasses RLS entirely — a browser client was
+-- never meant to write here directly.
+drop policy if exists "Authenticated read access" on studio_content_cache;
+create policy "Authenticated read access" on studio_content_cache for select using (auth.role() = 'authenticated');
+
+-- Atomic hit-counter bump on every cache hit, mirroring the retired
+-- courses_cache table's own increment_cache_hit_count above.
+create or replace function increment_studio_cache_hit_count(p_cache_id uuid)
+returns void
+language sql
+as $$
+  update studio_content_cache set hit_count = hit_count + 1, last_hit_at = now() where id = p_cache_id;
+$$;
