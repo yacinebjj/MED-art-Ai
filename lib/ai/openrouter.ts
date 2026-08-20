@@ -7,13 +7,17 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "anthropic/claude-sonnet-5";
 
 // Forced model for the chat's "highlight" quick actions (Ask MedArt /
-// Translate on a text selection) — see app/api/courses/chat/route.ts's
-// isHighlightMode. Confirmed live against
-// GET https://openrouter.ai/anthropic/claude-3.5-haiku on the day this was
-// added: real, active model, id exactly as below. Re-verify against
-// GET https://openrouter.ai/api/v1/models if this ever 400s with a
-// "not a valid model ID" error — OpenRouter does retire/rename slugs.
-export const HAIKU_MODEL = "anthropic/claude-3.5-haiku";
+// Translate on a text selection) and the Module Workspace's cross-course
+// synthesis pass — see app/api/courses/chat/route.ts's isHighlightMode and
+// app/api/workspace/module-synthesis/route.ts's buildCrossCourseSynthesis.
+// "anthropic/claude-3.5-haiku" was retired by OpenRouter (404s with "No
+// endpoints found for anthropic/claude-3.5-haiku") — same failure mode as
+// MODEL above, same fix: re-verified live against
+// GET https://openrouter.ai/api/v1/models, which confirmed
+// "anthropic/claude-3.5-haiku" is absent and "anthropic/claude-haiku-4.5"
+// is present. Re-verify the same way if this ever 404s again — OpenRouter
+// does retire/rename slugs.
+export const HAIKU_MODEL = "anthropic/claude-haiku-4.5";
 
 // Zero-spend Studio-content generation for local development: callOpenRouter
 // below checks this to serve a canned fixture (lib/ai/mock-data.ts) instead
@@ -97,7 +101,7 @@ export interface ChatMessageInput {
  */
 export async function callOpenRouter(
   messages: ChatMessageInput[],
-  options?: { maxTokens?: number; model?: string; bypassMock?: boolean }
+  options?: { maxTokens?: number; model?: string; bypassMock?: boolean; temperature?: number }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
   // TEXT, not by an explicit section id — it was built for one fixed set of
@@ -142,6 +146,7 @@ export async function callOpenRouter(
         model: options?.model ?? MODEL,
         messages,
         max_tokens: options?.maxTokens ?? 8192,
+        ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
       }),
     });
   } catch (error) {

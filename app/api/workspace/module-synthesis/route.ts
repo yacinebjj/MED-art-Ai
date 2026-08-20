@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, HAIKU_MODEL } from "@/lib/ai/openrouter";
 import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
-import { buildSummaryChunkPrompt, buildKeywordRowPrompt, type ModuleSynthesisCourseInput } from "@/lib/ai/module-synthesis-prompts";
+import {
+  buildSummaryChunkPrompt,
+  buildKeywordRowPrompt,
+  buildCrossCourseSynthesisPrompt,
+  CATEGORY_SUPERSET,
+  type ModuleSynthesisCourseInput,
+} from "@/lib/ai/module-synthesis-prompts";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import {
   lookupCourseWorkspaceChunks,
@@ -25,28 +31,37 @@ function isValidType(value: unknown): value is WorkspaceType {
   return typeof value === "string" && (VALID_TYPES as string[]).includes(value);
 }
 
-/** Maps the frontend-facing request type to the course-level cache's own generation_type — kept as two distinct vocabularies on purpose: "global_summary"/"keywords_table" describe what the STUDENT asked for; "summary_chunk"/"keyword_row_v2" describe the granularity of what's actually CACHED (one course's worth), which is the real architectural point of this pivot. */
+/** Maps the frontend-facing request type to the course-level cache's own generation_type — kept as two distinct vocabularies on purpose: "global_summary"/"keywords_table" describe what the STUDENT asked for; "summary_chunk"/"keyword_row_v3" describe the granularity of what's actually CACHED (one course's worth), which is the real architectural point of this pivot. */
 const CACHE_GENERATION_TYPE: Record<WorkspaceType, CourseWorkspaceGenerationType> = {
   global_summary: "summary_chunk",
-  keywords_table: "keyword_row_v2",
+  keywords_table: "keyword_row_v3",
 };
 
-const KEYWORD_CATEGORY_KEYS: (keyof KeywordCategories)[] = [
-  "mots_cles_principaux",
-  "signes_cliniques",
-  "examens_diagnostic",
-  "traitements",
-];
+/** Per-course category cap — without this, one unusually enthusiastic course could add many one-off columns that every OTHER course in the table then shows as empty, bloating the table width for no real benefit. */
+const MAX_CATEGORIES_PER_COURSE = 6;
+/** Per-category item cap and per-item word cap ("**keyword:** brief explanation" — brief, not a paragraph) — a hard backstop server-side, since the prompt instruction alone can't guarantee the model never slips. */
+const MAX_ITEMS_PER_CATEGORY = 6;
+const MAX_WORDS_PER_ITEM = 20;
 
-/** Defensive parsing of the model's per-course keyword object — a missing/wrong-typed category becomes an empty array rather than crashing the whole batch or silently rendering "undefined" in a table cell. Also enforces the "short keyword, not a sentence" rule server-side as a hard backstop: anything over ~6 words is dropped rather than trusted, since the prompt instruction alone can't guarantee the model never slips. */
+/**
+ * Defensive parsing of the model's per-course keyword object — DYNAMIC keys
+ * now, not a fixed 4. A missing/wrong-typed value becomes an empty array
+ * rather than crashing the whole batch; an over-long item (the model
+ * ignoring the "brief explanation" instruction) is dropped rather than
+ * trusted; a course offering more than MAX_CATEGORIES_PER_COURSE keys is
+ * truncated to the first N encountered, in JSON key order.
+ */
 function normalizeKeywordCategories(raw: unknown): KeywordCategories {
   const source = (raw ?? {}) as Record<string, unknown>;
-  const result = {} as KeywordCategories;
-  for (const key of KEYWORD_CATEGORY_KEYS) {
+  const result: KeywordCategories = {};
+  for (const key of Object.keys(source).slice(0, MAX_CATEGORIES_PER_COURSE)) {
     const value = source[key];
-    result[key] = Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string" && item.trim().split(/\s+/).length <= 6).map((item) => item.trim())
-      : [];
+    if (!Array.isArray(value)) continue;
+    const items = value
+      .filter((item): item is string => typeof item === "string" && item.trim().split(/\s+/).length <= MAX_WORDS_PER_ITEM)
+      .map((item) => item.trim())
+      .slice(0, MAX_ITEMS_PER_CATEGORY);
+    if (items.length > 0) result[key] = items;
   }
   return result;
 }
@@ -66,7 +81,7 @@ function resolveContentHash(course: EligibleCourseRow): string {
   return course.content_hash ?? sha256(normalizeText(course.raw_text));
 }
 
-/** Same token-saving priority as before (Explication over raw_text, combined-budget-aware per-course cap) — unaffected by the caching-granularity pivot, this part was already correct. */
+/** Same token-saving priority as before (Explication over raw_text, combined-budget-aware per-course cap) — unaffected by every pivot so far, this part was already correct. */
 function buildCourseInputs(courses: EligibleCourseRow[]): { inputs: ModuleSynthesisCourseInput[]; fallbackTitles: string[] } {
   const perCourseCap = Math.max(500, Math.min(MAX_PER_COURSE_CHARS, Math.floor(MAX_TOTAL_SYNTHESIS_CHARS / Math.max(1, courses.length))));
   const fallbackTitles: string[] = [];
@@ -79,44 +94,51 @@ function buildCourseInputs(courses: EligibleCourseRow[]): { inputs: ModuleSynthe
   return { inputs, fallbackTitles };
 }
 
-/** Basic table-safety escaping — an LLM-generated field containing a literal "|" or a newline would otherwise silently break the stitched Markdown table for every course in the response, not just the offending one. */
+/** Basic table-safety escaping — an LLM-generated field containing a literal "|" or a newline would otherwise silently break the stitched Markdown table for every course in the response, not just the offending one. Markdown emphasis syntax (**bold**) is preserved on purpose — GFM tables render inline formatting inside cells correctly, unlike raw HTML. */
 function escapeTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
 }
 
-/**
- * Renders one category's keyword list as a bullet-separated run INSIDE a
- * single table cell. NOT `<br/>`-joined: this app's ReactMarkdown setup has
- * no `rehype-raw` anywhere (checked before writing this) — without it, raw
- * HTML in Markdown source is stripped/escaped by default, so a `<br/>`
- * would render as the literal text "<br/>", not a line break. Adding
- * rehype-raw would fix that but enables raw HTML on every Markdown surface
- * in the app (chat, demo pages, quizzes) for content that's meant to stay
- * plain AI-generated text — a real security-surface change nobody asked
- * for. A same-line " • "-separated run reads just as cleanly for short
- * keywords and needs no new dependency. Empty category = empty cell, never
- * a stray "•" or "undefined".
- */
-function formatCategoryCell(keywords: string[]): string {
-  if (keywords.length === 0) return "";
+/** Same-line bullet-separated run inside one cell — see the historical note in git blame for why this isn't `<br/>`-joined (no rehype-raw in this app's ReactMarkdown setup; raw HTML would render as literal text). Empty category = "-", matching the spec (never a stray "•" or "undefined"). */
+function formatCategoryCell(keywords: string[] | undefined): string {
+  if (!keywords || keywords.length === 0) return "-";
   return keywords.map((kw) => escapeTableCell(kw)).join(" • ");
 }
 
 /**
- * ONE global table, ONE row per course — not one table per course. Markdown
- * has no rowspan, so avoiding a repeated "Cours" column on every row (the
- * original complaint) means each course's several keywords per category
- * must live inside ONE cell instead of spanning multiple rows — hence the
- * <br/>-joined bullet stack in formatCategoryCell rather than a real nested
- * list, which Markdown table cells can't render.
+ * ONE global table, ONE row per course, DYNAMIC columns — the header row is
+ * the UNION of every key present across every course's own chunk, ordered
+ * with CATEGORY_SUPERSET's preferred categories first (for a stable,
+ * predictable column order across different selections) and any one-off
+ * extra categories a course introduced afterward, alphabetically.
  */
 function stitchKeywordsTable(coursesInOrder: EligibleCourseRow[], categoriesByHash: Map<string, KeywordCategories>): string {
-  const header = "| Cours | Mots-clés Principaux | Signes Cliniques | Examens / Diagnostic | Traitements |";
-  const separator = "| --- | --- | --- | --- | --- |";
+  const usedKeys = new Set<string>();
+  for (const course of coursesInOrder) {
+    const categories = categoriesByHash.get(resolveContentHash(course));
+    if (categories) Object.keys(categories).forEach((key) => usedKeys.add(key));
+  }
+
+  const orderedKeys = [
+    ...CATEGORY_SUPERSET.filter((key) => usedKeys.has(key)),
+    ...[...usedKeys].filter((key) => !(CATEGORY_SUPERSET as string[]).includes(key)).sort(),
+  ];
+
+  if (orderedKeys.length === 0) {
+    // Every selected course's chunk came back with zero usable categories
+    // (should be rare — normalizeKeywordCategories only drops malformed
+    // items, not whole courses) — an honest empty table beats a header-only
+    // table with no columns at all.
+    return "| Cours |\n| --- |\n" + coursesInOrder.map((c) => `| **${escapeTableCell(c.title)}** |`).join("\n");
+  }
+
+  const header = `| Cours | ${orderedKeys.map((key) => key.replace(/_/g, " ")).join(" | ")} |`;
+  const separator = `| --- | ${orderedKeys.map(() => "---").join(" | ")} |`;
 
   const rows = coursesInOrder.map((course) => {
-    const categories = categoriesByHash.get(resolveContentHash(course)) ?? normalizeKeywordCategories(undefined);
-    return `| **${escapeTableCell(course.title)}** | ${formatCategoryCell(categories.mots_cles_principaux)} | ${formatCategoryCell(categories.signes_cliniques)} | ${formatCategoryCell(categories.examens_diagnostic)} | ${formatCategoryCell(categories.traitements)} |`;
+    const categories = categoriesByHash.get(resolveContentHash(course)) ?? {};
+    const cells = orderedKeys.map((key) => formatCategoryCell(categories[key]));
+    return `| **${escapeTableCell(course.title)}** | ${cells.join(" | ")} |`;
   });
 
   return [header, separator, ...rows].join("\n");
@@ -130,10 +152,53 @@ function stitchSummaryChunks(coursesInOrder: EligibleCourseRow[], chunksByHash: 
 }
 
 /**
+ * SECOND PASS — the only cross-course reasoning in this feature, and
+ * deliberately NOT cacheable: it's a function of the exact combination of
+ * selected courses, which is precisely what course-level caching exists to
+ * avoid keying on (see course_workspace_cache's comment in schema.sql for
+ * why combination-level caching was abandoned). Fed the ALREADY-GENERATED
+ * per-course chunks (small, structured JSON) — never raw_text/Explication
+ * again — so this stays cheap regardless of source size, on a fast/cheap
+ * model since the input is already distilled. Returns `null` for a single
+ * selected course (nothing to connect) — caller must check this.
+ */
+async function buildCrossCourseSynthesis(
+  coursesInOrder: EligibleCourseRow[],
+  chunksByHash: Map<string, unknown>
+): Promise<string> {
+  const chunksByCourseTitle = Object.fromEntries(
+    coursesInOrder.map((course) => [course.title, chunksByHash.get(resolveContentHash(course)) ?? {}])
+  );
+  const prompt = buildCrossCourseSynthesisPrompt(chunksByCourseTitle);
+
+  const raw = await callOpenRouter(
+    [
+      { role: "system", content: prompt },
+      { role: "user", content: "Génère la synthèse transversale demandée." },
+    ],
+    { model: HAIKU_MODEL, maxTokens: 1200, bypassMock: true }
+  );
+
+  const parsed = parseJsonResponse(raw);
+  const content = typeof parsed.content === "string" ? sanitizeForPostgres(parsed.content) : "";
+  if (!content.trim()) {
+    throw new Error("La réponse de l'IA ne contient pas de synthèse transversale exploitable.");
+  }
+  return content;
+}
+
+/**
  * MODULAR CHUNK PIPELINE (Fetch All -> Isolate Missing -> Generate Missing ->
- * Save Missing -> Stitch All) — see course_workspace_cache's own comment in
- * supabase/schema.sql for why this replaced the earlier combination-level
- * cache. Body: { moduleId: number, courseIds: number[], type: WorkspaceType }.
+ * Save Missing -> Stitch All -> Cross-Course Synthesis) — see
+ * course_workspace_cache's own comment in supabase/schema.sql for why the
+ * per-course cache replaced an earlier combination-level design. Body:
+ * { moduleId: number, courseIds: number[], type: WorkspaceType }.
+ *
+ * The cross-course synthesis step (>1 course selected) is NOT cacheable —
+ * see buildCrossCourseSynthesis's own comment — so BOTH generation types
+ * lose their "fully free on repeat" guarantee the moment more than one
+ * course is selected, even when every per-course chunk is already cached.
+ * That's the deliberate cost of restoring cross-course value, not a bug.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -203,24 +268,28 @@ export async function POST(request: NextRequest) {
 
   // ── STEP 2: Isolate Missing ──────────────────────────────────────────────
   const missingCourses = eligibleCourses.filter((course) => !cachedByHash.has(resolveContentHash(course)));
+  const needsCrossCourseSynthesis = eligibleCourses.length > 1;
 
   let fallbackTitles: string[] = [];
+  let crossCourseSection: string | null = null;
 
-  if (missingCourses.length > 0) {
-    // ── STEP 3: Generate Missing (ONE batched OpenRouter call covering
-    // every miss — not one call per missing course) ───────────────────────
-    // Plan quota RESERVATION — one unit for this whole batch, regardless of
-    // how many courses were missing, mirroring how a single Studio
-    // generation or a single Flashcards definitive-set generation each
-    // reserve one unit too. Reserved only for a genuine miss — a fully
-    // cached request (missingCourses.length === 0) never reaches this
-    // branch and never touches courseCap.
+  // Reserve if EITHER a chunk needs generating OR the (always-live,
+  // never-cacheable) cross-course pass will run — the only case that skips
+  // quota entirely is a single already-cached course, which really does
+  // cost nothing at all.
+  const needsReservation = missingCourses.length > 0 || needsCrossCourseSynthesis;
+
+  if (needsReservation) {
     const quotaGate = await reserveGeneration(user);
     if (!quotaGate.allowed) {
       return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
     }
+  }
 
-    try {
+  try {
+    // ── STEP 3: Generate Missing (ONE batched OpenRouter call covering
+    // every miss — not one call per missing course) ─────────────────────
+    if (missingCourses.length > 0) {
       const { inputs, fallbackTitles: missingFallbacks } = buildCourseInputs(missingCourses);
       fallbackTitles = missingFallbacks;
 
@@ -244,8 +313,7 @@ export async function POST(request: NextRequest) {
 
       // Every missing course MUST come back — a partial response (the model
       // silently dropped one course) is treated as a failure for the whole
-      // batch rather than silently stitching an incomplete result, which
-      // would look like a real answer while quietly missing content.
+      // batch rather than silently stitching an incomplete result.
       const newChunks: { courseContentHash: string; content: unknown }[] = [];
       for (const input of inputs) {
         const chunk = chunks[input.contentHash];
@@ -257,36 +325,44 @@ export async function POST(request: NextRequest) {
         cachedByHash.set(input.contentHash, sanitized);
       }
 
-      // ── STEP 4: Save Missing ─────────────────────────────────────────────
-      // Stored BEFORE stitching/returning — the next student (or this one,
-      // next click including one of these same courses in a DIFFERENT
-      // selection) benefits immediately. Fail-open internally.
+      // ── STEP 4: Save Missing ───────────────────────────────────────────
+      // Stored BEFORE the cross-course pass/stitching — the next student
+      // benefits immediately. Fail-open internally.
       await storeCourseWorkspaceChunks(newChunks, cacheType);
-    } catch (error) {
-      await refundGeneration(user.id);
-      if (error instanceof OpenRouterError) {
-        return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-      }
-      console.error(`[workspace/module-synthesis:${type}] Erreur non gérée:`, error);
-      return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
     }
+
+    // ── Cross-Course Synthesis (>1 course only, never cached) ────────────
+    if (needsCrossCourseSynthesis) {
+      crossCourseSection = await buildCrossCourseSynthesis(eligibleCourses, cachedByHash);
+    }
+  } catch (error) {
+    if (needsReservation) await refundGeneration(user.id);
+    if (error instanceof OpenRouterError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+    }
+    console.error(`[workspace/module-synthesis:${type}] Erreur non gérée:`, error);
+    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
   }
 
   // Telemetry only, never load-bearing — how many of this request's courses
-  // were already cached vs. freshly generated.
+  // were already cached vs. freshly generated (the cross-course pass, when
+  // it runs, is never counted as a "hit" for any course — it's its own,
+  // separate, always-live cost).
   const hitHashes = eligibleCourses.map(resolveContentHash).filter((hash) => !missingCourses.some((c) => resolveContentHash(c) === hash));
   if (hitHashes.length > 0) await recordCourseWorkspaceCacheHits(hitHashes, cacheType);
 
   // ── STEP 5: Stitch All ───────────────────────────────────────────────────
-  const content =
+  const mainContent =
     type === "global_summary"
       ? stitchSummaryChunks(eligibleCourses, cachedByHash as Map<string, string>)
       : stitchKeywordsTable(eligibleCourses, cachedByHash as Map<string, KeywordCategories>);
 
+  const content = crossCourseSection ? `${mainContent}\n\n---\n\n${crossCourseSection}` : mainContent;
+
   return NextResponse.json({
     success: true,
     content,
-    fullyCached: missingCourses.length === 0,
+    fullyCached: missingCourses.length === 0 && !needsCrossCourseSynthesis,
     coursesGenerated: missingCourses.length,
     coursesFromCache: eligibleCourses.length - missingCourses.length,
     coursesUsingRawTextFallback: fallbackTitles,

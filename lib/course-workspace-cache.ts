@@ -10,24 +10,26 @@
 
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 
-// "keyword_row_v2", not "keyword_row" — the stored SHAPE changed (per-course
-// {concept,term,trap} triples -> one object of 4 short-keyword category
-// arrays for a single global table row). Bumped rather than reused so old
-// cached rows are never read back under the new, incompatible shape — see
-// course_workspace_cache's own migration comment in supabase/schema.sql.
-export type CourseWorkspaceGenerationType = "summary_chunk" | "keyword_row_v2";
+// "keyword_row_v3" — bumped again from v2 (the stored SHAPE changed once
+// more: fixed 4-category object -> dynamic per-course category keys, and
+// each item is now "**keyword:** brief explanation" instead of a bare
+// term). Bumped rather than reused so old-shaped cached rows are never read
+// back under the new shape — see course_workspace_cache's full migration
+// history in supabase/schema.sql.
+export type CourseWorkspaceGenerationType = "summary_chunk" | "keyword_row_v3";
 
 /**
  * One course's entire Keywords Table contribution — exactly ONE table row,
- * not one row per concept. Every array holds SHORT keywords only (1-3 words,
- * no sentences, no verbs — enforced in the prompt, not just by this type).
+ * not one row per concept. Keys are DYNAMIC (whichever medical categories
+ * genuinely apply to this course — see CATEGORY_SUPERSET in
+ * lib/ai/module-synthesis-prompts.ts for the preferred shared vocabulary),
+ * not a fixed set — different courses can and will have different keys,
+ * which is exactly what lets the final table grow the right columns for
+ * the actual selection instead of forcing every course into 4 fixed ones.
+ * Each array item is a full "**keyword:** brief explanation" string, not a
+ * bare term.
  */
-export interface KeywordCategories {
-  mots_cles_principaux: string[];
-  signes_cliniques: string[];
-  examens_diagnostic: string[];
-  traitements: string[];
-}
+export type KeywordCategories = Record<string, string[]>;
 
 /** Looks up every requested (courseContentHash, generationType) pair in ONE query. Returns a Map keyed by course_content_hash — missing keys mean a genuine cache miss for that course. Returns an empty Map on any Supabase error or misconfiguration (fail-open: every course is then treated as a miss, never blocking generation). */
 export async function lookupCourseWorkspaceChunks(

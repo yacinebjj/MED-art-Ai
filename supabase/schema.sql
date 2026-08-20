@@ -1507,7 +1507,7 @@ drop table if exists module_synthesis_cache;
 
 create table if not exists course_workspace_cache (
   course_content_hash text not null,
-  generation_type text not null check (generation_type in ('summary_chunk', 'keyword_row_v2')),
+  generation_type text not null check (generation_type in ('summary_chunk', 'keyword_row_v3')),
   content jsonb not null,
   hit_count integer not null default 0,
   created_at timestamptz not null default now(),
@@ -1515,23 +1515,24 @@ create table if not exists course_workspace_cache (
   primary key (course_content_hash, generation_type)
 );
 
--- MIGRATION: 'keyword_row' -> 'keyword_row_v2'. The per-course keyword
--- chunk's STORED SHAPE changed (was `KeywordRow[]` — {concept, term, trap}
--- triples destined for one small table per course; now a single object of
--- 4 category arrays — {mots_cles_principaux, signes_cliniques,
--- examens_diagnostic, traitements} — destined for one row in one global
--- table). Reusing the old 'keyword_row' key against the new code would
--- silently read old-shaped JSON as if it were new-shaped (undefined
--- category arrays, broken cells) — bumping the generation_type instead of
--- reusing it means old cached rows are simply never looked up again, no
--- runtime type confusion, no manual DELETE needed. This ALTER is what makes
--- that safe on an already-existing production table (CREATE TABLE IF NOT
--- EXISTS above is a no-op there, same reasoning as this file's other
--- ALTER-based constraint fixes — see studio_courses.curriculum_module_id's
--- own comment for the identical pattern).
+-- MIGRATION HISTORY for the keyword chunk's generation_type — bumped every
+-- time the STORED SHAPE changed, never reused, so old-shaped cached rows
+-- are simply never looked up again instead of being silently misread:
+--   'keyword_row'    -> {concept, term, trap} triples, one small table PER COURSE.
+--   'keyword_row_v2' -> a fixed 4-category object, one row in one global table.
+--   'keyword_row_v3' -> a DYNAMIC-key object (categories vary per course,
+--                       drawn from a preferred shared vocabulary — see
+--                       CATEGORY_SUPERSET in lib/ai/module-synthesis-prompts.ts),
+--                       each item now "**keyword:** brief explanation" instead
+--                       of a bare term. Column set for the final table is the
+--                       UNION of every course's own keys, computed at stitch
+--                       time — see app/api/workspace/module-synthesis/route.ts.
+-- This ALTER is what makes each bump safe on an already-existing production
+-- table (CREATE TABLE IF NOT EXISTS above is a no-op there) — same pattern
+-- as this file's other ALTER-based constraint fixes.
 alter table course_workspace_cache drop constraint if exists course_workspace_cache_generation_type_check;
 alter table course_workspace_cache add constraint course_workspace_cache_generation_type_check
-  check (generation_type in ('summary_chunk', 'keyword_row_v2'));
+  check (generation_type in ('summary_chunk', 'keyword_row_v3'));
 
 alter table course_workspace_cache enable row level security;
 drop policy if exists "Deny all client access" on course_workspace_cache;
@@ -1596,6 +1597,45 @@ language sql
 as $$
   update studio_content_variations set hit_count = hit_count + 1, last_hit_at = now() where id = p_variation_id;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- module_generated_exams: the real "Générateur d'Examen" persistence layer
+-- (app/api/exam/generate/route.ts) — this feature had NO real backend at
+-- all before (fully mocked UI: a hardcoded 5-course list shown identically
+-- on every module, and a hardcoded 3-question exam). Every generated
+-- 40-60 QCM exam is saved here so a student's "Semaine Bloquée" history is
+-- permanent, not lost on refresh — same "atomic generate-then-save" policy
+-- as Studio's own courseCap-billed generations (never return success
+-- without the content already being durably saved first).
+--
+-- curriculum_module_id is ON DELETE RESTRICT, not CASCADE — same fix
+-- already applied to studio_courses.curriculum_module_id (see that column's
+-- own comment): admin/seed-managed reference data must never be able to
+-- silently wipe a student's real content just because it gets deleted.
+-- ---------------------------------------------------------------------------
+create table if not exists module_generated_exams (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  curriculum_module_id bigint not null references curriculum_modules (id) on delete restrict,
+  selected_courses jsonb not null,
+  content jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists module_generated_exams_user_module_idx
+  on module_generated_exams (user_id, curriculum_module_id, created_at desc);
+
+alter table module_generated_exams enable row level security;
+
+-- Real client-facing policy (matching studio_courses/user_notes' own
+-- convention) even though the actual route uses the service-role client —
+-- defense-in-depth, not currently exercised, same reasoning as those two
+-- tables' own RLS comments.
+drop policy if exists "Users manage their own exams" on module_generated_exams;
+create policy "Users manage their own exams" on module_generated_exams
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
 -- Web Push subscriptions — a JSONB array of standard PushSubscription

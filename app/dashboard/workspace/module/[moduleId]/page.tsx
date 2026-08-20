@@ -369,7 +369,24 @@ export default function ModuleWorkspacePage() {
               // border overrides (TABLE_BORDER_OVERRIDES_*) rather than as a
               // separate change, since both land on this same element.
               <div className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    ...(isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS),
+                    // Wraps ONLY the <table> in a horizontal-scroll container —
+                    // now that column count is dynamic (per selected courses),
+                    // a wide table must scroll internally instead of forcing
+                    // the whole page to overflow. Scoped here, not added to
+                    // the shared MARKDOWN_COMPONENTS in lib/markdown.tsx,
+                    // which every other Markdown surface in the app (chat,
+                    // demo pages, quizzes) also renders through.
+                    table: ({ ...props }) => (
+                      <div className="overflow-x-auto">
+                        <table {...props} />
+                      </div>
+                    ),
+                  }}
+                >
                   {normalizeCallouts(output)}
                 </ReactMarkdown>
               </div>
