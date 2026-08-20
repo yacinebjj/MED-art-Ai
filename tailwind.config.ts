@@ -82,6 +82,12 @@ const config: Config = {
         soft: "0 2px 10px -2px rgb(0 0 0 / 0.08)",
         card: "0 4px 24px -4px rgb(0 0 0 / 0.08)",
         glow: "0 0 0 1px hsl(var(--primary) / 0.15), 0 8px 30px -8px hsl(var(--primary) / 0.35)",
+        // "Futuristic Medical Elegance" glass chrome — a soft ambient shadow
+        // plus a hairline inset highlight (the light catching the top edge
+        // of a frosted pane), on top of Tailwind's own arbitrary
+        // shadow-[...] utilities already used for one-off card glows.
+        glass: "0 8px 32px -8px rgb(0 0 0 / 0.12), inset 0 1px 0 0 rgb(255 255 255 / 0.4)",
+        "glass-dark": "0 8px 32px -8px rgb(0 0 0 / 0.5), inset 0 1px 0 0 rgb(255 255 255 / 0.06)",
       },
       keyframes: {
         "fade-in": {
@@ -104,6 +110,23 @@ const config: Config = {
           "0%, 100%": { opacity: "0.06" },
           "50%": { opacity: "0.1" },
         },
+        // Gentle vertical bob for the animated brand mark / empty-state
+        // icons — distinct from aurora-breathe (which scales/fades a large
+        // background blob), this is for a small foreground glyph.
+        float: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-6px)" },
+        },
+        // Outward-expanding ring pulse (the "neural node" halo around the
+        // animated logo) — opacity fades to 0 as it scales up, looped.
+        "ring-pulse": {
+          "0%": { transform: "scale(0.9)", opacity: "0.6" },
+          "80%, 100%": { transform: "scale(1.6)", opacity: "0" },
+        },
+        shimmer: {
+          "0%": { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.25s ease-out",
@@ -111,6 +134,9 @@ const config: Config = {
         "aurora-breathe": "aurora-breathe 12s ease-in-out infinite",
         "sidebar-wave": "sidebar-wave 20s ease-in-out infinite",
         "mesh-pulse": "mesh-pulse 20s ease-in-out infinite",
+        float: "float 4s ease-in-out infinite",
+        "ring-pulse": "ring-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        shimmer: "shimmer 2.5s linear infinite",
       },
     },
   },

@@ -119,26 +119,77 @@
     background-color: rgba(255, 255, 255, 0.4);
   }
 
-  /* Clinical SaaS: faint teal grid, meant to sit behind page content at
-     6-10% opacity via animate-mesh-pulse (see tailwind.config.ts). */
-  .clinical-mesh-bg {
+  /* ---------------------------------------------------------------------
+     "Futuristic Medical Elegance" — the app-shell redesign's background
+     and glass surface system (app/dashboard/(shell)/layout.tsx onward).
+     Additive to the Clinical SaaS tokens above, not a replacement — every
+     existing `bg-card`/`border-border`/etc. still resolves through the
+     same CSS vars, so pages that haven't been redesigned yet are
+     unaffected. Only .clinical-mesh-bg/.clinical-canvas-bg (the shell's
+     OLD background, used nowhere else) were removed outright.
+     --------------------------------------------------------------------- */
+
+  /* Three soft, slowly-drifting color fields (teal/violet/cyan) behind the
+     shell — the "breathing" backdrop referenced by the redesign brief.
+     Deliberately not too colorful at rest (6-10% opacity) so long reading
+     sessions (Studio, Workspace) stay comfortable; glass panels placed on
+     top get their real vibrancy from backdrop-blur sampling this layer. */
+  .aurora-canvas-bg {
+    background-color: #f8fafc;
     background-image:
-      linear-gradient(rgba(13, 148, 136, 0.35) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(13, 148, 136, 0.35) 1px, transparent 1px);
-    background-size: 40px 40px;
+      radial-gradient(circle at 15% 20%, rgba(20, 184, 166, 0.16) 0%, transparent 45%),
+      radial-gradient(circle at 85% 15%, rgba(139, 92, 246, 0.14) 0%, transparent 45%),
+      radial-gradient(circle at 50% 90%, rgba(56, 189, 248, 0.12) 0%, transparent 50%);
   }
 
-  /* Clinical SaaS: soft white canvas with an ultra-light teal/blue tint
-     tucked into opposite corners, sitting under .clinical-mesh-bg. */
-  .clinical-canvas-bg {
-    background-color: #ffffff;
+  .dark .aurora-canvas-bg {
+    background-color: #030712;
     background-image:
-      radial-gradient(circle at top left, rgba(240, 249, 255, 0.7) 0%, transparent 55%),
-      radial-gradient(circle at bottom right, rgba(240, 253, 244, 0.6) 0%, transparent 55%);
+      radial-gradient(circle at 15% 20%, rgba(20, 184, 166, 0.22) 0%, transparent 45%),
+      radial-gradient(circle at 85% 15%, rgba(139, 92, 246, 0.2) 0%, transparent 45%),
+      radial-gradient(circle at 50% 90%, rgba(56, 189, 248, 0.16) 0%, transparent 50%);
   }
 
-  .dark .clinical-canvas-bg {
-    background-color: transparent;
-    background-image: none;
+  /* Faint grid, sits above .aurora-canvas-bg at low opacity via
+     animate-mesh-pulse (tailwind.config.ts) — same role as the old
+     clinical-mesh-bg, restyled to a neutral slate line so it works over
+     the new multi-color aurora instead of assuming a teal-only backdrop. */
+  .aurora-mesh-bg {
+    background-image:
+      linear-gradient(rgba(100, 116, 139, 0.5) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(100, 116, 139, 0.5) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+
+  /* Chrome surfaces (floating sidebar, topbar, mobile bottom nav) — a
+     frosted pane that lets the aurora field show through. Deliberately
+     more opaque than .glass-card below: nav chrome needs to stay legible
+     even over a busy page behind it, where a card's own content provides
+     that contrast instead. */
+  .glass-panel {
+    background-color: rgb(255 255 255 / 0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgb(255 255 255 / 0.6);
+  }
+
+  .dark .glass-panel {
+    background-color: rgb(15 23 42 / 0.6);
+    border-color: rgb(255 255 255 / 0.08);
+  }
+
+  /* Content surfaces (cards, panels) — lighter tint than .glass-panel so
+     card content (text, tables) keeps full contrast; the blur is what
+     reads as "glass", not opacity. */
+  .glass-card {
+    background-color: rgb(255 255 255 / 0.55);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(255 255 255 / 0.5);
+  }
+
+  .dark .glass-card {
+    background-color: rgb(30 41 59 / 0.4);
+    border-color: rgb(255 255 255 / 0.07);
   }
 }

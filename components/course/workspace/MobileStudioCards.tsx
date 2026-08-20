@@ -40,8 +40,8 @@ export const MobileStudioCards = memo(function MobileStudioCards({
   const hasAnyResult = sections.some((section) => getSectionStatus(section.id) === "available");
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
-      <div className="flex flex-col gap-3">
+    <div className="flex h-full flex-col gap-2 overflow-y-auto p-2">
+      <div className="flex flex-col gap-2">
         {sections.map((section) => {
           const Icon = section.icon;
           const status = getSectionStatus(section.id);
@@ -55,32 +55,32 @@ export const MobileStudioCards = memo(function MobileStudioCards({
               onClick={() => onItemClick(section.id)}
               disabled={isGenerating}
               className={cn(
-                "flex items-center gap-4 rounded-2xl border p-4 text-left shadow-sm transition-transform active:scale-[0.98] disabled:cursor-wait disabled:opacity-70",
+                "flex items-center gap-3 rounded-2xl border p-2.5 text-left shadow-sm transition-transform active:scale-[0.98] disabled:cursor-wait disabled:opacity-70",
                 tint.bg
               )}
             >
               <span
                 className={cn(
-                  "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/70 dark:bg-black/20",
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/70 dark:bg-black/20",
                   tint.icon
                 )}
               >
-                {isGenerating ? <Loader2 className="h-6 w-6 animate-spin" /> : <Icon className="h-6 w-6" />}
+                {isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" />}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-base font-semibold text-gray-900 dark:text-gray-100">{section.label}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{section.label}</p>
+                <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                   {isGenerating ? "Génération en cours..." : status === "available" ? "Déjà généré — appuie pour ouvrir" : "Appuie pour générer"}
                 </p>
               </div>
-              <ChevronRight className="h-5 w-5 shrink-0 text-gray-400 dark:text-neutral-600" />
+              <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 dark:text-neutral-600" />
             </button>
           );
         })}
       </div>
 
       {!hasAnyResult && (
-        <p className="py-6 text-center text-sm text-gray-400 dark:text-neutral-600">
+        <p className="py-4 text-center text-xs text-gray-400 dark:text-neutral-600">
           Les résultats de Studio seront enregistrés ici.
         </p>
       )}

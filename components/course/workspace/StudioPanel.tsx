@@ -206,7 +206,7 @@ export function StudioPanel({
     >
       <div
         className={cn(
-          "flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800",
+          "flex items-center justify-between border-b border-gray-200 p-2 dark:border-neutral-800 md:p-4",
           !isNoteOpen && detailBg
         )}
       >
@@ -279,13 +279,13 @@ export function StudioPanel({
         <div className={cn("h-full overflow-y-auto", openedSection && detailBg)}>
           {openedSection ? (
             isSectionExpanded ? null : (
-              <div ref={containerRef} className="p-4">
+              <div ref={containerRef} className="p-2 md:p-4">
                 {children}
               </div>
             )
           ) : (
-            <div className={cn("space-y-6 p-4 pb-24", isCollapsed && "px-2")}>
-              <div className={cn("grid gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-2")}>
+            <div className={cn("space-y-3 p-2 pb-20 md:space-y-6 md:p-4 md:pb-24", isCollapsed && "px-2")}>
+              <div className={cn("grid gap-1.5 md:gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-2")}>
                 {sections.map((section) => {
                   const Icon = section.icon;
                   const isGenerating = generatingSection === section.id;
@@ -298,8 +298,8 @@ export function StudioPanel({
                       onClick={() => onItemClick(section.id)}
                       title={isCollapsed ? section.label : undefined}
                       className={cn(
-                        "flex items-center gap-2 rounded-xl border text-sm font-medium text-gray-700 transition-all hover:scale-[1.01] hover:shadow-sm disabled:cursor-wait disabled:opacity-70 disabled:hover:scale-100 dark:text-gray-200",
-                        isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between p-3 text-left",
+                        "flex items-center gap-2 rounded-xl border text-xs font-medium text-gray-700 transition-all hover:scale-[1.01] hover:shadow-sm disabled:cursor-wait disabled:opacity-70 disabled:hover:scale-100 dark:text-gray-200 md:text-sm",
+                        isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between p-2 text-left md:p-3",
                         tint.bg
                       )}
                     >

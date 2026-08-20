@@ -44,7 +44,7 @@ export const MobileWorkspaceTabBar = memo(function MobileWorkspaceTabBar({ activ
             onClick={() => onChange(tab.id)}
             aria-pressed={isActive}
             className={cn(
-              "flex flex-1 flex-col items-center justify-center gap-1 py-2.5 text-xs font-medium transition-colors",
+              "flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-xs font-medium transition-colors",
               isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-400 dark:text-neutral-500"
             )}
           >

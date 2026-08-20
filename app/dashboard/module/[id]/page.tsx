@@ -898,7 +898,7 @@ export default function ModuleWorkspacePage() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-100 dark:bg-neutral-950">
+      <div className="flex h-dvh items-center justify-center bg-gray-100 dark:bg-neutral-950">
         <BrandLoader />
       </div>
     );
@@ -906,7 +906,7 @@ export default function ModuleWorkspacePage() {
 
   if (notFound || !module) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-gray-100 dark:bg-neutral-950">
+      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-gray-100 dark:bg-neutral-950">
         <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Ce module est introuvable.</p>
         <Link
           href="/dashboard"
@@ -1094,7 +1094,7 @@ export default function ModuleWorkspacePage() {
     "flex flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900";
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
+    <div className="flex h-dvh flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
       <WorkspaceTopbar title={moduleTitle} />
 
       {/* Desktop (md+) — the original fixed-width 3-column shell, completely
@@ -1147,7 +1147,7 @@ export default function ModuleWorkspacePage() {
           markdown/GastriteXXXStudio rendering logic a second time. */}
       {!isDesktop && (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className={cn(panelShellClasses, "m-4 flex-1")}>
+          <div className={cn(panelShellClasses, "m-2 flex-1")}>
             {mobileTab === "sources" && (
               <ModuleSourcesPanel
                 variant="mobile"

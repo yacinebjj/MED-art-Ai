@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { FileText, Plus, Search, Settings, UploadCloud } from "lucide-react";
+import { FileText, Plus, Search, Settings, Sparkles, UploadCloud } from "lucide-react";
+import { DashboardHero } from "@/components/dashboard/DashboardHero";
 import { UploadModal } from "@/components/dashboard/UploadModal";
 import { PublicCourseCard } from "@/components/dashboard/PublicCourseCard";
 import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
@@ -188,71 +189,82 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto max-w-7xl">
       {/* --- 1. Hero & Actions Rapides ------------------------------------ */}
-      <div className="mb-10 flex flex-col gap-5 rounded-2xl bg-gradient-to-br from-teal-50 via-cyan-50 to-white p-6 sm:flex-row sm:items-center sm:justify-between dark:from-teal-950/40 dark:via-cyan-950/20 dark:to-neutral-950">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Bonjour Dr. {firstName} 👋</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {curriculumProfile?.academicYear
-              ? `Bienvenue dans ton espace de ${curriculumProfile.academicYear.name} — choisis une unité, un module indépendant, ou ajoute un cours indépendant.`
-              : "Choisis ta spécialité et ton année dans les Paramètres pour voir ton programme — en attendant, ajoute un cours indépendant."}
-          </p>
-        </div>
-      </div>
+      <DashboardHero firstName={firstName} academicYearName={curriculumProfile?.academicYear?.name ?? null} />
 
-      {/* --- 2. Ajouter un cours indépendant — juste au-dessus de la grille */}
-      <div className="relative mb-8">
-        {/* Soft pulsing glow layer behind the card — subtler in light mode, deeper in dark mode. */}
-        <div className="absolute -inset-0.5 animate-pulse rounded-2xl bg-gradient-to-r from-blue-600/20 via-cyan-500/15 to-blue-600/20 blur-md dark:from-blue-600/40 dark:via-cyan-500/30 dark:to-blue-600/40" />
-
+      {/* --- 2. Actions Rapides : Ajouter un cours, Recherche, Assistant --- */}
+      {/* 3-way split so the Assistant/Chat entry point sits right alongside
+          Upload/Search, "highly visible... above the fold" on mobile
+          (compacted grid-cols-2 there — Assistant + Recherche share a row,
+          Importer gets its own full-width row since it's the primary action). */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
+        className="mb-3 grid grid-cols-2 gap-2 sm:mb-6 sm:gap-4 lg:mb-8 lg:grid-cols-5"
+      >
         <button
           onClick={() => setModalOpen(true)}
-          className="relative flex w-full items-center gap-5 rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-md shadow-blue-500/5 transition-all duration-300 hover:border-blue-400 hover:shadow-[0_0_30px_rgba(37,99,235,0.15)] dark:border-slate-700 dark:bg-slate-900 dark:shadow-xl dark:shadow-black/40 dark:hover:border-blue-500/60 dark:hover:shadow-[0_0_35px_rgba(37,99,235,0.35)]"
+          className="glass-card group col-span-2 flex items-center gap-3 rounded-2xl p-3 text-left shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-emerald-500/20 dark:shadow-glass-dark sm:gap-5 sm:rounded-3xl sm:p-6 lg:col-span-3"
         >
-          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.6)]">
-            <UploadCloud className="h-7 w-7" />
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-14 sm:w-14 sm:rounded-2xl">
+            <UploadCloud className="h-5 w-5 sm:h-7 sm:w-7" />
           </span>
 
           <div className="min-w-0 flex-1">
-            <p className="text-lg font-bold text-slate-900 dark:text-white">Ajouter un cours indépendant</p>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Importe un PDF ou un document sans l'associer à un module — tu pourras le classer plus tard.
+            <p className="text-sm font-bold text-foreground sm:text-lg">Ajouter un cours indépendant</p>
+            <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block sm:text-sm">
+              Importe un PDF ou un document sans l'associer à un module.
             </p>
           </div>
 
-          <span className="hidden shrink-0 items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-md transition-colors hover:bg-blue-500 sm:flex">
+          <span className="hidden shrink-0 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-all duration-300 active:scale-95 sm:flex">
             <Plus className="h-4 w-4" />
             Importer
           </span>
         </button>
-      </div>
 
-      {/* --- 2b. Recherche sémantique — redirige vers /dashboard/search ---- */}
-      <form onSubmit={handleSearchSubmit} className="relative mb-8">
-        <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-blue-600/15 via-cyan-500/10 to-blue-600/15 blur-md dark:from-blue-600/30 dark:via-cyan-500/20 dark:to-blue-600/30" />
-        <div className="relative flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 shadow-md shadow-blue-500/5 transition-all duration-300 focus-within:border-blue-400 focus-within:shadow-[0_0_25px_rgba(37,99,235,0.15)] dark:border-slate-700 dark:bg-slate-900 dark:shadow-xl dark:shadow-black/40 dark:focus-within:border-blue-500/60 dark:focus-within:shadow-[0_0_25px_rgba(37,99,235,0.3)]">
-          <Search className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-300" />
+        <Link
+          href="/dashboard/assistant"
+          className="glass-card group flex flex-col items-center justify-center gap-1.5 rounded-2xl p-3 text-center shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-violet-500/20 dark:shadow-glass-dark sm:flex-row sm:justify-start sm:gap-3 sm:rounded-3xl sm:p-6 lg:col-span-1"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-[0_0_16px_rgba(168,85,247,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-11 sm:w-11">
+            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
+          </span>
+          <span className="text-xs font-bold text-foreground sm:text-sm">Assistant</span>
+        </Link>
+
+        <form
+          onSubmit={handleSearchSubmit}
+          className="glass-card flex items-center gap-2 rounded-2xl p-3 shadow-glass transition-all duration-300 focus-within:-translate-y-1 focus-within:shadow-emerald-500/20 dark:shadow-glass-dark sm:gap-3 sm:rounded-3xl sm:p-6 lg:col-span-1"
+        >
+          <Search className="h-4 w-4 shrink-0 text-primary-500 dark:text-primary-300" />
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Rechercher un concept dans tous mes cours..."
-            className="flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-slate-500"
+            placeholder="Rechercher..."
+            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
           <button
             type="submit"
             disabled={!searchQuery.trim()}
-            className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+            className="hidden shrink-0 rounded-xl bg-primary-600 px-3 py-2 text-xs font-bold text-white transition-all duration-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 sm:block"
           >
-            Rechercher
+            OK
           </button>
-        </div>
-      </form>
+        </form>
+      </motion.div>
 
       {/* --- 3. Programme officiel — dépend de la spécialité/année réelles */}
       {/* enregistrées dans le profil (voir providers/AuthProvider.tsx et    */}
       {/* app/api/curriculum/route.ts). Fini le blocage sur "1ère année" :   */}
       {/* ce bloc suit exactement ce que l'étudiant a choisi dans Paramètres.*/}
-      <section className="mb-10">
-        <h2 className="mb-4 text-xl font-bold tracking-tight text-slate-900 dark:text-gray-100">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+        className="mb-4 sm:mb-8 lg:mb-10"
+      >
+        <h2 className="mb-2 text-base font-bold tracking-tight text-foreground sm:mb-4 sm:text-xl">
           Mon Programme{curriculumProfile?.academicYear ? ` — ${curriculumProfile.academicYear.name}` : ""}
         </h2>
 
@@ -264,62 +276,72 @@ export default function DashboardPage() {
           // real (already-configured) state arrives.
           <CurriculumViewSkeleton />
         ) : !curriculumProfile?.academicYear ? (
-          <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-gray-400">
+          <div className="glass-card flex flex-col items-start gap-3 rounded-3xl border-dashed p-3 text-sm text-muted-foreground sm:p-6">
             <p>Choisis ta spécialité et ton année dans les Paramètres pour afficher tes unités d&apos;enseignement.</p>
             <Link
               href="/dashboard/settings"
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-500"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-300 active:scale-95"
             >
               <Settings className="h-3.5 w-3.5" />
               Aller aux Paramètres
             </Link>
           </div>
         ) : curriculumError ? (
-          <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+          <p className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
             {curriculumError}
           </p>
         ) : curriculumData ? (
           <CurriculumView data={curriculumData} />
         ) : null}
-      </section>
+      </motion.section>
 
-      <hr className="my-10 border-slate-200 dark:border-neutral-800" />
+      <hr className="my-4 border-white/40 dark:border-white/10 sm:my-8 lg:my-10" />
 
       {/* --- 4. Historique — la grille Bento du programme ci-dessus gère   */}
       {/* déjà la navigation par module ; cette section ne montre plus que  */}
       {/* les cours indépendants du client (filtrage frontend, DB intacte). */}
-      <section>
-        <h2 className="mb-6 text-xl font-bold tracking-tight text-slate-900 dark:text-gray-100">
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <h2 className="mb-2 text-base font-bold tracking-tight text-foreground sm:mb-6 sm:text-xl">
           Mes cours indépendants (Historique)
         </h2>
 
         {loading ? (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-40 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-900" />
+              <div key={i} className="glass-card h-32 animate-pulse rounded-2xl sm:h-40 sm:rounded-3xl" />
             ))}
           </div>
         ) : courses.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center dark:border-neutral-800 dark:bg-neutral-900/50">
+          <div className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed p-6 text-center sm:p-10">
             <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
-              <FileText className="h-8 w-8 text-slate-300 dark:text-neutral-700" />
+              <FileText className="h-8 w-8 text-muted-foreground/50" />
             </motion.div>
-            <p className="text-sm font-medium text-slate-600 dark:text-gray-300">
+            <p className="text-sm font-medium text-foreground">
               Vous n'avez pas encore de cours indépendants.
             </p>
-            <p className="max-w-sm text-xs text-slate-400 dark:text-neutral-500">
+            <p className="max-w-sm text-xs text-muted-foreground">
               Cliquez sur « Ajouter un cours indépendant » ci-dessus pour importer votre premier cours.
             </p>
           </div>
         ) : (
           <motion.div
-            className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4"
+            className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4"
             variants={CARD_GRID_VARIANTS}
             initial="hidden"
             animate="show"
           >
             {courses.map((course) => (
-              <motion.div key={course.id} variants={CARD_ITEM_VARIANTS}>
+              <motion.div
+                key={course.id}
+                variants={CARD_ITEM_VARIANTS}
+                whileHover={{ y: -4 }}
+                transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                className="rounded-3xl transition-shadow duration-300 hover:shadow-emerald-500/20"
+              >
                 <PublicCourseCard
                   course={course}
                   modules={modules}
@@ -335,7 +357,7 @@ export default function DashboardPage() {
             ))}
           </motion.div>
         )}
-      </section>
+      </motion.section>
 
       <UploadModal open={modalOpen} onOpenChange={setModalOpen} onUploaded={handleUploaded} />
     </div>
