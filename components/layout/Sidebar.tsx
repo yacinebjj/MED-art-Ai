@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, Settings, CreditCard, Brain, NotebookPen, LogOut, ChevronsUpDown, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
-import { AnimatedBrandMark } from "./AnimatedBrandMark";
+import { Logo } from "./Logo";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useSidebarState } from "@/providers/SidebarProvider";
@@ -65,11 +65,14 @@ export function Sidebar() {
           from its row-flex parent directly. */}
       <div className={cn("h-full w-64 overflow-hidden transition-opacity duration-200", !isDesktopSidebarOpen && "opacity-0")}>
         <div className="glass-panel shadow-glass dark:shadow-glass-dark flex h-full w-64 flex-col rounded-3xl">
-          <div className="flex h-20 items-center gap-2.5 px-5">
-            <AnimatedBrandMark size="sm" />
-            <span className="text-lg font-bold tracking-tight text-foreground">
-              Med Art <span className="text-primary-600 dark:text-primary-400">AI</span>
-            </span>
+          {/* Real logo.png replaces the old AnimatedBrandMark-icon + "Med
+              Art AI"-text lockup here specifically — AnimatedBrandMark
+              itself is untouched everywhere else it's used, this is the
+              one spot that had its own separate text-based wordmark.
+              Header row grown h-20 -> h-24 to comfortably fit the bigger
+              size="lg" (80px) mark without touching the row's edges. */}
+          <div className="flex h-24 items-center px-5">
+            <Logo size="lg" />
           </div>
 
           <nav className="flex-1 space-y-1 px-3 py-2">
@@ -116,6 +119,9 @@ export function Sidebar() {
           <div className="p-3">
             <DropdownMenu>
               <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-2xl p-2.5 text-left transition-colors hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/5">
+                {/* Initials only, no image — the user explicitly wants zero
+                    image assets in the profile display. doctor-report.png
+                    is now unused anywhere in the app. */}
                 <Avatar>
                   <AvatarFallback>{initial}</AvatarFallback>
                 </Avatar>

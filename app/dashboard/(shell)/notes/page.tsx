@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { FileText, Loader2, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { FileText, Loader2, Maximize2, Minimize2, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -60,8 +60,21 @@ function NotesPageContent() {
   // delete, instead of the trash icon/menu item deleting on the very first
   // click (see handleDeleteNoteById below).
   const [confirmDeleteNote, setConfirmDeleteNote] = useState<UserNote | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
+
+  // Escape exits fullscreen — same convention as StudioPanel's own expanded-
+  // section overlay. Only listens while actually fullscreen, so it never
+  // intercepts an Escape meant for something else (a Dialog stacked on top).
+  useEffect(() => {
+    if (!isFullscreen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsFullscreen(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen]);
 
   /** Ask MedArt / Translate need a course context this standalone notes page doesn't have — honest info toast instead of a silently-broken action. Search Web, Add Note, and Highlight/Unhighlight all work exactly as everywhere else. */
   function handleAskFromNote() {
@@ -128,6 +141,7 @@ function NotesPageContent() {
     setSelectedId(note.id);
     setDraftTitle(note.title);
     setDraftContent(note.content);
+    setIsFullscreen(false);
   }
 
   async function handleCreate() {
@@ -193,6 +207,7 @@ function NotesPageContent() {
           setSelectedId(null);
           setDraftTitle("");
           setDraftContent("");
+          setIsFullscreen(false);
         }
       }
       toast({ variant: "success", title: "Note supprimée" });
@@ -246,18 +261,20 @@ function NotesPageContent() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <h1 className="text-2xl font-bold tracking-tight text-foreground">Mes notes</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Tes notes personnelles, indépendantes de tes cours.</p>
+    <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden">
+      <div className="shrink-0">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Mes notes</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Tes notes personnelles, indépendantes de tes cours.</p>
+      </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
-        <Card className="flex h-[70vh] flex-col p-3">
+      <div className="mt-6 min-h-0 flex-1 grid grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
+        <Card className="flex h-full min-h-0 flex-col p-3">
           <Button size="sm" className="w-full rounded-xl" onClick={handleCreate} disabled={isCreating}>
             {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Nouvelle note
           </Button>
 
-          <div className="mt-3 flex-1 space-y-1 overflow-y-auto">
+          <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
                 <BrandLoader className="h-6 w-6" />
@@ -314,7 +331,12 @@ function NotesPageContent() {
           </div>
         </Card>
 
-        <Card className="flex h-[70vh] min-w-0 flex-col p-5">
+        <Card
+          className={cn(
+            "flex min-h-0 min-w-0 flex-col",
+            isFullscreen ? "fixed inset-0 z-50 h-screen w-screen overflow-y-auto rounded-none bg-background p-8" : "h-full p-5"
+          )}
+        >
           {!selectedNote ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
               <FileText className="h-8 w-8 opacity-40" />
@@ -331,6 +353,14 @@ function NotesPageContent() {
                     className="border-none bg-transparent px-0 text-lg font-semibold shadow-none focus:ring-0"
                   />
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
+                  onClick={() => setIsFullscreen((v) => !v)}
+                >
+                  {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -359,7 +389,7 @@ function NotesPageContent() {
                   editable surface out from under wherever the student
                   visually clicks. `break-words`/`whitespace-pre-wrap` alone
                   do NOT fix that in a flex layout; `min-w-0` does. */}
-              <div className="relative mt-3 min-w-0 flex-1">
+              <div className="relative mt-3 min-h-0 min-w-0 flex-1">
                 {isContentEmpty && (
                   <p className="pointer-events-none absolute inset-0 p-4 text-sm text-muted-foreground">
                     Écris ta note ici...

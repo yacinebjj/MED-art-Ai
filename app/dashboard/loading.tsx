@@ -12,7 +12,7 @@ import { BrandLoader } from "@/components/ui/BrandLoader";
 export default function DashboardLoading() {
   return (
     <div className="flex h-full min-h-[50vh] w-full items-center justify-center">
-      <BrandLoader className="h-6 w-6" />
+      <BrandLoader />
     </div>
   );
 }

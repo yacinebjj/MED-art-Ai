@@ -36,24 +36,53 @@ import type { CurriculumModule, CurriculumYearData, TeachingUnitWithModules } fr
  * beyond the existing hasTeachingUnits check.
  */
 
+/**
+ * Aceternity-style Bento card, built as two nested layers rather than one
+ * div — the OUTER layer is a 1.5px gradient-filled "border" (transparent by
+ * default, blooming into an emerald/cyan/violet gradient on hover) and the
+ * INNER layer is the real glass surface. This is the standard CSS technique
+ * for an animatable gradient border: a real `border` property can't
+ * transition to/from a gradient, but padding around a gradient background
+ * can. `group`/hover/lift live on the OUTER layer so the whole card moves
+ * as one rigid unit instead of the glass panel sliding independently inside
+ * a static frame.
+ *
+ * The inner layer reuses `.glass-card` (globals.css) rather than a literal
+ * `bg-white/5` — 5% white opacity is nearly invisible against this app's
+ * LIGHT theme (the actual default — see providers/ThemeProvider's
+ * `defaultTheme="light"`), which only reads as "glass" against a dark
+ * background. `.glass-card` already has real light+dark variants tuned for
+ * exactly this, matching every other glass surface in the app (Dashboard
+ * hero, quick actions, Topbar).
+ */
+const BENTO_CARD_WRAPPER_CLASSES = cn(
+  "group relative w-full rounded-3xl bg-gradient-to-br from-white/20 via-white/5 to-white/20 p-[1.5px]",
+  "transition-all duration-300 ease-out hover:-translate-y-1",
+  "hover:from-emerald-400/70 hover:via-cyan-400/50 hover:to-violet-400/70",
+  "hover:shadow-xl hover:shadow-emerald-500/20 dark:hover:shadow-emerald-500/10",
+  "cursor-pointer"
+);
+
 const BENTO_CARD_CLASSES = cn(
-  "group relative min-h-[180px] w-full overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6",
-  "flex flex-col items-center justify-center",
-  "shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl cursor-pointer",
-  "dark:border-slate-700 dark:from-slate-800 dark:to-slate-900"
+  "glass-card relative flex min-h-[140px] w-full flex-col items-center justify-center overflow-hidden rounded-[calc(1.5rem-1.5px)] p-4",
+  "shadow-glass dark:shadow-glass-dark",
+  "sm:min-h-[180px] sm:p-6"
 );
 
 const ILLUSTRATION_CONTAINER_CLASSES =
-  "mb-4 flex h-24 w-24 shrink-0 transform items-center justify-center rounded-full bg-indigo-50/50 text-[4rem] shadow-inner drop-shadow-md transition-transform duration-300 group-hover:scale-110 dark:bg-indigo-900/20";
+  "mb-3 flex h-14 w-14 shrink-0 transform items-center justify-center rounded-2xl border border-white/20 bg-gradient-to-br from-white/20 to-white/5 text-3xl shadow-inner backdrop-blur-sm transition-transform duration-300 group-hover:scale-110 dark:border-white/10 sm:mb-4 sm:h-20 sm:w-20 sm:text-5xl";
 
 // Cascade entrance for both Bento grids below — same stagger language as the
 // Dashboard's "Mes cours indépendants" grid.
 const BENTO_GRID_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
 const BENTO_ITEM_VARIANTS = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
-const TITLE_CLASSES = "line-clamp-2 px-2 text-center text-lg font-bold text-slate-900 dark:text-gray-100";
+const TITLE_CLASSES = "line-clamp-2 px-1 text-center text-sm font-bold text-foreground sm:px-2 sm:text-lg";
 
-const BENTO_GRID_CLASSES = "grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4";
+// grid-cols-2 on mobile (not 1) — same "fit more above the fold, native-app
+// feel" compaction already applied to the Dashboard's other grids and the
+// Studio workspace; gap/columns scale up from there.
+const BENTO_GRID_CLASSES = "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:gap-6 xl:grid-cols-4";
 
 function SubModulePill({ module: mod }: { module: CurriculumModule }) {
   return (
@@ -116,7 +145,10 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
     // A <div role="button"> rather than a real <button> — it now contains its
     // own nested, independently-clickable ⋮ menu button, and a <button> can
     // never legally contain another <button>. Matches <TeachingUnitCard>'s
-    // existing pattern below.
+    // existing pattern below. The interactive role/handlers live on the
+    // OUTER gradient-border layer so the whole card (border + glass panel)
+    // is one hit-testable, one hover/lift unit — see BENTO_CARD_WRAPPER_CLASSES'
+    // own comment for why this is two nested divs, not one.
     <div
       role="button"
       tabIndex={0}
@@ -127,8 +159,9 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
           handleClick();
         }
       }}
-      className={cn(BENTO_CARD_CLASSES, "relative")}
+      className={BENTO_CARD_WRAPPER_CLASSES}
     >
+      <div className={BENTO_CARD_CLASSES}>
       <div className="absolute right-2 top-2 z-10" onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -225,6 +258,7 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
         <ModuleStatsModal open={statsOpen} onOpenChange={setStatsOpen} moduleTitle={mod.title} moduleId={mod.id} />
         <GlobalSummaryModal open={globalSummaryOpen} onOpenChange={setGlobalSummaryOpen} moduleTitle={mod.title} moduleId={mod.id} />
       </div>
+      </div>
     </div>
   );
 });
@@ -251,10 +285,11 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
     // A <div role="button"> rather than a real <button> — it contains its
     // own nested, independently-clickable <button> pills once expanded, and
     // a <button> can never legally contain another <button>.
-    <div role="button" tabIndex={0} onClick={onToggle} onKeyDown={handleKeyDown} className={BENTO_CARD_CLASSES}>
+    <div role="button" tabIndex={0} onClick={onToggle} onKeyDown={handleKeyDown} className={BENTO_CARD_WRAPPER_CLASSES}>
+      <div className={BENTO_CARD_CLASSES}>
       <ChevronDown
         className={cn(
-          "absolute right-4 top-4 h-5 w-5 text-slate-300 transition-transform duration-300 dark:text-slate-600",
+          "absolute right-3 top-3 h-4 w-4 text-muted-foreground transition-transform duration-300 sm:right-4 sm:top-4 sm:h-5 sm:w-5",
           expanded && "rotate-180"
         )}
       />
@@ -264,7 +299,7 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
           une fois les vraies illustrations dessinées disponibles côté client. */}
       <div className={ILLUSTRATION_CONTAINER_CLASSES}>{illustration}</div>
       <p className={TITLE_CLASSES}>{unit.title}</p>
-      <p className="mt-1 text-xs font-medium text-slate-400 dark:text-slate-500">
+      <p className="mt-1 text-xs font-medium text-muted-foreground">
         {unit.modules.length} module{unit.modules.length > 1 ? "s" : ""}
       </p>
 
@@ -277,7 +312,7 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
             transition={{ duration: 0.3, ease: "easeInOut" }}
             className="mt-5 w-full overflow-hidden"
           >
-            <div className="flex flex-wrap justify-center gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <div className="flex flex-wrap justify-center gap-2 border-t border-white/10 pt-4">
               {unit.modules.map((mod) => (
                 <SubModulePill key={mod.id} module={mod} />
               ))}
@@ -285,6 +320,7 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 });
@@ -300,10 +336,10 @@ export function CurriculumViewSkeleton() {
   return (
     <div className="space-y-10">
       <div>
-        <div className="mb-4 h-3 w-40 animate-pulse rounded bg-slate-200 dark:bg-neutral-800" />
+        <div className="mb-4 h-3 w-40 animate-pulse rounded bg-white/10" />
         <div className={BENTO_GRID_CLASSES}>
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="min-h-[180px] animate-pulse rounded-3xl bg-slate-100 dark:bg-neutral-900" />
+            <div key={i} className="glass-card min-h-[140px] animate-pulse rounded-3xl sm:min-h-[180px]" />
           ))}
         </div>
       </div>
@@ -426,7 +462,7 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
     <div className="space-y-10">
       {hasTeachingUnits && (
         <div>
-          <h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
+          <h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Unités d&apos;Enseignement
           </h2>
           <motion.div className={BENTO_GRID_CLASSES} variants={BENTO_GRID_VARIANTS} initial="hidden" animate="show">
@@ -445,7 +481,7 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
 
       {data.independentModules.length > 0 && (
         <div>
-          <h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
+          <h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">
             {hasTeachingUnits ? "Modules Indépendants" : "Modules"}
           </h2>
           <motion.div className={BENTO_GRID_CLASSES} variants={BENTO_GRID_VARIANTS} initial="hidden" animate="show">

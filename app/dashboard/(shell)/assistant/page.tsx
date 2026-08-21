@@ -21,6 +21,7 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Camera,
@@ -70,15 +71,6 @@ const SUGGESTED_PROMPTS = [
  * Solid emerald + white fill works unchanged in both themes, no dark:
  * variants needed.
  */
-function MedArtLogo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
-      <rect x="0.5" y="0.5" width="23" height="23" rx="7" className="fill-emerald-500" />
-      <path d="M12 6.5v11M6.5 12h11" stroke="white" strokeWidth="2.75" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 /** The "Nova Effect" — layered, independently-animated blurred rings around the MedArt mark, giving the impression of a slow, organic breathing glow rather than a single flat pulse. */
 function NovaOrb() {
   return (
@@ -103,7 +95,7 @@ function NovaOrb() {
         animate={{ scale: [1, 1.06, 1] }}
         transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
       >
-        <MedArtLogo className="h-full w-full" />
+        <Image src="/logo.png" alt="Med Art AI" fill sizes="80px" className="object-contain" priority />
       </motion.div>
     </div>
   );
@@ -111,7 +103,24 @@ function NovaOrb() {
 
 function EmptyState({ onSelectPrompt }: { onSelectPrompt: (prompt: string) => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-10 text-center sm:gap-8">
+    <div className="relative flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-10 text-center sm:gap-8">
+      {/* Subtle ambient background video — "AI operations" visual life
+          behind the empty state, deliberately understated: absolutely
+          positioned behind everything (-z-10), low opacity, blurred, muted
+          autoplay loop. Adds zero layout shift (out of document flow) and
+          zero risk of overlapping/illegible text — it sits well behind the
+          NovaOrb/heading/prompts, which keep their own full contrast. */}
+      <video
+        aria-hidden
+        autoPlay
+        muted
+        loop
+        playsInline
+        className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover opacity-10 blur-sm"
+      >
+        <source src="/ai-robot-doctor.mp4" type="video/mp4" />
+      </video>
+
       <NovaOrb />
       <div className="max-w-xl space-y-3">
         <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white md:text-4xl">
@@ -143,7 +152,7 @@ function EmptyState({ onSelectPrompt }: { onSelectPrompt: (prompt: string) => vo
 function AssistantAvatar() {
   return (
     <div className="relative mb-1 h-7 w-7 shrink-0">
-      <MedArtLogo className="h-full w-full" />
+      <Image src="/logo.png" alt="Med Art AI" fill sizes="28px" className="object-contain" />
       <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
         <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.6)]" />
@@ -428,7 +437,7 @@ const ChatBubble = memo(function ChatBubble({
         transition={{ duration: 0.25, ease: "easeOut" }}
         className="flex w-full justify-end"
       >
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-emerald-600 px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm sm:max-w-[70%] sm:text-[15px]">
+        <div className="max-w-[90%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-emerald-600 px-4 py-3 text-sm leading-relaxed text-white shadow-sm sm:max-w-[75%] sm:text-[15px]">
           {message.content}
         </div>
       </motion.div>
@@ -875,7 +884,11 @@ export default function AssistantPage() {
                 to edge (minus the padding), growing wider as either sidebar
                 collapses or the viewport widens, instead of stopping at a
                 fixed column width. */}
-            <div className="flex w-full flex-col gap-4 px-4 pb-6 pt-2 sm:px-8 lg:px-16 xl:px-24 2xl:px-32">
+            {/* pb-32 reserves room for the mobile-only bottom nav + input bar
+                stack below (see the input bar's own mb-16 note) so the LAST
+                message is never hidden behind them once the page is scrolled
+                to the bottom on a small screen. */}
+            <div className="flex w-full flex-col gap-4 px-4 pb-32 pt-2 sm:px-8 lg:px-16 lg:pb-6 xl:px-24 2xl:px-32">
               <AnimatePresence initial={false}>
                 {messages.map((message) => (
                   <ChatBubble key={message.id} message={message} onRefresh={regenerateResponse} onDelete={deleteMessage} />
@@ -886,8 +899,19 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* Sticky input bar — floats above the bottom edge, frosted glass, generous touch-friendly padding. pb-[max(...)] keeps it clear of the home-indicator/gesture area on iOS instead of sitting flush against it. Same no-max-w, padding-driven width as the message list above it, so the two stay visually aligned at every breakpoint. */}
-        <div className="shrink-0 border-t border-gray-100 bg-white/50 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/50 sm:px-8 sm:pb-4 lg:px-16 xl:px-24 2xl:px-32">
+        {/* Sticky input bar — floats above the bottom edge, frosted glass, generous touch-friendly padding. pb-[max(...)] keeps it clear of the home-indicator/gesture area on iOS instead of sitting flush against it. Same no-max-w, padding-driven width as the message list above it, so the two stay visually aligned at every breakpoint.
+
+            mb-20 (mobile/tablet only, lg:mb-0 — matches MobileBottomNav.tsx's
+            OWN `lg:hidden` breakpoint exactly, not an arbitrary md guess)
+            pushes this bar up above the fixed bottom tab bar: that nav is
+            `position: fixed`, so without this margin it visually overlaps
+            the input on every viewport below lg. 80px (mb-20), not 64px
+            (mb-16) — measured live: MobileBottomNav's real rendered
+            footprint from the viewport bottom is ~72px (bottom-3 offset +
+            its own height), so mb-16 still left an ~8px overlap. z-40 keeps
+            the input above ordinary page content, matching the nav's own
+            z-40 so neither layer fights the other for the top paint order. */}
+        <div className="sticky bottom-0 z-40 mb-20 shrink-0 border-t border-gray-100 bg-white/50 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/50 sm:px-8 sm:pb-4 lg:mb-0 lg:px-16 xl:px-24 2xl:px-32">
           <div className="flex w-full items-end gap-2 rounded-3xl border border-gray-200 bg-white/70 p-2 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/70">
             <div className="relative">
               <motion.button
@@ -937,7 +961,7 @@ export default function AssistantPage() {
               onKeyDown={handleKeyDown}
               rows={1}
               placeholder="Demande-moi sur tes cours, organise ta journée, ou discute simplement..."
-              className="max-h-40 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-[15px]"
+              className="min-h-[44px] max-h-40 flex-1 resize-none bg-transparent px-1 py-2.5 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-[15px]"
             />
 
             <button
@@ -965,13 +989,13 @@ export default function AssistantPage() {
               whileHover={canSend ? { scale: 1.05 } : undefined}
               whileTap={canSend ? { scale: 0.94 } : undefined}
               className={cn(
-                "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-200",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors duration-200",
                 canSend
                   ? "bg-emerald-600 text-white shadow-[0_0_18px_rgba(16,185,129,0.5)] hover:bg-emerald-700"
                   : "cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-gray-700/60 dark:text-gray-500"
               )}
             >
-              <Send className="h-4 w-4" />
+              <Send className="h-5 w-5" />
             </motion.button>
           </div>
         </div>

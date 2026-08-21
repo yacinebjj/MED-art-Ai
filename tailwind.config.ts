@@ -11,37 +11,66 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        // Bare `var(--x)`, NOT `hsl(var(--x))` — the tokens in globals.css
+        // are now full oklch() color functions (a custom shadcn preset),
+        // not bare HSL-triplet components. Wrapping an already-complete
+        // color function in hsl() would produce invalid CSS like
+        // `hsl(oklch(...))`, silently breaking every themed color in the
+        // app. Tailwind's opacity-modifier syntax (`bg-primary/50` etc.,
+        // used by Button/Badge/several forms) still works with this format
+        // via Tailwind's color-mix() fallback for non-decomposable colors.
+        border: "var(--border)",
+        input: "var(--input)",
+        ring: "var(--ring)",
+        background: "var(--background)",
+        foreground: "var(--foreground)",
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: "var(--card)",
+          foreground: "var(--card-foreground)",
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: "var(--popover)",
+          foreground: "var(--popover-foreground)",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted-foreground)",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: "var(--accent)",
+          foreground: "var(--accent-foreground)",
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: "var(--destructive)",
+          foreground: "var(--destructive-foreground)",
+        },
+        chart: {
+          1: "var(--chart-1)",
+          2: "var(--chart-2)",
+          3: "var(--chart-3)",
+          4: "var(--chart-4)",
+          5: "var(--chart-5)",
+        },
+        sidebar: {
+          DEFAULT: "var(--sidebar)",
+          foreground: "var(--sidebar-foreground)",
+          primary: "var(--sidebar-primary)",
+          "primary-foreground": "var(--sidebar-primary-foreground)",
+          accent: "var(--sidebar-accent)",
+          "accent-foreground": "var(--sidebar-accent-foreground)",
+          border: "var(--sidebar-border)",
+          ring: "var(--sidebar-ring)",
         },
         // Med Art AI "Clinical SaaS" design system — this is Tailwind's real
         // teal palette (not a custom-tuned scale) so `primary-600` is
-        // exactly the spec'd #0d9488, `primary-50` #f0fdfa, etc.
+        // exactly the spec'd #0d9488, `primary-50` #f0fdfa, etc. Deliberately
+        // UNCHANGED by the shadcn preset token swap above — DEFAULT/
+        // foreground follow the new neutral palette, but every numbered
+        // shade (used pervasively — icon badges, hero glows, accents) stays
+        // the app's real teal.
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: "var(--primary)",
+          foreground: "var(--primary-foreground)",
           50: "#f0fdfa",
           100: "#ccfbf1",
           200: "#99f6e4",
@@ -55,8 +84,8 @@ const config: Config = {
           950: "#042f2e",
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: "var(--secondary)",
+          foreground: "var(--secondary-foreground)",
           50: "#eff6ff",
           100: "#dbeafe",
           200: "#bfdbfe",
@@ -81,7 +110,12 @@ const config: Config = {
       boxShadow: {
         soft: "0 2px 10px -2px rgb(0 0 0 / 0.08)",
         card: "0 4px 24px -4px rgb(0 0 0 / 0.08)",
-        glow: "0 0 0 1px hsl(var(--primary) / 0.15), 0 8px 30px -8px hsl(var(--primary) / 0.35)",
+        // color-mix(), not the old `hsl(var(--primary) / 0.15)` alpha-slice
+        // trick — that only works when the variable holds bare HSL
+        // components, not a complete oklch() color function. color-mix()
+        // is format-agnostic, so this keeps working regardless of which
+        // color space --primary is defined in.
+        glow: "0 0 0 1px color-mix(in oklch, var(--primary) 15%, transparent), 0 8px 30px -8px color-mix(in oklch, var(--primary) 35%, transparent)",
         // "Futuristic Medical Elegance" glass chrome — a soft ambient shadow
         // plus a hairline inset highlight (the light catching the top edge
         // of a frosted pane), on top of Tailwind's own arbitrary

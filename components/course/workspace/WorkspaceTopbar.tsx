@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { ArrowLeft, Copy, Moon, Settings, Stethoscope, Sun } from "lucide-react";
+import { ArrowLeft, Copy, Moon, Settings, Sun } from "lucide-react";
+import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
 import {
   DropdownMenu,
@@ -58,11 +59,8 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
           <span className="hidden sm:inline">Retour</span>
         </Link>
         <span className="hidden h-6 w-px shrink-0 bg-gray-200 dark:bg-neutral-700 sm:block" />
-        <Link href="/dashboard" className="hidden shrink-0 items-center gap-2 sm:flex">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-secondary-600 text-white">
-            <Stethoscope className="h-4 w-4" />
-          </span>
-          <span className="hidden text-sm font-bold text-gray-900 dark:text-gray-100 sm:inline">Med Art AI</span>
+        <Link href="/dashboard" className="hidden shrink-0 sm:flex">
+          <Logo size="sm" />
         </Link>
         <span className="hidden h-6 w-px shrink-0 bg-gray-200 dark:bg-neutral-700 sm:block" />
         <h1 className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">

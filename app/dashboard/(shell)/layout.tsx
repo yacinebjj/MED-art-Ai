@@ -16,6 +16,14 @@ import { cn } from "@/lib/utils";
 // wiring into a second layout just for this one route.
 const FULL_BLEED_ROUTES = ["/dashboard/assistant"];
 
+// Notes keeps the normal centered/padded treatment (unlike full-bleed) but
+// still needs a REAL `h-full` — its note editor manages its own internal
+// scroll region precisely (IDE-style: only the editor scrolls, the page
+// itself never does), which requires a real height to fill rather than
+// "grow to content and let <main> scroll", the default for every other
+// page here.
+const FIXED_HEIGHT_ROUTES = ["/dashboard/notes"];
+
 /**
  * "Native-app" no-scroll viewport architecture: the shell's own root is a
  * fixed `h-dvh` flex box that NEVER scrolls (`overflow-hidden`) — Topbar
@@ -42,6 +50,7 @@ export default function DashboardShellLayout({
 }) {
   const pathname = usePathname();
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
+  const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname);
 
   return (
     <SidebarProvider>
@@ -61,8 +70,13 @@ export default function DashboardShellLayout({
               isFullBleed ? "overflow-hidden" : "overflow-y-auto"
             )}
           >
-            <div className={cn(isFullBleed ? "h-full" : "mx-auto w-full max-w-7xl px-2 pb-24 pt-1 sm:px-4 sm:pb-6 lg:px-8")}>
-              <PageTransition className={isFullBleed ? "block h-full" : undefined}>{children}</PageTransition>
+            <div
+              className={cn(
+                needsFixedHeight && "h-full",
+                !isFullBleed && "mx-auto w-full max-w-7xl px-2 pb-24 pt-1 sm:px-4 sm:pb-6 lg:px-8"
+              )}
+            >
+              <PageTransition className={needsFixedHeight ? "block h-full" : undefined}>{children}</PageTransition>
             </div>
           </main>
         </div>

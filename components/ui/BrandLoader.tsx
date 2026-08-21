@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 interface BrandLoaderProps {
@@ -6,50 +7,28 @@ interface BrandLoaderProps {
 }
 
 /**
- * Branded replacement for a generic `Loader2` spinner — a raw inline SVG
- * (no external file, no `next/image`), a stylized medical cross inside a
- * stethoscope loop, pulsing via Tailwind's built-in `animate-pulse`. Used at
- * the app's major loading moments (route-level Suspense fallbacks, full-page/
- * full-panel loading gates) — small inline button-spinners stay `Loader2` on
- * purpose, a pulsing brand mark would be visually oversized there.
+ * Branded loading indicator — public/logo.png with a slow pulse/glow, used
+ * at the app's major loading moments (route-level Suspense fallbacks,
+ * full-page/full-panel loading gates). Default size is intentionally
+ * large (it must dominate a loading screen) — callers that need a small
+ * inline version override via `className`, passing a matching `h-* w-*`
+ * pair (bare, no responsive prefix, so twMerge actually replaces the
+ * default instead of leaving it stacked alongside it).
+ *
+ * No cropping: `object-contain` shows the full logo.png, wordmark
+ * included — nothing is clipped by the container.
  */
 export function BrandLoader({ className, label }: BrandLoaderProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3">
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        className={cn("h-12 w-12 text-primary animate-pulse", className)}
-        role="img"
-        aria-label="Chargement"
+    <div className="flex flex-col items-center justify-center gap-4">
+      <div
+        className={cn(
+          "relative h-32 w-32 shrink-0 animate-pulse drop-shadow-[0_0_40px_rgba(20,184,166,0.5)]",
+          className
+        )}
       >
-        {/* Stethoscope loop */}
-        <path
-          d="M6 3v5a4 4 0 0 0 8 0V3"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M10 12v2a6 6 0 0 0 12 0v-2.5"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="21" cy="10.5" r="1.6" fill="currentColor" />
-        {/* Medical cross */}
-        <path
-          d="M6 15h4m-2-2v4"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="8" cy="17" r="4.2" stroke="currentColor" strokeWidth="1.8" />
-      </svg>
+        <Image src="/logo.png" alt="Chargement" fill sizes="128px" className="object-contain" />
+      </div>
       {label && <p className="text-sm text-muted-foreground">{label}</p>}
     </div>
   );
