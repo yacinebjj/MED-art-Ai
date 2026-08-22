@@ -175,15 +175,6 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
               <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               Voir statistiques
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setGlobalSummaryOpen(true)}>
-              <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              Résumé global du module
-            </DropdownMenuItem>
-            {/* New dedicated full-screen Workspace (see app/dashboard/workspace/module/[moduleId]/page.tsx),
-                deliberately kept alongside "Résumé global du module" above rather than replacing it for
-                this first phase: the existing modal is a quick single-summary action, the Workspace is a
-                deeper multi-course session (summary + keyword table, per-source selection). Worth
-                revisiting whether the modal becomes redundant once the Workspace fully ships. */}
             <DropdownMenuItem asChild>
               <Link href={`/dashboard/workspace/module/${mod.id}`}>
                 <BookOpenText className="h-4 w-4 text-teal-600 dark:text-teal-400" />

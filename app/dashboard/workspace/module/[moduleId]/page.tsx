@@ -41,6 +41,14 @@ import type { StudioCourseSummary } from "@/types/studio-course";
 type SelectAllState = "checked" | "unchecked" | "indeterminate";
 type WorkspaceGenerationType = "global_summary" | "keywords_table";
 
+// No per-student Supabase table exists yet for "this student's last
+// Workspace output" — course_workspace_cache (see schema.sql) is a GLOBAL,
+// cross-student, service-role-only dedup cache keyed by content hash, not a
+// per-user history, so it can't answer "what was on this student's screen
+// last time". localStorage fills that gap until a real table exists: keyed
+// per module so switching modules never shows another module's output.
+const WORKSPACE_HISTORY_STORAGE_PREFIX = "medart_workspace_history_";
+
 interface HistoryEntry {
   id: string;
   type: WorkspaceGenerationType;
@@ -90,9 +98,47 @@ export default function ModuleWorkspacePage() {
   /** Set when the API reports some selected courses had no Explication generated yet, so their raw source text was used instead — see the route's own comment. Cleared on every new generation attempt. */
   const [fallbackNotice, setFallbackNotice] = useState<string[] | null>(null);
 
-  /** Session-only (not persisted) — generating a keyword table no longer discards the summary that was on screen a moment ago. Newest first. */
+  /** Persisted to localStorage (see the restore/save effects below) — generating a keyword table no longer discards the summary that was on screen a moment ago. Newest first. */
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+
+  // Restore whatever this student last generated for THIS module, once on
+  // mount — fixes the reported bug where leaving and coming back lost the
+  // summary/keyword table. Deliberately keyed only on `moduleId` (not a
+  // continuous sync): the save effect below is what keeps localStorage
+  // current as new generations happen; this only ever needs to run once,
+  // right when the page opens.
+  useEffect(() => {
+    if (!Number.isInteger(moduleId)) return;
+    try {
+      const raw = localStorage.getItem(WORKSPACE_HISTORY_STORAGE_PREFIX + moduleId);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { history?: HistoryEntry[]; activeHistoryId?: string | null };
+      if (!Array.isArray(saved.history) || saved.history.length === 0) return;
+      setHistory(saved.history);
+      const active = saved.history.find((h) => h.id === saved.activeHistoryId) ?? saved.history[0];
+      setActiveHistoryId(active.id);
+      setOutput(active.content);
+    } catch {
+      // Corrupted or foreign localStorage value — ignore, page just starts empty.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleId]);
+
+  // Persist after every new/selected entry so a later visit (or a mid-session
+  // refresh) can restore it. `output` isn't a dependency here on purpose — it
+  // always changes in lockstep with `history`/`activeHistoryId` (a new
+  // generation prepends to history AND sets output together; viewHistoryEntry
+  // sets both together too), so tracking those two is sufficient.
+  useEffect(() => {
+    if (!Number.isInteger(moduleId) || history.length === 0) return;
+    try {
+      localStorage.setItem(WORKSPACE_HISTORY_STORAGE_PREFIX + moduleId, JSON.stringify({ history, activeHistoryId }));
+    } catch {
+      // Storage full or unavailable (private browsing) — non-fatal, generation
+      // still works for the current session, it just won't survive a reload.
+    }
+  }, [moduleId, history, activeHistoryId]);
 
   useEffect(() => {
     if (!Number.isInteger(moduleId)) return;

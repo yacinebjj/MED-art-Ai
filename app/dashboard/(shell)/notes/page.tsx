@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FileText, Loader2, Maximize2, Minimize2, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
@@ -10,10 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
-import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
-import { useTextSelection } from "@/hooks/useTextSelection";
 import { cn } from "@/lib/utils";
-import { sanitizeNoteHtml, stripHtmlToText } from "@/lib/highlight";
+import { stripHtmlToText } from "@/lib/highlight";
 import type { UserNote } from "@/types/user-notes";
 
 function formatDate(iso: string): string {
@@ -26,18 +24,23 @@ function formatDate(iso: string): string {
  * selecting a note loads its title/content into local draft state, "Sauvegarder"
  * PUTs only when the draft actually differs from the loaded note.
  *
- * `content` is HTML (not plain text) — the editor is a `contentEditable` div
- * so highlights made with TextSelectionToolbar (real `<mark>` elements) can
- * render and persist. `dangerouslySetInnerHTML` is fed `selectedNote.content`
- * (the last SAVED value), never the live `draftContent` — the two only
- * become equal again right after a save, so React never fights the browser
- * for control of the DOM while the student is actively typing (which would
- * otherwise reset the cursor position on every keystroke).
+ * Body is a plain, directly-controlled `<textarea value={draftContent}
+ * onChange={...}>` — deliberately NOT a `contentEditable` div anymore. An
+ * earlier version used contentEditable + dangerouslySetInnerHTML (to support
+ * inline `<mark>` highlights via TextSelectionToolbar), which could not be
+ * proven broken under test but was reported as unreliable across browsers;
+ * a plain textarea removes that entire class of contentEditable/React
+ * reconciliation edge cases for a note editor where "keystrokes always
+ * register" matters far more than inline highlight coloring. `content` is
+ * now plain text going forward; notes saved as HTML under the old version
+ * are shown here via `stripHtmlToText` (see `selectNote` and the initial-load
+ * effect below) — the words survive, only historic inline highlighting does
+ * not.
  *
- * `?noteId=` deep-link: TextSelectionToolbar's "Add Note" button creates the
- * note server-side first (so its id exists), then navigates here with
- * `?noteId=<id>` — read once on load so that specific note opens pre-selected
- * instead of whatever the newest note happens to be.
+ * `?noteId=` deep-link: created by other pages' "Add Note" action (which
+ * creates the note server-side first, so its id exists), then navigates here
+ * with `?noteId=<id>` — read once on load so that specific note opens
+ * pre-selected instead of whatever the newest note happens to be.
  */
 function NotesPageContent() {
   const { toast } = useToast();
@@ -61,8 +64,6 @@ function NotesPageContent() {
   // click (see handleDeleteNoteById below).
   const [confirmDeleteNote, setConfirmDeleteNote] = useState<UserNote | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const editorRef = useRef<HTMLDivElement | null>(null);
-  const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
 
   // Escape exits fullscreen — same convention as StudioPanel's own expanded-
   // section overlay. Only listens while actually fullscreen, so it never
@@ -75,24 +76,6 @@ function NotesPageContent() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isFullscreen]);
-
-  /** Ask MedArt / Translate need a course context this standalone notes page doesn't have — honest info toast instead of a silently-broken action. Search Web, Add Note, and Highlight/Unhighlight all work exactly as everywhere else. */
-  function handleAskFromNote() {
-    clearSelection();
-    toast({
-      variant: "info",
-      title: "Indisponible ici",
-      description: "Ask MedArt fonctionne depuis un cours — ouvre une source dans un module pour poser une question.",
-    });
-  }
-  function handleTranslateFromNote() {
-    clearSelection();
-    toast({
-      variant: "info",
-      title: "Indisponible ici",
-      description: "La traduction fonctionne depuis un cours — ouvre une source dans un module.",
-    });
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -108,7 +91,7 @@ function NotesPageContent() {
         if (initial) {
           setSelectedId(initial.id);
           setDraftTitle(initial.title);
-          setDraftContent(initial.content);
+          setDraftContent(stripHtmlToText(initial.content));
         }
       })
       .catch(() => setNotes([]))
@@ -120,27 +103,17 @@ function NotesPageContent() {
   }, []);
 
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
-  const isDirty = selectedNote ? draftTitle !== selectedNote.title || draftContent !== selectedNote.content : false;
-  const isContentEmpty = stripHtmlToText(draftContent).trim().length === 0;
-
-  // Sanitized once per note (id+content), not on every keystroke — see the
-  // component doc comment for why this, and never `draftContent`, feeds the
-  // contentEditable div's initial HTML.
-  const sanitizedSelectedContent = useMemo(
-    () => (selectedNote ? sanitizeNoteHtml(selectedNote.content) : ""),
-    [selectedNote?.id, selectedNote?.content]
-  );
-
-  /** Merges the plain innerHTML-reading ref with useTextSelection's callback ref — both need to observe the same contentEditable node. */
-  function setEditorRef(node: HTMLDivElement | null) {
-    editorRef.current = node;
-    containerRef(node);
-  }
+  // Compared against the STRIPPED version of the saved content, not the raw
+  // value — a note saved as HTML under the old contentEditable version would
+  // otherwise never equal its own stripped-for-display draftContent, making
+  // "Sauvegarder" permanently enabled even with zero real edits.
+  const selectedPlainContent = selectedNote ? stripHtmlToText(selectedNote.content) : "";
+  const isDirty = selectedNote ? draftTitle !== selectedNote.title || draftContent !== selectedPlainContent : false;
 
   function selectNote(note: UserNote) {
     setSelectedId(note.id);
     setDraftTitle(note.title);
-    setDraftContent(note.content);
+    setDraftContent(stripHtmlToText(note.content));
     setIsFullscreen(false);
   }
 
@@ -169,19 +142,17 @@ function NotesPageContent() {
     if (!selectedNote) return;
     setIsSaving(true);
     try {
-      const cleanContent = sanitizeNoteHtml(draftContent);
       const res = await fetch(`/api/notes/${selectedNote.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draftTitle, content: cleanContent }),
+        body: JSON.stringify({ title: draftTitle, content: draftContent }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement a échoué.");
 
       const finalTitle = draftTitle.trim() || "Note sans titre";
-      setNotes((prev) => prev.map((n) => (n.id === selectedNote.id ? { ...n, title: finalTitle, content: cleanContent } : n)));
+      setNotes((prev) => prev.map((n) => (n.id === selectedNote.id ? { ...n, title: finalTitle, content: draftContent } : n)));
       setDraftTitle(finalTitle);
-      setDraftContent(cleanContent);
       toast({ variant: "success", title: "Note enregistrée" });
     } catch (error) {
       toast({ variant: "error", title: "Échec", description: error instanceof Error ? error.message : "Erreur inconnue." });
@@ -372,53 +343,20 @@ function NotesPageContent() {
                 </Button>
               </div>
 
-              {/* Rich-text body — a contentEditable div (not a <textarea>) so
-                  TextSelectionToolbar's highlights render as real <mark>
-                  elements; switching to a plain textarea would show raw
-                  "<mark>...</mark>" tags as literal text instead of a
-                  highlight. `key={selectedNote.id}` forces a full remount on
-                  note switch, so the browser's own undo history and any
-                  lingering composition state never bleed from one note into
-                  another.
-
-                  `min-w-0` on this flex item is load-bearing, not
-                  decorative: without it, a long unbroken token (a URL, a
-                  chemical name) in the note's content forces this whole flex
-                  child — and the Card column it sits in — wider than the
-                  viewport instead of wrapping, which pushes the actual
-                  editable surface out from under wherever the student
-                  visually clicks. `break-words`/`whitespace-pre-wrap` alone
-                  do NOT fix that in a flex layout; `min-w-0` does. */}
-              <div className="relative mt-3 min-h-0 min-w-0 flex-1">
-                {isContentEmpty && (
-                  <p className="pointer-events-none absolute inset-0 p-4 text-sm text-muted-foreground">
-                    Écris ta note ici...
-                  </p>
-                )}
-                <div
-                  key={selectedNote.id}
-                  ref={setEditorRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  role="textbox"
-                  aria-multiline="true"
-                  onInput={(e) => setDraftContent(e.currentTarget.innerHTML)}
-                  dangerouslySetInnerHTML={{ __html: sanitizedSelectedContent }}
-                  className="h-full w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-border bg-transparent p-4 text-sm leading-relaxed text-foreground outline-none [&_mark]:text-gray-900"
-                />
-              </div>
-
-              {selection && (
-                <TextSelectionToolbar
-                  ref={tooltipRef}
-                  selection={selection}
-                  onAsk={handleAskFromNote}
-                  onTranslate={handleTranslateFromNote}
-                  onHighlightChange={() => {
-                    if (editorRef.current) setDraftContent(editorRef.current.innerHTML);
-                  }}
-                />
-              )}
+              {/* Plain, directly-controlled textarea — value/onChange straight
+                  onto draftContent, nothing in between. `key={selectedNote.id}`
+                  forces a full remount on note switch, so the browser's own
+                  undo history never bleeds from one note into another.
+                  No disabled, no readOnly, no overlay sitting on top of it. */}
+              <textarea
+                key={selectedNote.id}
+                value={draftContent}
+                onChange={(e) => setDraftContent(e.target.value)}
+                disabled={false}
+                readOnly={false}
+                placeholder="Écris ta note ici..."
+                className="mt-3 h-full min-h-0 w-full min-w-0 flex-1 resize-none rounded-xl border border-border bg-transparent p-4 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
+              />
 
               <div className="mt-3 flex justify-end">
                 <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty}>

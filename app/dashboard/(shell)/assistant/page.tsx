@@ -830,22 +830,26 @@ export default function AssistantPage() {
   const canSend = input.trim().length > 0 && !isTyping;
 
   return (
-    // Explicit viewport-relative height, not h-full: full-bleed pages get
-    // NO py-8 from (shell)/layout.tsx anymore (see FULL_BLEED_ROUTES there),
-    // so the only remaining fixed chrome is Topbar's h-16 (4rem) — h-full
-    // would still resolve against nothing without an explicit height
-    // somewhere in the chain, since <main> itself has no height rule beyond
-    // flex-1 in a min-h-screen column. 100dvh over 100vh so mobile browser
-    // chrome (address bar) doesn't leave the input bar floating past the
-    // real visible area. No boxed card here anymore either — no border,
-    // radius, or background — this blends directly into the dashboard
-    // canvas edge to edge, per the "no confined box" requirement.
+    // h-full, NOT a hardcoded h-[calc(100dvh-4rem)] — that calc was WRONG:
+    // it only accounted for Topbar's own height (h-14 mobile / h-16 desktop)
+    // and ignored the shell's OWN outer wrapper padding+gap around Topbar/
+    // <main> ((shell)/layout.tsx's `p-2 sm:p-3` + `gap-2 sm:gap-3`, ~24-36px
+    // combined on desktop), so this container claimed MORE height than
+    // <main> actually had — and since <main> is `overflow-hidden` for
+    // full-bleed routes, the excess got silently clipped off the BOTTOM,
+    // cutting off the input bar's buttons. `h-full` instead just inherits
+    // whatever height <main> (and the wrapping div/PageTransition, both
+    // already `h-full` for full-bleed routes — see FULL_BLEED_ROUTES in
+    // (shell)/layout.tsx) actually resolved to via flexbox, which is
+    // automatically correct on every breakpoint with zero magic numbers to
+    // keep in sync. No boxed card here — no border, radius, or background —
+    // this blends directly into the dashboard canvas edge to edge.
     //
     // flex-row at the outer level, not flex-col: the conversation-history
     // rail sits BESIDE the chat canvas (Gemini-style), independently
     // collapsible from the main dashboard sidebar via isHistoryOpen — the
     // two toggles are deliberately separate state, not the same one.
-    <div className="flex h-[calc(100dvh-4rem)] overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       <ConversationSidebar
         isOpen={isHistoryOpen}
         onToggle={() => setIsHistoryOpen(false)}
@@ -878,17 +882,19 @@ export default function AssistantPage() {
           <EmptyState onSelectPrompt={sendMessage} />
         ) : (
           <div className="flex-1 overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {/* No max-w-* here on purpose, per explicit instruction: width is
-                controlled entirely by responsive padding, not a content cap
-                — the message list genuinely fills the available canvas edge
-                to edge (minus the padding), growing wider as either sidebar
-                collapses or the viewport widens, instead of stopping at a
-                fixed column width. */}
-            {/* pb-32 reserves room for the mobile-only bottom nav + input bar
-                stack below (see the input bar's own mb-16 note) so the LAST
-                message is never hidden behind them once the page is scrolled
-                to the bottom on a small screen. */}
-            <div className="flex w-full flex-col gap-4 px-4 pb-32 pt-2 sm:px-8 lg:px-16 lg:pb-6 xl:px-24 2xl:px-32">
+            {/* max-w-4xl mx-auto, per explicit instruction — supersedes this
+                area's earlier "no max-w, edge-to-edge" design. Kept `gap-4`
+                over `space-y-4`: functionally near-identical for a vertical
+                stack, but `gap` is a pure layout property that doesn't touch
+                each child's own margin/transform, so it can't fight
+                framer-motion's own transform-based enter/exit animation on
+                each ChatBubble the way a margin-based `space-y` utility can.
+                pb-32 (mobile) / lg:pb-6 (desktop) reserves room for the
+                mobile-only bottom nav + input bar stack below (see the input
+                bar's own mb-20 note) so the LAST message is never hidden
+                behind them once the page is scrolled to the bottom on a
+                small screen. */}
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 pb-32 md:p-6 lg:pb-6">
               <AnimatePresence initial={false}>
                 {messages.map((message) => (
                   <ChatBubble key={message.id} message={message} onRefresh={regenerateResponse} onDelete={deleteMessage} />
@@ -899,19 +905,28 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* Sticky input bar — floats above the bottom edge, frosted glass, generous touch-friendly padding. pb-[max(...)] keeps it clear of the home-indicator/gesture area on iOS instead of sitting flush against it. Same no-max-w, padding-driven width as the message list above it, so the two stay visually aligned at every breakpoint.
+        {/* Plain flex sibling — NOT `position: sticky`. It's already the last
+            `shrink-0` child of the fixed-height, `overflow-hidden` column
+            above, which pins it to the bottom on its own; `sticky` needs a
+            SCROLLING ancestor to mean anything, and this element's nearest
+            one is a sibling (the message list), not an ancestor, so sticky
+            positioning here was inert at best and a source of "margin +
+            sticky" cross-browser sizing quirks at worst. Frosted glass,
+            generous touch-friendly padding, same max-w-4xl mx-auto as the
+            message list above it so the two columns stay perfectly aligned.
+            pb-[max(...)] keeps it clear of the home-indicator/gesture area
+            on iOS instead of sitting flush against it.
 
-            mb-20 (mobile/tablet only, lg:mb-0 — matches MobileBottomNav.tsx's
-            OWN `lg:hidden` breakpoint exactly, not an arbitrary md guess)
-            pushes this bar up above the fixed bottom tab bar: that nav is
+            mb-20 is a plain MARGIN on the outside of this box (not inner
+            padding) — mobile/tablet only, lg:mb-0 matches MobileBottomNav.tsx's
+            OWN `lg:hidden` breakpoint exactly, not an arbitrary md guess.
+            It pushes this bar up above the fixed bottom tab bar: that nav is
             `position: fixed`, so without this margin it visually overlaps
             the input on every viewport below lg. 80px (mb-20), not 64px
             (mb-16) — measured live: MobileBottomNav's real rendered
             footprint from the viewport bottom is ~72px (bottom-3 offset +
-            its own height), so mb-16 still left an ~8px overlap. z-40 keeps
-            the input above ordinary page content, matching the nav's own
-            z-40 so neither layer fights the other for the top paint order. */}
-        <div className="sticky bottom-0 z-40 mb-20 shrink-0 border-t border-gray-100 bg-white/50 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/50 sm:px-8 sm:pb-4 lg:mb-0 lg:px-16 xl:px-24 2xl:px-32">
+            its own height), so mb-16 still left an ~8px overlap. */}
+        <div className="mx-auto mb-20 w-full max-w-4xl shrink-0 border-t border-gray-100 bg-white/95 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95 lg:mb-0">
           <div className="flex w-full items-end gap-2 rounded-3xl border border-gray-200 bg-white/70 p-2 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/70">
             <div className="relative">
               <motion.button
@@ -961,7 +976,14 @@ export default function AssistantPage() {
               onKeyDown={handleKeyDown}
               rows={1}
               placeholder="Demande-moi sur tes cours, organise ta journée, ou discute simplement..."
-              className="min-h-[44px] max-h-40 flex-1 resize-none bg-transparent px-1 py-2.5 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-[15px]"
+              // text-[16px] (not text-sm/14px) on the base/mobile tier is
+              // load-bearing, not a style choice: iOS Safari auto-zooms the
+              // whole page on focus for any input/textarea rendered below a
+              // 16px font-size, and there is no CSS "disable zoom" escape
+              // hatch for this — the only fix is the input actually being
+              // >=16px. Only relaxed back down at sm: (640px+), where that
+              // Safari behavior no longer applies.
+              className="min-h-[44px] max-h-40 flex-1 resize-none bg-transparent px-1 py-2.5 text-[16px] leading-relaxed text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-[15px]"
             />
 
             <button

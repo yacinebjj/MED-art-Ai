@@ -130,7 +130,18 @@ export default function ExamGeneratorPage() {
     fetch(`/api/exam/generate?moduleId=${moduleId}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((body: { success: boolean; exams?: SavedExam[] }) => {
-        if (!cancelled && body.success && Array.isArray(body.exams)) setSavedExams(body.exams);
+        if (cancelled || !body.success || !Array.isArray(body.exams)) return;
+        setSavedExams(body.exams);
+        // Auto-resume the most recently generated exam (API returns oldest
+        // first, so the last element is the newest) so coming back to this
+        // page shows what the student was doing instead of the empty
+        // generator form — the exam was always safely persisted server-side
+        // in module_generated_exams, but requiring a manual click into "Mes
+        // Examens" to see it again read exactly like the content was lost.
+        if (body.exams.length > 0) {
+          setActiveExamId(body.exams[body.exams.length - 1].id);
+          setExamState("testing");
+        }
       })
       .catch(() => {
         /* Non-fatal — the page still works, just without history pre-loaded. */
