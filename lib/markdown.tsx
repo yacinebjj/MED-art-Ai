@@ -2,58 +2,30 @@ import type { Components } from "react-markdown";
 import { CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/**
- * Rich, colored @tailwindcss/typography class set shared by every Markdown
- * reader (workspace CenterReader + the static demo page). Kept in one place so
- * the two stay visually identical.
- *
- * Blockquote colors are handled by the custom component below (not here), so
- * this string covers headings, bold, markers, tables and separators. It also
- * strips the plugin's default blockquote quotation marks.
- */
 export const PROSE_CLASSES = [
-  // prose-xl at md+ (mobile keeps prose-lg) — a comfortable "premium reader"
-  // text size, done via the typography plugin's own scale rather than a
-  // literal text-lg utility stacked on the same element (which would just
-  // silently lose to/fight prose-lg's own font-size rule).
   "prose prose-slate prose-lg md:prose-xl max-w-none",
-  // Headings — premium, color by importance, gradient-clip for h1/h2
   "prose-headings:font-bold prose-headings:tracking-tight",
   "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-600 prose-h1:to-emerald-600",
   "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-600 prose-h2:to-emerald-600",
   "prose-h3:text-indigo-600",
   "prose-a:text-blue-600",
-  // Reading comfort: relaxed line-height and more breathing room between
-  // paragraphs/list items than the plugin's own default rhythm.
   "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
-  // List markers are replaced by custom icon bullets (see createMarkdownComponents)
   "prose-ul:list-none prose-ul:pl-0 prose-ol:list-none prose-ol:pl-0",
-  // Kill the default open-/close-quote glyphs on blockquotes (component colors them)
   "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",
-  // Tables
   "prose-th:bg-blue-600 prose-th:text-white prose-th:font-semibold prose-th:p-3 prose-th:text-left",
   "prose-td:p-3 prose-td:border-t prose-td:border-slate-200 prose-td:align-top",
   "[&_tbody_tr:nth-child(even)]:bg-slate-50",
-  // Horizontal separators
   "prose-hr:border-t-2 prose-hr:border-blue-100",
 ].join(" ");
 
-/**
- * Dark-mode counterpart of PROSE_CLASSES for the "Clinical Midnight Aurora"
- * theme — a complete, independent class string (not layered on top of
- * PROSE_CLASSES) so there's no ambiguity in how conflicting utilities like
- * `prose-h2:text-*` resolve.
- */
 export const DARK_PROSE_CLASSES = [
   "prose prose-invert prose-lg md:prose-xl max-w-none",
   "prose-headings:font-bold prose-headings:tracking-wide",
   "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
-  // Gradient headings for a premium, glowing feel against the dark canvas
   "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-400 prose-h1:to-emerald-400",
   "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-400 prose-h2:to-emerald-400",
   "prose-h3:text-cyan-300",
   "prose-a:text-cyan-400",
-  // List markers are replaced by custom icon bullets (see createMarkdownComponents)
   "prose-ul:list-none prose-ul:pl-0 prose-ol:list-none prose-ol:pl-0",
   "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",
   "prose-th:bg-cyan-600/70 prose-th:text-white prose-th:font-semibold prose-th:p-3 prose-th:text-left",
@@ -62,14 +34,6 @@ export const DARK_PROSE_CLASSES = [
   "prose-hr:border-t-2 prose-hr:border-white/10",
 ].join(" ");
 
-/**
- * Turns the shorthand blockquote levels into single-level blockquotes tagged
- * with a colored-circle marker so they can be colored without nested-box bugs:
- *   >   ...  -> blue   (default note / physiopathologie)
- *   >>  ...  -> green  (résumé, point positif)
- *   >>> ...  -> red    (alerte, danger, red flag)
- * The colored circle also stays visible as a structural bullet.
- */
 export function normalizeCallouts(md: string): string {
   return md
     .split("\n")
@@ -84,7 +48,6 @@ export function normalizeCallouts(md: string): string {
     .join("\n");
 }
 
-/** The four callout "tones" and their full literal Tailwind classes (literal so Tailwind's scanner picks them up). */
 type CalloutTone = "blue" | "emerald" | "amber" | "rose";
 
 const CALLOUT_STYLES: Record<CalloutTone, string> = {
@@ -94,7 +57,6 @@ const CALLOUT_STYLES: Record<CalloutTone, string> = {
   rose: "border-l-4 border-rose-500 bg-rose-50 text-slate-800",
 };
 
-/** Same four tones, restyled as translucent glass chips for the dark Aurora theme. */
 const DARK_CALLOUT_STYLES: Record<CalloutTone, string> = {
   blue: "border-l-4 border-cyan-400 bg-cyan-500/10 text-slate-100",
   emerald: "border-l-4 border-emerald-400 bg-emerald-500/10 text-slate-100",
@@ -102,24 +64,16 @@ const DARK_CALLOUT_STYLES: Record<CalloutTone, string> = {
   rose: "border-l-4 border-rose-400 bg-rose-500/10 text-slate-100",
 };
 
-/**
- * **bold** terms render as bold, colored text — no background pill. A filled
- * badge reads fine in light mode but turns into a muddy, low-contrast block
- * in dark mode (and visually overloads a page dense with medical terms);
- * plain bold-plus-color still pops for memorization without that cost.
- */
 const BADGE_CLASSES = {
   light: "font-bold text-primary-700",
   dark: "font-bold text-primary-400",
 };
 
-/** List-item bullet icon color — literal so Tailwind's scanner picks it up. */
 const LIST_ICON_CLASSES = {
   light: "mt-1 h-4 w-4 shrink-0 text-emerald-600",
   dark: "mt-1 h-4 w-4 shrink-0 text-emerald-400",
 };
 
-/** Flattens a hast node subtree to its text so a blockquote can be classified by content. */
 function hastText(node: unknown): string {
   const n = node as { type?: string; value?: string; children?: unknown[] } | null;
   if (!n) return "";
@@ -128,13 +82,12 @@ function hastText(node: unknown): string {
   return "";
 }
 
-/** Picks a callout color from the blockquote's own text — works for the static demo AND live AI output. */
 function calloutTone(text: string): CalloutTone {
   if (text.includes("🔴")) return "rose";
   if (text.includes("🟡")) return "amber";
   if (text.includes("🟢")) return "emerald";
   if (text.includes("🔵")) return "blue";
-  if (/[؀-ۿ]/.test(text)) return "emerald"; // Arabic memory anchor
+  if (/[؀-ۿ]/.test(text)) return "emerald";
   if (/astuce du prof/i.test(text)) return "amber";
   if (/(attention|danger|red\s*flag|jamais|interdit|urgence vitale|mortel|risque vital)/i.test(text)) {
     return "rose";
@@ -142,15 +95,6 @@ function calloutTone(text: string): CalloutTone {
   return "blue";
 }
 
-/**
- * ReactMarkdown element overrides:
- * - blockquote: colored callout box, tone chosen from its content.
- * - table: wrapped in a rounded, horizontally-scrollable container.
- * - strong: rendered as a rounded keyword badge instead of plain bold text.
- * - li: custom check-icon bullet instead of the default list marker.
- * Built by a factory so the light and dark themes share the exact same
- * logic and only differ in their literal Tailwind classes.
- */
 function createMarkdownComponents(
   calloutStyles: Record<CalloutTone, string>,
   tableWrapperClass: string,
@@ -180,6 +124,37 @@ function createMarkdownComponents(
         <span className="min-w-0">{children}</span>
       </li>
     ),
+    // فقرة تتبنى الهايلايتس المخزنة محلياً وتلونها أوتوماتيكياً أثناء الـ Render
+    p: ({ children }) => {
+      if (typeof window !== "undefined" && typeof children === "string") {
+        const pathParts = window.location.pathname.split("/");
+        const slug = pathParts[pathParts.length - 1];
+        const saved = JSON.parse(localStorage.getItem(`medart_highlights_${slug}`) || "[]");
+        
+        let rendered: React.ReactNode = children;
+        saved.forEach((phrase: string) => {
+          if (children.includes(phrase)) {
+            const parts = children.split(phrase);
+            rendered = (
+              <>
+                {parts.map((part, i) => (
+                  <span key={i}>
+                    {part}
+                    {i < parts.length - 1 && (
+                      <mark className="bg-yellow-300 dark:bg-yellow-500/40 text-inherit rounded px-1">
+                        {phrase}
+                      </mark>
+                    )}
+                  </span>
+                ))}
+              </>
+            );
+          }
+        });
+        return <p className="leading-relaxed my-6">{rendered}</p>;
+      }
+      return <p className="leading-relaxed my-6">{children}</p>;
+    },
   };
 }
 
@@ -190,7 +165,6 @@ export const MARKDOWN_COMPONENTS: Components = createMarkdownComponents(
   LIST_ICON_CLASSES.light
 );
 
-/** Dark-theme counterpart of MARKDOWN_COMPONENTS for the "Clinical Midnight Aurora" theme. */
 export const DARK_MARKDOWN_COMPONENTS: Components = createMarkdownComponents(
   DARK_CALLOUT_STYLES,
   "border-white/10",

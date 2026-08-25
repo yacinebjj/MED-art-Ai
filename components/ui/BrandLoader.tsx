@@ -1,23 +1,18 @@
+"use client";
+
 import Image from "next/image";
-import { cn } from "@/lib/utils";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 interface BrandLoaderProps {
   className?: string;
   label?: string;
 }
 
-/**
- * Branded loading indicator — public/logo.png with a slow pulse/glow, used
- * at the app's major loading moments (route-level Suspense fallbacks,
- * full-page/full-panel loading gates). Default size is intentionally
- * large (it must dominate a loading screen) — callers that need a small
- * inline version override via `className`, passing a matching `h-* w-*`
- * pair (bare, no responsive prefix, so twMerge actually replaces the
- * default instead of leaving it stacked alongside it).
- *
- * No cropping: `object-contain` shows the full logo.png, wordmark
- * included — nothing is clipped by the container.
- */
 export function BrandLoader({ className, label }: BrandLoaderProps) {
   return (
     <div className="flex flex-col items-center justify-center gap-4">

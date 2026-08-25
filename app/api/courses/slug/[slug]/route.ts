@@ -33,7 +33,7 @@ function parseJsonColumn(value: unknown): unknown {
  * per-user `user_courses` table. Powers app/dashboard/demo/[slug]/page.tsx's
  * Résumé / Cas Clinique / QCM Studio tabs.
  */
-export async function GET(request: NextRequest, { params }: { params: { slug: string } }) {
+export async function GET(_request: NextRequest, { params }: { params: { slug: string } }) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Supabase n'est pas configuré." }, { status: 500 });
   }

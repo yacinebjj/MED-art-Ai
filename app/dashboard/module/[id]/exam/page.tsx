@@ -86,7 +86,7 @@ export default function ExamGeneratorPage() {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const activeExam = useMemo(() => savedExams.find((e) => e.id === activeExamId) ?? null, [savedExams, activeExamId]);
-  const questions = activeExam?.content.questions ?? [];
+  const questions = useMemo(() => activeExam?.content.questions ?? [], [activeExam]);
 
   const allSelected = courses !== null && courses.length > 0 && selectedCourseIds.size === courses.length;
   const someSelected = selectedCourseIds.size > 0 && !allSelected;

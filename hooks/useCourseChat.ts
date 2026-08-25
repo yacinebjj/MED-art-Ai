@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isQuotedChatMessage } from "@/lib/demo-content";
 import { useToast } from "@/components/ui/Toast";
 import type { ChatMessage } from "@/lib/types";
@@ -39,6 +39,18 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+
+  // Guards the streaming loop in sendChatMessage below against setState on an
+  // unmounted component — a student can send a message then immediately
+  // navigate away (another course, back to the dashboard) while the reply is
+  // still streaming in. Found during a memory-leak audit.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Load the student's saved history for this course the moment the reader
   // mounts, so the chat opens with their past exchanges instead of blank —
@@ -131,6 +143,7 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
         const { done, value } = await reader.read();
         if (done) break;
         fullText += decoder.decode(value, { stream: true });
+        if (!isMountedRef.current) continue; // keep draining the stream, just stop touching state
         setChatMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: fullText } : m)));
         // The growing bubble itself is the "in progress" signal from here on —
         // clear the separate "MedArt écrit…" indicator the moment real text
@@ -138,16 +151,19 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
         setIsTyping(false);
       }
 
+      if (!isMountedRef.current) return;
+
       if (!fullText.trim()) {
         setChatMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: "⚠️ L'assistant n'a rien renvoyé. Réessaie." } : m))
         );
       }
     } catch (err) {
+      if (!isMountedRef.current) return;
       const message = err instanceof Error ? err.message : "L'assistant n'a pas pu répondre. Réessaie.";
       setChatMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: `⚠️ ${message}` } : m)));
     } finally {
-      setIsTyping(false);
+      if (isMountedRef.current) setIsTyping(false);
     }
   }
 

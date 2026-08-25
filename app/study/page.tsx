@@ -3,61 +3,28 @@
 import { Suspense, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Apple, BrainCircuit, Layers } from "lucide-react";
+import { ArrowLeft, Apple, BrainCircuit, Layers, Play, Pause, RotateCcw, Timer } from "lucide-react";
 import { StudyDashboard } from "@/components/study/StudyDashboard";
 import { WeaknessRemediationPlan } from "@/components/study/WeaknessRemediationPlan";
 import { ActiveFlashcardsDeck } from "@/components/study/ActiveFlashcardsDeck";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { PushOptInButton } from "@/components/push/PushOptInButton";
+import { usePomodoro } from "@/providers/PomodoroProvider"; // 👈 استيراد المخ العالمي للبومودورو
 
-/**
- * "Espace Étude" — the /study nav entry (see components/layout/Sidebar.tsx).
- * Three tabs, three independent features — deliberately NOT nested/gated
- * behind one another:
- * - "revision" (labeled "Points Faibles"): AI-generated "Points Faibles &
- *   Plan de Remédiation" (app/api/study/remediation-plan/*). Used to also
- *   host the real Leitner-box spaced-repetition review session
- *   (SpacedRepetitionReview, sourced from qcm_attempts via app/api/srs/*) —
- *   removed by direct request; that component and its due-review UI no
- *   longer exist anywhere in the app. The underlying attempt-recording and
- *   mastery/weakness tracking (app/api/srs/attempt, course-mastery,
- *   weakness-radar) are untouched and still power WeaknessRemediationPlan
- *   and CourseStatsModal elsewhere — only the "review your due items" UI
- *   itself was deleted, not the data.
- * - "flashcards": the separate AI-generated Q&A flashcards deck, pooled and
- *   shuffled across every activated module/course (app/api/flashcards/*).
- * - "session": the pre-existing gamification/timer prototype (local state
- *   only, no backend).
- * All three need a signed-in session for their data to mean anything, which
- * this route gets for free — it's only ever reached via the sidebar link,
- * itself only rendered inside the authenticated dashboard shell.
- *
- * Controlled (not `defaultValue`) specifically so a push notification's deep
- * link (`/study?tab=flashcards`, see public/sw.js's notificationclick
- * handler) reliably lands on the right tab regardless of whatever tab was
- * last active — explicit is safer than relying on a default that can change.
- *
- * Tab changes sync back into the URL (`router.replace`, not `push` — a tab
- * click isn't a new history entry, it'd make the browser's back button step
- * through every tab the student visited instead of leaving the page). Without
- * this, navigating away and back via the sidebar always reset to "revision"
- * regardless of which tab was open — which fought directly against
- * ActiveFlashcardsDeck's own localStorage "resume where I left off": the
- * deck would still resume correctly, but the student would have to notice
- * and manually re-click the Flashcards tab to see it every single time.
- */
 function StudyPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   const initialTab = tabParam === "session" ? "session" : tabParam === "flashcards" ? "flashcards" : "revision";
   const [activeTab, setActiveTab] = useState(initialTab);
-  // Switching tabs mounts/unmounts a fairly heavy subtree (WeaknessRemediationPlan
-  // vs. ActiveFlashcardsDeck vs. StudyDashboard) — marking the update as a
-  // transition lets React keep the CURRENT tab's content interactive/visible
-  // while it prepares the new one, instead of the click blocking on a
-  // synchronous re-render.
   const [isPending, startTransition] = useTransition();
+
+  // 👈 جلب حالة العداد العالمي لكي يصبح متزامناً مع الـ Topbar والتطبيق كامل
+  const { seconds, isActive, toggleActive, resetTimer } = usePomodoro();
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  const formattedTime = `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
 
   function handleTabChange(value: string) {
     startTransition(() => {
@@ -77,6 +44,31 @@ function StudyPageContent() {
             <ArrowLeft className="h-4 w-4" />
             Retour
           </Link>
+
+          {/* 👈 شريط تحكم سريع للبومودورو هنا في صفحة الدراسة متزامن مع الـ Topbar */}
+          <div className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-1.5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+            <Timer className="h-4 w-4 text-emerald-500 animate-pulse" />
+            <span className="font-mono text-sm font-bold text-gray-800 dark:text-gray-100">
+              {formattedTime}
+            </span>
+            <button
+              onClick={toggleActive}
+              className={`rounded-lg p-1 text-white transition-colors ${
+                isActive ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700"
+              }`}
+              title={isActive ? "Pause" : "Démarrer"}
+            >
+              {isActive ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={resetTimer}
+              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+              title="Réinitialiser"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
           <PushOptInButton />
         </div>
 
@@ -115,7 +107,6 @@ function StudyPageContent() {
   );
 }
 
-/** useSearchParams() (read by StudyPageContent, for the ?tab= deep link) requires a Suspense boundary at build time — this wrapper is purely that, no logic of its own. */
 export default function StudyTestPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-slate-50 dark:bg-slate-950" />}>

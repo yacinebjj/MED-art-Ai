@@ -4,6 +4,7 @@ import { errorMessage, generateCourseSection } from "@/lib/course-generation-sha
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+export const maxDuration = 300; // same headroom as /api/studio/generate — a full course-section generation.
 
 /** Thin wrapper — all pipeline logic lives in generateCourseSection(). Auth required: this triggers a real, billed OpenRouter call. */
 export async function POST(request: NextRequest) {

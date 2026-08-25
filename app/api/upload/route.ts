@@ -7,6 +7,7 @@ import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/documen
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
+export const maxDuration = 60; // large file extraction — no explicit cap before, so it silently rode Vercel's platform default.
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 Mo — same cap as /api/generate-course.
 

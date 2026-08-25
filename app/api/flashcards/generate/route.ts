@@ -197,7 +197,7 @@ export async function POST(request: NextRequest) {
           { role: "system", content: prompt },
           { role: "user", content: "Génère l'ensemble définitif de flashcards demandé." },
         ],
-        { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true }
+        { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 50_000 } // route's own maxDuration is 60s — fail cleanly before the platform kills it
       );
     } catch (error) {
       await refundGeneration(user.id);

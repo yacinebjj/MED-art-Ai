@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { LayoutDashboard, Sparkles, Brain, NotebookPen, MoreHorizontal, Settings, CreditCard, LogOut } from "lucide-react";
+import { LayoutDashboard, Sparkles, Brain, NotebookPen, MoreHorizontal, Settings, CreditCard, LogOut, ListTodo, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { Avatar, AvatarFallback } from "@/components/ui/Avatar";
@@ -46,7 +46,7 @@ export function MobileBottomNav() {
     router.refresh();
   }
 
-  const isMoreActive = ["/dashboard/billing", "/dashboard/settings"].some((p) => pathname.startsWith(p));
+  const isMoreActive = ["/dashboard/billing", "/dashboard/settings", "/dashboard/todo", "/dashboard/groups"].some((p) => pathname.startsWith(p));
 
   return (
     <nav
@@ -100,6 +100,18 @@ export function MobileBottomNav() {
             <span className="truncate">{profile?.fullName || profile?.email || "Étudiant(e)"}</span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link href="/dashboard/todo">
+              <ListTodo className="h-4 w-4" />
+              To-Do List
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link href="/dashboard/groups">
+              <Users className="h-4 w-4" />
+              Groupes de Révision
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link href="/dashboard/billing">
               <CreditCard className="h-4 w-4" />

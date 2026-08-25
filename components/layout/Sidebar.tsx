@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Settings, CreditCard, Brain, NotebookPen, LogOut, ChevronsUpDown, Sparkles } from "lucide-react";
+import { LayoutDashboard, Settings, CreditCard, Brain, NotebookPen, LogOut, ChevronsUpDown, Sparkles, ListTodo, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,8 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/dashboard/assistant", label: "MedArt Assistant", icon: Sparkles },
   { href: "/study", label: "Espace Étude", icon: Brain },
+  { href: "/dashboard/todo", label: "To-Do List", icon: ListTodo },
+  { href: "/dashboard/groups", label: "Groupes de Révision", icon: Users },
   { href: "/dashboard/notes", label: "Mes notes", icon: NotebookPen },
   { href: "/dashboard/billing", label: "Abonnement", icon: CreditCard },
   { href: "/dashboard/settings", label: "Paramètres", icon: Settings },

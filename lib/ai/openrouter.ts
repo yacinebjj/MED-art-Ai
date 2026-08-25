@@ -94,6 +94,17 @@ export interface ChatMessageInput {
   content: string | ContentBlock[];
 }
 
+// No timeout previously existed anywhere in this file — a stalled TCP
+// connection (OpenRouter accepts the request but never sends a byte back)
+// would hang the fetch indefinitely. On Vercel that's eventually cut off by
+// the route's own `maxDuration`, but as a raw platform timeout with no JSON
+// body, not this module's own clean OpenRouterError — and locally (`next
+// dev`, no platform-level cutoff at all) it would hang forever. Default is
+// comfortably under the 300s `maxDuration` the heaviest generation routes
+// declare; callers on a tighter budget (e.g. the 60s flashcards/remediation
+// routes) should pass a smaller `timeoutMs` explicitly.
+const DEFAULT_TIMEOUT_MS = 240_000;
+
 /**
  * Thin wrapper around OpenRouter's OpenAI-compatible chat completions API.
  * Every real AI call in this app goes through here — never call Anthropic
@@ -101,7 +112,7 @@ export interface ChatMessageInput {
  */
 export async function callOpenRouter(
   messages: ChatMessageInput[],
-  options?: { maxTokens?: number; model?: string; bypassMock?: boolean; temperature?: number }
+  options?: { maxTokens?: number; model?: string; bypassMock?: boolean; temperature?: number; timeoutMs?: number }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
   // TEXT, not by an explicit section id — it was built for one fixed set of
@@ -131,6 +142,10 @@ export async function callOpenRouter(
     throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
   }
 
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
   let res: Response;
   try {
     res = await fetch(OPENROUTER_URL, {
@@ -148,10 +163,17 @@ export async function callOpenRouter(
         max_tokens: options?.maxTokens ?? 8192,
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
       }),
+      signal: timeoutController.signal,
     });
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter fetch timed out after ${timeoutMs}ms`);
+      throw new OpenRouterError("Le modèle IA met trop de temps à répondre. Réessaie dans un instant.", 504);
+    }
     console.error("OpenRouter fetch failed", error);
     throw new OpenRouterError("L'appel au modèle IA a échoué. Réessaie dans un instant.", 502);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   if (!res.ok) {
@@ -200,12 +222,20 @@ export async function callOpenRouter(
  */
 export async function streamOpenRouter(
   messages: ChatMessageInput[],
-  options?: { maxTokens?: number; model?: string }
+  options?: { maxTokens?: number; model?: string; timeoutMs?: number }
 ): Promise<ReadableStream<Uint8Array>> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
   }
+
+  // Same stalled-connection guard as callOpenRouter above — aborts the whole
+  // request (headers + body read) if OpenRouter never responds at all. Bounds
+  // total stream duration too, but max_tokens already caps a reply's length
+  // long before this generous a ceiling would ever cut off a real answer.
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
   let res: Response;
   try {
@@ -223,13 +253,19 @@ export async function streamOpenRouter(
         max_tokens: options?.maxTokens ?? 4096,
         stream: true,
       }),
+      signal: timeoutController.signal,
     });
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter stream fetch timed out after ${timeoutMs}ms`);
+      throw new OpenRouterError("Le modèle IA met trop de temps à répondre. Réessaie dans un instant.", 504);
+    }
     console.error("OpenRouter stream fetch failed", error);
     throw new OpenRouterError("L'appel au modèle IA a échoué. Réessaie dans un instant.", 502);
   }
 
   if (!res.ok || !res.body) {
+    clearTimeout(timeoutId);
     const body = await res.text().catch(() => "");
     const detail = extractOpenRouterErrorDetail(body);
     console.error(`OpenRouter stream API error (${res.status})`, body.slice(0, 500));
@@ -266,6 +302,9 @@ export async function streamOpenRouter(
           console.error("OpenRouter stream: malformed SSE frame", error, payload.slice(0, 200));
         }
       }
+    },
+    flush() {
+      clearTimeout(timeoutId);
     },
   });
 

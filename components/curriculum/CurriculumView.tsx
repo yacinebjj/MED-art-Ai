@@ -4,7 +4,7 @@ import { memo, useEffect, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpenText, Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Sparkles, Target, Trash2, TrendingUp } from "lucide-react";
+import { BookOpenText, Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Target, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
 import { useToast } from "@/components/ui/Toast";

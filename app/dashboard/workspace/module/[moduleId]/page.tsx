@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
 import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
+import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
 import type { StudioCourseSummary } from "@/types/studio-course";
 
 /**
@@ -95,10 +96,8 @@ export default function ModuleWorkspacePage() {
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
   const [output, setOutput] = useState<string | null>(null);
-  /** Set when the API reports some selected courses had no Explication generated yet, so their raw source text was used instead — see the route's own comment. Cleared on every new generation attempt. */
   const [fallbackNotice, setFallbackNotice] = useState<string[] | null>(null);
 
-  /** Persisted to localStorage (see the restore/save effects below) — generating a keyword table no longer discards the summary that was on screen a moment ago. Newest first. */
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
 
@@ -282,6 +281,8 @@ export default function ModuleWorkspacePage() {
   return (
     <div className="flex h-screen w-full flex-col bg-slate-50 dark:bg-neutral-950">
       <WorkspaceTopbar title={moduleTitle || "Résumé du module"} />
+
+      <PomodoroStudyBanner />
 
       <div className="flex min-h-0 flex-1">
         {/* ── Sources sidebar ─────────────────────────────────────────── */}

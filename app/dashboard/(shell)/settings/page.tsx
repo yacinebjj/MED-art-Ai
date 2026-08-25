@@ -63,6 +63,12 @@ export default function SettingsPage() {
   // other reason, this stays true — the rule is "was it EVER set", not "is
   // it currently set").
   const [yearLocked, setYearLocked] = useState(false);
+  // Same "was it EVER set" permanence rule as yearLocked, applied to
+  // Spécialité — locking it unconditionally from the start would strand
+  // every new student with no way to ever choose one (registration doesn't
+  // collect it; this settings page is the only place that does), so it can
+  // only lock in AFTER a first real choice, exactly like Année already does.
+  const [specialtyLocked, setSpecialtyLocked] = useState(false);
 
   // Set by the bootstrap effect right after it fetches years for the saved
   // specialty — tells the live "specialty changed" effect below to skip its
@@ -106,6 +112,7 @@ export default function SettingsPage() {
         setAcademicYearId(savedAcademicYearId);
       }
 
+      if (savedSpecialtyId != null) setSpecialtyLocked(true);
       if (savedAcademicYearId != null) setYearLocked(true);
       setReady(true);
     }
@@ -235,14 +242,26 @@ export default function SettingsPage() {
               </div>
             )}
 
-            <Input label="Adresse e-mail" name="email" value={form.email ?? ""} disabled />
-
             <Input
-              label="Nom complet"
-              name="fullName"
-              value={form.fullName}
-              onChange={(e) => update("fullName", e.target.value)}
+              label="Adresse e-mail"
+              name="email"
+              value={form.email ?? ""}
+              disabled
+              className="cursor-not-allowed bg-muted opacity-50"
             />
+
+            <div>
+              <Input
+                label="Nom complet"
+                name="fullName"
+                value={form.fullName}
+                disabled
+                className="cursor-not-allowed bg-muted opacity-50"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Le nom associé à ton compte ne peut pas être modifié ici.
+              </p>
+            </div>
             <Select
               label="Faculté (Algérie)"
               name="university"
@@ -251,14 +270,23 @@ export default function SettingsPage() {
               onValueChange={(value) => update("university", value)}
             />
             <div className="grid grid-cols-2 gap-4">
-              <Select
-                label="Spécialité"
-                name="specialty"
-                placeholder="Choisis"
-                options={specialtyOptions}
-                value={specialtyId != null ? String(specialtyId) : ""}
-                onValueChange={handleSpecialtyChange}
-              />
+              <div>
+                <Select
+                  label="Spécialité"
+                  name="specialty"
+                  placeholder="Choisis"
+                  options={specialtyOptions}
+                  value={specialtyId != null ? String(specialtyId) : ""}
+                  onValueChange={handleSpecialtyChange}
+                  disabled={specialtyLocked}
+                  className={specialtyLocked ? "cursor-not-allowed bg-muted opacity-50" : undefined}
+                />
+                {specialtyLocked && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    La spécialité ne peut pas être modifiée après l&apos;inscription.
+                  </p>
+                )}
+              </div>
               <div>
                 <Select
                   label="Année"

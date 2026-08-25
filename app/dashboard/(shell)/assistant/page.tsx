@@ -1,29 +1,9 @@
 "use client";
 
-/**
- * MedArt Assistant — free-flowing AI companion, distinct from the
- * course-scoped chat in app/api/courses/chat/route.ts (that one is tied to
- * a specific course's raw_text; this one is a standalone conversational
- * space, no course context). Lives inside app/dashboard/(shell) on purpose
- * — same Sidebar/Topbar chrome as Espace Étude/Paramètres, verified against
- * components/layout/Sidebar.tsx (z-40, fixed) and this page's own scroll
- * container (overflow-y-auto, explicit height) before this round of edits,
- * not just assumed unchanged.
- *
- * Streaming wired to app/api/assistant/route.ts using the exact same
- * plain-text ReadableStream pattern as hooks/useCourseChat.ts. Perf note:
- * every streamed chunk calls setMessages with a NEW array, so every
- * <ChatBubble> in the list would re-render on every chunk — including
- * re-parsing Markdown for messages that aren't even changing — without the
- * memo() + stable-callback treatment below. See the comments on ChatBubble,
- * regenerateResponse, and deleteMessage for how that's actually prevented,
- * not just claimed.
- */
-
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  BrainCircuit,
   Camera,
   Check,
   Copy,
@@ -60,43 +40,13 @@ const SUGGESTED_PROMPTS = [
   "Résume mon module de Cardiologie",
 ];
 
-/**
- * The MedArt brand mark — a minimalist medical cross in a rounded-square
- * emerald badge, replacing the generic Sparkles/Bot icon everywhere the
- * AI's identity appears. Deliberately kept to a simple, guaranteed-legible
- * geometric cross rather than a more literal "M + brain" hybrid illustration
- * — that level of custom iconography needs a real visual design pass (this
- * is hand-authored SVG with no way to preview it before shipping), and a
- * clean cross reads clearly as "medical" without risking an illegible mess.
- * Solid emerald + white fill works unchanged in both themes, no dark:
- * variants needed.
- */
-/** The "Nova Effect" — layered, independently-animated blurred rings around the MedArt mark, giving the impression of a slow, organic breathing glow rather than a single flat pulse. */
 function NovaOrb() {
   return (
-    <div className="relative flex h-48 w-48 shrink-0 items-center justify-center sm:h-64 sm:w-64 md:h-72 md:w-72">
-      <motion.div
-        className="absolute inset-0 rounded-full bg-emerald-500/20 blur-3xl"
-        animate={{ scale: [0.95, 1.05, 0.95], opacity: [0.5, 0.85, 0.5], rotate: [0, 12, 0] }}
-        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute inset-6 rounded-full bg-teal-400/25 blur-2xl sm:inset-8"
-        animate={{ scale: [1.05, 0.95, 1.05], opacity: [0.55, 0.9, 0.55], x: [0, 10, -6, 0], y: [0, -8, 4, 0] }}
-        transition={{ duration: 7.5, repeat: Infinity, ease: "easeInOut", delay: 0.4 }}
-      />
-      <motion.div
-        className="absolute inset-12 rounded-full bg-emerald-300/30 blur-xl sm:inset-16"
-        animate={{ scale: [0.92, 1.08, 0.92], rotate: [0, -18, 0] }}
-        transition={{ duration: 5.2, repeat: Infinity, ease: "easeInOut", delay: 0.8 }}
-      />
-      <motion.div
-        className="relative flex h-14 w-14 items-center justify-center rounded-full shadow-[0_0_60px_rgba(16,185,129,0.55)] sm:h-20 sm:w-20"
-        animate={{ scale: [1, 1.06, 1] }}
-        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <Image src="/logo.png" alt="Med Art AI" fill sizes="80px" className="object-contain" priority />
-      </motion.div>
+    <div
+      className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary sm:h-24 sm:w-24"
+      aria-hidden="true"
+    >
+      <BrainCircuit className="h-10 w-10 sm:h-12 sm:w-12" />
     </div>
   );
 }
@@ -104,12 +54,6 @@ function NovaOrb() {
 function EmptyState({ onSelectPrompt }: { onSelectPrompt: (prompt: string) => void }) {
   return (
     <div className="relative flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-10 text-center sm:gap-8">
-      {/* Subtle ambient background video — "AI operations" visual life
-          behind the empty state, deliberately understated: absolutely
-          positioned behind everything (-z-10), low opacity, blurred, muted
-          autoplay loop. Adds zero layout shift (out of document flow) and
-          zero risk of overlapping/illegible text — it sits well behind the
-          NovaOrb/heading/prompts, which keep their own full contrast. */}
       <video
         aria-hidden
         autoPlay
@@ -124,7 +68,7 @@ function EmptyState({ onSelectPrompt }: { onSelectPrompt: (prompt: string) => vo
       <NovaOrb />
       <div className="max-w-xl space-y-3">
         <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white md:text-4xl">
-          Bienvenue sur MedArt Assistant.
+          Hi Yacine, what&apos;s on your mind?
         </h1>
         <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400 sm:text-base">
           Je sais que tu prépares tes examens de 5ème année. Besoin d&apos;aide pour organiser tes révisions de
@@ -151,8 +95,8 @@ function EmptyState({ onSelectPrompt }: { onSelectPrompt: (prompt: string) => vo
 
 function AssistantAvatar() {
   return (
-    <div className="relative mb-1 h-7 w-7 shrink-0">
-      <Image src="/logo.png" alt="Med Art AI" fill sizes="28px" className="object-contain" />
+    <div className="relative mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <BrainCircuit className="h-5 w-5" />
       <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
         <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.6)]" />
@@ -176,40 +120,6 @@ function TypingDots() {
   );
 }
 
-/**
- * Assistant messages only — user messages stay plain text (rendering a
- * student's own raw input as Markdown could turn a stray "*" or "#" into
- * unintended formatting, and there's no reason to parse it). `prose`
- * classes come from @tailwindcss/typography (already installed and
- * registered in tailwind.config.ts). Table cells get explicit overrides on
- * top of `prose` for the bordered/striped look requested — Typography's
- * defaults are close but not that specific.
- *
- * Known, inherent limitation of live-streaming Markdown, not something
- * fixable here without a much bigger incremental-parser rewrite: a
- * half-written table row or an unclosed "**" can render oddly for a
- * fraction of a second while more characters are still arriving. Every
- * streaming Markdown UI (this app's own chat included) has this same
- * property — buffering until a heuristic "safe to render" point would
- * trade this for added latency, a different tradeoff, not a strictly
- * better one.
- *
- * Fade-in reveal: `p`/`li`/`tr` each get `animate-in fade-in` (from the
- * already-installed tailwindcss-animate plugin, not hand-authored
- * keyframes) — a real, honest technique with a real limit, stated plainly:
- * ReactMarkdown re-parses the WHOLE string on every flush, and React only
- * remounts a DOM node (which is what re-triggers a CSS animation) when a
- * NEW element appears in the tree — an existing paragraph that's simply
- * getting MORE TEXT appended to it does not remount, so it doesn't
- * re-fade. What this achieves is real and visible: each new paragraph,
- * list item, or table row fades in the moment it first appears as the
- * response builds up block by block. What it does NOT achieve, because
- * ReactMarkdown's component-override API has no hook into individual
- * words or characters within one already-mounted text node, is a literal
- * per-word fade while a single sentence is still being typed out — that
- * needs a custom incremental renderer splitting text into per-token spans,
- * a materially bigger rewrite than this task, not a CSS trick.
- */
 function AssistantMarkdown({ content }: { content: string }) {
   return (
     <div className="prose prose-sm max-w-none text-gray-800 prose-headings:font-semibold prose-p:my-2 prose-strong:text-gray-900 prose-ul:my-2 prose-li:my-0.5 dark:prose-invert dark:text-gray-100 dark:prose-strong:text-white sm:prose-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
@@ -247,16 +157,6 @@ function AssistantMarkdown({ content }: { content: string }) {
   );
 }
 
-/**
- * Below every completed AI message only — never on the user's own bubbles,
- * never while the reply is still streaming (an empty/in-progress message
- * has nothing to copy, regenerate from a toolbar under itself, or rate).
- * Refresh/Copy/ThumbsUp/ThumbsDown/MoreHorizontal are all real, working
- * handlers, not decoration — see each button below for exactly what it
- * does and doesn't do (feedback state and "reported" are local-only, no
- * backend endpoint exists yet to send them to, which is disclosed in the
- * dropdown item itself rather than pretending it's persisted).
- */
 function ChatToolbar({
   messageId,
   content,
@@ -299,33 +199,22 @@ function ChatToolbar({
       setCopied(true);
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
       copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard permission denied or API unavailable (non-HTTPS context,
-      // older browser) — nothing to recover, the button just silently
-      // doesn't confirm success rather than throwing.
-    }
+    } catch {}
   }
 
   return (
     <div className="mt-1.5 flex flex-row items-center gap-2 text-gray-400 dark:text-gray-500">
-      <button
-        type="button"
-        onClick={() => onRefresh(messageId)}
-        aria-label="Régénérer la réponse"
-        className="rounded-md p-1 transition-colors hover:text-emerald-500"
-      >
+      <button type="button" onClick={() => onRefresh(messageId)} aria-label="Régénérer" className="rounded-md p-1 transition-colors hover:text-emerald-500">
         <RefreshCw className="h-3.5 w-3.5" />
       </button>
 
-      <button type="button" onClick={handleCopy} aria-label="Copier la réponse" className="rounded-md p-1 transition-colors hover:text-emerald-500">
+      <button type="button" onClick={handleCopy} aria-label="Copier" className="rounded-md p-1 transition-colors hover:text-emerald-500">
         {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
 
       <button
         type="button"
         onClick={() => setFeedback((prev) => (prev === "up" ? null : "up"))}
-        aria-label="Bonne réponse"
-        aria-pressed={feedback === "up"}
         className={cn("rounded-md p-1 transition-colors hover:text-emerald-500", feedback === "up" && "text-emerald-500")}
       >
         <ThumbsUp className="h-3.5 w-3.5" />
@@ -334,8 +223,6 @@ function ChatToolbar({
       <button
         type="button"
         onClick={() => setFeedback((prev) => (prev === "down" ? null : "down"))}
-        aria-label="Mauvaise réponse"
-        aria-pressed={feedback === "down"}
         className={cn("rounded-md p-1 transition-colors hover:text-emerald-500", feedback === "down" && "text-rose-500")}
       >
         <ThumbsDown className="h-3.5 w-3.5" />
@@ -346,8 +233,6 @@ function ChatToolbar({
           ref={menuButtonRef}
           type="button"
           onClick={() => setMenuOpen((prev) => !prev)}
-          aria-label="Plus d'options"
-          aria-expanded={menuOpen}
           className="rounded-md p-1 transition-colors hover:text-emerald-500"
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
@@ -365,24 +250,17 @@ function ChatToolbar({
             >
               <button
                 type="button"
-                onClick={() => {
-                  setReported(true);
-                  setMenuOpen(false);
-                }}
+                onClick={() => { setReported(true); setMenuOpen(false); }}
                 className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700"
               >
                 {reported ? "Signalé — merci" : "Signaler cette réponse"}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDelete(messageId);
-                }}
+                onClick={() => { setMenuOpen(false); onDelete(messageId); }}
                 className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"
               >
-                <Trash2 className="h-3.5 w-3.5" />
-                Supprimer cette réponse
+                <Trash2 className="h-3.5 w-3.5" /> Supprimer cette réponse
               </button>
             </motion.div>
           )}
@@ -392,32 +270,6 @@ function ChatToolbar({
   );
 }
 
-/**
- * Memoized so a streaming update to ONE message (a new array from
- * setMessages on every chunk) doesn't re-render every OTHER bubble in the
- * list — sendMessage/regenerateResponse only ever create a new object
- * reference for the message actually changing (see their .map() callbacks
- * below), so React.memo's default shallow-prop comparison correctly bails
- * out for every untouched message. This ONLY works because onRefresh/
- * onDelete are stable function references (useCallback with an empty
- * dependency array on the parent, reading fresh data via a ref instead of
- * closing over `messages` state) — an inline arrow function passed as a
- * prop here would get a new reference every render and silently defeat the
- * whole memoization, which is exactly the "state logic causes the whole
- * chat to re-render" bug this component exists to avoid.
- */
-/**
- * User and assistant messages now render through genuinely different
- * layouts, not one shared structure toggled by conditional classes: the
- * user's message stays a capped-width, right-aligned pill (bg-emerald-600,
- * rounded, shadow) exactly as before. The assistant's no longer has ANY
- * card — no background, no border, no rounded corners, no shadow, no
- * max-width — its Markdown/tables/lists flow directly on the page canvas,
- * full width between the avatar column and the right margin, per the
- * explicit "no boxed bubble for the AI" requirement. Trying to force both
- * through one conditional className string got fragile once the two
- * stopped sharing a shape at all; two small, explicit branches are safer.
- */
 const ChatBubble = memo(function ChatBubble({
   message,
   onRefresh,
@@ -455,7 +307,6 @@ const ChatBubble = memo(function ChatBubble({
     >
       <div className="flex w-full items-start gap-2">
         <AssistantAvatar />
-        {/* min-w-0 lets the flex child actually shrink below its content's natural width instead of overflowing — needed for long unbroken table rows/URLs to wrap correctly at the container edge instead of forcing horizontal scroll. */}
         <div className="min-w-0 flex-1 pt-0.5">{isPending ? <TypingDots /> : <AssistantMarkdown content={message.content} />}</div>
       </div>
       {!isPending && (
@@ -467,13 +318,6 @@ const ChatBubble = memo(function ChatBubble({
   );
 });
 
-// Minimal, self-contained typings for the Web Speech API — deliberately not
-// relying on the ambient `SpeechRecognition`/`SpeechRecognitionEvent` DOM
-// types, which aren't declared in every TS `lib` configuration. Only the
-// handful of members this file actually touches are typed. Extended for
-// continuous + interim results: `resultIndex` + `isFinal` are what the real
-// API uses to tell the caller which results in the growing `results` list
-// are still being revised vs. locked in.
 interface MinimalSpeechRecognitionResult {
   0: { transcript: string };
   isFinal: boolean;
@@ -503,8 +347,6 @@ function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null 
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-const MAX_TEXTAREA_HEIGHT_PX = 160;
-
 const ATTACHMENT_ITEMS = [
   { icon: ImageIcon, label: "Importer une image" },
   { icon: FileText, label: "Importer un PDF" },
@@ -527,25 +369,26 @@ export default function AssistantPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<MinimalSpeechRecognition | null>(null);
   const dictationBaseRef = useRef("");
+
+  // Guards streamAssistantReply's loop below against setState on an unmounted
+  // component — a student can send a message then immediately navigate away
+  // (another sidebar page, "Nouvelle conversation") while the reply is still
+  // streaming in. Found during a memory-leak audit.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const attachmentMenuRef = useRef<HTMLDivElement>(null);
   const attachmentButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Always-fresh mirrors of state that regenerateResponse/deleteMessage need
-  // to read, WITHOUT putting `messages`/`isTyping` in those callbacks'
-  // dependency arrays — doing that would give them a new function identity
-  // on every single state change (i.e. every streamed chunk), which would
-  // propagate to every ChatBubble as a changed prop and defeat memo() for
-  // the entire list, not just the streaming message. This ref-mirror
-  // pattern is what makes "stable callback + always-current data" possible
-  // at the same time.
   const messagesRef = useRef<ChatMessage[]>([]);
   const isTypingRef = useRef(false);
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-  useEffect(() => {
-    isTypingRef.current = isTyping;
-  }, [isTyping]);
+  
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { isTypingRef.current = isTyping; }, [isTyping]);
 
   const isEmpty = messages.length === 0;
 
@@ -558,16 +401,7 @@ export default function AssistantPage() {
   }, [messages]);
 
   useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`;
-  }, [input]);
-
-  useEffect(() => {
-    return () => {
-      recognitionRef.current?.stop();
-    };
+    return () => { recognitionRef.current?.stop(); };
   }, []);
 
   useEffect(() => {
@@ -581,13 +415,6 @@ export default function AssistantPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isAttachmentMenuOpen]);
 
-  // One-time restore on mount, once localStorage has actually been read —
-  // reopens whichever conversation was active when the user last left,
-  // exactly the "survive a refresh" behavior this whole feature exists for.
-  // Deliberately keyed ONLY on `hydrated`, not on `activeId`/`conversations`:
-  // this is a one-shot restore, not a continuous sync — picking a DIFFERENT
-  // conversation later goes through handleSelectConversation instead, which
-  // sets `messages` directly rather than relying on this effect re-firing.
   useEffect(() => {
     if (!hydrated || !activeId) return;
     const active = conversations.find((c) => c.id === activeId);
@@ -595,13 +422,6 @@ export default function AssistantPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
 
-  // Auto-save after every settled turn — the user's prompt AND the
-  // assistant's reply, together, once isTyping flips back to false.
-  // Deliberately gated on !isTyping rather than firing on every `messages`
-  // change: without that guard this would fire on every rAF-batched
-  // streaming flush too (up to ~60 times/second for a long reply), writing
-  // to localStorage far more often than the "after every user prompt and
-  // AI response" requirement actually calls for.
   useEffect(() => {
     if (isTyping) return;
     saveMessages(messages);
@@ -624,32 +444,6 @@ export default function AssistantPage() {
     if (wasActive) setMessages([]);
   }
 
-  /**
-   * Shared by sendMessage (new turn) and regenerateResponse (retry) — both
-   * just need "stream a reply for this user text, given this history"
-   * appended as a fresh assistant row.
-   *
-   * Streaming smoothness: `reader.read()` resolves once per network chunk,
-   * and network chunks arrive in bursts of wildly variable size/timing —
-   * calling setMessages synchronously on every single one (the previous
-   * version) means every burst is a separate React commit AND a separate
-   * full ReactMarkdown re-parse of the whole accumulated string so far,
-   * which gets more expensive the longer the reply grows. On a fast burst
-   * of several chunks within one frame, that's several redundant re-parses
-   * of an ever-longer string in a row — the actual mechanical cause of
-   * "stuttering" here, not something CSS/animation can paper over.
-   *
-   * Fix: buffer incoming text in a plain variable and flush to React state
-   * at most once per animation frame via requestAnimationFrame — this
-   * coalesces however many chunks arrived within that ~16ms window into a
-   * single commit/re-parse, capping the update rate at the browser's own
-   * paint cadence instead of the network's. `flush(fullText)` after the
-   * loop ends guarantees the LAST chunk is never dropped by a frame that
-   * was still pending when the stream closed, and any in-flight frame is
-   * explicitly cancelled before an error message overwrites the bubble so
-   * a late successful flush can never race past and clobber a subsequent
-   * error message.
-   */
   async function streamAssistantReply(userText: string, historyForRequest: HistoryTurn[]) {
     const assistantId = crypto.randomUUID();
     setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
@@ -659,14 +453,12 @@ export default function AssistantPage() {
     let latestText = "";
 
     function flush(text: string) {
-      // Only the streaming message gets a NEW object here — every other
-      // entry keeps its exact prior reference, which is what lets
-      // ChatBubble's memo() correctly skip re-rendering them.
+      if (!isMountedRef.current) return;
       setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m)));
     }
 
     function scheduleFlush() {
-      if (rafId !== null) return;
+      if (rafId !== null || !isMountedRef.current) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
         flush(latestText);
@@ -699,9 +491,6 @@ export default function AssistantPage() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        // {stream: true} buffers any multi-byte UTF-8 sequence split across
-        // a chunk boundary instead of emitting a corrupted character —
-        // already correct here, kept as-is.
         fullText += decoder.decode(value, { stream: true });
         latestText = fullText;
         scheduleFlush();
@@ -718,7 +507,7 @@ export default function AssistantPage() {
       const msg = error instanceof Error ? error.message : "L'assistant n'a pas pu répondre. Réessaie.";
       flush(`⚠️ ${msg}`);
     } finally {
-      setIsTyping(false);
+      if (isMountedRef.current) setIsTyping(false);
     }
   }
 
@@ -727,18 +516,19 @@ export default function AssistantPage() {
     if (!text || isTyping) return;
 
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
-    // Snapshot BEFORE appending this turn — the API's own history param must
-    // never include the message being sent right now, only what came before it.
     const historyForRequest = messages.map((m) => ({ role: m.role, content: m.content }));
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    
+    // إرجاع الخانة للحجم الأصلي بعد الإرسال
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+
     await streamAssistantReply(text, historyForRequest);
   }
 
-  // Stable identity (empty deps) on purpose — reads current data via the
-  // refs above instead of closing over `messages`/`isTyping` state, so
-  // passing this straight into every ChatBubble never breaks their memo().
   const regenerateResponse = useCallback(async (assistantMessageId: string) => {
     if (isTypingRef.current) return;
     const current = messagesRef.current;
@@ -748,9 +538,6 @@ export default function AssistantPage() {
     if (precedingUser.role !== "user") return;
 
     const historyForRequest = current.slice(0, index - 1).map((m) => ({ role: m.role, content: m.content }));
-    // Drop the old reply, keep everything up to and including the user
-    // message it answered — regeneration replaces one answer, not the
-    // whole conversation after it.
     setMessages((prev) => prev.slice(0, index));
     await streamAssistantReply(precedingUser.content, historyForRequest);
   }, []);
@@ -782,13 +569,6 @@ export default function AssistantPage() {
 
     try {
       const recognition = new Ctor();
-      // French base — medical vocabulary in Algerian faculties is heavily
-      // French even in otherwise Darija/Arabic speech, so fr-FR recognizes
-      // the terms that actually matter most accurately. continuous+interim
-      // together are what stop it from cutting off after the first pause:
-      // continuous keeps the session open across multiple phrases, interim
-      // surfaces live partial text instead of only committing once a phrase
-      // is judged fully finished.
       recognition.lang = "fr-FR";
       recognition.continuous = true;
       recognition.interimResults = true;
@@ -830,26 +610,7 @@ export default function AssistantPage() {
   const canSend = input.trim().length > 0 && !isTyping;
 
   return (
-    // h-full, NOT a hardcoded h-[calc(100dvh-4rem)] — that calc was WRONG:
-    // it only accounted for Topbar's own height (h-14 mobile / h-16 desktop)
-    // and ignored the shell's OWN outer wrapper padding+gap around Topbar/
-    // <main> ((shell)/layout.tsx's `p-2 sm:p-3` + `gap-2 sm:gap-3`, ~24-36px
-    // combined on desktop), so this container claimed MORE height than
-    // <main> actually had — and since <main> is `overflow-hidden` for
-    // full-bleed routes, the excess got silently clipped off the BOTTOM,
-    // cutting off the input bar's buttons. `h-full` instead just inherits
-    // whatever height <main> (and the wrapping div/PageTransition, both
-    // already `h-full` for full-bleed routes — see FULL_BLEED_ROUTES in
-    // (shell)/layout.tsx) actually resolved to via flexbox, which is
-    // automatically correct on every breakpoint with zero magic numbers to
-    // keep in sync. No boxed card here — no border, radius, or background —
-    // this blends directly into the dashboard canvas edge to edge.
-    //
-    // flex-row at the outer level, not flex-col: the conversation-history
-    // rail sits BESIDE the chat canvas (Gemini-style), independently
-    // collapsible from the main dashboard sidebar via isHistoryOpen — the
-    // two toggles are deliberately separate state, not the same one.
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden bg-transparent">
       <ConversationSidebar
         isOpen={isHistoryOpen}
         onToggle={() => setIsHistoryOpen(false)}
@@ -860,11 +621,7 @@ export default function AssistantPage() {
         onDelete={handleDeleteConversation}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Both toggles live in the same header row: the main dashboard
-            sidebar (SidebarProvider context, rendered by the ancestor
-            layout) and this page's own conversation-history rail (local
-            isHistoryOpen state). Collapsing one never affects the other. */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
         <div className="flex shrink-0 items-center gap-1 px-4 pt-3 sm:px-6">
           <button
             type="button"
@@ -874,7 +631,6 @@ export default function AssistantPage() {
           >
             {isDesktopSidebarOpen ? <PanelLeftClose className="h-[18px] w-[18px]" /> : <PanelLeftOpen className="h-[18px] w-[18px]" />}
           </button>
-
           {!isHistoryOpen && <ConversationSidebarCollapsedToggle onToggle={() => setIsHistoryOpen(true)} />}
         </div>
 
@@ -882,18 +638,6 @@ export default function AssistantPage() {
           <EmptyState onSelectPrompt={sendMessage} />
         ) : (
           <div className="flex-1 overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {/* max-w-4xl mx-auto, per explicit instruction — supersedes this
-                area's earlier "no max-w, edge-to-edge" design. Kept `gap-4`
-                over `space-y-4`: functionally near-identical for a vertical
-                stack, but `gap` is a pure layout property that doesn't touch
-                each child's own margin/transform, so it can't fight
-                framer-motion's own transform-based enter/exit animation on
-                each ChatBubble the way a margin-based `space-y` utility can.
-                pb-32 (mobile) / lg:pb-6 (desktop) reserves room for the
-                mobile-only bottom nav + input bar stack below (see the input
-                bar's own mb-20 note) so the LAST message is never hidden
-                behind them once the page is scrolled to the bottom on a
-                small screen. */}
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 pb-32 md:p-6 lg:pb-6">
               <AnimatePresence initial={false}>
                 {messages.map((message) => (
@@ -905,43 +649,19 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* Plain flex sibling — NOT `position: sticky`. It's already the last
-            `shrink-0` child of the fixed-height, `overflow-hidden` column
-            above, which pins it to the bottom on its own; `sticky` needs a
-            SCROLLING ancestor to mean anything, and this element's nearest
-            one is a sibling (the message list), not an ancestor, so sticky
-            positioning here was inert at best and a source of "margin +
-            sticky" cross-browser sizing quirks at worst. Frosted glass,
-            generous touch-friendly padding, same max-w-4xl mx-auto as the
-            message list above it so the two columns stay perfectly aligned.
-            pb-[max(...)] keeps it clear of the home-indicator/gesture area
-            on iOS instead of sitting flush against it.
-
-            mb-20 is a plain MARGIN on the outside of this box (not inner
-            padding) — mobile/tablet only, lg:mb-0 matches MobileBottomNav.tsx's
-            OWN `lg:hidden` breakpoint exactly, not an arbitrary md guess.
-            It pushes this bar up above the fixed bottom tab bar: that nav is
-            `position: fixed`, so without this margin it visually overlaps
-            the input on every viewport below lg. 80px (mb-20), not 64px
-            (mb-16) — measured live: MobileBottomNav's real rendered
-            footprint from the viewport bottom is ~72px (bottom-3 offset +
-            its own height), so mb-16 still left an ~8px overlap. */}
-        <div className="mx-auto mb-20 w-full max-w-4xl shrink-0 border-t border-gray-100 bg-white/95 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-xl dark:border-gray-800 dark:bg-gray-900/95 lg:mb-0">
-          <div className="flex w-full items-end gap-2 rounded-3xl border border-gray-200 bg-white/70 p-2 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/70">
-            <div className="relative">
-              <motion.button
+        {/* خانة الكتابة: رقيقة (Slim) ومقيدة ضد الزوم */}
+        <div className="mx-auto mb-20 w-full max-w-3xl shrink-0 px-4 lg:mb-6">
+          <div className="relative flex w-full items-end gap-1.5 rounded-[28px] bg-white dark:bg-[#1A1B20] p-1.5 shadow-md border border-gray-200 dark:border-gray-700/80">
+            
+            <div className="relative shrink-0 pb-0.5">
+              <button
                 ref={attachmentButtonRef}
                 type="button"
-                aria-label="Ajouter une pièce jointe"
-                aria-expanded={isAttachmentMenuOpen}
                 onClick={() => setIsAttachmentMenuOpen((prev) => !prev)}
-                whileHover={{ rotate: 90, backgroundColor: "rgba(16,185,129,0.12)" }}
-                whileTap={{ scale: 0.92 }}
-                transition={{ duration: 0.2 }}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-500 dark:text-gray-400"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-800"
               >
                 <Plus className="h-5 w-5" />
-              </motion.button>
+              </button>
 
               <AnimatePresence>
                 {isAttachmentMenuOpen && (
@@ -960,7 +680,7 @@ export default function AssistantPage() {
                         onClick={() => setIsAttachmentMenuOpen(false)}
                         className="flex w-full cursor-pointer items-center gap-3 p-3 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700"
                       >
-                        <Icon size={18} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        <Icon size={18} className="shrink-0 text-emerald-500" />
                         {label}
                       </button>
                     ))}
@@ -969,56 +689,51 @@ export default function AssistantPage() {
               </AnimatePresence>
             </div>
 
+            {/* تم حل مشكل العرض والزوم بـ text-base (16px صافي) وطريقة OnChange بسيطة */}
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                e.target.style.height = "auto";
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+              }}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder="Demande-moi sur tes cours, organise ta journée, ou discute simplement..."
-              // text-[16px] (not text-sm/14px) on the base/mobile tier is
-              // load-bearing, not a style choice: iOS Safari auto-zooms the
-              // whole page on focus for any input/textarea rendered below a
-              // 16px font-size, and there is no CSS "disable zoom" escape
-              // hatch for this — the only fix is the input actually being
-              // >=16px. Only relaxed back down at sm: (640px+), where that
-              // Safari behavior no longer applies.
-              className="min-h-[44px] max-h-40 flex-1 resize-none bg-transparent px-1 py-2.5 text-[16px] leading-relaxed text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-[15px]"
+              placeholder="Ask MedArt Assistant..."
+              className="flex-1 resize-none bg-transparent px-2 py-2 text-base leading-relaxed text-gray-900 placeholder-gray-500 outline-none focus:ring-0 dark:text-gray-100 scrollbar-hide my-auto"
             />
 
-            <button
-              type="button"
-              aria-label={isListening ? "Arrêter la dictée vocale" : "Dictée vocale"}
-              onClick={toggleListening}
-              disabled={!speechSupported}
-              title={speechSupported ? undefined : "Dictée vocale non supportée par ce navigateur"}
-              className={cn(
-                "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors",
-                isListening
-                  ? "animate-pulse bg-red-100 text-red-600 shadow-[0_0_0_4px_rgba(239,68,68,0.15)] dark:bg-red-950/40 dark:text-red-400"
-                  : "text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700/60",
-                !speechSupported && "cursor-not-allowed opacity-40"
-              )}
-            >
-              {isListening ? <Square className="h-4 w-4" /> : <Mic className="h-5 w-5" />}
-            </button>
+            <div className="flex shrink-0 items-center gap-1 pr-1 pb-0.5">
+              <button
+                type="button"
+                onClick={toggleListening}
+                disabled={!speechSupported}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+                  isListening
+                    ? "animate-pulse bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+                    : "text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-800",
+                  !speechSupported && "cursor-not-allowed opacity-40"
+                )}
+              >
+                {isListening ? <Square className="h-4 w-4" /> : <Mic className="h-5 w-5" />}
+              </button>
 
-            <motion.button
-              type="button"
-              aria-label="Envoyer"
-              onClick={handleSubmit}
-              disabled={!canSend}
-              whileHover={canSend ? { scale: 1.05 } : undefined}
-              whileTap={canSend ? { scale: 0.94 } : undefined}
-              className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors duration-200",
-                canSend
-                  ? "bg-emerald-600 text-white shadow-[0_0_18px_rgba(16,185,129,0.5)] hover:bg-emerald-700"
-                  : "cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-gray-700/60 dark:text-gray-500"
-              )}
-            >
-              <Send className="h-5 w-5" />
-            </motion.button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!canSend}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-full transition-colors duration-200",
+                  canSend
+                    ? "text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-800"
+                    : "cursor-not-allowed text-gray-400 dark:text-gray-600"
+                )}
+              >
+                <Send className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

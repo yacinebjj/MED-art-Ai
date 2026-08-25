@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { FileText, Loader2, Maximize2, Minimize2, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { FileText, Loader2, Maximize2, Minimize2, MoreVertical, Pencil, Plus, Trash2, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -18,30 +18,31 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 }
 
-/**
- * "Mes notes" — free-standing student notes (see app/api/notes, app/api/notes/[id]),
- * unrelated to any course/module. Classic list-left / editor-right layout:
- * selecting a note loads its title/content into local draft state, "Sauvegarder"
- * PUTs only when the draft actually differs from the loaded note.
- *
- * Body is a plain, directly-controlled `<textarea value={draftContent}
- * onChange={...}>` — deliberately NOT a `contentEditable` div anymore. An
- * earlier version used contentEditable + dangerouslySetInnerHTML (to support
- * inline `<mark>` highlights via TextSelectionToolbar), which could not be
- * proven broken under test but was reported as unreliable across browsers;
- * a plain textarea removes that entire class of contentEditable/React
- * reconciliation edge cases for a note editor where "keystrokes always
- * register" matters far more than inline highlight coloring. `content` is
- * now plain text going forward; notes saved as HTML under the old version
- * are shown here via `stripHtmlToText` (see `selectNote` and the initial-load
- * effect below) — the words survive, only historic inline highlighting does
- * not.
- *
- * `?noteId=` deep-link: created by other pages' "Add Note" action (which
- * creates the note server-side first, so its id exists), then navigates here
- * with `?noteId=<id>` — read once on load so that specific note opens
- * pre-selected instead of whatever the newest note happens to be.
- */
+// محرر النصوص الذكي اللي يقبل الألوان والجداول من الذكاء الاصطناعي ديريكت
+function HtmlEditor({ value, onChange, disabled }: { value: string; onChange: (val: string) => void; disabled: boolean }) {
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value;
+    }
+  }, [value]);
+
+  return (
+    <div
+      ref={editorRef}
+      contentEditable={!disabled}
+      onInput={(e) => onChange(e.currentTarget.innerHTML)}
+      className={cn(
+        "mt-3 h-full min-h-[300px] w-full min-w-0 flex-1 overflow-y-auto rounded-xl border border-border bg-transparent p-4 text-sm leading-relaxed outline-none transition-opacity",
+        "prose prose-sm dark:prose-invert max-w-none", // هذي اللي ترد الجداول والعناوين شابين أوتوماتيكيا
+        "prose-table:w-full prose-table:border-collapse prose-td:border prose-td:border-border prose-td:p-2 prose-th:border prose-th:border-border prose-th:bg-muted prose-th:p-2", // ستايل الجداول
+        disabled && "opacity-50 cursor-not-allowed"
+      )}
+    />
+  );
+}
+
 function NotesPageContent() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
@@ -53,24 +54,17 @@ function NotesPageContent() {
   const [draftContent, setDraftContent] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isOrganizing, setIsOrganizing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [renamingNote, setRenamingNote] = useState<UserNote | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
-  // Deletion is irreversible and can silently discard an unsaved in-progress
-  // edit if the note being deleted is also the one currently open — this
-  // holds the PENDING target so a confirmation dialog gates the actual
-  // delete, instead of the trash icon/menu item deleting on the very first
-  // click (see handleDeleteNoteById below).
   const [confirmDeleteNote, setConfirmDeleteNote] = useState<UserNote | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Escape exits fullscreen — same convention as StudioPanel's own expanded-
-  // section overlay. Only listens while actually fullscreen, so it never
-  // intercepts an Escape meant for something else (a Dialog stacked on top).
   useEffect(() => {
     if (!isFullscreen) return;
-    function handleKeyDown(e: KeyboardEvent) {
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
       if (e.key === "Escape") setIsFullscreen(false);
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -91,7 +85,7 @@ function NotesPageContent() {
         if (initial) {
           setSelectedId(initial.id);
           setDraftTitle(initial.title);
-          setDraftContent(stripHtmlToText(initial.content));
+          setDraftContent(initial.content); // خلينا المحتوى بالألوان والجداول تاعو
         }
       })
       .catch(() => setNotes([]))
@@ -103,17 +97,13 @@ function NotesPageContent() {
   }, []);
 
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
-  // Compared against the STRIPPED version of the saved content, not the raw
-  // value — a note saved as HTML under the old contentEditable version would
-  // otherwise never equal its own stripped-for-display draftContent, making
-  // "Sauvegarder" permanently enabled even with zero real edits.
-  const selectedPlainContent = selectedNote ? stripHtmlToText(selectedNote.content) : "";
-  const isDirty = selectedNote ? draftTitle !== selectedNote.title || draftContent !== selectedPlainContent : false;
+  const selectedOriginalContent = selectedNote ? selectedNote.content : "";
+  const isDirty = selectedNote ? draftTitle !== selectedNote.title || draftContent !== selectedOriginalContent : false;
 
   function selectNote(note: UserNote) {
     setSelectedId(note.id);
     setDraftTitle(note.title);
-    setDraftContent(stripHtmlToText(note.content));
+    setDraftContent(note.content);
     setIsFullscreen(false);
   }
 
@@ -161,7 +151,30 @@ function NotesPageContent() {
     }
   }
 
-  /** Usable from the list's per-note dropdown (any note) as well as the editor's own trash icon (the selected note). Only ever called after the confirmation dialog below — never directly from a click handler. */
+  async function handleOrganizeByAI() {
+    // نعتمدو على النص الخام باش نبعثوه للـ AI
+    const rawText = stripHtmlToText(draftContent).trim();
+    if (!rawText) return;
+    
+    setIsOrganizing(true);
+    try {
+      const res = await fetch("/api/notes/organize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: rawText }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "L'organisation par l'IA a échoué.");
+
+      setDraftContent(data.organizedContent);
+      toast({ variant: "success", title: "✨ Note organisée avec succès ! N'oublie pas de sauvegarder." });
+    } catch (error) {
+      toast({ variant: "error", title: "Échec", description: error instanceof Error ? error.message : "Erreur inconnue." });
+    } finally {
+      setIsOrganizing(false);
+    }
+  }
+
   async function handleDeleteNoteById(id: string) {
     setDeletingId(id);
     try {
@@ -189,7 +202,6 @@ function NotesPageContent() {
     }
   }
 
-  /** The confirmation dialog's own "Supprimer" button — the only path that ever reaches handleDeleteNoteById. */
   async function handleConfirmDelete() {
     if (!confirmDeleteNote) return;
     const id = confirmDeleteNote.id;
@@ -203,11 +215,6 @@ function NotesPageContent() {
   }
 
   async function handleRenameSubmit() {
-    // Guards the Enter-key path too — the button's own `disabled` below only
-    // stops a click, not an Enter press typed into an empty/whitespace-only
-    // field. No more silent fallback to "Note sans titre": an empty title is
-    // now simply refused rather than auto-renamed to something the student
-    // never typed.
     if (!renamingNote || renameValue.trim().length === 0) return;
     const nextTitle = renameValue.trim();
     setIsRenaming(true);
@@ -343,24 +350,23 @@ function NotesPageContent() {
                 </Button>
               </div>
 
-              {/* Plain, directly-controlled textarea — value/onChange straight
-                  onto draftContent, nothing in between. `key={selectedNote.id}`
-                  forces a full remount on note switch, so the browser's own
-                  undo history never bleeds from one note into another.
-                  No disabled, no readOnly, no overlay sitting on top of it. */}
-              <textarea
-                key={selectedNote.id}
-                value={draftContent}
-                onChange={(e) => setDraftContent(e.target.value)}
-                disabled={false}
-                readOnly={false}
-                placeholder="Écris ta note ici..."
-                className="mt-3 h-full min-h-0 w-full min-w-0 flex-1 resize-none rounded-xl border border-border bg-transparent p-4 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
-              />
+              {/* المكون الجديد: محرر يقبل الجداول والألوان مباشرة */}
+              <HtmlEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
 
-              <div className="mt-3 flex justify-end">
-                <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty}>
-                  {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              <div className="mt-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOrganizeByAI}
+                  disabled={isOrganizing || stripHtmlToText(draftContent).trim().length === 0}
+                  className="w-full sm:w-auto border-purple-500/30 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30 dark:text-purple-400"
+                >
+                  {isOrganizing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                  {isOrganizing ? "Organisation en cours..." : "Généré avec l'AI"}
+                </Button>
+
+                <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty} className="w-full sm:w-auto">
+                  {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                   Sauvegarder
                 </Button>
               </div>
@@ -422,7 +428,6 @@ function NotesPageContent() {
   );
 }
 
-/** useSearchParams() (read by NotesPageContent, for the ?noteId= deep link) requires a Suspense boundary at build time — this wrapper is purely that, no logic of its own. */
 export default function NotesPage() {
   return (
     <Suspense fallback={<div className="mx-auto max-w-6xl py-20 text-center text-sm text-muted-foreground">Chargement...</div>}>

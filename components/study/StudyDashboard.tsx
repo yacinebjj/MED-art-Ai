@@ -1,28 +1,14 @@
 "use client";
 
 /**
- * Smart Anti-Cheat Pomodoro System — replaces the earlier XP-grid prototype
- * entirely. Zero backend: everything here is local React state, per spec.
- *
- * Anti-cheat mechanism: a `visibilitychange` listener auto-pauses the timer
- * the instant the tab/window loses focus WHILE a study phase is running —
- * tabbing away to a video, another app, or a different browser tab
- * immediately stops the clock instead of letting it silently keep counting
- * unattended "focus" time.
- *
- * Notification sound: synthesized with the Web Audio API (a short sine
- * beep) rather than shipping an embedded base64 audio file — this
- * guarantees the sound is byte-correct and needs no asset file, while still
- * satisfying "audio feedback on completion, handled safely." Swap in
- * `new Audio("/sounds/bell.mp3")` inside playNotificationSound() below if a
- * real sound asset gets added to /public later; the try/catch around it
- * already covers browser autoplay-policy rejections either way.
+ * Smart Anti-Cheat Pomodoro System — connected globally with the Topbar via PomodoroProvider.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { BookOpenCheck, Coffee, Minus, Pause, Play, Plus, RotateCcw, ShieldAlert, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
+import { usePomodoro } from "@/providers/PomodoroProvider";
 
 type TimerMode = "study" | "break";
 
@@ -34,12 +20,6 @@ const MAX_DURATION_MINUTES = 120;
 const MIN_CYCLES = 1;
 const MAX_CYCLES = 12;
 
-// Mocked lifetime stats — independent of the live timer above, exactly like
-// the header stats in the previous XP prototype were independent of its
-// live session counter. No backend field exists yet for real study-time
-// aggregation; wiring this to qcm_attempts/course_chat_history timestamps
-// (the only real activity timestamps this app has) would be a separate,
-// larger feature.
 const MOCK_STATS = [
   { label: "Aujourd'hui", value: "2h 15m" },
   { label: "Cette semaine", value: "14h 30m" },
@@ -56,7 +36,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-/** Small labeled stepper for the study/break/cycles settings — disabled entirely while the timer is running, since changing it mid-session would desync timeLeft from a duration the user can no longer see reflected on the clock. */
 function DurationStepper({
   label,
   icon: Icon,
@@ -115,19 +94,18 @@ function DurationStepper({
 export function StudyDashboard() {
   const { toast } = useToast();
 
+  // 👈 ربط العداد مباشرة مع الـ Context العالمي لتتم المزامنة تلقائياً مع الـ Topbar
+  const { seconds, isActive: isRunning, toggleActive, resetTimer: globalReset } = usePomodoro();
+
   const [studyDuration, setStudyDuration] = useState(DEFAULT_STUDY_MINUTES);
   const [breakDuration, setBreakDuration] = useState(DEFAULT_BREAK_MINUTES);
   const [cycles, setCycles] = useState(DEFAULT_CYCLES);
   const [currentCycle, setCurrentCycle] = useState(1);
   const [currentMode, setCurrentMode] = useState<TimerMode>("study");
-  const [timeLeft, setTimeLeft] = useState(DEFAULT_STUDY_MINUTES * 60);
-  const [isRunning, setIsRunning] = useState(false);
   const [cheatWarningVisible, setCheatWarningVisible] = useState(false);
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  /** Synthesizes a short two-tone chime — no external asset, so it can never 404 or ship corrupted. */
   function playNotificationSound() {
     try {
       const AudioCtx =
@@ -152,65 +130,15 @@ export function StudyDashboard() {
         oscillator.stop(startAt + 0.5);
       });
     } catch (error) {
-      // Autoplay policy blocked it, AudioContext unavailable, or the tab was
-      // never interacted with yet — the timer keeps working regardless,
-      // audio feedback is a nice-to-have, never a hard requirement.
       console.warn("Notification sonore indisponible:", error);
     }
   }
 
-  // Ticks once per second, only while running. Cleared on every isRunning
-  // change and on unmount, so no interval ever outlives this effect.
-  useEffect(() => {
-    if (!isRunning) return;
-    intervalRef.current = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    };
-  }, [isRunning]);
-
-  // Phase-completion transitions — study -> break -> study -> ... until all
-  // cycles are done, then stops. Guarded on timeLeft === 0 so it only fires
-  // once per phase (setTimeLeft below immediately moves it away from 0).
-  useEffect(() => {
-    if (timeLeft !== 0) return;
-    playNotificationSound();
-
-    if (currentMode === "study") {
-      if (currentCycle >= cycles) {
-        setIsRunning(false);
-        toast({
-          variant: "success",
-          title: "Session terminée !",
-          description: `${cycles} cycle${cycles > 1 ? "s" : ""} d'étude complété${cycles > 1 ? "s" : ""}. Excellent travail.`,
-        });
-        setCurrentCycle(1);
-        setCurrentMode("study");
-        setTimeLeft(studyDuration * 60);
-      } else {
-        toast({ variant: "info", title: "Pause méritée", description: `${breakDuration} min de pause avant le prochain cycle.` });
-        setCurrentMode("break");
-        setTimeLeft(breakDuration * 60);
-      }
-    } else {
-      toast({ variant: "info", title: "Pause terminée", description: "Retour à l'étude." });
-      setCurrentCycle((c) => c + 1);
-      setCurrentMode("study");
-      setTimeLeft(studyDuration * 60);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft]);
-
-  // Anti-Cheat: the instant the tab/window is hidden during a RUNNING study
-  // phase, pause immediately — never during a break (leaving the tab during
-  // a break is expected and fine) and never when already paused.
+  // Anti-Cheat: Pause automatically if the window loses focus during study mode
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.hidden && currentMode === "study" && isRunning) {
-        setIsRunning(false);
+        toggleActive();
         setCheatWarningVisible(true);
         toast({
           variant: "error",
@@ -221,29 +149,26 @@ export function StudyDashboard() {
     }
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [currentMode, isRunning, toast]);
+  }, [currentMode, isRunning, toast, toggleActive]);
 
   function handleToggleRunning() {
     if (!isRunning) setCheatWarningVisible(false);
-    setIsRunning((prev) => !prev);
+    toggleActive();
   }
 
   function handleReset() {
-    setIsRunning(false);
     setCheatWarningVisible(false);
     setCurrentMode("study");
     setCurrentCycle(1);
-    setTimeLeft(studyDuration * 60);
+    globalReset();
   }
 
   function handleStudyDurationChange(minutes: number) {
     setStudyDuration(minutes);
-    if (!isRunning && currentMode === "study") setTimeLeft(minutes * 60);
   }
 
   function handleBreakDurationChange(minutes: number) {
     setBreakDuration(minutes);
-    if (!isRunning && currentMode === "break") setTimeLeft(minutes * 60);
   }
 
   function handleCyclesChange(next: number) {
@@ -252,7 +177,8 @@ export function StudyDashboard() {
   }
 
   const totalPhaseSeconds = (currentMode === "study" ? studyDuration : breakDuration) * 60;
-  const progress = totalPhaseSeconds > 0 ? 1 - timeLeft / totalPhaseSeconds : 0;
+  // استخدام الـ seconds القادم من الـ Provider العالمي
+  const progress = totalPhaseSeconds > 0 ? 1 - (seconds % totalPhaseSeconds) / totalPhaseSeconds : 0;
 
   const radius = 92;
   const circumference = 2 * Math.PI * radius;
@@ -262,7 +188,6 @@ export function StudyDashboard() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 font-sans text-slate-800 dark:text-slate-200">
-      {/* Anti-cheat warning banner — persists (unlike the auto-dismissing toast) until the student explicitly resumes, so it can't be missed if they were away when it fired. */}
       {cheatWarningVisible && (
         <div className="flex items-center gap-3 rounded-2xl border-2 border-rose-300 bg-rose-50 p-4 text-rose-800 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
           <ShieldAlert className="h-5 w-5 shrink-0" />
@@ -285,7 +210,7 @@ export function StudyDashboard() {
             {isStudyMode ? "Session d'étude" : "Pause"}
           </div>
 
-          {/* Circular progress ring around the clock */}
+          {/* Circular progress ring */}
           <div className="relative flex items-center justify-center">
             <svg width={220} height={220} viewBox="0 0 220 220" className="-rotate-90">
               <circle cx={110} cy={110} r={radius} fill="none" strokeWidth={12} className="stroke-slate-100 dark:stroke-slate-800" />
@@ -303,7 +228,7 @@ export function StudyDashboard() {
             </svg>
             <div className="absolute flex flex-col items-center">
               <p className="text-5xl font-black tabular-nums tracking-tight text-slate-900 dark:text-white sm:text-6xl">
-                {formatTime(timeLeft)}
+                {formatTime(seconds % totalPhaseSeconds)}
               </p>
               <p className="mt-1 text-xs font-semibold text-slate-400 dark:text-slate-500">
                 Cycle {currentCycle} / {cycles}
@@ -321,7 +246,7 @@ export function StudyDashboard() {
               )}
             >
               {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              {isRunning ? "Pause" : timeLeft === totalPhaseSeconds ? "Démarrer" : "Reprendre"}
+              {isRunning ? "Pause" : seconds === 0 ? "Démarrer" : "Reprendre"}
             </button>
 
             <button
@@ -335,7 +260,7 @@ export function StudyDashboard() {
           </div>
         </div>
 
-        {/* Duration / cycles settings — locked while a phase is actively running */}
+        {/* Duration / cycles settings */}
         <div className="mt-8 flex flex-col gap-3 border-t border-slate-100 pt-6 dark:border-slate-800 sm:flex-row">
           <DurationStepper
             label="Étude"

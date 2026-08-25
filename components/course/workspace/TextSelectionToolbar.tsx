@@ -18,43 +18,19 @@ interface TextSelectionToolbarProps {
   selection: TextSelectionState;
   onAsk: (text: string) => void;
   onTranslate: (text: string) => void;
-  /** Highlight/Unhighlight mutate the DOM directly (range.insertNode/removeChild), which never fires a native `input` event — a caller with React state mirroring that DOM (the "Mes notes" contentEditable editor) needs this to know when to re-read `innerHTML` and re-sync. Optional: omitted by every other (ephemeral, non-persisted) call site. */
   onHighlightChange?: () => void;
-  /** When set (only by module/[id]/page.tsx's workspace, the one surface with a real curriculum module in scope), "Add Note" aggregates into that module's single note instead of always creating a new one — see /api/notes route.ts's POST handler. `courseTitle` tags which source an appended excerpt came from. */
   moduleId?: number;
   courseTitle?: string;
+  courseSlug?: string;
 }
 
-/**
- * Floating selection toolbar — Ask MedArt / Translate / Search Web / Add Note
- * / Highlight (with a 4-color picker) or Unhighlight, shown right above
- * whatever native HTML text the student just selected (StudioPanel's
- * opened-section detail view, ChatDocumentPanel's message bubbles, the demo
- * reading view, and the "Mes notes" contentEditable editor). Deliberately
- * never wired inside FileViewerModal's iframe: `window.getSelection()` cannot
- * see across an iframe boundary at all (a same-origin restriction with no
- * workaround), so a selection made inside an embedded PDF/Office viewer is
- * structurally invisible to this component.
- *
- * Portaled straight into `document.body` for the same reason as this
- * component's predecessor (SelectionTooltip) — see useTextSelection.ts's own
- * comment: a `position: fixed` descendant of any ancestor with its own
- * transform/filter/will-change (several of which this workspace's panel-shell
- * transition classes apply) gets trapped relative to that ancestor instead of
- * the real viewport.
- */
 export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionToolbarProps>(
-  function TextSelectionToolbar({ selection, onAsk, onTranslate, onHighlightChange, moduleId, courseTitle }, ref) {
+  function TextSelectionToolbar({ selection, onAsk, onTranslate, onHighlightChange, moduleId, courseTitle, courseSlug }, ref) {
     const router = useRouter();
     const [isSavingNote, setIsSavingNote] = useState(false);
     const [pickerOpen, setPickerOpen] = useState(false);
-    // Hides the toolbar the instant a highlight/unhighlight action fires —
-    // the underlying `selection` prop stays the same object until the
-    // student makes a NEW selection elsewhere (see useTextSelection.ts), so
-    // without this the toolbar would otherwise linger showing stale
-    // Highlight/Unhighlight state after acting on it. Reset the moment a
-    // fresh selection arrives.
     const [dismissed, setDismissed] = useState(false);
+
     useEffect(() => {
       setDismissed(false);
       setPickerOpen(false);
@@ -62,12 +38,8 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
 
     if (typeof document === "undefined" || dismissed) return null;
 
-    // Re-checked on every render — a render only happens here when
-    // `selection` changes (a fresh mouseup), so this always reflects
-    // whether THAT selection currently lives inside a <mark>.
     const markAncestor = getSelectionMarkAncestor();
 
-    /** "Add Note" — creates the note server-side immediately (so its id exists to deep-link to), then navigates to the dedicated notes page with that note pre-selected, its content already filled in. Escaped: the note's content field is rendered as HTML by the notes editor (see Feature 2), so raw "<"/">"/"&" in the selected text must not be interpreted as markup. */
     async function handleAddNote() {
       setIsSavingNote(true);
       try {
@@ -90,13 +62,35 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
     }
 
     function handleUnhighlight() {
-      if (markAncestor) removeHighlight(markAncestor);
+      if (markAncestor) {
+        const textToRemove = markAncestor.textContent || "";
+        removeHighlight(markAncestor);
+        
+        // حذف الهايلايت من LocalStorage إذا كان مخزن هناك
+        if (courseSlug) {
+          const key = `medart_highlights_${courseSlug}`;
+          const saved = JSON.parse(localStorage.getItem(key) || "[]");
+          const filtered = saved.filter((item: string) => item !== textToRemove);
+          localStorage.setItem(key, JSON.stringify(filtered));
+        }
+      }
       setDismissed(true);
       onHighlightChange?.();
     }
 
+    // 👈 الحل النهائي والسريع: حفظ الهايلايت في LocalStorage محلياً ودائماً
     function handlePickColor(color: (typeof HIGHLIGHT_COLORS)[number]) {
       applyHighlight(color);
+
+      if (courseSlug) {
+        const key = `medart_highlights_${courseSlug}`;
+        const saved = JSON.parse(localStorage.getItem(key) || "[]");
+        if (!saved.includes(selection.text)) {
+          saved.push(selection.text);
+          localStorage.setItem(key, JSON.stringify(saved));
+        }
+      }
+
       setDismissed(true);
       onHighlightChange?.();
     }

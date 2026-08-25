@@ -55,7 +55,7 @@ export function MermaidDiagram({ id, chart, dark = true }: { id: string; chart: 
     return () => {
       cancelled = true;
     };
-  }, [id, chart]);
+  }, [id, chart, dark]);
 
   if (error) {
     return (

@@ -53,7 +53,7 @@ function toFullCourse(row: StudioCourseFullRow): StudioCourseFull {
 }
 
 /** Full detail for one course — called when the student clicks it in the sidebar; everything already generated loads straight from Supabase, nothing regenerated. */
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -148,7 +148,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 }
 
 /** Deletes one course and everything it holds (all generated Studio sections live as columns on this same row, so a single row delete is a full delete — no child tables to cascade). */
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });

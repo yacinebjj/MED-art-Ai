@@ -9,6 +9,7 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
+export const maxDuration = 60; // text extraction + an embedding call — no explicit cap before, so it silently rode Vercel's platform default.
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 Mo
 

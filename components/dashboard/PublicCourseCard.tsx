@@ -2,8 +2,8 @@
 
 import { memo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, FileText, FolderInput, MoreVertical, Pencil, Target, Trash2, TrendingUp } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { FolderInput, MoreVertical, Pencil, Trash2, TrendingUp } from "lucide-react";
+import { getCourseEmoji } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,69 +16,6 @@ import { DeleteCourseDialog } from "./DeleteCourseDialog";
 import { MoveToModuleDialog } from "./MoveToModuleDialog";
 import { CourseStatsModal } from "./CourseStatsModal";
 import type { ModuleSummary, PublicCourseSummary } from "@/lib/dashboard-modules";
-
-/** One "Lecture" or "Préparation Examen" row — a tiny icon, a slim fill bar, and a "N%" or "—" label. */
-function CourseMetricRow({
-  icon: Icon,
-  pct,
-  barClassName,
-  iconClassName,
-  label,
-}: {
-  icon: typeof BookOpen;
-  pct: number | undefined;
-  barClassName: string;
-  iconClassName: string;
-  label: string;
-}) {
-  return (
-    <div className="flex items-center gap-1.5" title={label}>
-      <Icon className={cn("h-3 w-3 shrink-0", iconClassName)} />
-      <div className="h-1 flex-1 overflow-hidden rounded-full bg-slate-100">
-        {pct !== undefined && (
-          <div
-            className={cn("h-full rounded-full transition-all duration-500", barClassName)}
-            style={{ width: `${Math.round(pct)}%` }}
-          />
-        )}
-      </div>
-      <span className="w-8 shrink-0 text-right text-[10px] font-semibold text-slate-500">
-        {pct !== undefined ? `${Math.round(pct)}%` : "—"}
-      </span>
-    </div>
-  );
-}
-
-/**
- * The two performance indicators shown under a course's title:
- * 1. Lecture/Étude — reading progress (currently always a demo seed, see
- *    lib/mock-course-progress.ts — no real per-user reading tracking exists
- *    yet anywhere in the app).
- * 2. Préparation Examen — real QCM mastery from qcm_attempts via the
- *    `course_mastery` SQL function (app/dashboard/(shell)/page.tsx), falling
- *    back to the same mock seed only when a course has zero real attempts.
- * `undefined` on either metric renders an honest "—", never a fabricated 0%.
- */
-function CoursePerformanceIndicators({ readingPct, examReadinessPct }: { readingPct: number | undefined; examReadinessPct: number | undefined }) {
-  return (
-    <div className="space-y-1 pr-6">
-      <CourseMetricRow
-        icon={BookOpen}
-        pct={readingPct}
-        barClassName="bg-teal-500"
-        iconClassName="text-teal-500"
-        label="Progression des cours (lecture)"
-      />
-      <CourseMetricRow
-        icon={Target}
-        pct={examReadinessPct}
-        barClassName="bg-gradient-to-r from-blue-500 to-cyan-400"
-        iconClassName="text-blue-500"
-        label="Indice de préparation à l'examen (QCMs)"
-      />
-    </div>
-  );
-}
 
 /**
  * One course card for the dashboard's "Mes cours" / "Mes modules" sections —
@@ -155,12 +92,14 @@ export const PublicCourseCard = memo(function PublicCourseCard({
       </div>
 
       <Link href={`/dashboard/demo/${course.slug}`} className="flex h-full flex-col justify-between p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-950/40 dark:text-teal-400">
-          <FileText className="h-5 w-5" />
+        <div
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-lg dark:bg-teal-950/40"
+          aria-hidden="true"
+        >
+          {getCourseEmoji(course.title)}
         </div>
-        <div className="space-y-1.5">
+        <div>
           <p className="line-clamp-2 pr-6 text-sm font-semibold text-slate-900 dark:text-gray-100">{course.title}</p>
-          <CoursePerformanceIndicators readingPct={readingPct} examReadinessPct={examReadinessPct} />
         </div>
       </Link>
 

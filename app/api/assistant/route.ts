@@ -6,6 +6,7 @@ import { errorMessage } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 120; // streamed chat reply — no explicit cap before, so it silently rode Vercel's platform default.
 
 /**
  * MedArt Assistant — free-flowing companion chat, distinct from

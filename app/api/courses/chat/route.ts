@@ -16,6 +16,7 @@ import { CHAT_MAX_CONTEXT_CHARS } from "@/lib/chat-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 120; // streamed chat reply — no explicit cap before, so it silently rode Vercel's platform default.
 
 const MAX_CONTEXT_CHARS = CHAT_MAX_CONTEXT_CHARS;
 // 5 exchanges (10 messages) verbatim — cost analysis showed the OLD cap of

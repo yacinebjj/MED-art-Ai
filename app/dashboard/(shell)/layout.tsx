@@ -24,6 +24,16 @@ const FULL_BLEED_ROUTES = ["/dashboard/assistant"];
 // page here.
 const FIXED_HEIGHT_ROUTES = ["/dashboard/notes"];
 
+// A group's chat room (not the /dashboard/groups lobby list itself) needs
+// the same real-height treatment as Notes — ChatRoom manages its own
+// internal scroll region (message list scrolls, header/input stay pinned),
+// which requires a real height to fill rather than "grow to content".
+// Dynamic route ([id]), so this can't just be one more literal string in
+// FIXED_HEIGHT_ROUTES above (that array is checked with exact `.includes`).
+function isGroupChatRoomRoute(pathname: string): boolean {
+  return /^\/dashboard\/groups\/[^/]+$/.test(pathname);
+}
+
 /**
  * "Native-app" no-scroll viewport architecture: the shell's own root is a
  * fixed `h-dvh` flex box that NEVER scrolls (`overflow-hidden`) — Topbar
@@ -50,7 +60,7 @@ export default function DashboardShellLayout({
 }) {
   const pathname = usePathname();
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
-  const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname);
+  const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname) || isGroupChatRoomRoute(pathname);
 
   return (
     <SidebarProvider>

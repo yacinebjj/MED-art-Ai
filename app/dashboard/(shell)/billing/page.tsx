@@ -93,14 +93,19 @@ function BillingPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [plansOpen, setPlansOpen] = useState(false);
 
-  async function loadSubscription() {
-    const res = await fetch("/api/subscription");
-    const data = await res.json();
-    setSubscription(data.subscription);
-  }
-
   useEffect(() => {
-    if (user) loadSubscription();
+    if (!user) return;
+    let cancelled = false;
+
+    fetch("/api/subscription")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setSubscription(data.subscription);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   async function handleSubscribe(plan: PlanId) {

@@ -169,7 +169,7 @@ export async function POST(_request: NextRequest) {
         { role: "system", content: prompt },
         { role: "user", content: "Génère le plan de remédiation demandé." },
       ],
-      { model: STUDIO_MODEL, maxTokens: 4000, bypassMock: true }
+      { model: STUDIO_MODEL, maxTokens: 4000, bypassMock: true, timeoutMs: 50_000 } // route's own maxDuration is 60s — fail cleanly before the platform kills it
     );
 
     const parsed = parseJsonResponse(raw);

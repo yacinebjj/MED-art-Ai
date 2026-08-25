@@ -116,6 +116,8 @@ export const RATE_LIMITS = {
   ai: { limit: 20, windowMs: 5 * 60 * 1000 },
   /** Plain-write mutations with no AI cost: create module, rename/delete a course. */
   mutation: { limit: 30, windowMs: 5 * 60 * 1000 },
+  /** Group chat message sends — a real conversation legitimately fires far more often than an ordinary mutation, so this gets its own, looser bucket instead of starving normal chatting under `mutation`'s cap. */
+  chatMessage: { limit: 120, windowMs: 5 * 60 * 1000 },
 } satisfies Record<string, RateLimitConfig>;
 
 /** Seconds until the window resets, for a Retry-After header. */
