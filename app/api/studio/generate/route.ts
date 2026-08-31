@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import {
   STUDIO_MODEL,
   STUDIO_BYPASS_MOCK,
@@ -344,6 +344,25 @@ export async function POST(request: NextRequest) {
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
+      // ECONOMY_MODEL (Gemini 3.7 Flash) for exemples_analogies, résumé,
+      // cas_clinique and qcm — same real-test-then-decide basis as the
+      // explication swap above (see lib/studio-explication-delta.ts's own
+      // comment). Each of the 4 was tested independently against this exact
+      // prompt+schema on a real course (Hémolyse): exemples_analogies
+      // confirmed authentic Darija+français register at an acceptable volume;
+      // résumé/cas_clinique/qcm each passed a full structural re-validation
+      // (mirroring StudioResumeSchema/StudioCasCliniqueSchema/
+      // StudioQcmsSchema — exact mode/case/question counts, every nested key
+      // present, every QCM's reponsesCorrectes referencing a real option
+      // label) with zero errors, plus a manual medical-accuracy read finding
+      // no incorrect answer keys or fabricated facts. Real measured cost per
+      // call landed around $0.03-0.035 on all three — roughly an 80%+ cut
+      // from Sonnet's observed $0.21 for a single Studio QCM generation.
+      // Scoped to `!isFuzzyHit` only — buildStudioDeltaAdaptationPrompt (the
+      // fuzzy-hit branch just above) is a different, untested prompt, so it
+      // keeps the STUDIO_MODEL default regardless of actionType.
+      const generationModel = actionType !== "explication" && !isFuzzyHit ? ECONOMY_MODEL : STUDIO_MODEL;
+
       const MAX_GENERIC_ATTEMPTS = 2;
       let correctiveNote: string | null = null;
       let succeeded = false;
@@ -363,7 +382,7 @@ export async function POST(request: NextRequest) {
               { role: "system", content: systemContent },
               { role: "user", content: userPrompt },
             ],
-            { model: STUDIO_MODEL, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK }
           );
         } catch (error) {
           await refundGeneration(user.id);

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
-import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
+import { callOpenRouter, OpenRouterError, MID_TIER_MODEL } from "@/lib/ai/openrouter";
 import { buildStudyPlanGenerationPrompt, buildStudyPlanRefinementPrompt, type StudyPlanCourseInput } from "@/lib/ai/study-planner-prompts";
 import { StudyPlanGenerationSchema, StudyPlanRefinementSchema } from "@/lib/ai/study-planner-schemas";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
@@ -141,7 +140,7 @@ export async function POST(request: NextRequest) {
             { role: "system", content: prompt },
             { role: "user", content: message.trim() },
           ],
-          { model: STUDIO_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
+          { model: MID_TIER_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
         );
       }, StudyPlanRefinementSchema);
 
@@ -160,7 +159,7 @@ export async function POST(request: NextRequest) {
           { role: "system", content: prompt },
           { role: "user", content: "Génère le planning de révision demandé." },
         ],
-        { model: STUDIO_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
+        { model: MID_TIER_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
       );
     }, StudyPlanGenerationSchema);
 

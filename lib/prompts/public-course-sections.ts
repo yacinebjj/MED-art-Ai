@@ -25,6 +25,7 @@ RÈGLES DE STRUCTURE NON NÉGOCIABLES :
 - N'utilise JAMAIS la valeur \`null\`. Un champ objet non utilisé reste un objet avec des chaînes vides ("") ou des tableaux vides ([]) selon son type — jamais null.
 - Chaque tableau d'objets doit avoir des objets avec exactement les mêmes clés à chaque item (même si certaines valeurs sont vides).
 - Sois rigoureux médicalement, mais reste CONCIS par champ (quelques phrases, pas des pavés).
+- N'utilise JAMAIS de notation mathématique LaTeX (ex: $\\alpha$, \\beta, \\times) dans une valeur JSON — un backslash non échappé casse le parsing JSON. Écris les lettres grecques et symboles scientifiques en toutes lettres (alpha, bêta, delta) ou en caractère Unicode simple (α, β, δ, ×), jamais en syntaxe LaTeX/backslash.
 - Rédige tout en français.`;
 
 const ICON_TONE_NOTES = `- "icon" doit être une valeur parmi : shield, bug, pill, flame, stethoscope, activity, alert-triangle, bar-chart-3, check-circle-2, wind, zap, heart-pulse.

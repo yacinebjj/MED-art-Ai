@@ -120,7 +120,9 @@ SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "q
  */
 const STUDIO_EXPLICATION_SYSTEM_PROMPT = `${EXPLICATION_SYSTEM_PROMPT}
 
-SURCHARGE OBLIGATOIRE — CONCISION SANS PERTE DE PROFONDEUR : conserve intégralement la structure en chapitres, le niveau de détail médical, le style magistral et la rigueur clinique déjà exigés ci-dessus — RIEN de médical ne doit disparaître, aucun mécanisme, aucune notion du cours source ne doit être coupé ou résumé à l'excès. Réduis UNIQUEMENT le volume de mots consacré aux tournures rédactionnelles non-informatives : phrases de transition creuses, reformulations d'une idée déjà exprimée, adjectifs et adverbes de remplissage sans valeur clinique. Vise une réduction globale d'environ 10 à 15% du nombre de mots par rapport à une rédaction non filtrée, obtenue exclusivement en éliminant ce type de superflu rédactionnel.`;
+SURCHARGE OBLIGATOIRE — CONCISION SANS PERTE DE PROFONDEUR : conserve intégralement la structure en chapitres, le niveau de détail médical, le style magistral et la rigueur clinique déjà exigés ci-dessus — RIEN de médical ne doit disparaître, aucun mécanisme, aucune notion du cours source ne doit être coupé ou résumé à l'excès. Réduis UNIQUEMENT le volume de mots consacré aux tournures rédactionnelles non-informatives : phrases de transition creuses, reformulations d'une idée déjà exprimée, adjectifs et adverbes de remplissage sans valeur clinique. Vise une réduction globale d'environ 10 à 15% du nombre de mots par rapport à une rédaction non filtrée, obtenue exclusivement en éliminant ce type de superflu rédactionnel.
+
+SURCHARGE OBLIGATOIRE — TUTOIEMENT STRICT : tu t'adresses à UN SEUL étudiant que tu connais et que tu coaches personnellement, jamais à un auditoire. Utilise EXCLUSIVEMENT la deuxième personne du singulier ("tu", "toi", "ton", "ta", "tes") du tout premier au tout dernier mot — le vouvoiement ("vous", "votre", "vos") est FORMELLEMENT INTERDIT, y compris dans l'introduction, l'avant-propos et le récapitulatif final où le risque de glisser vers un registre plus académique est le plus fort. C'est ce tutoiement constant qui crée le ton "professeur chaleureux en tête-à-tête" exigé ci-dessus — un seul "vous" égaré rompt cet effet pour tout le reste du texte.`;
 
 /**
  * Same reasoning as STUDIO_EXPLICATION_SYSTEM_PROMPT above, lighter touch —
@@ -129,7 +131,7 @@ SURCHARGE OBLIGATOIRE — CONCISION SANS PERTE DE PROFONDEUR : conserve intégra
  */
 const STUDIO_EXEMPLES_ANALOGIES_SYSTEM_PROMPT = `${EXEMPLES_ANALOGIES_SYSTEM_PROMPT}
 
-SURCHARGE OBLIGATOIRE — LÉGER ÉLAGAGE (remplace toute consigne de longueur ci-dessus) : garde intégralement chaque analogie, son ton Darija+français, et sa richesse pédagogique — aucune analogie ni aucune notion du cours ne doit disparaître. Allège légèrement UNIQUEMENT les phrases qui entourent les analogies (transitions, répétitions d'une idée déjà illustrée) pour réduire modestement le volume total, sans jamais sacrifier la clarté, le ton ou la profondeur qui caractérisent cette section.`;
+SURCHARGE OBLIGATOIRE — LÉGER ÉLAGAGE : garde intégralement chaque analogie, son ton Darija+français, et sa richesse pédagogique — aucune analogie ni aucune notion du cours ne doit disparaître. Allège légèrement UNIQUEMENT les phrases qui entourent les analogies (transitions, répétitions d'une idée déjà illustrée) pour réduire modestement le volume total, sans jamais sacrifier la clarté, le ton ou la profondeur qui caractérisent cette section.`;
 
 interface StudioPromptConfig {
   systemPrompt: string;

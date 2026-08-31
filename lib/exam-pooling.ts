@@ -78,17 +78,47 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
   return result.success ? result.data : null;
 }
 
+/**
+ * Inverse of convertIfCompatible — turns a freshly AI-generated ExamQuestion
+ * (single-correct, 5 options, per-option explanation) into the Studio
+ * QcmItem shape, so it can be harvested into exam_harvested_qcms and reused
+ * by FUTURE exam generations covering this course, in any course-set
+ * combination — not just the one that triggered this generation. Lossless:
+ * the single isCorrect option becomes a 1-element reponsesCorrectes array (a
+ * field that already supports more, per StudioQcmsSchema). QcmExplication
+ * requires a "globale" field ExamQuestion has no direct equivalent of (no
+ * whole-question summary) — reuses the correct option's own explanation
+ * text rather than inventing a new fact.
+ */
+export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: number): QcmItem {
+  const correctOption = question.options.find((o) => o.isCorrect);
+  const explication = { globale: correctOption?.explanation ?? "" } as QcmItem["explication"];
+  for (const option of question.options) {
+    explication[option.label as "A" | "B" | "C" | "D" | "E"] = option.explanation;
+  }
+  return {
+    id,
+    question: question.vignette,
+    options: question.options.map((o) => ({ label: o.label, text: o.text })),
+    reponsesCorrectes: question.options.filter((o) => o.isCorrect).map((o) => o.label),
+    explication,
+  };
+}
+
 export interface ExamPoolingCourseInput {
+  id: number;
   title: string;
   /** Raw studio_courses.qcms column value — untyped/untrusted until validated above. */
   qcms: unknown;
+  /** Previously-harvested QCMs for this course (see lib/exam-harvested-qcms.ts) — already QcmItem-shaped, merged with `qcms` before the same convertIfCompatible check applies to both. */
+  harvestedQcms?: QcmItem[];
 }
 
 export interface ExamPoolingResult {
   pooled: ExamQuestion[];
   totalShortfall: number;
-  /** Per-course shortfall count, in the SAME order as the input courses — used to log/report which courses had little or no reusable pool. */
-  shortfallByCourse: Array<{ title: string; shortfall: number }>;
+  /** Per-course shortfall, in the SAME order as the input courses — used both to log which courses had little/no reusable pool AND (via `id`) to generate + harvest each course's shortfall independently, see app/api/exam/generate/route.ts. */
+  shortfallByCourse: Array<{ id: number; title: string; shortfall: number }>;
 }
 
 /**
@@ -102,14 +132,19 @@ export interface ExamPoolingResult {
  */
 export function poolExamQuestions(courses: ExamPoolingCourseInput[], targetPerCourse: number): ExamPoolingResult {
   const pooled: ExamQuestion[] = [];
-  const shortfallByCourse: Array<{ title: string; shortfall: number }> = [];
+  const shortfallByCourse: Array<{ id: number; title: string; shortfall: number }> = [];
   let totalShortfall = 0;
 
   for (const course of courses) {
     const qcmsColumn = course.qcms as { qcms?: unknown } | null;
     const rawQcms = Array.isArray(qcmsColumn?.qcms) ? (qcmsColumn!.qcms as QcmItem[]) : [];
+    // Harvested QCMs (see lib/exam-harvested-qcms.ts) are already QcmItem-
+    // shaped — merged in BEFORE convertIfCompatible so both sources go
+    // through the exact same validation, never a separate "trust this one"
+    // path.
+    const candidates = [...rawQcms, ...(course.harvestedQcms ?? [])];
 
-    const compatible = rawQcms
+    const compatible = candidates
       .map((qcm) => convertIfCompatible(qcm, course.title))
       .filter((q): q is ExamQuestion => q !== null);
 
@@ -118,7 +153,7 @@ export function poolExamQuestions(courses: ExamPoolingCourseInput[], targetPerCo
 
     const shortfall = Math.max(0, targetPerCourse - taken.length);
     if (shortfall > 0) {
-      shortfallByCourse.push({ title: course.title, shortfall });
+      shortfallByCourse.push({ id: course.id, title: course.title, shortfall });
       totalShortfall += shortfall;
     }
   }

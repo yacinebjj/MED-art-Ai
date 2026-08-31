@@ -25,7 +25,7 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
-import { callOpenRouter } from "@/lib/ai/openrouter";
+import { callOpenRouter, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import { parseJsonResponse } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
@@ -469,6 +469,21 @@ export async function runStudioExplicationFreshGenerationWithTagging(
   const chunks = buildSourceChunks(truncatedText);
   const numberedExtraits = chunks.map((content, i) => `Extrait ${i + 1}:\n${content}`).join("\n\n");
 
+  // ECONOMY_MODEL (Gemini 3.7 Flash) — swapped from the implicit Sonnet
+  // default after a real side-by-side test against this exact prompt
+  // (explicationSystemPrompt, i.e. STUDIO_EXPLICATION_SYSTEM_PROMPT): equal
+  // or greater word count, full medical accuracy, and (after two targeted
+  // prompt fixes — a strict-tutoiement surcharge and a no-LaTeX-in-JSON
+  // rule) a clean register match and zero JSON-escaping failures, at ~76%
+  // lower cost per call. The `explicationChapterChunks` tagging field this
+  // call additionally requests (via explicationChunkTaggingAddendum) was
+  // NOT part of that test, but a wrong/missing value there only degrades a
+  // background cross-university cache-reuse optimization — see
+  // parseChapterChunkNumbers's `?? []` fallback above and this file's own
+  // "fails open by construction" header comment — it can never affect the
+  // explicationMarkdown actually served to the student. Scoped to ONLY this
+  // call site: the cross-university delta-chapter/wrapper calls below use
+  // different, untested prompts and deliberately keep the Sonnet default.
   const raw = await callOpenRouter(
     [
       { role: "system", content: explicationSystemPrompt + explicationChunkTaggingAddendum },
@@ -477,7 +492,7 @@ export async function runStudioExplicationFreshGenerationWithTagging(
         content: `Voici le contenu source, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
       },
     ],
-    { maxTokens, bypassMock: true }
+    { model: ECONOMY_MODEL, maxTokens, bypassMock: true }
   );
 
   const parsed = parseJsonResponse(raw);

@@ -2689,6 +2689,85 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- exam_content_variations: cross-student cache for the exam's own
+-- "Régénérer" (variation:true — see app/api/exam/generate/route.ts), capped
+-- at MAX_EXAM_VARIATIONS (20) per content_hash — the exact same
+-- "pre-generate a bounded pool, then serve for free forever" pattern as
+-- studio_content_variations above, applied here too (product ask: a second
+-- student's "Régénérer" on the same course set should cost $0, not just the
+-- first-ever generation). No section_key column — unlike Studio's 5 tiles,
+-- one exam has no sections to key by, only content_hash.
+--
+-- Deliberately a SEPARATE table from exam_content_cache (not just more rows
+-- under the same primary key): that table's key is `content_hash` alone by
+-- design (ONE canonical first-ever exam per course set), and variation:true
+-- requests already bypass it entirely on both read and write (see that
+-- table's own comment) — changing its primary key to accommodate multiple
+-- rows would touch the canonical-cache contract this table was never meant
+-- to have. A new table keeps both contracts independent and unambiguous.
+-- ---------------------------------------------------------------------------
+create table if not exists exam_content_variations (
+  id uuid primary key default gen_random_uuid(),
+  content_hash text not null,
+  variation_index integer not null,
+  content jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz,
+  unique (content_hash, variation_index)
+);
+
+create index if not exists exam_content_variations_lookup_idx
+  on exam_content_variations (content_hash);
+
+alter table exam_content_variations enable row level security;
+drop policy if exists "Deny all client access" on exam_content_variations;
+create policy "Deny all client access" on exam_content_variations for all using (false);
+
+create or replace function increment_exam_variation_hit_count(p_variation_id uuid)
+returns void
+language sql
+as $$
+  update exam_content_variations set hit_count = hit_count + 1, last_hit_at = now() where id = p_variation_id;
+$$;
+
+revoke execute on function increment_exam_variation_hit_count(uuid) from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- exam_harvested_qcms: a per-COURSE (not per-course-SET, unlike
+-- exam_content_variations above) supply of QCMs harvested from real exam-
+-- shortfall generations (see lib/exam-pooling.ts's own header comment and
+-- app/api/exam/generate/route.ts's per-course shortfall loop), so a
+-- shortfall question generated once for ONE exam becomes reusable pool
+-- material for ANY future exam that includes this course, in ANY
+-- combination with other courses — not just the exact course-set that
+-- triggered the original generation.
+--
+-- Deliberately NOT written into studio_courses.qcms itself: that column is
+-- the literal Studio QCM tile shown to students, with its own product
+-- invariants (StudioQcmsSchema's exactly-15 mandate, its own regenerate/
+-- variation flow) — mixing exam-authored content into it would leak exam
+-- content into a different product surface and risk breaking those
+-- invariants. `qcm` stores the SAME QcmItem-shaped JSON studio_courses.qcms'
+-- own "qcms" array elements use, so lib/exam-pooling.ts's existing
+-- convertIfCompatible validation applies unchanged to rows from either
+-- source — no separate "trust this one, it's pre-validated" code path.
+-- ---------------------------------------------------------------------------
+create table if not exists exam_harvested_qcms (
+  id uuid primary key default gen_random_uuid(),
+  course_id bigint not null references studio_courses (id) on delete cascade,
+  qcm jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists exam_harvested_qcms_course_idx
+  on exam_harvested_qcms (course_id);
+
+alter table exam_harvested_qcms enable row level security;
+drop policy if exists "Deny all client access" on exam_harvested_qcms;
+create policy "Deny all client access" on exam_harvested_qcms for all using (false);
+
+-- ---------------------------------------------------------------------------
 -- REVERTED (product direction): the standalone MedArt Assistant's own
 -- semantic cache (app/api/assistant/route.ts) — same removal as
 -- semantic_cache above, see that block's own comment.

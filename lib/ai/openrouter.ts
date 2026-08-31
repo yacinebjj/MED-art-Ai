@@ -32,6 +32,41 @@ export const HAIKU_MODEL = "anthropic/claude-haiku-4.5";
 // bar fit for medical explanations. Re-verify the same way if this 404s.
 export const ECONOMY_MODEL = "google/gemini-3.7-flash";
 
+// Mid-tier model for PERSONALIZED generation — content that is unique to one
+// student (their own flashcards, their own weakness remediation plan, their
+// own study schedule, their own cross-course module synthesis) and therefore
+// can never benefit from the cross-student/cross-university pooling that
+// keeps STUDIO_MODEL's (Sonnet 5) real per-student cost near zero on
+// app/api/studio/generate. For these routes the model tier is the only
+// remaining cost lever, so they use this instead of STUDIO_MODEL.
+// Confirmed live, 2026-08-31, against GET https://openrouter.ai/api/v1/models:
+// $0.25/M input + $2/M output vs Sonnet 5's $2/M + $10/M — a 5x cut on
+// completion cost (the dominant cost on these long-output generations), at a
+// context window (400K) comfortably larger than any prompt these routes send.
+// Re-verify the same way if this ever 404s.
+export const MID_TIER_MODEL = "openai/gpt-5-mini";
+
+// Cheapest tier — SCOPED to app/api/exam/generate/route.ts's exam-shortfall
+// QCM batches only (single-correct-answer, 5 options, <40-word explanations,
+// no clinical framing). Chosen after a real side-by-side test of 3 cheaper
+// candidates against this exact prompt+schema, each independently
+// adversarially re-verified for medical accuracy on a real course
+// (Hémolyse): deepseek/deepseek-v3.2 ($0.0025/8-question batch) and
+// qwen/qwen3-235b-a22b-2507 ($0.0022/batch) were both even cheaper, but the
+// adversarial pass on EACH found a real factual error in a distractor's
+// explanation text (deepseek: swapped the source's own PK/G6PD aerobic-vs-
+// anaerobic labeling; qwen: hemopexin binding claim contradicts real
+// hematology) — neither flipped an answer key, but both are genuine
+// inaccuracies a student would read. gpt-5-nano ($0.0049/batch, still ~5-6x
+// cheaper than ECONOMY_MODEL's $0.026-0.03/batch) was the only one of the 3
+// the adversarial pass confirmed with ZERO issues. Confirmed live,
+// 2026-08-31, against GET https://openrouter.ai/api/v1/models: $0.05/M
+// input + $0.40/M output, 400K context. Re-verify the same way if this
+// 404s, and do NOT reuse this constant for a different prompt/task without
+// its own test — this is a narrow, task-specific pick, not a general
+// "cheapest available" default.
+export const NANO_MODEL = "openai/gpt-5-nano";
+
 // Shared free-tier (":free" suffix) fallback chain — genuinely zero
 // marginal cost, used by app/api/dashboard-assistant/route.ts,
 // app/api/courses/chat/route.ts, and app/api/assistant/route.ts's

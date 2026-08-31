@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
-import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
+import { callOpenRouter, OpenRouterError, MID_TIER_MODEL } from "@/lib/ai/openrouter";
 import { buildRemediationPrompt, type RemediationSourceItem } from "@/lib/ai/remediation-prompts";
 import { RemediationPlanSchema } from "@/lib/ai/remediation-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -240,7 +239,7 @@ export async function POST(_request: NextRequest) {
         { role: "system", content: prompt },
         { role: "user", content: "Génère le plan de remédiation demandé." },
       ],
-      { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 110_000 } // route's own maxDuration is 120s — fail cleanly before the platform kills it
+      { model: MID_TIER_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 110_000 } // route's own maxDuration is 120s — fail cleanly before the platform kills it
     );
 
     // parseJsonResponse itself already logs the raw response + attempts a
