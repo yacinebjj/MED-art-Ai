@@ -8,7 +8,9 @@ import { Logo } from "./Logo";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useSidebarState } from "@/providers/SidebarProvider";
-import { Avatar, AvatarFallback } from "@/components/ui/Avatar";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { t } from "@/lib/translations";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,14 +21,14 @@ import {
 } from "@/components/ui/DropdownMenu";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
-  { href: "/dashboard/assistant", label: "MedArt Assistant", icon: Sparkles },
-  { href: "/study", label: "Espace Étude", icon: Brain },
-  { href: "/dashboard/todo", label: "To-Do List", icon: ListTodo },
-  { href: "/dashboard/groups", label: "Groupes de Révision", icon: Users },
-  { href: "/dashboard/notes", label: "Mes notes", icon: NotebookPen },
-  { href: "/dashboard/billing", label: "Abonnement", icon: CreditCard },
-  { href: "/dashboard/settings", label: "Paramètres", icon: Settings },
+  { href: "/dashboard", key: "dashboard" as const, icon: LayoutDashboard },
+  { href: "/dashboard/assistant", key: "assistant" as const, icon: Sparkles },
+  { href: "/dashboard/study", key: "studySpace" as const, icon: Brain },
+  { href: "/dashboard/todo", key: "todo" as const, icon: ListTodo },
+  { href: "/dashboard/groups", key: "groups" as const, icon: Users },
+  { href: "/dashboard/notes", key: "notes" as const, icon: NotebookPen },
+  { href: "/dashboard/billing", key: "billing" as const, icon: CreditCard },
+  { href: "/dashboard/settings", key: "settings" as const, icon: Settings },
 ];
 
 /**
@@ -42,6 +44,7 @@ export function Sidebar() {
   const router = useRouter();
   const { profile, signOut } = useAuth();
   const { isDesktopSidebarOpen } = useSidebarState();
+  const { language } = useLanguage();
   const initial = (profile?.fullName ?? "").trim().charAt(0).toUpperCase() || "E";
 
   async function handleSignOut() {
@@ -97,22 +100,34 @@ export function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200",
+                    "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                     isActive
                       ? "font-semibold text-primary-700 dark:text-primary-300"
                       : "font-medium text-muted-foreground hover:translate-x-0.5 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/5"
                   )}
                 >
                   {isActive && (
-                    <motion.span
-                      layoutId="sidebar-active-pill"
-                      className="absolute inset-0 rounded-2xl bg-gradient-to-r from-primary-500/15 to-violet-500/10 shadow-[inset_0_0_0_1px_rgba(20,184,166,0.25)]"
-                      transition={{ type: "spring", stiffness: 500, damping: 40 }}
-                    />
+                    <>
+                      {/* Colored fill + icon/text tone already say "active" —
+                          this rail is the extra glanceable cue that reads
+                          instantly even in peripheral vision while scanning
+                          down the list, without adding any new copy/clutter. */}
+                      <motion.span
+                        layoutId="sidebar-active-rail"
+                        className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-gradient-to-b from-primary-400 to-violet-400"
+                        transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                      />
+                      <motion.span
+                        layoutId="sidebar-active-pill"
+                        className="absolute inset-0 rounded-2xl bg-gradient-to-r from-primary-500/15 to-violet-500/10 shadow-glow"
+                        transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                      />
+                    </>
                   )}
-                  <Icon className="relative z-10 h-5 w-5 shrink-0" />
-                  <span className="relative z-10">{item.label}</span>
+                  <Icon className="relative z-10 h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+                  <span className="relative z-10">{t(item.key, language)}</span>
                 </Link>
               );
             })}
@@ -121,10 +136,13 @@ export function Sidebar() {
           <div className="p-3">
             <DropdownMenu>
               <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-2xl p-2.5 text-left transition-colors hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/5">
-                {/* Initials only, no image — the user explicitly wants zero
-                    image assets in the profile display. doctor-report.png
-                    is now unused anywhere in the app. */}
+                {/* Real photo when Settings > profile upload has set one
+                    (profile.avatarUrl, from AuthProvider) — Radix's
+                    AvatarPrimitive.Image falls back to AvatarFallback's
+                    initial automatically on an empty/broken src, so no
+                    manual error handling is needed here. */}
                 <Avatar>
+                  {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} alt="" />}
                   <AvatarFallback>{initial}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
@@ -143,12 +161,12 @@ export function Sidebar() {
                 <DropdownMenuItem asChild>
                   <Link href="/dashboard/settings">
                     <Settings className="h-4 w-4" />
-                    Paramètres
+                    {t("settings", language)}
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={handleSignOut}>
                   <LogOut className="h-4 w-4" />
-                  Déconnexion
+                  {t("signOut", language)}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

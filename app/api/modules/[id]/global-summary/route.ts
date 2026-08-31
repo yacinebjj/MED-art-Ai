@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
-import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
-import { buildGlobalSummaryPrompt } from "@/lib/ai/global-summary-prompts";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
-import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { errorMessage } from "@/lib/course-generation-shared";
+import { runModuleSynthesis, MIN_COURSES_REQUIRED } from "@/lib/module-synthesis";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-// Per-course cap so N selected courses can't blow past the model's context
-// window between them — generous enough that a single course's full text
-// almost never actually hits it (studio_courses.raw_text itself has no hard
-// cap, but real uploads are rarely this long).
-const MAX_SOURCE_CHARS_PER_COURSE = 15_000;
 
 interface StoredGlobalSummary {
   text: string;
@@ -43,7 +34,14 @@ function parseModuleId(rawId: string): number | null {
  *
  * GET  -> cached read, never calls the AI (mirrors
  *         app/api/study/remediation-plan/route.ts's own contract).
- * POST -> the real, billed generation — body { courseIds: number[] }.
+ * POST -> the real generation — body { courseIds: number[] } — now delegates
+ *         to lib/module-synthesis.ts's shared pipeline (the SAME per-course,
+ *         cross-student cache app/api/workspace/module-synthesis uses)
+ *         instead of its own bespoke, always-fresh, full-raw-text call. Two
+ *         students selecting the same courses now share the cost through
+ *         EITHER entry point. The request/response CONTRACT with the
+ *         frontend (GlobalSummaryModal.tsx) is unchanged — only what
+ *         happens behind POST changed.
  */
 export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthenticatedUser();
@@ -106,97 +104,47 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   if (!Array.isArray(courseIds) || courseIds.length === 0 || !courseIds.every((id) => typeof id === "number")) {
     return NextResponse.json({ success: false, error: "'courseIds' est requis (tableau d'identifiants non vide)." }, { status: 400 });
   }
+  if (courseIds.length < MIN_COURSES_REQUIRED) {
+    return NextResponse.json(
+      { success: false, error: `Sélectionne au moins ${MIN_COURSES_REQUIRED} cours pour générer le résumé global (actuellement ${courseIds.length}).` },
+      { status: 400 }
+    );
+  }
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
   }
 
+  const outcome = await runModuleSynthesis(user, moduleId, courseIds, "global_summary");
+  if (!outcome.ok) {
+    return NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status });
+  }
+
+  const generatedAt = new Date().toISOString();
+  const result: StoredGlobalSummary = {
+    text: outcome.result.content,
+    generatedAt,
+    courseIds,
+  };
+
   const supabase = getSupabaseAdmin();
+  // Read-modify-write: this is a jsonb MAP keyed by module id, so a plain
+  // column-level `update` would clobber every OTHER module's already-saved
+  // summary if we didn't merge it in first.
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("module_global_summaries")
+    .eq("id", user.id)
+    .maybeSingle<ProfileGlobalSummaryRow>();
+  const existingMap = profileRow?.module_global_summaries ?? {};
+  const updatedMap = { ...existingMap, [String(moduleId)]: result };
 
-  // Scoped to THIS user AND THIS module — a courseId the student doesn't own,
-  // or one that belongs to a different module, is silently excluded rather
-  // than trusted from the request body.
-  const { data: courses, error: coursesError } = await supabase
-    .from("studio_courses")
-    .select("id, title, raw_text")
-    .eq("user_id", user.id)
-    .eq("curriculum_module_id", moduleId)
-    .in("id", courseIds);
-
-  if (coursesError) {
-    console.error("[modules/global-summary:post] Échec lecture Supabase:", coursesError);
-    return NextResponse.json({ success: false, error: `Lecture échouée : ${coursesError.message}` }, { status: 500 });
+  const { error: saveError } = await supabase.from("profiles").update({ module_global_summaries: updatedMap }).eq("id", user.id);
+  if (saveError) {
+    console.error("[modules/global-summary:post] Échec sauvegarde (fail-open):", saveError);
+    // Fail-open on persistence: the summary was generated successfully —
+    // still return it even if it won't survive a reload.
   }
 
-  const eligibleCourses = (courses ?? []) as { id: number; title: string; raw_text: string }[];
-  if (eligibleCourses.length === 0) {
-    return NextResponse.json({ success: false, error: "Aucun cours sélectionné trouvé dans ce module." }, { status: 400 });
-  }
-
-  // Plan quota RESERVATION — this route made a real, billable OpenRouter
-  // call with no quota check at all before, unlike every other generation
-  // route in the app. Shares courseCap with Studio generate/regenerate
-  // (see reserveGeneration's own comment in lib/subscription.ts). Atomic
-  // check-and-increment, done here (after validating there's real work to
-  // do, before the real call below) so a malformed/empty request never
-  // burns a unit, and refundGeneration() undoes it if the call then fails.
-  // Found during a security/UX audit.
-  const quotaGate = await reserveGeneration(user);
-  if (!quotaGate.allowed) {
-    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
-  }
-
-  try {
-    const prompt = buildGlobalSummaryPrompt(
-      eligibleCourses.map((course) => ({ title: course.title, rawText: course.raw_text.slice(0, MAX_SOURCE_CHARS_PER_COURSE) }))
-    );
-
-    const raw = await callOpenRouter(
-      [
-        { role: "system", content: prompt },
-        { role: "user", content: "Génère le résumé global demandé." },
-      ],
-      { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true }
-    );
-
-    const parsed = parseJsonResponse(raw);
-    const summaryText = typeof parsed.summary === "string" ? parsed.summary : "";
-    if (!summaryText.trim() || summaryText.trim().length < 50) {
-      throw new Error("La réponse de l'IA ne contient pas de résumé exploitable.");
-    }
-
-    const generatedAt = new Date().toISOString();
-    const result: StoredGlobalSummary = {
-      text: sanitizeForPostgres(summaryText),
-      generatedAt,
-      courseIds: eligibleCourses.map((course) => course.id),
-    };
-
-    // Read-modify-write: this is a jsonb MAP keyed by module id, so a plain
-    // column-level `update` would clobber every OTHER module's already-saved
-    // summary if we didn't merge it in first.
-    const { data: profileRow } = await supabase
-      .from("profiles")
-      .select("module_global_summaries")
-      .eq("id", user.id)
-      .maybeSingle<ProfileGlobalSummaryRow>();
-    const existingMap = profileRow?.module_global_summaries ?? {};
-    const updatedMap = { ...existingMap, [String(moduleId)]: result };
-
-    const { error: saveError } = await supabase.from("profiles").update({ module_global_summaries: updatedMap }).eq("id", user.id);
-    if (saveError) {
-      console.error("[modules/global-summary:post] Échec sauvegarde (fail-open):", saveError);
-      // Fail-open on persistence: the summary was generated successfully —
-      // still return it even if it won't survive a reload.
-    }
-
-    return NextResponse.json({ success: true, summary: result });
-  } catch (error) {
-    await refundGeneration(user.id);
-    if (error instanceof OpenRouterError) {
-      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-    }
-    console.error("[modules/global-summary:post] Erreur non gérée:", error);
-    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
-  }
+  return NextResponse.json({ success: true, summary: result });
 }

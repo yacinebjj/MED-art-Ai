@@ -9,8 +9,11 @@ import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Camera, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, Plus, Search, Trash2, TrendingUp } from "lucide-react";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tModulePage } from "@/lib/translations/modulePage";
 import { cn } from "@/lib/utils";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
+import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { Button } from "@/components/ui/Button";
@@ -163,6 +166,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
    */
   variant?: "desktop" | "mobile";
 }) {
+  const { language } = useLanguage();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [statsCourse, setStatsCourse] = useState<StudioCourseSummary | null>(null);
   const [deleteCourse, setDeleteCourse] = useState<StudioCourseSummary | null>(null);
@@ -190,13 +194,13 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   return (
     <>
       {variant === "desktop" && (
-        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sources</h2>
+        <div className="flex items-center justify-between border-b border-border p-4">
+          <h2 className="text-sm font-semibold text-foreground">{tModulePage("sourcesHeading", language)}</h2>
           <button
             type="button"
             onClick={onClosePanel}
-            aria-label="Fermer le panneau"
-            className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100"
+            aria-label={tModulePage("closePanelAriaLabel", language)}
+            className="rounded-xl p-2 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
           >
             <PanelLeftClose className="h-4 w-4" />
           </button>
@@ -213,25 +217,25 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
             </Button>
 
             <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search the web..."
+                placeholder={tModulePage("searchWebPlaceholder", language)}
                 value={webSearchQuery}
                 onChange={(e) => setWebSearchQuery(e.target.value)}
                 onKeyDown={handleWebSearchKeyDown}
-                className="border-none bg-gray-100 pl-9 shadow-none dark:bg-neutral-800 dark:text-gray-100 dark:placeholder:text-gray-500"
+                className="border-none bg-muted pl-9 shadow-none"
               />
             </div>
           </>
         )}
 
         {courses.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-200 p-8 text-center dark:border-neutral-800">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-8 text-center">
             <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
-              <FileText className="h-6 w-6 text-gray-300 dark:text-neutral-700" />
+              <FileText className="h-6 w-6 text-muted-foreground/50" />
             </motion.div>
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Aucun support n'a été ajouté à ce module</p>
-            <p className="text-xs text-gray-400 dark:text-neutral-600">
+            <p className="text-sm font-medium text-muted-foreground">{tModulePage("noSourcesEmptyState", language)}</p>
+            <p className="text-xs text-muted-foreground/70">
               Ajoutez votre premier PDF ou texte pour commencer.
             </p>
           </div>
@@ -245,10 +249,10 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                 <div
                   key={course.id}
                   className={cn(
-                    "flex items-start gap-2 rounded-2xl border p-3 transition-colors",
+                    "group flex items-start gap-2 rounded-2xl border p-3 transition-all duration-300",
                     isActive
-                      ? "border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30"
-                      : "border-gray-200 bg-white hover:bg-gray-50 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+                      ? "border-primary-300 bg-primary-50 shadow-glow dark:border-primary-800 dark:bg-primary-950/30"
+                      : "border-border bg-card hover:-translate-y-0.5 hover:bg-accent hover:shadow-soft"
                   )}
                 >
                   <button
@@ -257,29 +261,31 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                     disabled={isSwitchingCourse}
                     className="flex min-w-0 flex-1 items-start gap-3 text-left disabled:cursor-wait"
                   >
-                    <FileText className={cn("mt-0.5 h-4 w-4 shrink-0", isActive ? "text-blue-500" : "text-gray-400 dark:text-gray-500")} />
+                    <FileText className={cn("mt-0.5 h-4 w-4 shrink-0", isActive ? "text-primary-500" : "text-muted-foreground")} />
                     <div className="min-w-0 flex-1">
-                      <p className={cn("truncate text-sm font-medium", isActive ? "text-blue-900 dark:text-blue-200" : "text-gray-900 dark:text-gray-100")}>
+                      <p className={cn("truncate text-sm font-medium", isActive ? "text-primary-900 dark:text-primary-200" : "text-foreground")}>
                         {course.title}
                       </p>
-                      <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{isActive ? "Cours actif" : "Cliquer pour ouvrir"}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {isActive ? tModulePage("activeCourseLabel", language) : tModulePage("clickToOpenLabel", language)}
+                      </p>
                     </div>
                   </button>
 
                   <DropdownMenu>
                     <DropdownMenuTrigger
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
                       aria-label="Options de la source"
                     >
                       <MoreVertical className="h-3.5 w-3.5" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onSelect={() => onShowCourseFile(course.id)}>
-                        <Columns2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <Columns2 className="h-4 w-4 text-primary-600 dark:text-primary-400" />
                         Afficher le cours
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => setStatsCourse(course)}>
-                        <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <TrendingUp className="h-4 w-4 text-primary-600 dark:text-primary-400" />
                         Statistiques
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -297,7 +303,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
       </div>
 
       {variant === "mobile" && (
-        <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 p-4 dark:border-neutral-800">
+        <div className="flex shrink-0 items-center gap-2 border-t border-border p-4">
           <Button
             variant="outline"
             size="icon"
@@ -309,7 +315,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
           </Button>
           <Button className="flex-1 rounded-full" onClick={() => setUploadOpen(true)}>
             <Plus className="h-4 w-4" />
-            Ajouter une source
+            {tModulePage("addSourceLabel", language)}
           </Button>
         </div>
       )}
@@ -353,7 +359,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
         onUploaded={() => {}}
         onSubmitFile={onSubmitFile}
         onSubmitText={onSubmitText}
-        title="Ajouter une source"
+        title={tModulePage("addSourceLabel", language)}
         description="Importe un document ou colle du texte pour ce module."
       />
     </>
@@ -363,6 +369,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
 export default function ModuleWorkspacePage() {
   const params = useParams<{ id: string }>();
   const moduleId = Number(params.id);
+  const { language } = useLanguage();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { toast } = useToast();
@@ -440,8 +447,15 @@ export default function ModuleWorkspacePage() {
   // to it must never itself trigger a re-render — only `activeCourse` does.
   const courseCacheRef = useRef<Map<number, StudioCourseFull>>(new Map());
   const [isSwitchingCourse, setIsSwitchingCourse] = useState(false);
-  const [generatingSection, setGeneratingSection] = useState<DemoSectionId | null>(null);
-  const [regeneratingSection, setRegeneratingSection] = useState<DemoSectionId | null>(null);
+  // Sets, not a single DemoSectionId — a student can now generate/regenerate
+  // several Studio sections concurrently (e.g. click Résumé, then Cas
+  // Clinique, without waiting for the first to finish) instead of every
+  // OTHER tile's click being silently ignored while one is in flight. The
+  // backend already handles each /api/studio/generate call as its own
+  // independent, stateless request — this was purely a client-side
+  // single-value bottleneck, not a real backend constraint.
+  const [generatingSections, setGeneratingSections] = useState<Set<DemoSectionId>>(() => new Set());
+  const [regeneratingSections, setRegeneratingSections] = useState<Set<DemoSectionId>>(() => new Set());
   // "Afficher le cours" — a self-contained modal (FileViewerModal), decoupled
   // from the isSplitScreen/studioPanel system entirely, showing whichever
   // course's file was requested from the Sources list.
@@ -549,9 +563,9 @@ export default function ModuleWorkspacePage() {
 
     const created: StudioCourseSummary = createData.course;
     applyCreatedCourse(created, uploadData.text, sourceFileUrl);
-    toast({ variant: "success", title: "Source ajoutée", description: `${file.name} a été importé et sauvegardé.` });
+    toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} a été importé et sauvegardé.` });
     return String(created.id);
-  }, [moduleId, applyCreatedCourse, toast]);
+  }, [moduleId, applyCreatedCourse, toast, language]);
 
   /** "Texte brut" tab of the unified Add-sources modal — skips /api/upload entirely (no file to extract from) and creates the course directly from the pasted text. */
   const handleTextSubmitted = useCallback(async (text: string, title: string): Promise<string> => {
@@ -565,9 +579,9 @@ export default function ModuleWorkspacePage() {
 
     const created: StudioCourseSummary = createData.course;
     applyCreatedCourse(created, text, null);
-    toast({ variant: "success", title: "Source ajoutée", description: `${created.title} a été ajouté.` });
+    toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${created.title} a été ajouté.` });
     return String(created.id);
-  }, [moduleId, applyCreatedCourse, toast]);
+  }, [moduleId, applyCreatedCourse, toast, language]);
 
   /**
    * Context switching: clears the detail pane immediately (the Studio must
@@ -603,26 +617,29 @@ export default function ModuleWorkspacePage() {
     } catch (error) {
       toast({
         variant: "error",
-        title: "Échec du chargement",
+        title: tModulePage("toastLoadFailed", language),
         description: error instanceof Error ? error.message : "Erreur inconnue.",
       });
       return null;
     } finally {
       setIsSwitchingCourse(false);
     }
-  }, [activeCourse, toast]);
+  }, [activeCourse, toast, language]);
 
-  // Matches the Pleurésie "Golden Standard" flow exactly, using only
-  // StudioPanel's existing, UNCHANGED contract (generatingSection +
-  // getSectionStatus drive the list row; openedSection drives the detail
-  // pane) — StudioPanel calls this same onItemClick for BOTH a grid tile and
-  // a "recent generations" list row, so the three cases below are
-  // distinguished purely by this page's own state, never by touching the
-  // component:
-  //  1. Not generated yet, nothing in flight -> start generating. Do NOT
-  //     open the detail pane: StudioPanel already surfaces this as a
-  //     spinning row in its own "recent generations" list purely because
-  //     generatingSection === id, with no code needed here for that part.
+  // Matches the Pleurésie "Golden Standard" flow, using StudioPanel's
+  // contract (generatingSections + getSectionStatus drive the list row;
+  // openedSection drives the detail pane — generatingSections is now a Set,
+  // so several tiles can each show their own spinner concurrently instead
+  // of only one at a time) — StudioPanel calls this same onItemClick for
+  // BOTH a grid tile and a "recent generations" list row, so the three
+  // cases below are distinguished purely by this page's own state, never by
+  // touching the component:
+  //  1. Not generated yet, nothing in flight for THIS id -> start
+  //     generating (a different id already generating no longer blocks
+  //     this). Do NOT open the detail pane: StudioPanel already surfaces
+  //     this as a spinning row in its own "recent generations" list purely
+  //     because generatingSections.has(id), with no code needed here for
+  //     that part.
   //  2. Already generated -> THIS click (on the now-ready list row, or on
   //     the grid tile again) is what opens the detail pane full-screen.
   //  3. Currently generating (a click on the spinning list row, or a second
@@ -642,27 +659,63 @@ export default function ModuleWorkspacePage() {
       return;
     }
 
+    // Enforced Studio Pipeline — every OTHER section is locked until
+    // "Explication Ultra-Détaillée" exists for this course. Explicit product
+    // decision: this does not reduce per-message chat cost (every reply's
+    // tokens are still generated and billed fresh regardless of what
+    // grounds them) and forces a real generation cost on every course,
+    // whether or not the student ever wanted Explication specifically —
+    // accepted knowingly, not a side effect.
+    if (id !== "explication" && !getSectionValue(activeCourse, "explication")) {
+      toast({
+        variant: "info",
+        title: "Explication Ultra-Détaillée requise",
+        description: "Génère d'abord l'Explication Ultra-Détaillée de ce cours — les autres sections se débloquent ensuite.",
+      });
+      return;
+    }
+
     if (getSectionValue(activeCourse, id)) {
       startNavTransition(() => setOpenedSection(id));
       return;
     }
 
-    if (generatingSection) return; // ignore: this id's own spinner, or a different tile already in flight
+    // Only THIS id's own spinner blocks a re-click on itself — a different
+    // tile already generating no longer blocks a new one from starting.
+    if (generatingSections.has(id)) return;
 
     const courseId = activeCourse.id;
-    const rawText = activeCourse.rawText;
 
-    setGeneratingSection(id);
+    setGeneratingSections((prev) => new Set(prev).add(id));
     try {
       // /api/studio/generate now saves to Supabase itself before returning
       // success (atomic generate-then-save — see that route's header
       // comment), so there's no separate PATCH here anymore: a refresh
       // right after this resolves already reloads straight from Supabase,
       // and a refresh/tab-close mid-generation never burns an OpenRouter
-      // call for a result that never gets saved.
-      const { res, data } = await postStudioGenerate(id, rawText, courseId);
+      // call for a result that never gets saved. Note: no course text is
+      // sent in this request anymore — the backend fetches its own raw_text
+      // by courseId (see that route's own comment) instead of trusting this
+      // client to resend a 60,000-char payload on every single click.
+      // Every section (Explication, Résumé, Cas Clinique, QCM,
+      // Exemples&Analogies) generates its complete content in ONE call on
+      // first open — Résumé's earlier lazy per-mode loading was reverted by
+      // explicit product direction (single-shot, hyper-concise prompt
+      // instead — see STUDIO_RESUME_SYSTEM_PROMPT's own comment).
+      const { res, data } = await postStudioGenerate(id, courseId);
       if (!res.ok || !data.success) {
         throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
+      }
+
+      // UX ILLUSION (product direction) — a cache hit is instant, but the
+      // student should still feel like the AI is actively working on it
+      // rather than seeing a suspiciously-fast result. The "generating"
+      // spinner/rotating label above stays visible for this whole delay,
+      // since it's cleared only in the `finally` block below, after this
+      // resolves. Never applied to a genuine cache miss — a real generation
+      // already takes real time.
+      if (data.cached) {
+        await wait(randomFakeDelayMs());
       }
 
       // Keyed off the cache (not the `activeCourse` closure, which may now
@@ -679,14 +732,18 @@ export default function ModuleWorkspacePage() {
     } catch (error) {
       toast({
         variant: "error",
-        title: "Échec de la génération",
+        title: tModulePage("toastGenerationFailed", language),
         description: error instanceof Error ? error.message : "Erreur inconnue.",
       });
     } finally {
-      setGeneratingSection(null);
+      setGeneratingSections((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCourse, generatingSection, toast]);
+  }, [activeCourse, generatingSections, toast]);
 
   /** Stable reference so the desktop ModuleSourcesPanel instance's React.memo actually holds. */
   const handleCloseSourcesPanel = useCallback(() => setIsSplitScreen(true), []);
@@ -709,12 +766,20 @@ export default function ModuleWorkspacePage() {
    * propagate to the caller, which is what lets postStudioGenerate below
    * distinguish "the request never landed" from "it landed and the server
    * said no".
+   *
+   * Deliberately does NOT send `documentContext` (the course's raw text)
+   * anymore — the backend now fetches it itself from `studio_courses` by
+   * `courseId` (see that route's own comment). Previously this resent the
+   * full text (up to 60,000 chars) from the browser on every single Studio
+   * click, purely a bandwidth cost (it never affected the actual OpenRouter
+   * bill either way — Anthropic's cache_control only ever discounts what
+   * the SERVER sends to the model, not where the server got it from).
    */
-  async function requestStudioGeneration(actionType: DemoSectionId, context: string, courseId: number) {
+  async function requestStudioGeneration(actionType: DemoSectionId, courseId: number, extra?: Record<string, unknown>) {
     const res = await fetch("/api/studio/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionType, documentContext: context, courseId }),
+      body: JSON.stringify({ actionType, courseId, ...extra }),
     });
     const data = await res.json().catch(() => ({}));
     return { res, data };
@@ -735,18 +800,18 @@ export default function ModuleWorkspacePage() {
    *     from that transient race instead of surfacing a false "you're
    *     logged out" error mid-generation.
    */
-  async function postStudioGenerate(actionType: DemoSectionId, context: string, courseId: number) {
+  async function postStudioGenerate(actionType: DemoSectionId, courseId: number, extra?: Record<string, unknown>) {
     let attempt: { res: Response; data: any };
     try {
-      attempt = await requestStudioGeneration(actionType, context, courseId);
+      attempt = await requestStudioGeneration(actionType, courseId, extra);
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      attempt = await requestStudioGeneration(actionType, context, courseId);
+      attempt = await requestStudioGeneration(actionType, courseId, extra);
     }
 
     if (attempt.res.status === 401) {
       await supabase.auth.getUser();
-      attempt = await requestStudioGeneration(actionType, context, courseId);
+      attempt = await requestStudioGeneration(actionType, courseId, extra);
     }
 
     return attempt;
@@ -809,7 +874,7 @@ export default function ModuleWorkspacePage() {
     const res = await fetch(`/api/studio/courses/${courseId}`, { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) {
-      toast({ variant: "error", title: "Échec de la suppression", description: data?.error ?? "Erreur inconnue." });
+      toast({ variant: "error", title: tModulePage("toastDeleteFailed", language), description: data?.error ?? "Erreur inconnue." });
       return;
     }
     courseCacheRef.current.delete(courseId);
@@ -820,7 +885,7 @@ export default function ModuleWorkspacePage() {
       setIsSplitScreen(false);
     }
     toast({ variant: "success", title: "Cours supprimé" });
-  }, [activeCourse, toast]);
+  }, [activeCourse, toast, language]);
 
   /** "Afficher le cours" — opens FileViewerModal for this course, loading it first if it isn't already the active one. Fully decoupled from the chat/Studio split-screen. */
   const handleShowCourseFile = useCallback(async (courseId: number) => {
@@ -830,10 +895,12 @@ export default function ModuleWorkspacePage() {
 
   /** "Regénérer" — see app/api/studio/regenerate/route.ts's own doc comment for why this deliberately never resends the source document. */
   async function handleRegenerateSection(id: DemoSectionId) {
-    if (!activeCourse || regeneratingSection || generatingSection) return;
+    // Same relaxation as handleStudioItemClick — only THIS id's own
+    // regenerate/generate state blocks it, not an unrelated tile's.
+    if (!activeCourse || regeneratingSections.has(id) || generatingSections.has(id)) return;
 
     const courseId = activeCourse.id;
-    setRegeneratingSection(id);
+    setRegeneratingSections((prev) => new Set(prev).add(id));
     try {
       const res = await fetch("/api/studio/regenerate", {
         method: "POST",
@@ -843,6 +910,14 @@ export default function ModuleWorkspacePage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La régénération a échoué.");
+      }
+
+      // UX ILLUSION (product direction) — see handleStudioItemClick's own
+      // identical comment above. A variation served from
+      // studio_content_variations without a real OpenRouter call is still a
+      // "cache hit" in spirit.
+      if (data.cached) {
+        await wait(randomFakeDelayMs());
       }
 
       const baseCourse = courseCacheRef.current.get(courseId);
@@ -863,7 +938,11 @@ export default function ModuleWorkspacePage() {
         description: error instanceof Error ? error.message : "Erreur inconnue.",
       });
     } finally {
-      setRegeneratingSection(null);
+      setRegeneratingSections((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   }
 
@@ -898,7 +977,7 @@ export default function ModuleWorkspacePage() {
 
   if (loading) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-gray-100 dark:bg-neutral-950">
+      <div className="aurora-canvas-bg flex h-dvh items-center justify-center">
         <BrandLoader />
       </div>
     );
@@ -906,11 +985,11 @@ export default function ModuleWorkspacePage() {
 
   if (notFound || !module) {
     return (
-      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-gray-100 dark:bg-neutral-950">
-        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Ce module est introuvable.</p>
+      <div className="aurora-canvas-bg flex h-dvh flex-col items-center justify-center gap-4">
+        <p className="text-sm font-medium text-muted-foreground">Ce module est introuvable.</p>
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-500"
+          className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-bold text-white shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 hover:shadow-glow"
         >
           <ArrowLeft className="h-4 w-4" />
           Retour au Dashboard
@@ -944,6 +1023,7 @@ export default function ModuleWorkspacePage() {
       }}
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
+      courseSlug={courseChatSlug}
       sourceTextLength={activeCourse?.rawText?.length}
     />
   );
@@ -981,6 +1061,7 @@ export default function ModuleWorkspacePage() {
       onSelectSource={handleSelectCourse}
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
+      courseSlug={courseChatSlug}
       sourceTextLength={activeCourse?.rawText?.length}
     />
   );
@@ -993,8 +1074,8 @@ export default function ModuleWorkspacePage() {
       onItemClick={handleStudioItemClick}
       onCloseSection={() => setOpenedSection(null)}
       getSectionStatus={getSectionStatus}
-      generatingSection={generatingSection}
-      regeneratingSection={regeneratingSection}
+      generatingSections={generatingSections}
+      regeneratingSections={regeneratingSections}
       onRegenerateSection={handleRegenerateSection}
       sourceCount={courses.length}
       isNoteOpen={isNoteOpen}
@@ -1015,14 +1096,14 @@ export default function ModuleWorkspacePage() {
       onCollapsedChange={setIsStudioCollapsed}
     >
       {isSwitchingCourse ? (
-        <div className="flex h-full flex-col items-center justify-center gap-3 py-20">
+        <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
           <BrandLoader className="h-6 w-6" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">Chargement du cours...</p>
+          <p className="text-sm text-muted-foreground">Chargement du cours...</p>
         </div>
-      ) : openedSection && generatingSection === openedSection ? (
-        <div className="flex h-full flex-col items-center justify-center gap-3 py-20">
+      ) : openedSection && generatingSections.has(openedSection) ? (
+        <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
           <BrandLoader className="h-6 w-6" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">Génération en cours...</p>
+          <p className="text-sm text-muted-foreground">Génération en cours...</p>
         </div>
       ) : openedSection && activeCourse && getSectionValue(activeCourse, openedSection) ? (
         <div className="animate-fade-in">
@@ -1080,9 +1161,9 @@ export default function ModuleWorkspacePage() {
           </Suspense>
         </div>
       ) : openedSection && !activeCourse ? (
-        <div className="flex h-full flex-col items-center justify-center gap-2 py-20 text-center">
-          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Ajoute une source pour générer ce contenu</p>
-          <p className="max-w-sm text-xs text-gray-500 dark:text-gray-400">
+        <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-2 py-20 text-center">
+          <p className="text-sm font-medium text-foreground">Ajoute une source pour générer ce contenu</p>
+          <p className="max-w-sm text-xs text-muted-foreground">
             Importe un PDF dans le panneau Sources à gauche, puis reclique sur « {openedSectionLabel} ».
           </p>
         </div>
@@ -1090,11 +1171,11 @@ export default function ModuleWorkspacePage() {
     </StudioPanel>
   );
 
-  const panelShellClasses =
-    "flex flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900";
+  const panelShellClasses = "glass-card flex flex-col overflow-hidden rounded-3xl shadow-glass transition-all duration-300 dark:shadow-glass-dark";
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
+    <div className="aurora-canvas-bg relative flex h-dvh flex-col overflow-hidden">
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
       <WorkspaceTopbar title={moduleTitle} />
 
       {/* Desktop (md+) — the original fixed-width 3-column shell, completely
@@ -1171,7 +1252,7 @@ export default function ModuleWorkspacePage() {
                 <MobileStudioCards
                   sections={DEMO_SECTIONS}
                   getSectionStatus={getSectionStatus}
-                  generatingSection={generatingSection}
+                  generatingSections={generatingSections}
                   onItemClick={handleStudioItemClick}
                 />
               ))}

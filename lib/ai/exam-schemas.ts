@@ -18,7 +18,7 @@ const ExamOptionSchema = z
   })
   .strict();
 
-const ExamQuestionSchema = z
+export const ExamQuestionSchema = z
   .object({
     vignette: z.string().min(30),
     options: z

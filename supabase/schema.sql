@@ -643,6 +643,16 @@ create table if not exists courses (
 create index if not exists courses_slug_idx on courses (slug);
 create index if not exists courses_module_id_idx on courses (module_id);
 
+-- user_id: nullable — an admin/seed-loaded public showcase course
+-- (Pleurésie, Gastrite) has no uploader and stays null; a student's own
+-- "cours indépendant" upload (app/api/generate-course) stamps their id.
+-- Added because GET /api/courses/list had NO owner filter at all before
+-- this (this column didn't exist), so "Mes cours indépendants" on the
+-- dashboard showed literally every course ever uploaded by every student,
+-- platform-wide — a real cross-account data-isolation bug, not cosmetic.
+alter table courses add column if not exists user_id uuid references auth.users (id) on delete cascade;
+create index if not exists courses_user_id_idx on courses (user_id);
+
 alter table courses enable row level security;
 
 -- EXPLICIT zero-trust policy — same pattern as courses_cache/subscriptions/
@@ -753,73 +763,17 @@ as $$
   order by mastery_pct asc;
 $$;
 
--- ---------------------------------------------------------------------------
--- semantic_cache: cross-student cache of (question, answer) pairs, matched by
--- cosine similarity over pgvector rather than exact text — see
--- lib/ai/semantic-cache.ts getCachedOrGenerate(). Column names here MUST
--- match that file's .insert({ course_slug, question, answer, embedding })
--- call exactly (it writes "question"/"answer", not "chunk_text").
--- ---------------------------------------------------------------------------
 create extension if not exists vector;
 
-create table if not exists semantic_cache (
-  id uuid primary key default gen_random_uuid(),
-  course_slug text,
-  question text not null,
-  answer text not null,
-  embedding vector(1536) not null,
-  created_at timestamptz not null default now()
-);
-
--- IVFFlat needs at least some rows to build meaningful lists; fine to create
--- empty; Supabase docs recommend re-running `analyze` after the table has
--- real data (a handful of qualifying rows) to reach optimal recall.
-create index if not exists semantic_cache_embedding_idx
-  on semantic_cache using ivfflat (embedding vector_cosine_ops)
-  with (lists = 100);
-
-create index if not exists semantic_cache_course_slug_idx on semantic_cache (course_slug);
-
-alter table semantic_cache enable row level security;
-
--- EXPLICIT zero-trust policy — see courses_cache's identical comment further
--- up for why. (Also correcting a naming mismatch from an earlier directive:
--- this is `semantic_cache`, not `course_faq_cache` — no such table exists in
--- this codebase; renaming a working table for no functional reason was
--- deliberately not done, see the earlier RAG-audit turn.)
-drop policy if exists "Deny all client access" on semantic_cache;
-create policy "Deny all client access" on semantic_cache for all using (false);
-
--- Cosine-similarity search, filtered by course when match_course_slug is
--- given, across all courses when it's null (see the comment on
--- getCachedOrGenerate() in lib/ai/semantic-cache.ts for why cross-course
--- search is sometimes desirable). match_threshold matches
--- SIMILARITY_THRESHOLD (0.92) in that same file.
-create or replace function match_semantic_cache(
-  query_embedding vector(1536),
-  match_course_slug text,
-  match_threshold float,
-  match_count int
-)
-returns table (
-  id uuid,
-  question text,
-  answer text,
-  similarity float
-)
-language sql stable
-as $$
-  select
-    semantic_cache.id,
-    semantic_cache.question,
-    semantic_cache.answer,
-    1 - (semantic_cache.embedding <=> query_embedding) as similarity
-  from semantic_cache
-  where (match_course_slug is null or semantic_cache.course_slug = match_course_slug)
-    and 1 - (semantic_cache.embedding <=> query_embedding) >= match_threshold
-  order by semantic_cache.embedding <=> query_embedding
-  limit match_count;
-$$;
+-- ---------------------------------------------------------------------------
+-- REVERTED (product direction): chat semantic caching, entirely. Both
+-- semantic_cache (course chat) and assistant_semantic_cache (the standalone
+-- MedArt Assistant, further down) are dropped — every chat message now
+-- always reaches a real OpenRouter call. `vector` extension kept: still
+-- used by content_embedding below (course-level dedup, unrelated).
+-- ---------------------------------------------------------------------------
+drop function if exists match_semantic_cache(vector(1536), text, float, int);
+drop table if exists semantic_cache;
 
 -- ---------------------------------------------------------------------------
 -- content_embedding: one embedding per course, computed ONCE at upload from
@@ -1101,7 +1055,28 @@ create policy "Deny all client access" on course_chunks for all using (false);
 -- or module — app/api/search/route.ts resolves course title/module name
 -- afterwards via a plain lookup, kept out of this function so it stays a
 -- simple, reusable primitive.
-create or replace function match_course_chunks(query_embedding vector(1536), match_count int)
+--
+-- match_threshold: THIS is the fix for the "recherche 'fracture' renvoie la
+-- Pleurésie" bug — the function used to have no floor at all, just "return
+-- the match_count NEAREST rows, however far they actually are". pgvector's
+-- <=> always returns SOME ordering even when every row is genuinely
+-- unrelated to the query, so a query with few (or zero) real matches was
+-- silently backfilled with the least-dissimilar noise instead of coming
+-- back empty or short. Now filtered server-side (`where ... >= match_threshold`)
+-- before the limit, so an under-matched query legitimately returns FEWER
+-- than match_count rows — or zero — rather than padding out to
+-- match_count with irrelevant chunks.
+--
+-- The signature gained a 3rd parameter (match_threshold) — `create or
+-- replace` does NOT drop/replace a function whose argument list changed
+-- (Postgres treats that as a distinct overload, not the same function), so
+-- the old 2-arg version is dropped explicitly first. Without this, BOTH the
+-- old unfiltered function and the new filtered one would exist side by
+-- side, and the old one — still directly callable via RPC by anyone who
+-- knows its name/arity — would still return unfiltered noise.
+drop function if exists match_course_chunks(vector(1536), int);
+
+create or replace function match_course_chunks(query_embedding vector(1536), match_count int, match_threshold float)
 returns table (
   course_slug text,
   section_label text,
@@ -1116,6 +1091,7 @@ as $$
     course_chunks.content,
     1 - (course_chunks.embedding <=> query_embedding) as similarity
   from course_chunks
+  where 1 - (course_chunks.embedding <=> query_embedding) >= match_threshold
   order by course_chunks.embedding <=> query_embedding
   limit match_count;
 $$;
@@ -1683,6 +1659,42 @@ alter table profiles add column if not exists weakness_remediation_generated_at 
 -- ---------------------------------------------------------------------------
 alter table studio_courses add column if not exists source_file_url text;
 
+-- Per-student, per-course personal ceiling on QCM regeneration (product
+-- direction: max 4 ever) — see app/api/studio/regenerate/route.ts's
+-- "section === 'qcm'" gate. Deliberately its OWN counter, independent of
+-- studio_content_variations' platform-wide 10-variation cap below: that one
+-- limits how many DISTINCT contents ever get created for a (course, section)
+-- pair, shared across every student; this one limits how many times THIS
+-- student can click "Régénérer" at all, even while the shared pool still has
+-- room. A column on studio_courses (not a separate table) because a row
+-- here is already inherently one (student, course) pair — no junction table
+-- needed. Same atomic reserve/refund pattern as every other quota in this
+-- file (see the reserve_generations_used block's own comment for the TOCTOU
+-- race this avoids).
+alter table studio_courses add column if not exists qcm_regenerate_count integer not null default 0;
+
+create or replace function reserve_qcm_regenerate(p_course_id bigint, p_user_id uuid, p_cap integer)
+returns integer
+language sql
+as $$
+  update studio_courses
+  set qcm_regenerate_count = qcm_regenerate_count + 1
+  where id = p_course_id and user_id = p_user_id and qcm_regenerate_count < p_cap
+  returning qcm_regenerate_count;
+$$;
+
+create or replace function refund_qcm_regenerate(p_course_id bigint, p_user_id uuid)
+returns void
+language sql
+as $$
+  update studio_courses
+  set qcm_regenerate_count = greatest(qcm_regenerate_count - 1, 0)
+  where id = p_course_id and user_id = p_user_id;
+$$;
+
+revoke execute on function reserve_qcm_regenerate(bigint, uuid, integer) from anon, authenticated;
+revoke execute on function refund_qcm_regenerate(bigint, uuid) from anon, authenticated;
+
 -- SECURITY/DATA-SAFETY FIX: the FK above was originally written as
 -- `on delete cascade` — deleting one curriculum_modules row (admin/seed-
 -- managed reference data, e.g. to fix a typo'd module name) would silently
@@ -1773,6 +1785,36 @@ alter table user_notes add column if not exists module_id integer references cur
 -- its own GET.
 -- ---------------------------------------------------------------------------
 alter table profiles add column if not exists module_global_summaries jsonb not null default '{}';
+
+-- Global, per-student ceiling on "Examen de Module" regeneration (product
+-- direction: max 5 ever, across every module) — see
+-- app/api/exam/generate/route.ts's "variation === true" gate. A single
+-- column on profiles (not per-module) since the product direction frames
+-- this as one personal allowance for the whole feature, not per-module.
+-- Same atomic reserve/refund pattern as every other quota in this file.
+alter table profiles add column if not exists module_exam_regenerations_used integer not null default 0;
+
+create or replace function reserve_module_exam_regenerate(p_user_id uuid, p_cap integer)
+returns integer
+language sql
+as $$
+  update profiles
+  set module_exam_regenerations_used = module_exam_regenerations_used + 1
+  where id = p_user_id and module_exam_regenerations_used < p_cap
+  returning module_exam_regenerations_used;
+$$;
+
+create or replace function refund_module_exam_regenerate(p_user_id uuid)
+returns void
+language sql
+as $$
+  update profiles
+  set module_exam_regenerations_used = greatest(module_exam_regenerations_used - 1, 0)
+  where id = p_user_id;
+$$;
+
+revoke execute on function reserve_module_exam_regenerate(uuid, integer) from anon, authenticated;
+revoke execute on function refund_module_exam_regenerate(uuid) from anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Seed — Médecine 2ème et 3ème année, exactement comme spécifié. Chaque
@@ -2259,6 +2301,20 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- REVERTED (product direction): Résumé's lazy per-mode loading + its
+-- cross-student cache. Both existed for exactly one prior pass — the whole
+-- feature was undone in favor of single-shot 6-mode generation with a
+-- hyper-concise prompt (see STUDIO_RESUME_SYSTEM_PROMPT's own comment in
+-- lib/ai/studio-prompts.ts). Explicit DROPs below so re-running this file
+-- on a Supabase project that already applied the earlier version cleans up
+-- the now-dead table/functions instead of leaving them orphaned — safe: a
+-- pure regeneratable cache/merge-helper, never load-bearing user data.
+-- ---------------------------------------------------------------------------
+drop function if exists merge_studio_resume_mode(bigint, uuid, jsonb, numeric, text);
+drop function if exists increment_studio_resume_mode_cache_hit_count(text, text);
+drop table if exists studio_resume_mode_cache;
+
+-- ---------------------------------------------------------------------------
 -- course_highlights: text selections a student highlights while reading a
 -- public showcase course (app/api/highlights/route.ts). Like studio_courses
 -- and user_notes above, this was never defined in this file — created by
@@ -2276,6 +2332,15 @@ create table if not exists course_highlights (
   course_slug text not null,
   selected_text text not null,
   color text not null default 'yellow',
+  -- Character offsets of the highlight within its reading container's
+  -- flattened text content at capture time (see lib/highlight.ts's
+  -- computeOffsets/rangeFromOffsets) — nullable because rows saved before
+  -- this column existed only ever stored the raw text, matched back via a
+  -- fragile whole-page substring search. New rows always set these; the
+  -- rehydration code falls back to the old substring search ONLY when
+  -- they're null or no longer resolve (e.g. the source content changed).
+  start_offset integer,
+  end_offset integer,
   created_at timestamptz not null default now()
 );
 
@@ -2311,11 +2376,10 @@ revoke execute on function increment_flashcards_content_cache_hit_count(text) fr
 revoke execute on function weakness_radar(uuid) from anon, authenticated;
 revoke execute on function course_mastery(uuid) from anon, authenticated;
 revoke execute on function course_weak_qcms(uuid, text, int) from anon, authenticated;
-revoke execute on function match_semantic_cache(vector(1536), text, float, int) from anon, authenticated;
 revoke execute on function match_similar_courses_by_slug(text, float, int) from anon, authenticated;
 revoke execute on function match_similar_source_chunks(text, float) from anon, authenticated;
 revoke execute on function match_chunks_against_course(text, text, float) from anon, authenticated;
-revoke execute on function match_course_chunks(vector(1536), int) from anon, authenticated;
+revoke execute on function match_course_chunks(vector(1536), int, float) from anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Study Planner ("To-Do List & AI Study Planner") — OMEGA-SHIELD.
@@ -2546,3 +2610,434 @@ begin
     alter publication supabase_realtime add table chat_messages;
   end if;
 end $$;
+
+-- ===========================================================================
+-- Point 13 — Avatar de profil, photo affichée dans Sidebar/Topbar/
+-- Paramètres. `profiles` n'avait jusqu'ici aucune colonne dédiée à ça.
+--
+-- Aucune nouvelle policy RLS nécessaire : cette colonne est déjà couverte
+-- par la policy SELECT "Users can view their own profile" existante
+-- (ligne ~417) et, comme pour specialty_id/academic_year_id plus haut,
+-- l'écriture ne passe jamais par le client — uniquement par
+-- POST /api/profile/avatar, qui vérifie l'utilisateur connecté côté serveur
+-- puis écrit via le client service-role (getSupabaseAdmin, contourne RLS).
+--
+-- Bucket Storage attendu : "avatars", créé au premier upload par
+-- ensureAvatarBucket() dans app/api/profile/avatar/route.ts via
+-- `storage.createBucket("avatars", { public: true })` — même pattern que
+-- les 3 buckets déjà en place ailleurs dans le projet (app/api/upload/
+-- route.ts, app/api/study-planner/upload/route.ts, app/api/groups/[id]/
+-- media/route.ts) : lecture publique par construction (bucket public +
+-- getPublicUrl), écriture jamais ouverte au client — seule la route
+-- ci-dessus, authentifiée, peut y écrire, sous un chemin préfixé par l'id
+-- du propriétaire (`${user.id}/...`). Comme pour ces 3 buckets, aucune
+-- policy storage.objects n'est ajoutée ici : le projet n'en définit pour
+-- aucun bucket existant, la restriction vit entièrement côté route API.
+-- ===========================================================================
+alter table profiles add column if not exists avatar_url text;
+
+-- ===========================================================================
+-- Universal caching — Phase 2: Exam Generator + MedArt Assistant.
+-- Closes the last two AI surfaces that had zero caching (Studio, Flashcards,
+-- and the Workspace/course chat were already covered — see
+-- studio_content_cache, flashcards_content_cache, semantic_cache above).
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- exam_content_cache: cross-student cache for the "Générateur d'Examen"
+-- (app/api/exam/generate/route.ts), keyed by a hash of the SET of selected
+-- courses' content (see lib/exam-content-cache.ts's computeExamContentHash).
+--
+-- Deliberately combination-level, NOT course-level like course_workspace_cache
+-- above — that table's own comment explains why course-level beats
+-- combination-level for a workspace summary (independent per-course chunks,
+-- assembled client-side). An exam is the opposite: buildExamBatchPrompt
+-- generates ONE coherent, cross-referencing 40-question exam OVER the whole
+-- selected set at once (see generateExamBatch's previousTopics threading) —
+-- there is no meaningful "this course's slice of the exam" to cache
+-- independently, so the combinatorial-explosion argument doesn't apply here.
+-- Module course-sets are small and stable in practice (a module's full course
+-- list, rarely an arbitrary sub-selection), so exact-set collisions across
+-- students are actually common — unlike the large, arbitrary multi-course
+-- selections course_workspace_cache was built to handle.
+--
+-- variation:true requests (the exam's own "Régénérer" — see route.ts) always
+-- bypass this cache on read AND never overwrite it on write: the cache
+-- always holds the canonical first-generation exam for a given course set,
+-- and a student who explicitly asked for a fresh variation must always get
+-- one, never a stored answer. This IS the "bypass" mechanism the caching
+-- directive asked for, not a separate flag.
+-- ---------------------------------------------------------------------------
+create table if not exists exam_content_cache (
+  content_hash text primary key,
+  selected_courses jsonb not null,
+  content jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz
+);
+
+alter table exam_content_cache enable row level security;
+drop policy if exists "Deny all client access" on exam_content_cache;
+create policy "Deny all client access" on exam_content_cache for all using (false);
+
+create or replace function increment_exam_content_cache_hit_count(p_content_hash text)
+returns void
+language sql
+as $$
+  update exam_content_cache set hit_count = hit_count + 1, last_hit_at = now() where content_hash = p_content_hash;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- REVERTED (product direction): the standalone MedArt Assistant's own
+-- semantic cache (app/api/assistant/route.ts) — same removal as
+-- semantic_cache above, see that block's own comment.
+-- ---------------------------------------------------------------------------
+drop function if exists match_assistant_cache(vector(1536), bigint, float, int);
+drop function if exists increment_assistant_cache_hit_count(uuid);
+drop table if exists assistant_semantic_cache;
+
+revoke execute on function increment_exam_content_cache_hit_count(text) from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- user_exam_attempts: persists a completed "Générateur d'Examen" attempt —
+-- this feature previously had NO persistence at all past "Afficher la
+-- correction" (see app/dashboard/module/[id]/exam/page.tsx before this
+-- pass): answers, score, and identified weak points lived only in React
+-- state and vanished on refresh/navigation.
+--
+-- One row per COMPLETED attempt (not per question, unlike qcm_attempts,
+-- which upserts one row per (student, course, qcm) for the Leitner
+-- scheduler) — an exam attempt has no natural "latest state wins" semantics
+-- the way one flashcard's spaced-repetition box does; every sitting is its
+-- own record, including repeat sittings of the same generated exam.
+--
+-- `wrong_questions` is DELIBERATELY denormalized (vignette/correct-answer
+-- text/weakPointTag copied in at save time, not just an examId to join
+-- against module_generated_exams.content later) — this is exactly the data
+-- app/api/study/remediation-plan/generate/route.ts needs, and denormalizing
+-- means that route never has to re-join and re-walk the exam's full content
+-- JSON on every remediation-plan generation, and stays correct even if the
+-- source exam is later deleted independently (though exam_id also cascades
+-- here, so that's a belt-and-suspenders reason, not the main one).
+--
+-- Score/wrong_questions are computed SERVER-SIDE from the exam's own
+-- canonical content (see lib/exam-scoring.ts's scoreExamAttempt(), called
+-- from app/api/exam/attempts/route.ts) — a client-supplied score is never
+-- trusted, the same "never trust the client's own grading" principle
+-- already applied everywhere else scores are recorded in this app.
+-- ---------------------------------------------------------------------------
+create table if not exists user_exam_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  curriculum_module_id bigint not null references curriculum_modules (id) on delete cascade,
+  exam_id uuid not null references module_generated_exams (id) on delete cascade,
+  -- { [questionId]: selectedOptionLabel | null } — the student's raw
+  -- submitted answers, kept in full so a saved attempt can be redisplayed
+  -- exactly (selected vs correct per option) without recomputing anything.
+  answers jsonb not null,
+  score integer not null,
+  total_questions integer not null,
+  wrong_questions jsonb not null default '[]',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists user_exam_attempts_user_module_idx on user_exam_attempts (user_id, curriculum_module_id, created_at desc);
+create index if not exists user_exam_attempts_exam_id_idx on user_exam_attempts (exam_id);
+
+alter table user_exam_attempts enable row level security;
+
+-- Real client-facing policy (matching module_generated_exams' own
+-- convention) even though the actual routes use the service-role client —
+-- defense-in-depth, not currently exercised, same reasoning as that table's
+-- own RLS comment.
+drop policy if exists "Users manage their own exam attempts" on user_exam_attempts;
+create policy "Users manage their own exam attempts" on user_exam_attempts
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ===========================================================================
+-- Cross-University Chunk Caching — ports the "Explication Chunk-Based Delta
+-- Update" pipeline (course_source_chunks / course_explication_chapters /
+-- match_similar_source_chunks / match_chunks_against_course /
+-- runExplicationDeltaPipeline, all in lib/course-generation-shared.ts and
+-- above in this file) from the legacy `courses` pipeline to `studio_courses`
+-- — the pipeline app/dashboard/module/[id]/page.tsx actually uses, which had
+-- NONE of this. Same two-tier design, same 0.90 per-chunk / no aggregate-
+-- coverage-gate philosophy for Explication specifically (see
+-- lib/studio-explication-delta.ts's own header comment for exactly why),
+-- now additionally tagged by university so cross-institution reuse can be
+-- logged and audited, never silent.
+--
+-- SAFETY INVARIANT (read before touching any of this): reused content is
+-- NEVER exposed to a student except by being written into THEIR OWN
+-- studio_courses row via the normal generate-and-save flow in
+-- app/api/studio/generate/route.ts — there is no code path, and must never
+-- be one, where a student's UI reads another course's row directly. Cross-
+-- university matching only ever decides "do I need to pay for this chapter
+-- again", never "whose row does the student see".
+-- ===========================================================================
+
+-- profiles.university — previously lived ONLY in auth.users.user_metadata
+-- (unstructured, not queryable/joinable in plain SQL), which is exactly why
+-- no per-university logic could exist anywhere in this schema until now.
+-- Promoted to a real column so match/log queries and RLS can filter on it
+-- directly. Nullable: a student who hasn't set this yet, or whose account
+-- predates this column, simply never contributes a tagged chunk and is
+-- never matched against by university (see studio_course_chunks below —
+-- untagged chunks still work for cross-university matching, they're just
+-- unattributed in the audit log).
+alter table profiles add column if not exists university text;
+
+-- Per-module opt-out — checked by lib/studio-explication-delta.ts BEFORE
+-- attempting any cross-university match at all. Defaults to enabled (true):
+-- the whole point of this feature is savings by default, but a module can
+-- be explicitly excluded (e.g. a professor who doesn't want their own
+-- material's phrasing reused by another institution's students) by flipping
+-- this to false directly via SQL — no admin UI exists for this yet, this is
+-- the escape hatch until one does.
+alter table curriculum_modules add column if not exists cross_university_sharing_enabled boolean not null default true;
+
+-- ---------------------------------------------------------------------------
+-- studio_course_chunks: paragraph-level chunks of a studio_courses row's
+-- raw_text, embedded once (lazily, on first Explication generation attempt —
+-- see app/api/studio/generate/route.ts) — mirrors course_source_chunks
+-- above exactly, but keyed to course_id (studio_courses has no slug) and
+-- carrying university_tag so a match's PROVENANCE is known, not just its
+-- similarity score.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_course_chunks (
+  id bigint generated by default as identity primary key,
+  course_id bigint not null references studio_courses (id) on delete cascade,
+  chunk_index integer not null default 0,
+  content text not null,
+  embedding vector(1536) not null,
+  university_tag text,
+  created_at timestamptz not null default now(),
+  unique (course_id, chunk_index)
+);
+
+create index if not exists studio_course_chunks_embedding_idx
+  on studio_course_chunks using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+create index if not exists studio_course_chunks_course_id_idx on studio_course_chunks (course_id);
+
+alter table studio_course_chunks enable row level security;
+drop policy if exists "Deny all client access" on studio_course_chunks;
+create policy "Deny all client access" on studio_course_chunks for all using (false);
+
+-- Same shape/semantics as match_similar_source_chunks above (see that
+-- function's own comment for the full explanation of the lateral-join/
+-- per-chunk-best-match/coverage design) — deliberately searches EVERY OTHER
+-- course_id regardless of university (that IS the feature: cross-university
+-- matching), university_tag is surfaced downstream (via a separate lookup
+-- against the matched chunks, in lib/studio-explication-delta.ts) purely for
+-- logging/audit, never as a matching filter.
+create or replace function match_similar_studio_chunks(
+  p_course_id bigint,
+  match_threshold float
+)
+returns table (
+  candidate_course_id bigint,
+  matched_chunks bigint,
+  total_chunks bigint
+)
+language sql stable
+as $$
+  with target_chunks as (
+    select id, embedding from studio_course_chunks where course_id = p_course_id
+  ),
+  best_per_chunk as (
+    select
+      tc.id as target_chunk_id,
+      best.course_id as candidate_course_id,
+      best.similarity
+    from target_chunks tc
+    cross join lateral (
+      select scc.course_id, 1 - (scc.embedding <=> tc.embedding) as similarity
+      from studio_course_chunks scc
+      where scc.course_id <> p_course_id
+      order by scc.embedding <=> tc.embedding
+      limit 1
+    ) best
+  )
+  select
+    candidate_course_id,
+    count(*) filter (where similarity >= match_threshold) as matched_chunks,
+    (select count(*) from target_chunks) as total_chunks
+  from best_per_chunk
+  group by candidate_course_id
+  having count(*) filter (where similarity >= match_threshold) > 0
+  order by matched_chunks desc
+  limit 10;
+$$;
+
+-- Same shape/semantics as match_chunks_against_course above — detailed
+-- chunk-index-to-chunk-index matching between exactly two specific courses,
+-- used once a candidate has been chosen from match_similar_studio_chunks.
+create or replace function match_studio_chunks_against_course(
+  p_course_id bigint,
+  p_candidate_course_id bigint,
+  match_threshold float
+)
+returns table (
+  target_chunk_index integer,
+  candidate_chunk_index integer,
+  similarity float
+)
+language sql stable
+as $$
+  select
+    tc.chunk_index as target_chunk_index,
+    best.chunk_index as candidate_chunk_index,
+    best.similarity
+  from studio_course_chunks tc
+  cross join lateral (
+    select scc.chunk_index, 1 - (scc.embedding <=> tc.embedding) as similarity
+    from studio_course_chunks scc
+    where scc.course_id = p_candidate_course_id
+    order by scc.embedding <=> tc.embedding
+    limit 1
+  ) best
+  where tc.course_id = p_course_id
+    and best.similarity >= match_threshold;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- studio_course_explication_chapters: per-chapter storage of a studio_courses
+-- row's Explication, keyed to which of ITS OWN studio_course_chunks each
+-- chapter was written from — mirrors course_explication_chapters exactly.
+-- See lib/studio-explication-delta.ts's runStudioExplicationDeltaPipeline for
+-- how a FUTURE course's chunk-level match against this one decides, per
+-- chapter, whether it's still valid to reuse.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_course_explication_chapters (
+  id bigint generated by default as identity primary key,
+  course_id bigint not null references studio_courses (id) on delete cascade,
+  chapter_index integer not null,
+  heading text not null,
+  content text not null,
+  source_chunk_indices integer[] not null default '{}',
+  created_at timestamptz not null default now(),
+  unique (course_id, chapter_index)
+);
+
+create index if not exists studio_course_explication_chapters_course_id_idx
+  on studio_course_explication_chapters (course_id);
+
+alter table studio_course_explication_chapters enable row level security;
+drop policy if exists "Deny all client access" on studio_course_explication_chapters;
+create policy "Deny all client access" on studio_course_explication_chapters for all using (false);
+
+-- ---------------------------------------------------------------------------
+-- studio_cross_university_reuse_log: audit trail — every time a chapter from
+-- ONE course (any university) gets reused into ANOTHER course's Explication
+-- instead of being regenerated, a row is written here. Purely for human
+-- review (which cross-institution reuses actually happened, how similar,
+-- which chapter) — never read back by any generation code path, never
+-- load-bearing for correctness. This is the concrete, inspectable answer to
+-- "prove nothing leaked silently" beyond just trusting the 0.90 threshold.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_cross_university_reuse_log (
+  id uuid primary key default gen_random_uuid(),
+  target_course_id bigint not null references studio_courses (id) on delete cascade,
+  source_course_id bigint references studio_courses (id) on delete set null,
+  target_university text,
+  source_university text,
+  chapter_heading text not null,
+  similarity float not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists studio_cross_university_reuse_log_target_idx
+  on studio_cross_university_reuse_log (target_course_id, created_at desc);
+
+alter table studio_cross_university_reuse_log enable row level security;
+drop policy if exists "Deny all client access" on studio_cross_university_reuse_log;
+create policy "Deny all client access" on studio_cross_university_reuse_log for all using (false);
+
+revoke execute on function match_similar_studio_chunks(bigint, float) from anon, authenticated;
+revoke execute on function match_studio_chunks_against_course(bigint, bigint, float) from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- platform_daily_generation_usage: a PLATFORM-WIDE circuit breaker on real
+-- (cache-miss) OpenRouter generations — distinct from every quota above,
+-- which caps ONE student's own usage. 1,000 students each safely under their
+-- individual monthly cap can still add up to an unpredictable, unbounded
+-- total bill on any given day — this table caps the absolute daily total
+-- across ALL students combined, protecting cash flow directly, especially
+-- during a launch/cold-start burst of many new accounts at once.
+--
+-- Deliberately its own tiny table (one row per calendar date), not a column
+-- bolted onto an existing table — this counter has no natural owner (it's
+-- not "a user's" or "a course's" row) and its own row-per-day shape makes a
+-- day-over-day spend history trivially queryable later.
+--
+-- See lib/platform-spend-guard.ts for the application-side gate that calls
+-- reserve_platform_generation below, and which routes call it.
+-- ---------------------------------------------------------------------------
+create table if not exists platform_daily_generation_usage (
+  usage_date date primary key,
+  real_generation_count integer not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+alter table platform_daily_generation_usage enable row level security;
+drop policy if exists "Deny all client access" on platform_daily_generation_usage;
+create policy "Deny all client access" on platform_daily_generation_usage for all using (false);
+
+-- Same atomic reserve-in-one-statement pattern as every reserve_*_used
+-- function above (see that block's own header comment on the TOCTOU race
+-- this avoids) — INSERT ... ON CONFLICT DO UPDATE ... WHERE: the WHERE
+-- guards the update itself, so a day already at its cap silently does NOT
+-- increment and RETURNING yields no row, exactly like the per-user
+-- reserve_* functions returning NULL when a user's own cap is hit.
+create or replace function reserve_platform_generation(p_date date, p_cap integer)
+returns integer
+language sql
+as $$
+  insert into platform_daily_generation_usage (usage_date, real_generation_count, updated_at)
+  values (p_date, 1, now())
+  on conflict (usage_date) do update
+    set real_generation_count = platform_daily_generation_usage.real_generation_count + 1, updated_at = now()
+    where platform_daily_generation_usage.real_generation_count < p_cap
+  returning real_generation_count;
+$$;
+
+revoke execute on function reserve_platform_generation(date, integer) from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- dashboard_assistant_daily_usage: SEPARATE daily ceiling for the free-tier
+-- Dashboard Assistant (app/api/dashboard-assistant/route.ts, ":free"-suffixed
+-- OpenRouter models) — distinct from platform_daily_generation_usage above,
+-- which caps PAID generations. This one exists because OpenRouter's free
+-- models carry their own hard, EXTERNAL, account-wide daily request cap
+-- (verified live: 1000/day once ≥10 lifetime credits purchased, 50/day
+-- otherwise) that has nothing to do with dollars spent — mixing it into the
+-- paid-generation counter would incorrectly let free-tier chat traffic
+-- consume budget meant for real money, and vice versa. See
+-- lib/platform-spend-guard.ts's reserveDashboardAssistantCapacity.
+-- ---------------------------------------------------------------------------
+create table if not exists dashboard_assistant_daily_usage (
+  usage_date date primary key,
+  request_count integer not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+alter table dashboard_assistant_daily_usage enable row level security;
+drop policy if exists "Deny all client access" on dashboard_assistant_daily_usage;
+create policy "Deny all client access" on dashboard_assistant_daily_usage for all using (false);
+
+create or replace function reserve_dashboard_assistant_request(p_date date, p_cap integer)
+returns integer
+language sql
+as $$
+  insert into dashboard_assistant_daily_usage (usage_date, request_count, updated_at)
+  values (p_date, 1, now())
+  on conflict (usage_date) do update
+    set request_count = dashboard_assistant_daily_usage.request_count + 1, updated_at = now()
+    where dashboard_assistant_daily_usage.request_count < p_cap
+  returning request_count;
+$$;
+
+revoke execute on function reserve_dashboard_assistant_request(date, integer) from anon, authenticated;

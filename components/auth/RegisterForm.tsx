@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { MailCheck } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -13,6 +14,8 @@ import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
 import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
 import type { AcademicYear, Specialty } from "@/types/academic";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tAuth } from "@/lib/translations/auth";
 
 const FACULTY_OPTIONS = ALGERIAN_FACULTIES.map((name) => ({ value: name, label: name }));
 
@@ -58,6 +61,7 @@ const INITIAL_STATE: FormState = {
 export function RegisterForm() {
   const router = useRouter();
   const { toast } = useToast();
+  const { language } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
   const [error, setError] = useState<string | null>(null);
@@ -182,22 +186,32 @@ export function RegisterForm() {
 
   if (awaitingConfirmation) {
     return (
-      <div className="rounded-2xl border border-border bg-card p-6 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+        className="rounded-2xl border border-border bg-card p-6 text-center sm:p-8"
+      >
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ delay: 0.15, duration: 0.35, ease: "easeOut" }}
+          className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
+        >
           <MailCheck className="h-6 w-6" />
-        </div>
-        <h2 className="text-lg font-semibold text-foreground">Vérifie ta boîte mail</h2>
+        </motion.div>
+        <h2 className="text-lg font-semibold text-foreground">{tAuth("verifyEmailTitle", language)}</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          On a envoyé un lien de confirmation à <strong>{form.email}</strong>. Clique dessus pour
-          activer ton compte, puis connecte-toi.
+          On a envoyé un lien de confirmation à <strong className="text-foreground">{form.email}</strong>. Clique
+          dessus pour activer ton compte, puis connecte-toi.
         </p>
         <Link
           href="/login"
-          className="mt-6 inline-block text-sm font-medium text-primary hover:underline"
+          className="mt-6 inline-block text-sm font-medium text-primary transition-colors hover:text-primary/80 hover:underline"
         >
           Retour à la connexion
         </Link>
-      </div>
+      </motion.div>
     );
   }
 
@@ -216,15 +230,15 @@ export function RegisterForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {error && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="animate-in fade-in-0 slide-in-from-top-1 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive duration-200">
           {error}
         </div>
       )}
 
       <Input
-        label="Nom complet"
+        label={tAuth("fullNameLabel", language)}
         name="fullName"
-        placeholder="Ex : Amine Belkacem"
+        placeholder={tAuth("fullNamePlaceholder", language)}
         required
         value={form.fullName}
         onChange={(e) => update("fullName", e.target.value)}
@@ -241,7 +255,7 @@ export function RegisterForm() {
       />
 
       <Input
-        label="Mot de passe"
+        label={tAuth("passwordLabel", language)}
         name="password"
         type="password"
         placeholder="8 caractères minimum"
@@ -254,7 +268,7 @@ export function RegisterForm() {
       <Select
         label="Faculté (Algérie)"
         name="university"
-        placeholder="Choisis ta faculté"
+        placeholder={tAuth("facultyPlaceholder", language)}
         options={FACULTY_OPTIONS}
         required
         value={form.university}
@@ -263,7 +277,7 @@ export function RegisterForm() {
 
       <div className="grid grid-cols-2 gap-4">
         <Select
-          label="Spécialité"
+          label={tAuth("specialtyLabel", language)}
           name="specialty"
           placeholder="Choisis"
           options={specialtyOptions}
@@ -273,9 +287,9 @@ export function RegisterForm() {
         />
 
         <Select
-          label="Année"
+          label={tAuth("yearLabel", language)}
           name="academicYear"
-          placeholder={specialtyId == null ? "Choisis d'abord" : yearsLoading ? "Chargement..." : "Choisis"}
+          placeholder="Choisis"
           options={yearOptions}
           required
           disabled={specialtyId == null || yearsLoading}

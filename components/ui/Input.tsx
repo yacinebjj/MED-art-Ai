@@ -19,15 +19,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            "w-full rounded-xl border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground shadow-soft transition-colors",
+            "w-full rounded-xl border bg-card px-3.5 py-2.5 text-base text-foreground placeholder:text-muted-foreground shadow-soft transition-all duration-300 sm:text-sm",
+            "hover:border-primary/40",
             "focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary",
-            error ? "border-destructive" : "border-input",
+            "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-input disabled:bg-muted/40",
+            error ? "border-destructive hover:border-destructive focus:border-destructive" : "border-input",
             className
           )}
           {...props}
         />
         {error ? (
-          <p className="mt-1.5 text-xs text-destructive">{error}</p>
+          <p className="mt-1.5 animate-in fade-in-0 slide-in-from-top-1 text-xs text-destructive duration-200">{error}</p>
         ) : hint ? (
           <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>
         ) : null}

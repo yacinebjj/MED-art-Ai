@@ -71,13 +71,13 @@ export function SourcesPanel({
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sources</h2>
+      <div className="flex items-center justify-between border-b border-border p-4">
+        <h2 className="text-sm font-semibold text-foreground">Sources</h2>
         <button
           type="button"
           onClick={onClosePanel}
           aria-label="Fermer le panneau"
-          className="rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100"
+          className="rounded-xl p-2 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
         >
           <PanelLeftClose className="h-4 w-4" />
         </button>
@@ -89,11 +89,13 @@ export function SourcesPanel({
           Add sources
         </Button>
 
-        <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
-          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
+        <div className="group flex items-start gap-3 rounded-2xl border border-border bg-card p-3 shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <FileText className="h-4 w-4" />
+          </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{sourceFileName}</p>
-            <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+            <p className="truncate text-sm font-medium text-foreground">{sourceFileName}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
               {dateLabel} · {sourceSize}
             </p>
           </div>
@@ -101,18 +103,18 @@ export function SourcesPanel({
 
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
               aria-label="Options de la source"
             >
               <MoreVertical className="h-3.5 w-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={onToggleSplitScreen}>
-                <Columns2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <Columns2 className="h-4 w-4 text-primary-600 dark:text-primary-400" />
                 {isSplitScreen ? "Fermer l'écran partagé" : "Afficher le cours"}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
-                <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <TrendingUp className="h-4 w-4 text-primary-600 dark:text-primary-400" />
                 Statistiques
               </DropdownMenuItem>
               <DropdownMenuSeparator />

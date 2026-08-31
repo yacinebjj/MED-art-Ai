@@ -12,6 +12,7 @@ import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider"; // 👈 استيراد اللغة
+import { tDashboard } from "@/lib/translations/dashboard";
 import type { ModuleSummary, PublicCourseSummary } from "@/lib/dashboard-modules";
 import {
   MOCK_READING_PROGRESS_BY_COURSE_SLUG,
@@ -129,7 +130,7 @@ export default function DashboardPage() {
     fetch(`/api/curriculum?specialty=${encodeURIComponent(curriculumSpecialtyName)}&level=${curriculumLevel}`)
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body?.error ?? "Impossible de charger le programme.");
+        if (!res.ok) throw new Error(body?.error ?? tDashboard("curriculumLoadError", language));
         return body as CurriculumYearData;
       })
       .then((body) => {
@@ -137,7 +138,7 @@ export default function DashboardPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setCurriculumError(err instanceof Error ? err.message : "Impossible de charger le programme.");
+          setCurriculumError(err instanceof Error ? err.message : tDashboard("curriculumLoadError", language));
           setCurriculumData(null);
         }
       })
@@ -148,6 +149,9 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
+    // `language` is intentionally omitted: it only picks the fallback error
+    // string's locale and must not trigger a curriculum refetch on toggle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curriculumSpecialtyName, curriculumLevel]);
 
   const examReadinessByCourseSlug = useMemo(() => {
@@ -194,18 +198,18 @@ export default function DashboardPage() {
     setModules((prev) => (prev.some((m) => m.id === newModule.id) ? prev : [...prev, newModule]));
   }, []);
 
-  const firstName = profile?.fullName?.split(" ")[0] || (language === "fr" ? "Étudiant(e)" : "Student");
+  const firstName = profile?.fullName?.split(" ")[0] || tDashboard("fallbackStudentName", language);
 
   return (
     <div className="mx-auto max-w-7xl">
-      <div className="mb-4 flex items-start justify-between">
-        <div>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <DashboardHero firstName={firstName} academicYearName={curriculumProfile?.academicYear?.name ?? null} />
-          <p className="mt-2 text-sm text-muted-foreground italic">
+          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground italic sm:line-clamp-none">
             « {MOTIVATIONAL_QUOTES[language][quoteIndex]} »
           </p>
         </div>
-        <div className="mt-1">
+        <div className="mt-1 shrink-0">
           <LanguageToggle />
         </div>
       </div>
@@ -214,40 +218,38 @@ export default function DashboardPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
-        className="mb-3 grid grid-cols-2 gap-2 sm:mb-6 sm:gap-4 lg:mb-8 lg:grid-cols-5"
+        className="mb-3 grid grid-cols-2 gap-2 sm:mb-6 sm:gap-4 md:grid-cols-4 lg:mb-8 xl:grid-cols-5"
       >
         <button
           onClick={() => setModalOpen(true)}
-          className="glass-card group col-span-2 flex items-center gap-3 rounded-2xl p-3 text-left shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-emerald-500/20 dark:shadow-glass-dark sm:gap-5 sm:rounded-3xl sm:p-6 lg:col-span-3"
+          className="glass-card group col-span-2 flex items-center gap-3 rounded-2xl p-3 text-left shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-emerald-500/20 dark:shadow-glass-dark sm:gap-5 sm:rounded-3xl sm:p-6 xl:col-span-3"
         >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-14 sm:w-14 sm:rounded-2xl">
             <UploadCloud className="h-5 w-5 sm:h-7 sm:w-7" />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-foreground sm:text-lg">
-              {language === "fr" ? "Ajouter un cours indépendant" : "Add an independent course"}
+              {tDashboard("addCourseHeading", language)}
             </p>
             <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block sm:text-sm">
-              {language === "fr" 
-                ? "Importe un PDF ou un document sans l'associer à un module." 
-                : "Import a PDF or document without linking it to a module."}
+              {tDashboard("addCourseHelper", language)}
             </p>
           </div>
           <span className="hidden shrink-0 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-all duration-300 active:scale-95 sm:flex">
             <Plus className="h-4 w-4" />
-            {language === "fr" ? "Importer" : "Import"}
+            {tDashboard("importButton", language)}
           </span>
         </button>
 
         <Link
           href="/dashboard/assistant"
-          className="glass-card group flex flex-col items-center justify-center gap-1.5 rounded-2xl p-3 text-center shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-violet-500/20 dark:shadow-glass-dark sm:flex-row sm:justify-start sm:gap-3 sm:rounded-3xl sm:p-6 lg:col-span-1"
+          className="glass-card group flex flex-col items-center justify-center gap-1.5 rounded-2xl p-3 text-center shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-violet-500/20 dark:shadow-glass-dark sm:rounded-3xl sm:p-6 xl:flex-row xl:justify-start xl:gap-3"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-[0_0_16px_rgba(168,85,247,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-11 sm:w-11">
             <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
           </span>
           <span className="text-xs font-bold text-foreground sm:text-sm">
-            {language === "fr" ? "Assistant" : "AI Assistant"}
+            {tDashboard("assistantLabel", language)}
           </span>
         </Link>
 
@@ -259,8 +261,8 @@ export default function DashboardPage() {
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={language === "fr" ? "Rechercher..." : "Search..."}
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            placeholder={tDashboard("searchPlaceholder", language)}
+            className="min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
           />
           <button
             type="submit"
@@ -279,7 +281,7 @@ export default function DashboardPage() {
         className="mb-4 sm:mb-8 lg:mb-10"
       >
         <h2 className="mb-2 text-base font-bold tracking-tight text-foreground sm:mb-4 sm:text-xl">
-          {language === "fr" ? "Mon Programme" : "My Curriculum"} 
+          {tDashboard("myCurriculumHeading", language)}
           {curriculumProfile?.academicYear ? ` — ${curriculumProfile.academicYear.name}` : ""}
         </h2>
 
@@ -288,16 +290,14 @@ export default function DashboardPage() {
         ) : !curriculumProfile?.academicYear ? (
           <div className="glass-card flex flex-col items-start gap-3 rounded-3xl border-dashed p-3 text-sm text-muted-foreground sm:p-6">
             <p>
-              {language === "fr" 
-                ? "Choisis ta spécialité et ton année dans les Paramètres pour afficher tes unités d'enseignement." 
-                : "Choose your specialty and year in Settings to display your teaching units."}
+              {tDashboard("chooseSpecialtyHelper", language)}
             </p>
             <Link
               href="/dashboard/settings"
               className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-300 active:scale-95"
             >
               <Settings className="h-3.5 w-3.5" />
-              {language === "fr" ? "Aller aux Paramètres" : "Go to Settings"}
+              {tDashboard("goToSettings", language)}
             </Link>
           </div>
         ) : curriculumError ? (
@@ -317,13 +317,13 @@ export default function DashboardPage() {
         transition={{ duration: 0.4, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
       >
         <h2 className="mb-2 text-base font-bold tracking-tight text-foreground sm:mb-6 sm:text-xl">
-          {language === "fr" ? "Mes cours indépendants (Historique)" : "My independent courses (History)"}
+          {tDashboard("independentCoursesHeading", language)}
         </h2>
 
         {loading ? (
-          <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-4 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="glass-card h-32 animate-pulse rounded-2xl sm:h-40 sm:rounded-3xl" />
+              <div key={i} className="glass-card h-36 animate-pulse rounded-2xl sm:h-40 sm:rounded-3xl lg:h-44" />
             ))}
           </div>
         ) : courses.length === 0 ? (
@@ -332,17 +332,15 @@ export default function DashboardPage() {
               <FileText className="h-8 w-8 text-muted-foreground/50" />
             </motion.div>
             <p className="text-sm font-medium text-foreground">
-              {language === "fr" ? "Vous n'avez pas encore de cours indépendants." : "You don't have any independent courses yet."}
+              {tDashboard("noIndependentCourses", language)}
             </p>
             <p className="max-w-sm text-xs text-muted-foreground">
-              {language === "fr" 
-                ? "Cliquez sur « Ajouter un cours indépendant » ci-dessus pour importer votre premier cours." 
-                : 'Click on "Add an independent course" above to import your first course.'}
+              {tDashboard("noIndependentCoursesHelper", language)}
             </p>
           </div>
         ) : (
           <motion.div
-            className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4"
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-4 xl:grid-cols-4"
             variants={CARD_GRID_VARIANTS}
             initial="hidden"
             animate="show"

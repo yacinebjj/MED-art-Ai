@@ -9,9 +9,15 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
-export const maxDuration = 60; // text extraction + an embedding call — no explicit cap before, so it silently rode Vercel's platform default.
+// Bumped from 60s alongside MAX_FILE_BYTES below — a 100 Mo image-heavy PDF
+// (radiology scans, etc.) takes meaningfully longer to parse than the 20 Mo
+// files this used to be tuned for. Note this is still subject to whatever
+// hard ceiling the hosting platform enforces regardless of what's declared
+// here (e.g. Vercel's Hobby tier caps Route Handlers at 60s no matter what) —
+// raise the plan/tier too if large uploads still time out in production.
+export const maxDuration = 300;
 
-const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 Mo
+const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo — same cap as /api/upload (see that file's own comment for why both exist).
 
 /**
  * Lazy-loading architecture: this route ONLY extracts the PDF's text and
@@ -169,9 +175,19 @@ export async function POST(request: NextRequest) {
 
     // Every content column starts empty (not yet generated) — each Studio
     // tab fills its own column in on first click, via the section route.
+    //
+    // user_id: stamps who uploaded this "cours indépendant" — was MISSING
+    // entirely until this fix, and GET /api/courses/list had no filter at
+    // all, so every student's "Mes cours indépendants" showed literally
+    // every course ever uploaded by EVERY student, platform-wide. Nullable:
+    // an admin/seed-loaded showcase course (Pleurésie, Gastrite) has no
+    // uploader and keeps user_id null — those are never returned by
+    // /api/courses/list either way, that endpoint now requires auth and
+    // filters strictly to the caller's own uploads.
     const courseRow: Record<string, unknown> = {
       slug,
       title,
+      user_id: user.id,
       raw_text: sourceText,
       content_embedding: contentEmbedding,
       explication: null,
@@ -189,22 +205,31 @@ export async function POST(request: NextRequest) {
       const supabase = getSupabaseAdmin();
       let { error: insertError } = await supabase.from("courses").insert(courseRow);
 
-      // Missing-column errors happen if the `content_embedding` migration
-      // (supabase/schema.sql) hasn't been run yet — PostgREST rejects the
-      // payload itself with "PGRST204" (schema cache has no such column)
-      // before the query ever reaches Postgres, so the raw Postgres code
-      // "42703" never actually surfaces here; checked for anyway in case a
-      // future Supabase version routes this differently. Retry once without
-      // the column rather than failing the whole upload: course creation
-      // must never depend on a migration timing detail. The course still
-      // gets created normally; it just won't participate in Smart Clone
-      // deduplication until the column exists.
-      if ((insertError?.code === "PGRST204" || insertError?.code === "42703") && "content_embedding" in courseRow) {
-        console.warn(
-          "[generate-course] Colonne 'content_embedding' absente (migration non exécutée) — nouvel essai sans elle."
-        );
-        const { content_embedding: _omittedEmbedding, ...courseRowWithoutEmbedding } = courseRow;
-        ({ error: insertError } = await supabase.from("courses").insert(courseRowWithoutEmbedding));
+      // Missing-column errors happen if a migration (supabase/schema.sql)
+      // hasn't been run yet on this Supabase project — PostgREST rejects
+      // the payload itself with "PGRST204" (schema cache has no such
+      // column) before the query ever reaches Postgres, so the raw Postgres
+      // code "42703" never actually surfaces here; checked for anyway in
+      // case a future Supabase version routes this differently. Generic
+      // (not hardcoded to one column) so it covers content_embedding,
+      // user_id, or any future addition independently: PostgREST's error
+      // message names the exact missing column ("Could not find the 'X'
+      // column..."), so this drops THAT column and retries rather than
+      // failing the whole upload. Course creation must never depend on a
+      // migration timing detail — the course still gets created, it just
+      // won't participate in Smart Clone dedup (missing content_embedding)
+      // or per-student isolation (missing user_id) until the column exists.
+      // Bounded to 3 attempts (covers both of today's new-ish columns plus
+      // the final real attempt) so a persistently different failure still
+      // surfaces instead of retrying forever.
+      let remainingCourseRow = { ...courseRow };
+      for (let attempt = 0; attempt < 3 && (insertError?.code === "PGRST204" || insertError?.code === "42703"); attempt++) {
+        const missingColumn = insertError.message.match(/'([a-z_]+)' column/)?.[1];
+        if (!missingColumn || !(missingColumn in remainingCourseRow)) break;
+        console.warn(`[generate-course] Colonne '${missingColumn}' absente (migration non exécutée) — nouvel essai sans elle.`);
+        const { [missingColumn]: _omitted, ...rest } = remainingCourseRow;
+        remainingCourseRow = rest;
+        ({ error: insertError } = await supabase.from("courses").insert(remainingCourseRow));
       }
 
       if (insertError) {

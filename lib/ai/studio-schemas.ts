@@ -7,11 +7,15 @@ import type { DemoSectionId } from "@/lib/demo-content";
  * GastriteCasCliniqueStudio, GastriteQcmsStudio) require as props.
  * Validation is strict on TYPES/SHAPE (every required field present, right
  * primitive type, right nesting) and, for cas_clinique/qcm specifically, now
- * also strict on the client's mandated MINIMUM COUNTS (5 cases, 30 QCM, 5
- * QROC) — those are non-negotiable per the current spec, not soft guidance,
- * so an under-count generation is rejected rather than silently accepted.
- * Résumé's mode count stays lenient (no hard minimum was mandated for it),
- * since GastriteResumeStudio already degrades gracefully on a missing mode.
+ * also strict on the client's mandated MINIMUM COUNTS (3 cases, 15 QCM) —
+ * those are non-negotiable per the current spec, not soft guidance, so an
+ * under-count generation is rejected rather than silently accepted. QROC was
+ * dropped entirely from the Studio spec for cost reasons — `qrocs` stays a
+ * required (but unbounded) array purely so InteractiveQuiz, SHARED with the
+ * real per-course production pipeline, keeps receiving the exact prop shape
+ * it always has; Studio's own prompt now always sends it empty. Résumé's
+ * mode count stays lenient (no hard minimum was mandated for it), since
+ * GastriteResumeStudio already degrades gracefully on a missing mode.
  */
 
 const strArr = z.array(z.string());
@@ -103,12 +107,20 @@ const ParaclinicalItemSchema = z.object({ label: z.string(), result: z.string(),
 const DdxItemSchema = z.object({ maladie: z.string(), raisonnement: z.string(), pourquoi: z.string() });
 const RxItemSchema = z.object({ ligne: z.string(), pourquoi: z.string() });
 
-const GastriteRawCaseSchema = z.object({
+export const GastriteRawCaseSchema = z.object({
   id: z.string(),
   numero: z.number(),
   archetype: z.string(),
-  icon: z.string(),
-  color: z.string(),
+  // Purely cosmetic (never medical content) and both already have a
+  // graceful runtime fallback downstream for an unrecognized value —
+  // resolveLucideIcon (lib/lucide-icon-lookup.ts) falls back to Stethoscope,
+  // resolveCaseColor (GastriteCasCliniqueStudio.tsx) falls back to "indigo".
+  // Defaulted here too so a MISSING key (as opposed to an unrecognized
+  // value, already handled) doesn't fail the whole case over a detail with
+  // zero clinical weight — unlike every other field below, which stays
+  // strictly required since it IS real medical content.
+  icon: z.string().optional().default(""),
+  color: z.string().optional().default("indigo"),
   titre: z.string(),
   scene: z.string(),
   vitals: z.array(VitalItemSchema),
@@ -119,10 +131,10 @@ const GastriteRawCaseSchema = z.object({
   acte5_prise_en_charge: z.object({ items: z.array(RxItemSchema), surveillance: z.string() }),
 });
 
-/** Client mandate: minimum absolu de 5 cas cliniques distincts — see STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT's override in lib/ai/studio-prompts.ts. */
+/** Client mandate: exactement 3 cas cliniques, les plus importants/fréquents — see STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT's override in lib/ai/studio-prompts.ts. min(3) is a floor (guards against a genuine under-generation), the prompt itself controls the exact target. */
 export const StudioCasCliniqueSchema = z.object({
   titre_section: z.string(),
-  cases: z.array(GastriteRawCaseSchema).min(5),
+  cases: z.array(GastriteRawCaseSchema).min(3),
 });
 
 const QcmOptionSchema = z.object({ label: z.string(), text: z.string() });
@@ -143,11 +155,17 @@ const QcmItemSchema = z.object({
 });
 const QrocItemSchema = z.object({ id: z.number(), question: z.string(), reponseOfficielle: z.string() });
 
-/** Client mandate: minimum absolu de 30 QCM et 5 QROC — see STUDIO_QCMS_SYSTEM_PROMPT's override in lib/ai/studio-prompts.ts. */
+/**
+ * Client mandate: exactement 15 QCM, aucun QROC — see STUDIO_QCMS_SYSTEM_PROMPT's
+ * override in lib/ai/studio-prompts.ts. `qrocs` keeps no minimum (always sent
+ * empty by the Studio prompt now) rather than being removed outright, since
+ * InteractiveQuiz (components/course/workspace/InteractiveQuiz.tsx) is SHARED
+ * with the real per-course production pipeline and still expects the key.
+ */
 export const StudioQcmsSchema = z.object({
   titre_section: z.string(),
-  qcms: z.array(QcmItemSchema).min(30),
-  qrocs: z.array(QrocItemSchema).min(5),
+  qcms: z.array(QcmItemSchema).min(15),
+  qrocs: z.array(QrocItemSchema),
 });
 
 const StudioTextSchema = z.string().min(50);

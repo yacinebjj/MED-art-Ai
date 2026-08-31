@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { BookOpenText, Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Target, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tDiscovery } from "@/lib/translations/discovery";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
 import { useToast } from "@/components/ui/Toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
@@ -116,6 +118,7 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
 }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { language } = useLanguage();
   const illustration = getCartoonIllustration(mod.title);
   const [statsOpen, setStatsOpen] = useState(false);
   const [globalSummaryOpen, setGlobalSummaryOpen] = useState(false);
@@ -132,10 +135,10 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
       const res = await fetch(`/api/studio/courses?moduleId=${mod.id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "Erreur inconnue.");
-      toast({ variant: "success", title: "Sources supprimées", description: `Toutes les sources de « ${mod.title} » ont été supprimées.` });
+      toast({ variant: "success", title: tDiscovery("sourcesDeleted", language), description: `Toutes les sources de « ${mod.title} » ont été supprimées.` });
       setDeleteOpen(false);
     } catch (error) {
-      toast({ variant: "error", title: "Échec de la suppression", description: error instanceof Error ? error.message : "Erreur inconnue." });
+      toast({ variant: "error", title: tDiscovery("deleteSourcesFailed", language), description: error instanceof Error ? error.message : "Erreur inconnue." });
     } finally {
       setIsDeleting(false);
     }
@@ -193,7 +196,7 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onToggleWeaknesses(mod.id, !isWeaknessesActive)}>
               <Target className="h-4 w-4 text-rose-600 dark:text-rose-400" />
-              {isWeaknessesActive ? "Désactiver les points faibles" : "Activer les points faibles"}
+              {isWeaknessesActive ? tDiscovery("disableWeaknesses", language) : tDiscovery("enableWeaknesses", language)}
             </DropdownMenuItem>
             <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
@@ -347,6 +350,7 @@ export function CurriculumViewSkeleton() {
  */
 export const CurriculumView = memo(function CurriculumView({ data }: { data: CurriculumYearData }) {
   const { toast } = useToast();
+  const { language } = useLanguage();
   const [expandedUnitId, setExpandedUnitId] = useState<number | null>(null);
   // A Set, not a single id: several modules/courses can be active for
   // flashcards at once (see app/api/modules/[id]/flashcards/route.ts's
@@ -411,7 +415,7 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
       });
       toast({
         variant: "error",
-        title: "Échec de la mise à jour",
+        title: tDiscovery("updateFailed", language),
         description: error instanceof Error ? error.message : "Impossible de contacter le serveur.",
       });
     }
@@ -443,7 +447,7 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
       });
       toast({
         variant: "error",
-        title: "Échec de la mise à jour",
+        title: tDiscovery("updateFailed", language),
         description: error instanceof Error ? error.message : "Impossible de contacter le serveur.",
       });
     }
@@ -473,7 +477,7 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
       {data.independentModules.length > 0 && (
         <div>
           <h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            {hasTeachingUnits ? "Modules Indépendants" : "Modules"}
+            {hasTeachingUnits ? tDiscovery("independentModulesHeading", language) : tDiscovery("modulesHeading", language)}
           </h2>
           <motion.div className={BENTO_GRID_CLASSES} variants={BENTO_GRID_VARIANTS} initial="hidden" animate="show">
             {data.independentModules.map((mod) => (
@@ -497,10 +501,12 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
           with nothing in it, right under the "Mon Programme" heading — this
           gives that dead end an actual message instead. */}
       {!hasTeachingUnits && data.independentModules.length === 0 && (
-        <div className="flex flex-col items-center gap-3 rounded-3xl border border-dashed border-slate-300 bg-slate-50/60 py-16 text-center dark:border-slate-700 dark:bg-slate-900/40">
-          <FolderOpen className="h-10 w-10 text-slate-400 dark:text-slate-600" />
-          <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Aucun module disponible pour le moment.</p>
-          <p className="max-w-sm text-xs text-slate-500 dark:text-slate-500">
+        <div className="glass-card shadow-glass dark:shadow-glass-dark flex flex-col items-center gap-3 rounded-3xl border-dashed px-4 py-10 text-center sm:px-8 sm:py-16">
+          <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+            <FolderOpen className="h-10 w-10 text-muted-foreground/50" />
+          </motion.div>
+          <p className="text-sm font-semibold text-foreground">Aucun module disponible pour le moment.</p>
+          <p className="max-w-sm text-xs text-muted-foreground">
             Le programme officiel de ta spécialité/année n&apos;est pas encore disponible ici — tu peux en attendant
             ajouter un cours indépendant depuis le bouton ci-dessus.
           </p>

@@ -104,6 +104,16 @@ const config: Config = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      fontSize: {
+        // Opt-in long-form reading size for dense medical prose (course
+        // content, Studio explanations) — a hair larger than `text-base`
+        // with a more generous line-height/tracking than Tailwind's default
+        // text-* scale, tuned for extended reading sessions rather than UI
+        // chrome. Purely additive: doesn't touch text-sm/base/lg/etc., so
+        // nothing existing changes appearance until a page opts in with
+        // `text-reading`.
+        reading: ["1.0625rem", { lineHeight: "1.75", letterSpacing: "0.005em" }],
+      },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
       },

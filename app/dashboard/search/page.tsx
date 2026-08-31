@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Search, Loader2, FileText, BookOpen } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowLeft, Search, Loader2, FileText, BookOpen, Sparkles, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tDiscovery } from "@/lib/translations/discovery";
 
 /**
  * Full-page results view for the semantic search (see app/api/search/route.ts).
@@ -22,7 +25,11 @@ interface SearchResult {
   similarity: number;
 }
 
+const RESULTS_GROUP_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
+const RESULT_ITEM_VARIANTS = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
+
 export default function SearchPage() {
+  const { language } = useLanguage();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [results, setResults] = useState<SearchResult[] | null>(null);
@@ -59,106 +66,173 @@ export default function SearchPage() {
   }, []);
 
   const grouped = results?.reduce<Record<string, SearchResult[]>>((acc, r) => {
-    const key = r.moduleName ?? "Sans module";
+    const key = r.moduleName ?? tDiscovery("noModuleGroup", language);
     (acc[key] ??= []).push(r);
     return acc;
   }, {});
 
+  // Never searched yet (fresh page load, no ?q=) — show a friendly guide
+  // instead of a blank canvas under the search bar.
+  const showGuide = !error && !loading && results === null;
+
   return (
-    <div className="min-h-screen bg-white dark:bg-neutral-950">
-      <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="aurora-canvas-bg relative min-h-screen">
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+
+      <div className="relative mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
         <Link
           href="/dashboard"
-          className="mb-8 inline-flex items-center gap-2 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+          className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-gray-600 transition-all duration-300 hover:-translate-x-0.5 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 sm:mb-8"
         >
           <ArrowLeft className="h-4 w-4" />
           Retour au Dashboard
         </Link>
 
-        <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-gray-100">
-          Recherche dans mes cours
-        </h1>
-        <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">
-          Recherche sémantique — trouve un concept même s'il n'est pas formulé avec les mêmes mots dans le cours.
-        </p>
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-gray-100 sm:text-3xl">
+            Recherche dans mes cours
+          </h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">
+            Recherche sémantique — trouve un concept même s'il n'est pas formulé avec les mêmes mots dans le cours.
+          </p>
+        </motion.div>
 
-        <form
+        <motion.form
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
           onSubmit={(e) => {
             e.preventDefault();
             runSearch(query);
           }}
-          className="relative mt-8"
+          className="relative mt-6 sm:mt-8"
         >
-          <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-blue-600/40 via-cyan-500/30 to-blue-600/40 blur-md" />
-          <div className="relative flex items-center gap-3 rounded-2xl border border-blue-500/40 bg-slate-900/80 p-2 pl-5 shadow-[0_0_25px_rgba(37,99,235,0.2)] backdrop-blur-2xl transition-all duration-300 focus-within:border-blue-400/70 focus-within:shadow-[0_0_35px_rgba(37,99,235,0.35)]">
-            <Search className="h-5 w-5 shrink-0 text-blue-300" />
+          <div aria-hidden className="pointer-events-none absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-primary-500/40 via-violet-500/30 to-primary-500/40 blur-md" />
+          <div className="glass-panel relative flex w-full max-w-full items-center gap-2 overflow-hidden rounded-2xl p-2 pl-4 shadow-glass transition-all duration-300 focus-within:-translate-y-0.5 dark:shadow-glass-dark sm:gap-3 sm:pl-5">
+            <Search className="h-5 w-5 shrink-0 text-primary-500 dark:text-primary-300" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ex : structure mitochondriale, signes de l'appendicite..."
-              className="flex-1 bg-transparent py-3 text-sm text-white outline-none placeholder:text-slate-500"
+              placeholder={tDiscovery("searchPlaceholder", language)}
+              className="min-w-0 flex-1 bg-transparent py-3 text-base text-slate-900 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-slate-500 sm:text-sm"
             />
             <button
               type="submit"
               disabled={loading || !query.trim()}
-              className="flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 px-5 py-3 text-sm font-bold text-white shadow-[0_0_20px_rgba(59,130,246,0.5)] transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={tDiscovery("searchAriaLabel", language)}
+              className="flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-br from-primary-500 to-violet-500 px-4 py-3 text-sm font-bold text-white shadow-glow transition-all duration-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Rechercher"}
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Search className="h-4 w-4 sm:hidden" />
+                  <span className="hidden sm:inline">{tDiscovery("searchButton", language)}</span>
+                </>
+              )}
             </button>
           </div>
-        </form>
+        </motion.form>
 
-        <div className="mt-10">
-          {error && (
-            <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
-              {error}
-            </p>
-          )}
+        <div className="mt-8 sm:mt-10">
+          <AnimatePresence mode="wait">
+            {error && (
+              <motion.div
+                key="error"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="glass-card flex items-start gap-2.5 rounded-2xl border border-rose-200/60 p-4 text-sm text-rose-700 shadow-glass dark:border-rose-900/40 dark:text-rose-300 dark:shadow-glass-dark"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </motion.div>
+            )}
 
-          {!error && results !== null && results.length === 0 && (
-            <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-gray-400">
-              Aucun résultat pour « {query} ». Essaie une autre formulation, ou vérifie que tu as bien des cours avec du contenu généré.
-            </p>
-          )}
+            {loading && (
+              <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="glass-card h-20 animate-pulse rounded-2xl shadow-glass dark:shadow-glass-dark" />
+                ))}
+              </motion.div>
+            )}
 
-          {grouped && Object.keys(grouped).length > 0 && (
-            <div className="space-y-8">
-              {Object.entries(grouped).map(([moduleName, moduleResults]) => (
-                <div key={moduleName}>
-                  <div className="mb-3 flex items-center gap-2">
-                    <BookOpen className="h-4 w-4 text-blue-500" />
-                    <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
-                      {moduleName}
-                    </h2>
+            {!loading && !error && results !== null && results.length === 0 && (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="glass-card flex flex-col items-center gap-3 rounded-2xl border-dashed p-8 text-center shadow-glass dark:shadow-glass-dark sm:p-10"
+              >
+                <Search className="h-7 w-7 text-slate-300 dark:text-neutral-700" />
+                <p className="max-w-sm text-sm text-slate-500 dark:text-gray-400">
+                  Aucun résultat pour « {query} ». Essaie une autre formulation, ou vérifie que tu as bien des cours avec du contenu généré.
+                </p>
+              </motion.div>
+            )}
+
+            {showGuide && (
+              <motion.div
+                key="guide"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="glass-card flex flex-col items-center gap-3 rounded-2xl border-dashed p-8 text-center shadow-glass dark:shadow-glass-dark sm:p-10"
+              >
+                <span className="flex h-12 w-12 animate-float items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-violet-500 text-white shadow-glow">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                <p className="max-w-sm text-sm text-slate-500 dark:text-gray-400">
+                  Lance une recherche pour explorer instantanément tous tes cours générés, même avec des mots différents de ceux du texte original.
+                </p>
+              </motion.div>
+            )}
+
+            {!loading && grouped && Object.keys(grouped).length > 0 && (
+              <motion.div key="results" initial="hidden" animate="show" variants={RESULTS_GROUP_VARIANTS} className="space-y-8">
+                {Object.entries(grouped).map(([moduleName, moduleResults]) => (
+                  <div key={moduleName}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <BookOpen className="h-4 w-4 text-primary-500 dark:text-primary-400" />
+                      <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
+                        {moduleName}
+                      </h2>
+                    </div>
+                    <div className="space-y-3">
+                      {moduleResults.map((r, i) => (
+                        <motion.div key={`${r.courseSlug}-${r.sectionLabel}-${i}`} variants={RESULT_ITEM_VARIANTS}>
+                          <Link
+                            href={`/dashboard/demo/${r.courseSlug}`}
+                            className={cn(
+                              "glass-card block rounded-2xl p-4 shadow-glass transition-all duration-300",
+                              "hover:-translate-y-0.5 hover:shadow-primary-500/20",
+                              "dark:shadow-glass-dark dark:hover:shadow-primary-400/20"
+                            )}
+                          >
+                            <div className="mb-1 flex items-center gap-2">
+                              <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                              <p className="min-w-0 flex-1 truncate text-sm font-bold text-slate-900 dark:text-gray-100">{r.courseTitle}</p>
+                              <span className="ml-auto shrink-0 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
+                                {r.sectionLabel}
+                              </span>
+                            </div>
+                            <p dir="auto" className="line-clamp-2 text-sm text-slate-600 dark:text-gray-400">
+                              {r.excerpt}
+                            </p>
+                          </Link>
+                        </motion.div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-3">
-                    {moduleResults.map((r, i) => (
-                      <Link
-                        key={`${r.courseSlug}-${r.sectionLabel}-${i}`}
-                        href={`/dashboard/demo/${r.courseSlug}`}
-                        className={cn(
-                          "block rounded-2xl border border-blue-300/60 bg-white p-4 shadow-sm transition-all duration-300",
-                          "hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.15)]",
-                          "dark:border-blue-500/30 dark:bg-slate-950 dark:hover:border-blue-400 dark:hover:shadow-[0_0_20px_rgba(59,130,246,0.3)]"
-                        )}
-                      >
-                        <div className="mb-1 flex items-center gap-2">
-                          <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                          <p className="truncate text-sm font-bold text-slate-900 dark:text-gray-100">{r.courseTitle}</p>
-                          <span className="ml-auto shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
-                            {r.sectionLabel}
-                          </span>
-                        </div>
-                        <p dir="auto" className="line-clamp-2 text-sm text-slate-600 dark:text-gray-400">
-                          {r.excerpt}
-                        </p>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

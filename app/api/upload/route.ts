@@ -7,9 +7,15 @@ import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/documen
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
-export const maxDuration = 60; // large file extraction — no explicit cap before, so it silently rode Vercel's platform default.
+// Bumped from 60s alongside MAX_FILE_BYTES below — a 100 Mo image-heavy PDF
+// (radiology scans, etc.) takes meaningfully longer to parse than the 20 Mo
+// files this used to be tuned for. Note this is still subject to whatever
+// hard ceiling the hosting platform enforces regardless of what's declared
+// here (e.g. Vercel's Hobby tier caps Route Handlers at 60s no matter what) —
+// raise the plan/tier too if large uploads still time out in production.
+export const maxDuration = 300;
 
-const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 Mo — same cap as /api/generate-course.
+const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo — same cap as /api/generate-course. Bumped so a heavy, image/radiology-rich course PDF isn't rejected outright — see components/dashboard/UploadModal.tsx's matching client-side MAX_UPLOAD_FILE_BYTES.
 
 const SOURCE_FILES_BUCKET = "course-sources";
 

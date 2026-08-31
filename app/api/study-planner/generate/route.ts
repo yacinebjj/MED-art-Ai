@@ -14,7 +14,14 @@ export const runtime = "nodejs";
 export const maxDuration = 300; // same class of work as /api/studio/generate — a full multi-week schedule generation.
 
 const MAX_ATTEMPTS = 2; // 1 retry on a malformed/invalid AI response, same convention as exam/generate.
-const GENERATION_MAX_TOKENS = 8_192;
+// A full multi-week "days" array (StudyPlanGenerationSchema has no upper
+// bound on plan length — a real exam-date window can run months out) is a
+// large, unbounded structured JSON output; 8192 tokens truncated mid-plan on
+// a real stress test. Doubled for real headroom. parseJsonResponse also now
+// repairs a truncated response as a second line of defense (recovers
+// whatever complete days made it through instead of hard-failing the whole
+// plan) — see that function's own comment in lib/course-generation-shared.ts.
+const GENERATION_MAX_TOKENS = 16_384;
 
 interface StudyPlanConfigRow {
   id: number;
@@ -168,21 +175,79 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function generateWithRetry<T>(call: () => Promise<string>, schema: { safeParse: (v: unknown) => { success: boolean; data?: T; error?: unknown } }): Promise<T> {
+/**
+ * Same retry loop as before, but each of the three genuinely different
+ * failure modes is now logged (and, where safe, surfaced to the client)
+ * distinctly instead of collapsing into one generic "réponse invalide" —
+ * found necessary after a report of persistent failures that survived a
+ * max_tokens bump, which only rules out ONE of these three categories:
+ *
+ *  1. The OpenRouter call itself fails (bad/missing OPENROUTER_API_KEY,
+ *     invalid model id, OpenRouter down, rate-limited) — never reaches JSON
+ *     parsing at all. Logged with the real status/detail from
+ *     OpenRouterError, and NOT retried for a config-shaped error (401/400 —
+ *     retrying with the same bad key/model just wastes another attempt),
+ *     retried as before for a transient one (429/5xx).
+ *  2. JSON.parse fails on the raw text (truncation, stray prose before/after
+ *     the JSON) — parseJsonResponse already logs the raw response's first
+ *     1000 chars and attempts a truncation repair internally.
+ *  3. JSON.parse SUCCEEDS but zod rejects the shape (schema.strict() mode
+ *     means even one extra/missing/mistyped field fails everything) — this
+ *     one was previously logged as just `result.error` (the raw ZodError
+ *     object, not always legible from console output) with NO visibility
+ *     into what the model actually returned. Now logs the full flattened
+ *     zod error AND the parsed object itself, so a real schema drift (the
+ *     model adding a field the schema doesn't expect, e.g.) is immediately
+ *     diagnosable from server logs instead of indistinguishable from a
+ *     truncation.
+ */
+async function generateWithRetry<T>(
+  call: () => Promise<string>,
+  schema: { safeParse: (v: unknown) => { success: boolean; data?: T; error?: { flatten: () => unknown } } }
+): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let raw: string;
     try {
-      const raw = await call();
-      const parsed = parseJsonResponse(raw);
-      const result = schema.safeParse(parsed);
-      if (!result.success) {
-        console.error(`[study-planner/generate] Réponse invalide (tentative ${attempt}/${MAX_ATTEMPTS}):`, result.error);
-        throw new Error("L'IA n'a pas produit un planning valide. Réessaie.");
-      }
-      return result.data as T;
+      raw = await call();
     } catch (error) {
       lastError = error;
+      if (error instanceof OpenRouterError) {
+        console.error(
+          `[study-planner/generate] Échec de l'appel OpenRouter (tentative ${attempt}/${MAX_ATTEMPTS}, status ${error.status}):`,
+          error.message
+        );
+        // 401 (bad/missing API key) and 400 (bad model id/request) fail
+        // identically on every retry — no point burning a second attempt.
+        if (error.status === 401 || error.status === 400) throw error;
+        continue;
+      }
+      console.error(`[study-planner/generate] Échec inattendu de l'appel IA (tentative ${attempt}/${MAX_ATTEMPTS}):`, error);
+      continue;
     }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = parseJsonResponse(raw);
+    } catch (error) {
+      // parseJsonResponse already logged the raw text + its own repair
+      // attempt — nothing more to add here.
+      lastError = error;
+      continue;
+    }
+
+    const result = schema.safeParse(parsed);
+    if (!result.success) {
+      lastError = new Error("L'IA n'a pas produit un planning valide. Réessaie.");
+      console.error(
+        `[study-planner/generate] JSON valide mais hors-schéma (tentative ${attempt}/${MAX_ATTEMPTS}) — détail zod:`,
+        JSON.stringify(result.error?.flatten(), null, 2),
+        "\nObjet reçu du modèle (2000 premiers caractères):",
+        JSON.stringify(parsed).slice(0, 2000)
+      );
+      continue;
+    }
+    return result.data as T;
   }
   throw lastError instanceof Error ? lastError : new Error("La génération du planning a échoué après plusieurs tentatives.");
 }

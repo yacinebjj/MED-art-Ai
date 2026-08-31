@@ -60,7 +60,7 @@ export const PublicCourseCard = memo(function PublicCourseCard({
   const [statsOpen, setStatsOpen] = useState(false);
 
   return (
-    <div className="group relative h-40 rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-slate-700 dark:bg-slate-800">
+    <div className="glass-card group relative flex h-36 flex-col overflow-hidden rounded-2xl shadow-glass transition-all duration-300 ease-out hover:shadow-emerald-500/20 active:scale-[0.98] dark:shadow-glass-dark sm:h-40 sm:rounded-3xl lg:h-44">
       <div className="absolute right-2 top-2 z-10">
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -91,15 +91,15 @@ export const PublicCourseCard = memo(function PublicCourseCard({
         </DropdownMenu>
       </div>
 
-      <Link href={`/dashboard/demo/${course.slug}`} className="flex h-full flex-col justify-between p-4">
+      <Link href={`/dashboard/demo/${course.slug}`} className="flex h-full flex-col justify-between p-4 sm:p-5">
         <div
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-lg dark:bg-teal-950/40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-teal-400/25 to-emerald-500/10 text-lg shadow-inner backdrop-blur-sm transition-transform duration-300 group-hover:scale-110 dark:border-white/10 sm:h-12 sm:w-12 sm:rounded-2xl sm:text-xl"
           aria-hidden="true"
         >
           {getCourseEmoji(course.title)}
         </div>
         <div>
-          <p className="line-clamp-2 pr-6 text-sm font-semibold text-slate-900 dark:text-gray-100">{course.title}</p>
+          <p className="line-clamp-2 pr-6 text-sm font-semibold text-foreground sm:text-base">{course.title}</p>
         </div>
       </Link>
 

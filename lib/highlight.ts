@@ -60,6 +60,109 @@ export function applyHighlight(color: HighlightColorOption): void {
   sel.removeAllRanges();
 }
 
+/**
+ * Character offsets of `range` relative to `container`'s own flattened text
+ * content (every text node inside it, concatenated in document order).
+ * Scoped to `container` (the reading pane), NOT `document.body` — anchoring
+ * on the whole page was the actual bug in the old implementation: any
+ * dynamic text rendered BEFORE the reading container in the DOM (the
+ * Pomodoro widget's ticking clock, a trial-countdown badge, anything whose
+ * rendered length can differ between page loads) would silently shift every
+ * offset captured against `document.body`, corrupting rehydration for
+ * reasons that have nothing to do with the highlighted content itself.
+ */
+export function computeOffsets(container: Node, range: Range): { startOffset: number; endOffset: number } | null {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let startOffset: number | null = null;
+  let endOffset: number | null = null;
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node === range.startContainer) startOffset = offset + range.startOffset;
+    if (node === range.endContainer) {
+      endOffset = offset + range.endOffset;
+      break;
+    }
+    offset += node.nodeValue?.length ?? 0;
+  }
+  if (startOffset === null || endOffset === null) return null;
+  return { startOffset, endOffset };
+}
+
+/** The inverse of computeOffsets — reconstructs a Range spanning `[startOffset, endOffset)` of `container`'s flattened text content, or null if the offsets no longer resolve (container has fewer characters than expected). */
+export function rangeFromOffsets(container: Node, startOffset: number, endOffset: number): Range | null {
+  if (startOffset < 0 || endOffset <= startOffset) return null;
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  let offset = 0;
+  let startSet = false;
+  let endSet = false;
+  let node: Node | null;
+
+  while ((node = walker.nextNode())) {
+    const len = node.nodeValue?.length ?? 0;
+    if (!startSet && offset + len >= startOffset) {
+      range.setStart(node, startOffset - offset);
+      startSet = true;
+    }
+    if (!endSet && offset + len >= endOffset) {
+      range.setEnd(node, endOffset - offset);
+      endSet = true;
+      break;
+    }
+    offset += len;
+  }
+
+  return startSet && endSet ? range : null;
+}
+
+/** Wraps `range` in a `<mark>` of the given color, tagged with `data-highlight-id` when known (lets the toolbar find and delete/restyle the exact persisted row later, not just "a mark containing this text"). Same surroundContents-with-extract-fallback as applyHighlight below. */
+export function wrapRangeInMark(range: Range, markClass: string, highlightId?: string | number): HTMLElement | null {
+  const mark = document.createElement("mark");
+  mark.className = markClass;
+  if (highlightId !== undefined) mark.dataset.highlightId = String(highlightId);
+
+  try {
+    range.surroundContents(mark);
+    return mark;
+  } catch {
+    try {
+      const contents = range.extractContents();
+      mark.appendChild(contents);
+      range.insertNode(mark);
+      return mark;
+    } catch {
+      return null; // range crosses a boundary surroundContents/extractContents can't handle — caller's fallback (substring search) takes over.
+    }
+  }
+}
+
+/**
+ * Last-resort rehydration for highlight rows saved before start_offset/
+ * end_offset existed (or whose offsets no longer resolve to the expected
+ * text): finds the first occurrence of `text` inside `container` and wraps
+ * it — the same whole-page substring search this app used everywhere
+ * before, just scoped to `container` instead of `document.body` so it
+ * can't match text belonging to some other part of the page.
+ */
+export function restoreHighlightBySubstring(container: Node, text: string, markClass: string, highlightId?: string | number): boolean {
+  if (!text) return false;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.parentElement?.tagName === "MARK") continue;
+    const pos = node.nodeValue?.indexOf(text) ?? -1;
+    if (pos < 0) continue;
+
+    const range = document.createRange();
+    range.setStart(node, pos);
+    range.setEnd(node, pos + text.length);
+    return Boolean(wrapRangeInMark(range, markClass, highlightId));
+  }
+  return false;
+}
+
 /** Unwraps a `<mark>` — its children move up to take its place in the parent, so the text merges back in seamlessly with no background color left behind. */
 export function removeHighlight(mark: HTMLElement): void {
   const parent = mark.parentNode;

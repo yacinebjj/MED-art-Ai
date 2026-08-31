@@ -19,9 +19,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
   CheckCircle2,
+  FilePlus2,
   FileQuestion,
   ListChecks,
   Loader2,
@@ -37,6 +39,8 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import type { StudioCourseSummary } from "@/types/studio-course";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tExam } from "@/lib/translations/exam";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 
@@ -61,15 +65,29 @@ interface SavedExam {
   createdAt: string;
 }
 
+/** One persisted sitting of a saved exam — see app/api/exam/attempts/route.ts. `score`/`totalQuestions` are the server's own recomputed grading, never trusted from whatever the client last held in state. */
+interface ExamAttempt {
+  id: string;
+  examId: string;
+  answers: Record<string, string | null>;
+  score: number;
+  totalQuestions: number;
+  createdAt: string;
+}
+
 const MAX_ATTEMPTS = 5;
 
 const panelShellClasses =
-  "flex flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900";
+  "glass-card flex flex-col overflow-hidden rounded-3xl shadow-glass transition-all duration-300 dark:shadow-glass-dark";
+
+const RESULTS_STAGGER_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
+const RESULT_CARD_VARIANTS = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 
 export default function ExamGeneratorPage() {
   const params = useParams<{ id: string }>();
   const moduleId = Number(params.id);
   const { toast } = useToast();
+  const { language } = useLanguage();
 
   const [courses, setCourses] = useState<StudioCourseSummary[] | null>(null);
   const [coursesError, setCoursesError] = useState(false);
@@ -82,8 +100,22 @@ export default function ExamGeneratorPage() {
 
   const [examState, setExamState] = useState<ExamState>("idle");
   const [answers, setAnswers] = useState<Record<string, string | null>>({});
+  // MAX_ATTEMPTS is only the initial/pre-load placeholder and display-fallback
+  // cap reference now — the moment either the GET-history effect below or a
+  // generateExam response reports the server's real regenerationsRemaining
+  // (from profiles.module_exam_regenerations_used via
+  // app/api/exam/generate/route.ts), THAT becomes the live source of truth.
+  // Never decremented optimistically client-side anymore — see
+  // handleRegenerate and generateExam.
   const [attempts, setAttempts] = useState(MAX_ATTEMPTS);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingAttempt, setIsSavingAttempt] = useState(false);
+
+  // Latest saved attempt per examId — see app/api/exam/attempts/route.ts.
+  // Keyed by examId (not a plain array) so handleViewExam/the auto-resume
+  // effect below can look one up in O(1) instead of re-scanning on every
+  // switch between "Mes Examens" entries.
+  const [attemptsByExamId, setAttemptsByExamId] = useState<Record<string, ExamAttempt>>({});
 
   const activeExam = useMemo(() => savedExams.find((e) => e.id === activeExamId) ?? null, [savedExams, activeExamId]);
   const questions = useMemo(() => activeExam?.content.questions ?? [], [activeExam]);
@@ -122,27 +154,66 @@ export default function ExamGeneratorPage() {
 
   // History fetch — scoped to THIS module only, fixing the "shows courses
   // from unrelated modules" bug at its root: there was never a real
-  // per-module fetch of anything before this pass.
+  // per-module fetch of anything before this pass. Fetches saved exams AND
+  // their attempts together (not one after the other) so the auto-resume
+  // decision below is made with both in hand — fetching attempts in a
+  // separate effect risked a visible flash of the blank "testing" state
+  // before a previously-saved attempt had a chance to load and restore it.
   useEffect(() => {
     if (!Number.isInteger(moduleId)) return;
     let cancelled = false;
 
-    fetch(`/api/exam/generate?moduleId=${moduleId}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((body: { success: boolean; exams?: SavedExam[] }) => {
-        if (cancelled || !body.success || !Array.isArray(body.exams)) return;
-        setSavedExams(body.exams);
-        // Auto-resume the most recently generated exam (API returns oldest
-        // first, so the last element is the newest) so coming back to this
-        // page shows what the student was doing instead of the empty
-        // generator form — the exam was always safely persisted server-side
-        // in module_generated_exams, but requiring a manual click into "Mes
-        // Examens" to see it again read exactly like the content was lost.
-        if (body.exams.length > 0) {
-          setActiveExamId(body.exams[body.exams.length - 1].id);
-          setExamState("testing");
+    Promise.all([
+      fetch(`/api/exam/generate?moduleId=${moduleId}`).then((res) => (res.ok ? res.json() : Promise.reject())),
+      fetch(`/api/exam/attempts?moduleId=${moduleId}`).then((res) => (res.ok ? res.json() : { success: true, attempts: [] })),
+    ])
+      .then(
+        ([examsBody, attemptsBody]: [
+          { success: boolean; exams?: SavedExam[]; regenerationsUsed?: number; regenerationsRemaining?: number },
+          { success: boolean; attempts?: ExamAttempt[] },
+        ]) => {
+          if (cancelled || !examsBody.success || !Array.isArray(examsBody.exams)) return;
+          setSavedExams(examsBody.exams);
+
+          // Sync the "Régénérer" counter to server truth ONCE on load —
+          // replaces the initial useState(MAX_ATTEMPTS) placeholder with the
+          // real remaining count (profiles.module_exam_regenerations_used-
+          // derived) instead of leaving every page mount/reload showing a
+          // full 5 regardless of how many the student already used.
+          if (typeof examsBody.regenerationsRemaining === "number") {
+            setAttempts(examsBody.regenerationsRemaining);
+          }
+
+          // Reduce to the LATEST attempt per examId — attempts are returned
+          // oldest-first (same convention as exams), so a later entry for
+          // the same examId simply overwrites the earlier one here.
+          const latestByExamId: Record<string, ExamAttempt> = {};
+          if (attemptsBody.success && Array.isArray(attemptsBody.attempts)) {
+            for (const attempt of attemptsBody.attempts) latestByExamId[attempt.examId] = attempt;
+          }
+          setAttemptsByExamId(latestByExamId);
+
+          // Auto-resume the most recently generated exam (API returns oldest
+          // first, so the last element is the newest) so coming back to this
+          // page shows what the student was doing instead of the empty
+          // generator form — the exam was always safely persisted server-side
+          // in module_generated_exams, but requiring a manual click into "Mes
+          // Examens" to see it again read exactly like the content was lost.
+          // If a saved attempt exists for it, restore straight into the
+          // correction view instead of a blank re-take.
+          if (examsBody.exams.length > 0) {
+            const mostRecentExam = examsBody.exams[examsBody.exams.length - 1];
+            setActiveExamId(mostRecentExam.id);
+            const savedAttempt = latestByExamId[mostRecentExam.id];
+            if (savedAttempt) {
+              setAnswers(savedAttempt.answers);
+              setExamState("results");
+            } else {
+              setExamState("testing");
+            }
+          }
         }
-      })
+      )
       .catch(() => {
         /* Non-fatal — the page still works, just without history pre-loaded. */
       });
@@ -177,8 +248,23 @@ export default function ExamGeneratorPage() {
         body: JSON.stringify({ moduleId, courseIds, variation }),
       });
       const body = await res.json().catch(() => null);
+      // Server truth for the "Régénérer" quota, synced whenever the API
+      // includes it — on the SUCCESS path (a fresh regeneration was just
+      // reserved) and on the 403 cap-reached error path alike (see
+      // app/api/exam/generate/route.ts's POST handler), so the local
+      // `attempts` counter can never claim more remain than the server
+      // actually has left. Replaces the old purely-optimistic
+      // `setAttempts((a) => a - 1)` that ran before the API call even
+      // resolved and was never reconciled with the real count.
+      if (typeof body?.regenerationsRemaining === "number") {
+        setAttempts(body.regenerationsRemaining);
+      }
       if (!res.ok || !body?.success) {
-        toast({ variant: "error", title: "Échec de la génération", description: body?.error ?? "Réessaie." });
+        toast({
+          variant: "error",
+          title: tExam("generationFailedTitle", language),
+          description: body?.error ?? tExam("generationFailedFallbackDescription", language),
+        });
         setExamState(variation ? "results" : "idle");
         return;
       }
@@ -187,7 +273,11 @@ export default function ExamGeneratorPage() {
       setActiveExamId(exam.id);
       setExamState("testing");
     } catch {
-      toast({ variant: "error", title: "Échec de la génération", description: "Impossible de contacter le serveur." });
+      toast({
+        variant: "error",
+        title: tExam("generationFailedTitle", language),
+        description: tExam("generationFailedNetworkDescription", language),
+      });
       setExamState(variation ? "results" : "idle");
     } finally {
       setIsGenerating(false);
@@ -201,17 +291,68 @@ export default function ExamGeneratorPage() {
 
   function handleRegenerate() {
     if (attempts <= 0 || !activeExam) return;
-    setAttempts((a) => a - 1);
+    // No optimistic local decrement anymore — `attempts` is synced from the
+    // server's authoritative regenerationsRemaining once generateExam's
+    // response comes back (success or 403 cap-reached alike).
     void generateExam(
       activeExam.selectedCourses.map((c) => c.id),
       true
     );
   }
 
+  /** "Générer un nouvel examen" — distinct from Régénérer (which reuses activeExam.selectedCourses): returns to course selection so the student can pick a DIFFERENT set of courses, without touching activeExamId/savedExams/attemptsByExamId (so "Mes Examens" history stays untouched) or clearing the prior selection (consistent with this codebase's other "back" flows, which let the student see and adjust their last pick rather than starting from a blank slate). */
+  function handleStartOver() {
+    setExamState("idle");
+  }
+
   function handleViewExam(exam: SavedExam) {
     setActiveExamId(exam.id);
-    setAnswers({});
-    setExamState("testing");
+    // Restore a previously saved attempt straight into the correction view
+    // instead of resetting to a blank re-take — matches the auto-resume
+    // effect's own behavior for the most recent exam.
+    const savedAttempt = attemptsByExamId[exam.id];
+    if (savedAttempt) {
+      setAnswers(savedAttempt.answers);
+      setExamState("results");
+    } else {
+      setAnswers({});
+      setExamState("testing");
+    }
+  }
+
+  /** "Afficher la correction" — saves the attempt server-side (recomputes score from the exam's own canonical content, see app/api/exam/attempts/route.ts) BEFORE switching to the results view. A save failure never blocks the student from seeing their own already-computed local correction — it just means the attempt won't be there if they come back later, surfaced via a toast rather than a silent loss. */
+  async function handleFinishExam() {
+    if (!activeExam) {
+      setExamState("results");
+      return;
+    }
+    setIsSavingAttempt(true);
+    try {
+      const res = await fetch("/api/exam/attempts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ examId: activeExam.id, answers }),
+      });
+      const body = await res.json().catch(() => null);
+      if (res.ok && body?.success) {
+        setAttemptsByExamId((prev) => ({ ...prev, [activeExam.id]: body.attempt as ExamAttempt }));
+      } else {
+        toast({
+          variant: "error",
+          title: tExam("resultsNotSavedTitle", language),
+          description: body?.error ?? tExam("resultsNotSavedFallbackDescription", language),
+        });
+      }
+    } catch {
+      toast({
+        variant: "error",
+        title: tExam("resultsNotSavedTitle", language),
+        description: tExam("resultsNotSavedNetworkDescription", language),
+      });
+    } finally {
+      setIsSavingAttempt(false);
+      setExamState("results");
+    }
   }
 
   function handleSelectAnswer(questionId: string, optionLabel: string) {
@@ -240,18 +381,19 @@ export default function ExamGeneratorPage() {
   }, [answers, questions]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
+    <div className="aurora-canvas-bg relative flex h-dvh flex-col overflow-hidden">
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
       <WorkspaceTopbar title="Générateur d'Examen" />
 
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 md:flex-row md:overflow-hidden">
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3 sm:p-4 md:flex-row md:overflow-hidden">
         {/* Panneau Gauche — Sources + Historique */}
         <aside className={cn(panelShellClasses, "h-[70vh] w-full shrink-0 md:h-auto md:w-80")}>
-          <div className="border-b border-gray-200 p-4 dark:border-neutral-800">
-            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cours du module</h2>
+          <div className="border-b border-white/40 p-4 dark:border-white/10">
+            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tExam("coursesOfModule", language)}</h2>
             <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
               {selectedCourseIds.size} / {courses?.length ?? 0} sélectionné{selectedCourseIds.size > 1 ? "s" : ""}
             </p>
-            <label className="mt-3 flex cursor-pointer items-center gap-2.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200">
+            <label className="mt-3 flex cursor-pointer items-center gap-2.5 rounded-lg border border-gray-200/70 bg-white/50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors dark:border-neutral-700/70 dark:bg-neutral-800/50 dark:text-gray-200">
               <Checkbox
                 checked={allSelected ? true : someSelected ? "indeterminate" : false}
                 onCheckedChange={toggleAll}
@@ -276,7 +418,7 @@ export default function ExamGeneratorPage() {
               courses.map((course) => (
                 <label
                   key={course.id}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-neutral-800"
+                  className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
                 >
                   <Checkbox checked={selectedCourseIds.has(course.id)} onCheckedChange={() => toggleCourse(course.id)} />
                   {course.title}
@@ -285,7 +427,7 @@ export default function ExamGeneratorPage() {
             )}
 
             {savedExams.length > 0 && (
-              <div className="mt-2 border-t border-gray-200 pt-2 dark:border-neutral-800">
+              <div className="mt-2 border-t border-white/40 pt-2 dark:border-white/10">
                 <h3 className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">Mes Examens</h3>
                 {savedExams.map((exam, index) => (
                   <button
@@ -293,10 +435,10 @@ export default function ExamGeneratorPage() {
                     type="button"
                     onClick={() => handleViewExam(exam)}
                     className={cn(
-                      "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
+                      "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-300 active:scale-[0.98]",
                       activeExamId === exam.id
-                        ? "bg-primary-50 font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300"
-                        : "text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-neutral-800"
+                        ? "bg-primary-50 font-semibold text-primary-700 shadow-soft dark:bg-primary-950/40 dark:text-primary-300"
+                        : "text-gray-700 hover:translate-x-0.5 hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
                     )}
                   >
                     <span>Examen {index + 1}</span>
@@ -310,9 +452,17 @@ export default function ExamGeneratorPage() {
 
         {/* Panneau Droit — Exam Arena */}
         <main className={cn(panelShellClasses, "h-[70vh] w-full flex-1 md:h-auto")}>
+          <AnimatePresence mode="wait">
           {examState === "idle" && (
-            <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-50 dark:bg-primary-950/40">
+            <motion.div
+              key="idle"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center sm:p-8"
+            >
+              <div className="flex h-16 w-16 shrink-0 animate-float items-center justify-center rounded-2xl bg-primary-50 shadow-glow dark:bg-primary-950/40">
                 <FileQuestion className="h-8 w-8 text-primary-600 dark:text-primary-400" />
               </div>
               <div>
@@ -321,17 +471,32 @@ export default function ExamGeneratorPage() {
                   Sélectionne les cours à couvrir dans le panneau de gauche, puis génère un examen clinique complet.
                 </p>
               </div>
-              <Button size="lg" disabled={selectedCourseIds.size === 0 || isGenerating} onClick={handleGenerate}>
-                Générer l&apos;examen (40-60 QCM)
-              </Button>
+              <div className="flex flex-col items-center gap-1.5">
+                <Button
+                  size="lg"
+                  disabled={selectedCourseIds.size === 0 || isGenerating}
+                  onClick={handleGenerate}
+                  className="max-w-full whitespace-normal text-center leading-snug"
+                >
+                  Générer l&apos;examen
+                </Button>
+                <p className="text-xs text-gray-400 dark:text-gray-500">40 à 60 QCM générés par l&apos;IA</p>
+              </div>
               {selectedCourseIds.size === 0 && (
                 <p className="text-xs text-gray-400 dark:text-gray-500">Sélectionne au moins un cours pour continuer.</p>
               )}
-            </div>
+            </motion.div>
           )}
 
           {examState === "generating" && (
-            <div className="flex h-full flex-col items-center justify-center gap-6 p-8">
+            <motion.div
+              key="generating"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="flex h-full flex-col items-center justify-center gap-6 p-6 sm:p-8"
+            >
               <div className="relative flex h-16 w-16 items-center justify-center">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-30" />
                 <Sparkles className="relative h-7 w-7 text-primary-600 dark:text-primary-400" />
@@ -341,27 +506,38 @@ export default function ExamGeneratorPage() {
               </p>
               <div className="w-full max-w-md space-y-3">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-neutral-800">
+                  <div key={i} className="space-y-2 rounded-xl border border-gray-200/70 bg-white/40 p-4 dark:border-neutral-800/70 dark:bg-white/5">
                     <div className="h-3 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
                     <div className="h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
                     <div className="h-3 w-5/6 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
                   </div>
                 ))}
               </div>
-            </div>
+            </motion.div>
           )}
 
           {examState === "testing" && (
-            <div className="flex h-full flex-col overflow-y-auto p-6 pb-28">
-              <div className="mb-4 flex items-center justify-between gap-3">
+            <motion.div
+              key="testing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="flex h-full flex-col overflow-y-auto p-4 pb-28 sm:p-6"
+            >
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Épreuve Clinique</h2>
                 <Badge variant="outline">
                   {answeredCount} / {questions.length} répondues
                 </Badge>
               </div>
-              <div className="space-y-6">
+              <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
                 {questions.map((q, index) => (
-                  <div key={q.id} className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+                  <motion.div
+                    key={q.id}
+                    variants={RESULT_CARD_VARIANTS}
+                    className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
+                  >
                     <p className="mb-4 text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
                       <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
                       {q.vignette}
@@ -373,9 +549,9 @@ export default function ExamGeneratorPage() {
                           <label
                             key={opt.label}
                             className={cn(
-                              "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-colors",
+                              "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-all duration-300 active:scale-[0.99]",
                               selected
-                                ? "border-primary-500 bg-primary-50 dark:border-primary-500 dark:bg-primary-950/30"
+                                ? "border-primary-500 bg-primary-50 shadow-soft dark:border-primary-500 dark:bg-primary-950/30"
                                 : "border-gray-200 hover:bg-gray-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
                             )}
                           >
@@ -394,28 +570,39 @@ export default function ExamGeneratorPage() {
                         );
                       })}
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
-              </div>
-            </div>
+              </motion.div>
+            </motion.div>
           )}
 
           {examState === "results" && (
-            <div className="flex h-full flex-col overflow-y-auto p-6">
-              <div className="mb-6 rounded-2xl border-2 border-primary-200 bg-primary-50 p-5 text-center dark:border-primary-900/50 dark:bg-primary-950/20">
-                <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-400">Score final</p>
+            <motion.div
+              key="results"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              className="flex h-full flex-col overflow-y-auto p-4 sm:p-6"
+            >
+              <div className="mb-6 rounded-2xl border-2 border-primary-200 bg-primary-50 p-5 text-center shadow-glow dark:border-primary-900/50 dark:bg-primary-950/20">
+                <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-400">{tExam("finalScore", language)}</p>
                 <p className="mt-1 text-4xl font-black text-gray-900 dark:text-white">
                   {score} / {questions.length}
                 </p>
               </div>
 
-              <div className="space-y-6">
+              <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
                 {questions.map((q, index) => {
                   const userAnswer = answers[q.id];
                   const correctOption = q.options.find((o) => o.isCorrect);
                   const isCorrect = !!correctOption && userAnswer === correctOption.label;
                   return (
-                    <div key={q.id} className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+                    <motion.div
+                      key={q.id}
+                      variants={RESULT_CARD_VARIANTS}
+                      className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
+                    >
                       <div className="mb-3 flex items-start justify-between gap-3">
                         <p className="text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
                           <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
@@ -470,10 +657,10 @@ export default function ExamGeneratorPage() {
                           ))}
                         </ul>
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 })}
-              </div>
+              </motion.div>
 
               {weakPoints.length > 0 && (
                 <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
@@ -488,26 +675,43 @@ export default function ExamGeneratorPage() {
                 </div>
               )}
 
-              <div className="mt-6">
-                <Button variant="outline" className="w-full" onClick={handleRegenerate} disabled={attempts <= 0 || isGenerating}>
-                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              <div className="mt-6 flex flex-col gap-2.5">
+                <Button
+                  variant="secondary"
+                  className="w-full whitespace-normal text-center leading-snug"
+                  onClick={handleStartOver}
+                >
+                  <FilePlus2 className="h-4 w-4 shrink-0" />
+                  {tExam("generateNewExam", language)}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full whitespace-normal text-center leading-snug"
+                  onClick={handleRegenerate}
+                  disabled={attempts <= 0 || isGenerating}
+                >
+                  {isGenerating ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCcw className="h-4 w-4 shrink-0" />}
                   {attempts > 0
-                    ? `Régénérer un nouvel examen (${attempts} tentative${attempts > 1 ? "s" : ""} restante${attempts > 1 ? "s" : ""})`
-                    : "Aucune tentative restante"}
+                    ? tExam(attempts > 1 ? "regenerateCountPlural" : "regenerateCountSingular", language).replace(
+                        "{n}",
+                        String(attempts)
+                      )
+                    : tExam("noRegenerationsLeft", language)}
                 </Button>
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
         </main>
       </div>
 
       {examState === "testing" && (
-        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-4 border-t border-gray-200 bg-white/95 p-4 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/95">
+        <div className="glass-panel fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-4 p-4 shadow-glass dark:shadow-glass-dark">
           <p className="hidden text-sm text-gray-500 dark:text-gray-400 sm:block">
             <ListChecks className="mr-1.5 inline h-4 w-4" />
             {answeredCount} / {questions.length} questions répondues
           </p>
-          <Button className="w-full sm:w-auto" onClick={() => setExamState("results")}>
+          <Button className="w-full sm:w-auto" onClick={handleFinishExam} disabled={isSavingAttempt} isLoading={isSavingAttempt}>
             Afficher la correction
           </Button>
         </div>

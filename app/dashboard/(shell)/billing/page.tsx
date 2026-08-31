@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle2, XCircle, CreditCard, Clock, BookOpenText, GraduationCap } from "lucide-react";
+import { CheckCircle2, XCircle, CreditCard, Clock, BookOpenText, GraduationCap, Sparkles, Receipt } from "lucide-react";
 import { PlanCard } from "@/components/billing/PlanCard";
 import { Card } from "@/components/ui/Card";
 import { MotionCard } from "@/components/ui/MotionCard";
@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { PLANS, type PlanId } from "@/lib/pricing";
 import { useAuth } from "@/providers/AuthProvider";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tSettings } from "@/lib/translations/settings";
 
 // ssr: false — see UsageCharts.tsx's own comment: recharts crashes
 // ("document is not defined") under Next's server-render pass, so this
@@ -52,28 +54,31 @@ function formatFrenchDate(iso: string): string {
   return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 }
 
-// --- Usage Analytics: mock data ------------------------------------------
+// --- Usage Analytics: hardcoded zero-state (no backend yet) ---------------
 // No real analytics backend exists yet for "hours studied" / "summaries
-// generated" / "exams taken" aggregates — these are illustrative placeholder
-// numbers so the section's shape/design can ship now, swapped for a real
-// query once that aggregation exists server-side.
+// generated" / "exams taken" aggregates. This USED to show fake positive
+// placeholder numbers (42h/156/24) identical for every account, which read
+// as fabricated usage history. Corrected to a realistic blank state — 0
+// across the board, matching what an actual new account should show —
+// instead of invented numbers. Still hardcoded: swap for a real query once
+// that aggregation exists server-side.
 const USAGE_METRICS = [
-  { key: "hours", label: "Heures d'étude", value: "42h", icon: Clock },
-  { key: "summaries", label: "Résumés générés", value: "156", icon: BookOpenText },
-  { key: "exams", label: "Examens passés", value: "24", icon: GraduationCap },
-];
+  { key: "hours", labelKey: "hoursStudiedLabel", value: "0h", icon: Clock },
+  { key: "summaries", labelKey: "summariesGeneratedLabel", value: "0", icon: BookOpenText },
+  { key: "exams", labelKey: "examsTakenLabel", value: "0", icon: GraduationCap },
+] as const;
 
-// --- Payment method + invoice history: mock data --------------------------
-// No real "saved card" or "invoice history" endpoint exists yet — Chargily's
-// checkout is redirect-based and doesn't hand this app stored-card or
-// invoice data to persist. Shown as clearly-labeled example content (see the
-// "Aperçu" notes below each card) rather than pretending it's real, until a
-// real Chargily invoice-history integration exists.
-const MOCK_INVOICES = [
-  { id: "FAC-2025-0006", date: "2025-06-01", status: "paid" as const, amountDZD: 1300 },
-  { id: "FAC-2025-0005", date: "2025-05-01", status: "paid" as const, amountDZD: 1300 },
-  { id: "FAC-2025-0004", date: "2025-04-01", status: "failed" as const, amountDZD: 1300 },
-];
+// --- Invoice history: hardcoded blank state (no backend yet) --------------
+// No real "invoice history" endpoint exists yet — Chargily's checkout is
+// redirect-based and doesn't hand this app invoice data to persist or
+// query. This USED to render 3 fake invoice rows (the same fabricated
+// "FAC-2025-000x" numbers/amounts shown to every single account), which
+// misrepresented real payment history. Corrected to an honest empty list —
+// the table below renders a proper "no invoices yet" empty state instead of
+// fabricated rows. The typed shape is kept so wiring in a real per-user
+// Supabase/Chargily query later is a drop-in change.
+type InvoiceRecord = { id: string; date: string; status: "paid" | "failed"; amountDZD: number };
+const INVOICES: InvoiceRecord[] = [];
 
 export default function BillingPage() {
   return (
@@ -87,6 +92,7 @@ function BillingPageContent() {
   const searchParams = useSearchParams();
   const status = searchParams.get("status");
   const { user } = useAuth();
+  const { language } = useLanguage();
 
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
@@ -139,7 +145,7 @@ function BillingPageContent() {
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Abonnement</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">{tSettings("subscriptionTitle", language)}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Paiement sécurisé en DZD via Edahabia (Algérie Poste) ou carte CIB, propulsé par Chargily Pay.
         </p>
@@ -163,58 +169,68 @@ function BillingPageContent() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Abonnement actuel — REAL subscription data (see /api/subscription), not mock. */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-foreground">Abonnement actuel</h2>
-            <Badge variant="primary">{currentPlan.label}</Badge>
-          </div>
-
-          <p className="mt-4">
-            <span className="text-2xl font-medium text-foreground">{currentPlan.priceDZD.toLocaleString("fr-FR")} DZD</span>
-            <span className="text-xs text-muted-foreground"> / {formatBillingCycle(currentPlan.durationMonths)}</span>
-          </p>
-
-          <p className="mt-1 text-xs text-muted-foreground">
-            {subscription?.active && subscription.effectivePlan === subscription.plan && subscription.periodEnd
-              ? `Se renouvelle le ${formatFrenchDate(subscription.periodEnd)}`
-              : subscription?.effectivePlan !== subscription?.plan && subscription
-                ? `Ta formule « ${subscription.planLabel} » a expiré — tu es repassé(e) en Freemium`
-                : "Formule gratuite — pas de renouvellement"}
-          </p>
-
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => setPlansOpen((v) => !v)}>
-            {plansOpen ? "Masquer les formules" : "Changer d'abonnement"}
-          </Button>
-        </Card>
-
-        {/* Moyen de paiement — Aperçu: aucune API Chargily ne renvoie encore
-            de carte enregistrée à cette app (son checkout est basé sur une
-            redirection, pas un token de carte stocké) — étiqueté clairement
-            comme aperçu plutôt que présenté comme une vraie carte liée. */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-foreground">Moyen de paiement</h2>
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Aperçu</span>
-          </div>
-
-          <div className="mt-4 flex items-center gap-3">
-            <span className="grid h-10 w-14 shrink-0 place-content-center rounded-lg bg-gradient-to-br from-primary-500 to-secondary-600 text-xs font-bold text-white shadow-sm">
-              Edahabia
-            </span>
-            <div className="text-sm">
-              <p className="font-medium text-foreground">Terminant par 4589</p>
-              <p className="text-muted-foreground">Expire 10/2028</p>
+      <RevealSection>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Abonnement actuel — REAL subscription data (see /api/subscription), not mock. */}
+          <Card className="p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                <h2 className="text-sm font-medium text-foreground">{tSettings("currentSubscription", language)}</h2>
+              </div>
+              <Badge variant="primary">{currentPlan.label}</Badge>
             </div>
-          </div>
 
-          <Button variant="outline" size="sm" className="mt-4" disabled title="Bientôt disponible">
-            <CreditCard className="h-3.5 w-3.5" />
-            Mettre à jour la carte
-          </Button>
-        </Card>
-      </div>
+            <p className="mt-4">
+              <span className="text-2xl font-medium text-foreground">{currentPlan.priceDZD.toLocaleString("fr-FR")} DZD</span>
+              <span className="text-xs text-muted-foreground"> / {formatBillingCycle(currentPlan.durationMonths)}</span>
+            </p>
+
+            <p className="mt-1 text-xs text-muted-foreground">
+              {subscription?.active && subscription.effectivePlan === subscription.plan && subscription.periodEnd
+                ? `Se renouvelle le ${formatFrenchDate(subscription.periodEnd)}`
+                : subscription?.effectivePlan !== subscription?.plan && subscription
+                  ? `Ta formule « ${subscription.planLabel} » a expiré — tu es repassé(e) en Freemium`
+                  : "Formule gratuite — pas de renouvellement"}
+            </p>
+
+            <Button variant="outline" size="sm" className="mt-4 w-full sm:w-auto" onClick={() => setPlansOpen((v) => !v)}>
+              {plansOpen ? tSettings("hidePlans", language) : tSettings("changeSubscription", language)}
+            </Button>
+          </Card>
+
+          {/* Moyen de paiement — pas de carte enregistrée : le checkout
+              Chargily est basé sur une redirection (pas de token de carte
+              stocké), donc aucun "Terminant par XXXX" / "Expire MM/AAAA"
+              réel n'existe jamais ici. Ces champs (convention de carte
+              internationale Visa/Mastercard) étaient de faux exemples
+              affichés à tous les comptes — retirés. Ne reste que le visuel
+              (doré, en écho à "Edahabia" = "الذهبية", littéralement "la
+              dorée") et le nom réel de la méthode acceptée, sans structure
+              de gestion de carte internationale (pas de bouton "mettre à
+              jour la carte" — il n'y a pas de carte stockée à mettre à jour). */}
+          <Card className="p-6">
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+                <CreditCard className="h-4 w-4" />
+              </span>
+              <h2 className="text-sm font-medium text-foreground">{tSettings("paymentMethod", language)}</h2>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <span className="grid h-10 w-14 shrink-0 place-content-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-xs font-bold text-white shadow-sm">
+                Edahabia
+              </span>
+              <div className="min-w-0 text-sm">
+                <p className="font-medium text-foreground">Edahabia / CIB</p>
+                <p className="text-muted-foreground">via Chargily Pay</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </RevealSection>
 
       {plansOpen && (
         <RevealSection>
@@ -232,56 +248,74 @@ function BillingPageContent() {
         </RevealSection>
       )}
 
-      {/* Historique des factures — Aperçu: pas encore d'intégration
-          Chargily pour l'historique réel des factures, données d'exemple. */}
-      <Card className="p-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-foreground">Historique des factures</h2>
-          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Aperçu</span>
-        </div>
+      {/* Historique des factures — pas encore d'intégration Chargily pour un
+          historique réel par utilisateur. Affichait auparavant 3 fausses
+          factures identiques pour tout le monde ("FAC-2025-000x", mêmes
+          montants) ; remplacé par une liste vide honnête avec un message
+          clair plutôt qu'un tableau silencieusement vide. Le rendu du
+          tableau reste en place pour le jour où une vraie requête existera. */}
+      <RevealSection delay={0.05}>
+        <Card className="p-6">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+              <Receipt className="h-4 w-4" />
+            </span>
+            <h2 className="text-sm font-medium text-foreground">{tSettings("invoiceHistory", language)}</h2>
+          </div>
 
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full divide-y-2 divide-border">
-            <thead className="text-left">
-              <tr className="text-foreground">
-                <th className="whitespace-nowrap px-3 py-2 font-medium">Facture</th>
-                <th className="whitespace-nowrap px-3 py-2 font-medium">Date</th>
-                <th className="whitespace-nowrap px-3 py-2 font-medium">Statut</th>
-                <th className="whitespace-nowrap px-3 py-2 font-medium">Montant</th>
-                <th className="whitespace-nowrap px-3 py-2 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {MOCK_INVOICES.map((invoice) => (
-                <tr key={invoice.id} className="text-foreground">
-                  <td className="whitespace-nowrap px-3 py-2 font-medium">{invoice.id}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{formatFrenchDate(invoice.date)}</td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    <Badge variant={invoice.status === "paid" ? "success" : "danger"}>
-                      {invoice.status === "paid" ? "Payé" : "Échoué"}
-                    </Badge>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                    {invoice.amountDZD.toLocaleString("fr-FR")} DZD
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    <button type="button" disabled title="Bientôt disponible" className="font-medium text-muted-foreground underline underline-offset-2 opacity-50">
-                      Télécharger
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+          {INVOICES.length === 0 ? (
+            <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-10 text-center">
+              <Receipt className="h-7 w-7 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Aucune facture pour l'instant.</p>
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full divide-y-2 divide-border text-sm">
+                <thead className="text-left">
+                  <tr className="text-foreground">
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">{tSettings("invoiceColumn", language)}</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">{tSettings("dateColumn", language)}</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">{tSettings("statusColumn", language)}</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">{tSettings("amountColumn", language)}</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {INVOICES.map((invoice) => (
+                    <tr key={invoice.id} className="text-foreground">
+                      <td className="whitespace-nowrap px-3 py-2 font-medium">{invoice.id}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{formatFrenchDate(invoice.date)}</td>
+                      <td className="whitespace-nowrap px-3 py-2">
+                        <Badge variant={invoice.status === "paid" ? "success" : "danger"}>
+                          {invoice.status === "paid" ? tSettings("paidStatus", language) : tSettings("failedStatus", language)}
+                        </Badge>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                        {invoice.amountDZD.toLocaleString("fr-FR")} DZD
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2">
+                        <button type="button" disabled title={tSettings("comingSoon", language)} className="font-medium text-muted-foreground underline underline-offset-2 opacity-50">
+                          Télécharger
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </RevealSection>
 
-      {/* Statistiques d'utilisation — mock data, see USAGE_METRICS/
-          STUDY_TIME_DATA/USAGE_BREAKDOWN_DATA above for why. */}
+      {/* Statistiques d'utilisation — USAGE_METRICS ci-dessus est un état
+          vierge codé en dur (0 partout), pas un calcul Supabase réel ; voir
+          aussi components/billing/UsageCharts.tsx (hors périmètre de ce
+          fichier) qui a le même souci pour ses graphiques (STUDY_TIME_DATA /
+          USAGE_BREAKDOWN_DATA, données positives inventées). */}
       <RevealSection>
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-foreground">Statistiques d'utilisation</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Aperçu — exemple de données, en attendant l'agrégation réelle.</p>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground">{tSettings("usageStatsTitle", language)}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Aucune activité enregistrée pour l'instant.</p>
 
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
             {USAGE_METRICS.map((metric, index) => (
@@ -291,7 +325,7 @@ function BillingPageContent() {
                     <metric.icon className="h-5 w-5" />
                   </div>
                   <p className="mt-4 text-3xl font-extrabold tracking-tight text-foreground">{metric.value}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{metric.label}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{tSettings(metric.labelKey, language)}</p>
                 </MotionCard>
               </RevealSection>
             ))}

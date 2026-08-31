@@ -113,20 +113,92 @@ export function errorMessage(error: unknown): string {
  * model occasionally prefixes a sentence before the fenced block too.
  */
 function stripMarkdownFences(raw: string): string {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (fenced) return fenced[1].trim();
-  return raw.trim();
+  const trimmed = raw.trim();
+  const closedFence = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (closedFence) return closedFence[1].trim();
+
+  // No CLOSING fence found — this is what a response cut off mid-fence looks
+  // like (hit max_tokens before ever reaching the closing "```"). Strip just
+  // the leading "```json" marker so the truncation-repair pass below isn't
+  // fighting stray backticks on top of unbalanced brackets; without this, a
+  // truncated fenced response failed to parse for TWO compounding reasons
+  // (leftover fence text AND unbalanced JSON), and repairTruncatedJson only
+  // ever fixes the second one.
+  const openFenceOnly = trimmed.match(/^```(?:json)?\s*([\s\S]*)$/i);
+  if (openFenceOnly) return openFenceOnly[1].trim();
+
+  return trimmed;
 }
 
-/** Parses the model's raw output into a plain object, with a clear error on malformed/truncated JSON. */
+/**
+ * Best-effort repair for a JSON string cut off mid-structure — the classic
+ * signature of a response hitting max_tokens before finishing. Closes any
+ * string left open at the point of truncation, drops a dangling trailing
+ * comma (left by a cut-off array/object entry), then closes every
+ * still-open `{`/`[` in the correct reverse order.
+ *
+ * Returns `null` when there's nothing bracket/string-shaped to repair (the
+ * original failure wasn't a truncation, e.g. the model returned prose
+ * instead of JSON) — parseJsonResponse falls back to its original error in
+ * that case, never silently swallowing a genuinely different failure.
+ *
+ * This recovers a PARTIAL but validly-shaped result (e.g. 6 of 8 requested
+ * QCMs instead of 8) — it never fabricates missing content, and a caller's
+ * own schema validation (exact counts, required fields, etc.) is still what
+ * catches an under-filled result downstream and triggers that route's
+ * existing retry logic. This function's only job is turning a hard
+ * JSON.parse crash into a recoverable, honestly-incomplete object.
+ */
+function repairTruncatedJson(text: string): string | null {
+  let inString = false;
+  let escaped = false;
+  const stack: string[] = [];
+
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+
+  if (!inString && stack.length === 0) return null; // balanced already — not a truncation-shaped failure.
+
+  let repaired = text;
+  if (inString) repaired += '"';
+  repaired = repaired.replace(/,\s*$/, ""); // a truncated array/object entry often leaves a dangling trailing comma.
+  for (let i = stack.length - 1; i >= 0; i--) {
+    repaired += stack[i] === "{" ? "}" : "]";
+  }
+  return repaired;
+}
+
+/** Parses the model's raw output into a plain object, with a clear error on malformed/truncated JSON. Attempts repairTruncatedJson() as a fallback before giving up — see that function's own comment for exactly what it does and doesn't fix. */
 export function parseJsonResponse(raw: string): Record<string, unknown> {
   const cleaned = stripMarkdownFences(sanitizeForPostgres(raw));
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
-  } catch (error) {
-    console.error("[course-generation] JSON.parse failed:", error, "\nRaw output (first 1000 chars):", raw.slice(0, 1000));
-    throw new Error("L'IA a renvoyé un JSON invalide ou tronqué (limite de tokens atteinte). Réessaie.");
+  } catch (firstError) {
+    const repaired = repairTruncatedJson(cleaned);
+    if (repaired) {
+      try {
+        parsed = JSON.parse(repaired);
+        console.warn(
+          "[course-generation] JSON tronqué détecté et réparé automatiquement (résultat potentiellement incomplet — la validation de schéma en aval reste responsable de détecter un contenu insuffisant)."
+        );
+      } catch {
+        console.error("[course-generation] JSON.parse failed (même après réparation):", firstError, "\nRaw output (first 1000 chars):", raw.slice(0, 1000));
+        throw new Error("L'IA a renvoyé un JSON invalide ou tronqué (limite de tokens atteinte). Réessaie.");
+      }
+    } else {
+      console.error("[course-generation] JSON.parse failed:", firstError, "\nRaw output (first 1000 chars):", raw.slice(0, 1000));
+      throw new Error("L'IA a renvoyé un JSON invalide ou tronqué (limite de tokens atteinte). Réessaie.");
+    }
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {

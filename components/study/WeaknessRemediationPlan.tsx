@@ -22,6 +22,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tStudyTools } from "@/lib/translations/studyTools";
 import type { RemediationPlan, RemediationPriority } from "@/types/remediation";
 
 type Status = "loading" | "needs-auth" | "error" | "no-modules-active" | "no-plan-yet" | "no-data" | "ready";
@@ -34,10 +36,11 @@ const PRIORITY_BADGE: Record<RemediationPriority, string> = {
   basse: "border-sky-300 bg-sky-100 text-sky-700 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-300",
 };
 
-const PRIORITY_LABEL: Record<RemediationPriority, string> = {
-  haute: "Priorité haute",
-  moyenne: "Priorité moyenne",
-  basse: "Priorité basse",
+/** Maps each priority to its studyTools.ts translation key — PRIORITY_LABEL used to hold the rendered French text directly, but that text now needs to vary by language, and this constant lives outside the component so it can't call useLanguage() itself. */
+const PRIORITY_LABEL_KEY: Record<RemediationPriority, "priorityHigh" | "priorityMedium" | "priorityLow"> = {
+  haute: "priorityHigh",
+  moyenne: "priorityMedium",
+  basse: "priorityLow",
 };
 
 function formatDate(iso: string): string {
@@ -45,6 +48,7 @@ function formatDate(iso: string): string {
 }
 
 export function WeaknessRemediationPlan() {
+  const { language } = useLanguage();
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
@@ -60,7 +64,7 @@ export function WeaknessRemediationPlan() {
 
       if (!res) {
         setStatus("error");
-        setError("Impossible de contacter le serveur.");
+        setError(tStudyTools("serverContactError", language));
         return;
       }
       if (res.status === 401) {
@@ -71,11 +75,17 @@ export function WeaknessRemediationPlan() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.success) {
         setStatus("error");
-        setError(body?.error ?? "Échec du chargement.");
+        setError(body?.error ?? tStudyTools("loadFailed", language));
         return;
       }
 
-      if ((body.activeModuleCount ?? 0) === 0) {
+      // "no-modules-active" is only the right empty state when NEITHER
+      // source has anything: no module activated for the Studio QCM-tab
+      // source, AND no Générateur d'Examen attempt on record either — a
+      // student who's only ever used the exam generator must still reach
+      // the "Générer" button below, not this dead end. See
+      // app/api/study/remediation-plan/route.ts's own comment.
+      if ((body.activeModuleCount ?? 0) === 0 && !body.hasExamAttempts) {
         setStatus("no-modules-active");
         return;
       }
@@ -92,6 +102,9 @@ export function WeaknessRemediationPlan() {
     return () => {
       cancelled = true;
     };
+    // `language` is read for its value at the moment an error/status string
+    // is produced, not a reason to re-run the load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleGenerate() {
@@ -102,7 +115,7 @@ export function WeaknessRemediationPlan() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.success) {
         setStatus("error");
-        setError(res.status === 429 ? buildRateLimitMessage(res) : body?.error ?? "Échec de la génération.");
+        setError(res.status === 429 ? buildRateLimitMessage(res) : body?.error ?? tStudyTools("generationFailed", language));
         return;
       }
       if (body.noData) {
@@ -113,7 +126,7 @@ export function WeaknessRemediationPlan() {
       setStatus("ready");
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Erreur inconnue.");
+      setError(err instanceof Error ? err.message : tStudyTools("unknownError", language));
     } finally {
       setIsGenerating(false);
     }
@@ -121,10 +134,10 @@ export function WeaknessRemediationPlan() {
 
   if (status === "loading") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-sm">Chargement de ton plan de remédiation...</span>
+          <span className="text-sm">{tStudyTools("loadingRemediationPlan", language)}</span>
         </CardContent>
       </Card>
     );
@@ -132,10 +145,10 @@ export function WeaknessRemediationPlan() {
 
   if (status === "needs-auth") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
           <LogIn className="h-6 w-6" />
-          <p className="text-sm">Connecte-toi pour voir tes points faibles.</p>
+          <p className="text-sm">{tStudyTools("signInForWeakPoints", language)}</p>
         </CardContent>
       </Card>
     );
@@ -143,12 +156,12 @@ export function WeaknessRemediationPlan() {
 
   if (status === "no-modules-active") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           <Target className="h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm font-semibold text-foreground">Aucun module actif.</p>
+          <p className="text-sm font-semibold text-foreground">{tStudyTools("noActiveModulesTitle", language)}</p>
           <p className="max-w-sm text-xs text-muted-foreground">
-            Activez « Points Faibles & Plan de Remédiation » depuis votre tableau de bord (menu ⋮ d&apos;un module).
+            {tStudyTools("noActiveModulesRemediationSubtitle", language)}
           </p>
         </CardContent>
       </Card>
@@ -158,16 +171,16 @@ export function WeaknessRemediationPlan() {
   const sortedWeakSpots = plan ? [...plan.weakSpots].sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]) : [];
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+    <Card className="animate-in fade-in-0 duration-300">
+      <CardHeader className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
           <ShieldAlert className="h-5 w-5" />
         </div>
         <div className="flex-1">
-          <CardTitle>Points Faibles &amp; Plan de Remédiation</CardTitle>
+          <CardTitle>{tStudyTools("cardTitle", language)}</CardTitle>
           {plan && (
             <>
-              <p className="text-xs text-muted-foreground">Généré le {formatDate(plan.generatedAt)}</p>
+              <p className="text-xs text-muted-foreground">{tStudyTools("generatedOn", language)} {formatDate(plan.generatedAt)}</p>
               {/* No automated staleness detection (would mean comparing
                   against qcm_attempts on every render, or a background job
                   neither of which exist here) — this is the honest,
@@ -175,56 +188,58 @@ export function WeaknessRemediationPlan() {
                   reflects a snapshot, not a live view, so a student who's
                   answered a bunch of new QCMs since knows to act on it. */}
               <p className="text-[11px] italic text-muted-foreground/80">
-                (Pensez à régénérer ce plan si vous avez récemment terminé de nouveaux QCMs)
+                {tStudyTools("regenerateReminder", language)}
               </p>
             </>
           )}
         </div>
         {status === "ready" && (
-          <Button variant="secondary" size="sm" onClick={handleGenerate} disabled={isGenerating}>
+          <Button variant="secondary" size="sm" onClick={handleGenerate} disabled={isGenerating} className="w-full sm:w-auto">
             {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            Régénérer
+            {tStudyTools("regenerateButton", language)}
           </Button>
         )}
       </CardHeader>
       <CardContent className="space-y-4">
         {status === "error" && (
-          <div className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground">
+          <div key="error" className="flex animate-in flex-col items-center gap-3 py-10 text-center text-muted-foreground fade-in-0 duration-300">
             <AlertTriangle className="h-6 w-6 text-amber-500" />
             <p className="text-sm">{error}</p>
           </div>
         )}
 
         {status === "no-data" && (
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
+          <div key="no-data" className="flex animate-in flex-col items-center gap-3 py-10 text-center fade-in-0 duration-300">
             <Target className="h-8 w-8 text-muted-foreground/50" />
-            <p className="text-sm font-semibold text-foreground">Pas encore assez de données.</p>
+            <p className="text-sm font-semibold text-foreground">{tStudyTools("notEnoughDataTitle", language)}</p>
             <p className="max-w-sm text-xs text-muted-foreground">
-              Réponds à quelques QCM dans les cours de tes modules actifs — le plan se construit à partir de tes vraies
-              erreurs.
+              {tStudyTools("notEnoughDataSubtitle", language)}
             </p>
           </div>
         )}
 
         {status === "no-plan-yet" && (
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <Target className="h-8 w-8 text-rose-500/70" />
-            <p className="text-sm font-semibold text-foreground">Ton plan de remédiation n&apos;a pas encore été généré.</p>
+          <div key="no-plan-yet" className="flex animate-in flex-col items-center gap-3 py-10 text-center fade-in-0 duration-300">
+            <Target className="h-8 w-8 text-primary-500/70" />
+            <p className="text-sm font-semibold text-foreground">{tStudyTools("noPlanYetTitle", language)}</p>
             <p className="max-w-sm text-xs text-muted-foreground">
-              L&apos;IA analyse tes QCM ratés ou fragiles dans tes modules actifs pour identifier tes points faibles réels,
-              triés par priorité clinique.
+              {tStudyTools("noPlanYetSubtitle", language)}
             </p>
             <Button onClick={handleGenerate} disabled={isGenerating} className="mt-2">
               {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Générer mon plan de remédiation
+              {tStudyTools("generatePlanButton", language)}
             </Button>
           </div>
         )}
 
         {status === "ready" && (
-          <div className="space-y-3">
+          <div key="ready" className="animate-in space-y-3 fade-in-0 duration-300">
             {sortedWeakSpots.map((spot, i) => (
-              <div key={i} className="rounded-2xl border border-border bg-card p-4">
+              <div
+                key={i}
+                style={{ animationDelay: `${i * 60}ms` }}
+                className="animate-in rounded-2xl border border-border bg-card p-4 fade-in slide-in-from-bottom-1 duration-300"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-bold text-foreground">{spot.concept}</p>
                   <div className="flex items-center gap-2">
@@ -237,13 +252,13 @@ export function WeaknessRemediationPlan() {
                         PRIORITY_BADGE[spot.priority]
                       )}
                     >
-                      {PRIORITY_LABEL[spot.priority]}
+                      {tStudyTools(PRIORITY_LABEL_KEY[spot.priority], language)}
                     </span>
                   </div>
                 </div>
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{spot.whyItMatters}</p>
-                <div className="mt-3 rounded-r-xl border-l-4 border-primary bg-primary-50 p-3 text-xs text-primary-900 dark:bg-primary-900/20 dark:text-primary-100">
-                  <p className="mb-0.5 text-[10px] font-black uppercase tracking-wide opacity-70">Comment progresser</p>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{spot.whyItMatters}</p>
+                <div className="mt-3 rounded-r-xl border-l-4 border-primary bg-primary-50 p-3 text-sm text-primary-900 dark:bg-primary-900/20 dark:text-primary-100">
+                  <p className="mb-0.5 text-[10px] font-black uppercase tracking-wide opacity-70">{tStudyTools("howToImprove", language)}</p>
                   {spot.actionableAdvice}
                 </div>
               </div>

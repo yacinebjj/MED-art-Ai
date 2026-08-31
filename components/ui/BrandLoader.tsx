@@ -1,12 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from "@/lib/utils";
 
 interface BrandLoaderProps {
   className?: string;
@@ -22,7 +17,23 @@ export function BrandLoader({ className, label }: BrandLoaderProps) {
           className
         )}
       >
-        <Image src="/logo.png" alt="Chargement" fill sizes="128px" className="object-contain" />
+        {/* Two staggered expanding rings — same "neural node halo" language
+            as AnimatedBrandMark (tailwind.config.ts's animate-ring-pulse),
+            reused here so a route-level loading screen reads as the same
+            brand identity rather than a generic spinner. Blurred so they
+            read as a soft bloom behind the (transparent-background) logo
+            PNG rather than a hard-edged shape peeking out from its corners,
+            and kept at the exact same inset-0 box as the logo itself (no
+            separate padding) so this degrades gracefully at every size this
+            component is used at in the app — both the full h-32 hero use
+            and the h-6 inline spinner use next to "Chargement du cours...".  */}
+        <span aria-hidden className="absolute inset-0 rounded-full bg-gradient-to-br from-primary-500/40 to-secondary-500/40 blur-xl animate-ring-pulse" />
+        <span
+          aria-hidden
+          className="absolute inset-0 rounded-full bg-gradient-to-br from-primary-500/40 to-secondary-500/40 blur-xl animate-ring-pulse"
+          style={{ animationDelay: "1.2s" }}
+        />
+        <Image src="/logo.png" alt="Chargement" fill sizes="128px" className="relative object-contain" />
       </div>
       {label && <p className="text-sm text-muted-foreground">{label}</p>}
     </div>

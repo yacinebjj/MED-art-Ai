@@ -1,46 +1,74 @@
+import { z } from "zod";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
-import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
-import { buildExamBatchPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
-import { ExamGenerationSchema, ExamBatchSchema } from "@/lib/ai/exam-schemas";
+import { callOpenRouter, OpenRouterError, HAIKU_MODEL } from "@/lib/ai/openrouter";
+import { buildExamBatchInstruction, buildExamStaticSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
+import { ExamGenerationSchema, ExamQuestionSchema } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
+import { poolExamQuestions, type ExamQuestion } from "@/lib/exam-pooling";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 // SEQUENTIAL BATCHING: the 40-question exam used to be requested in ONE call
 // (32000 max tokens, relying on the model not stopping early before 40),
-// then 4 batches of 10 — which still occasionally truncated (JSON.parse
-// failure on a cut-off response) because 8000 tokens for 10 fully-explained
-// QCMs, some of which drifted into verbose paragraph-length explanations,
-// wasn't always enough. Now 5 batches of 8: smaller per-call output, a
-// prompt instruction capping explanations at ~40 words each (the actual
-// token-count driver, not just the question count), AND a generous 8192
-// max_tokens per batch — for 8 short-explanation QCMs this is enough
-// headroom that hitting the ceiling should no longer happen in practice.
-const EXAM_BATCH_MAX_TOKENS = 8_192;
+// then 4 batches of 10 (8000 tokens — too tight for 10 fully-explained QCMs
+// on a real course), then 5 batches of 8 at 8192 tokens. STILL truncated in
+// production on a long, image/detail-dense course (a real 40k-char stress
+// test) — the "~40 words per explanation" instruction is a request, not a
+// hard ceiling the model always obeys, and a denser source text pushes it
+// toward longer, more specific explanations. Bumped again to 16000: real
+// headroom over what 8 QCMs with 5 explanations each has ever measured at,
+// even on a verbose response. lib/course-generation-shared.ts's
+// parseJsonResponse also now repairs a truncated response as a second line
+// of defense (recovers whatever complete questions made it through instead
+// of hard-failing the whole batch) — see that function's own comment.
+const EXAM_BATCH_MAX_TOKENS = 16_000;
 const QUESTIONS_PER_BATCH = 8;
-const TOTAL_BATCHES = 5;
 // 1 initial attempt + 1 retry — bounded so a persistently broken batch fails
 // (and refunds) the whole exam rather than looping indefinitely.
 const MAX_BATCH_ATTEMPTS = 2;
+
+// SMART AGGREGATION (product direction): the exam total no longer comes
+// exclusively from fresh generation. For each selected course, up to
+// QUESTIONS_PER_COURSE_TARGET already-generated, EXAM-COMPATIBLE QCMs (see
+// lib/exam-pooling.ts's own header comment for the exact compatibility
+// rules — no fabrication) are pooled first; only the shortfall is generated
+// fresh. Ceiling-divided so the total lands at/above EXAM_TARGET_TOTAL
+// regardless of how many courses are selected.
+const EXAM_TARGET_TOTAL = 40;
 // Only applied when `variation: true` — forces creative divergence for a
 // regenerated exam. Left unset (provider default) for a first generation,
 // since a first exam should stay close to the source material, not roam.
 const VARIATION_TEMPERATURE = 0.85;
 
-const MAX_PER_COURSE_CHARS = 8_000;
+// MAX_PER_COURSE_CHARS used to be a hard 8_000-char ceiling applied even
+// when a SINGLE course was selected — meaning a real 40-60k char course
+// (heavy on radiology/imaging detail, exactly the kind a "Semaine Bloquée"
+// exam most needs full coverage of) was silently gutted down to its first
+// ~20%, regardless of MAX_TOTAL_EXAM_CHARS's much larger budget. Raised to
+// match MAX_TOTAL_EXAM_CHARS itself, so a single course gets the ENTIRE
+// budget instead of an arbitrary low ceiling — the Math.min(...) below then
+// only ever bites for genuine multi-course selections, exactly as the
+// "spread the shared budget across N courses" design always intended.
+// Safe to raise without a proportional cost increase: generateExamBatch
+// below now sends this text inside a cache_control-marked system block, so
+// only the FIRST of the 5 sequential batches pays full price for it —
+// batches 2-5 read it from Anthropic's prompt cache instead of repricing it
+// from scratch every time.
 const MAX_TOTAL_EXAM_CHARS = 60_000;
+const MAX_PER_COURSE_CHARS = MAX_TOTAL_EXAM_CHARS;
 
 interface EligibleCourseRow {
   id: number;
   title: string;
   explication: string | null;
   raw_text: string;
+  qcms: unknown;
 }
 
 /** Same Explication-preferred, combined-budget-aware per-course cap used by the Workspace synthesis route — see that route's own comment for why. */
@@ -52,35 +80,65 @@ function buildCourseInputs(courses: EligibleCourseRow[]): ExamCourseInput[] {
   }));
 }
 
-type ExamQuestion = ReturnType<typeof ExamBatchSchema.parse>["questions"][number];
-
 /**
- * Generates ONE QUESTIONS_PER_BATCH-question batch, retrying THAT batch
- * alone (never the whole exam) up to MAX_BATCH_ATTEMPTS times on a parse/
- * validation failure. Course inputs are resent in full on every batch — the
- * model needs the full source text each time since it has no memory of
- * earlier calls; this is the real cost tradeoff of sequential batching
- * (roughly TOTAL_BATCHES× the course input tokens of the old single-call
- * approach, in exchange for a per-call output small enough to never
- * truncate).
+ * Generates ONE batch of exactly `questionsInThisBatch` questions, retrying
+ * THAT batch alone (never the whole exam) up to MAX_BATCH_ATTEMPTS times on
+ * a parse/validation failure. Only ever called now for the SHORTFALL — the
+ * portion pooling (lib/exam-pooling.ts) couldn't cover — so
+ * `questionsInThisBatch` is rarely the original fixed 8 anymore; the schema
+ * is built to match whatever count was actually requested.
+ *
+ * `batchIndex`/`totalBatches` are passed purely to reuse
+ * buildExamBatchInstruction's existing clinical/standard ratio framing
+ * (clinicalCountForBatch returns 0 once batchIndex exceeds its internal
+ * TOTAL_CLINICAL_QUESTIONS constant) — every shortfall chunk is deliberately
+ * requested as "all standard" questions, since pooled questions already
+ * supply most of the exam's real content and a partial top-up chunk doesn't
+ * divide cleanly into the original 90/10 standard/clinical ratio.
+ *
+ * The system message is the STATIC half (persona + full course content, see
+ * buildExamStaticSystemPrompt) marked `cache_control: ephemeral` — byte-
+ * identical across every shortfall chunk for this exam, so only the first
+ * chunk pays full price for it; later chunks hit Anthropic's prompt cache
+ * instead (roughly a 90% discount, per Anthropic's published cache-read
+ * pricing) rather than repricing the same course text from scratch — this
+ * is what makes MAX_PER_COURSE_CHARS above safe to raise without a
+ * proportional cost blowup. The DYNAMIC per-batch instructions (previousTopics,
+ * variation flag) go in the user message, which necessarily changes every
+ * call and was never a caching candidate.
  */
 async function generateExamBatch(
   inputs: ExamCourseInput[],
   batchIndex: number,
+  totalBatches: number,
+  questionsInThisBatch: number,
   isVariation: boolean,
   previousTopics: string[]
 ): Promise<ExamQuestion[]> {
+  const staticSystemPrompt = buildExamStaticSystemPrompt(inputs);
+  const batchSchema = z.object({ questions: z.array(ExamQuestionSchema).length(questionsInThisBatch) });
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_BATCH_ATTEMPTS; attempt++) {
     try {
-      const prompt = buildExamBatchPrompt(inputs, batchIndex, TOTAL_BATCHES, QUESTIONS_PER_BATCH, isVariation, previousTopics);
+      const batchInstruction = buildExamBatchInstruction(batchIndex, totalBatches, questionsInThisBatch, isVariation, previousTopics);
       const raw = await callOpenRouter(
         [
-          { role: "system", content: prompt },
-          { role: "user", content: `Génère le lot ${batchIndex} sur ${TOTAL_BATCHES} (${QUESTIONS_PER_BATCH} QCMs).` },
+          { role: "system", content: [{ type: "text", text: staticSystemPrompt, cache_control: { type: "ephemeral" } }] },
+          { role: "user", content: batchInstruction },
         ],
         {
-          model: STUDIO_MODEL,
+          // Haiku 4.5, not Sonnet — deliberate cost decision made SAFE by
+          // the pooling design above (see poolExamQuestions), not a blanket
+          // exam-quality downgrade. Most of a well-established course's exam
+          // now comes from POOLED Studio QCMs, still Sonnet-quality (reused
+          // verbatim from the Studio QCM tile, which stays on Sonnet) and
+          // never touching this call at all — this function only ever
+          // generates the SHORTFALL, a residual top-up, so Haiku's reduced
+          // clinical-reasoning depth only affects a fraction of the exam.
+          // Was Sonnet (~$0.50/exam observed, flagged as unacceptable);
+          // Haiku 4.5 is ~2x cheaper per token AND now only writes the
+          // residual portion.
+          model: HAIKU_MODEL,
           maxTokens: EXAM_BATCH_MAX_TOKENS,
           bypassMock: true,
           ...(isVariation ? { temperature: VARIATION_TEMPERATURE } : {}),
@@ -88,10 +146,10 @@ async function generateExamBatch(
       );
 
       const parsed = parseJsonResponse(raw);
-      const result = ExamBatchSchema.safeParse(parsed);
+      const result = batchSchema.safeParse(parsed);
       if (!result.success) {
-        console.error(`[exam/generate] Lot ${batchIndex}/${TOTAL_BATCHES} invalide (tentative ${attempt}/${MAX_BATCH_ATTEMPTS}):`, result.error.flatten());
-        throw new Error(`Le lot ${batchIndex} n'a pas produit exactement ${QUESTIONS_PER_BATCH} QCMs valides.`);
+        console.error(`[exam/generate] Lot ${batchIndex}/${totalBatches} invalide (tentative ${attempt}/${MAX_BATCH_ATTEMPTS}):`, result.error.flatten());
+        throw new Error(`Le lot ${batchIndex} n'a pas produit exactement ${questionsInThisBatch} QCMs valides.`);
       }
       return result.data.questions;
     } catch (error) {
@@ -102,6 +160,49 @@ async function generateExamBatch(
 }
 
 /**
+ * Generates the SHORTFALL only — however many questions pooling couldn't
+ * cover — in chunks of up to QUESTIONS_PER_BATCH, sequentially (each chunk
+ * told every topic already covered by pooling AND by earlier chunks in this
+ * same request, so "ensure new QCMs are completely distinct and
+ * non-overlapping with the existing ones" is enforced for real). Every
+ * chunk uses batchIndex/totalBatches values chosen so
+ * buildExamBatchInstruction's clinical-ratio math always yields "all
+ * standard" — see generateExamBatch's own comment for why.
+ */
+async function generateShortfallQuestions(
+  inputs: ExamCourseInput[],
+  totalNeeded: number,
+  isVariation: boolean,
+  poolTopics: string[]
+): Promise<ExamQuestion[]> {
+  const generated: ExamQuestion[] = [];
+  const topics = [...poolTopics];
+  let remaining = totalNeeded;
+  // ALL-STANDARD FRAMING: TOTAL_CLINICAL_QUESTIONS inside exam-prompts.ts is
+  // 4 — any batchIndex/totalBatches pair above that always yields 0 clinical
+  // questions for that chunk (see clinicalCountForBatch). Fixed at 5 for
+  // every chunk deliberately, not incremented per-chunk — purely cosmetic
+  // prompt framing, not a student-facing number.
+  const ALL_STANDARD_BATCH_INDEX = 5;
+
+  while (remaining > 0) {
+    const count = Math.min(QUESTIONS_PER_BATCH, remaining);
+    const batchQuestions = await generateExamBatch(inputs, ALL_STANDARD_BATCH_INDEX, ALL_STANDARD_BATCH_INDEX, count, isVariation, topics);
+    generated.push(...batchQuestions);
+    topics.push(...batchQuestions.map((q) => q.weakPointTag));
+    remaining -= count;
+  }
+  return generated;
+}
+
+// Global, per-student regeneration ceiling — 5 ever, across every module
+// (product direction). Hoisted to module scope (was previously a local
+// const inside POST's `if (isVariation)` block) so GET can report the same
+// live remaining-count the POST cap check itself enforces, instead of the
+// two ever drifting apart.
+const MODULE_EXAM_REGENERATE_CAP = 5;
+
+/**
  * GET a student's saved exams for one module — the "Mes Examens" sidebar
  * history. Ordered ascending by created_at so the frontend can label them
  * "Examen 1", "Examen 2"... in the order they were actually generated.
@@ -109,6 +210,15 @@ async function generateExamBatch(
  * cross-module leakage bug: there was previously no real per-module fetch
  * at all (the sidebar showed a hardcoded MOCK_COURSES list identically on
  * every module), not a filter that forgot to apply.
+ *
+ * ALSO reports the student's live "Régénérer" quota (regenerationsUsed /
+ * regenerationsRemaining, from profiles.module_exam_regenerations_used) so
+ * the frontend can sync its attempts counter to server truth on mount
+ * instead of trusting a client-local value that always resets to
+ * MAX_ATTEMPTS on reload. This secondary read fails OPEN (0 used, full cap
+ * remaining) on error — a profile-read hiccup shouldn't take down the whole
+ * exam history fetch, and the real cap is still enforced authoritatively by
+ * reserve_module_exam_regenerate in POST regardless of what this GET reports.
  */
 export async function GET(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -139,6 +249,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
   }
 
+  let regenerationsUsed = 0;
+  try {
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("module_exam_regenerations_used")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profileError) {
+      console.warn("[exam/generate] Échec lecture quota régénération (fail-open à 0):", profileError.message);
+    } else {
+      regenerationsUsed = profile?.module_exam_regenerations_used ?? 0;
+    }
+  } catch (profileReadError) {
+    console.warn("[exam/generate] Erreur inattendue lecture quota régénération (fail-open à 0):", profileReadError);
+  }
+  const regenerationsRemaining = Math.max(0, MODULE_EXAM_REGENERATE_CAP - regenerationsUsed);
+
   return NextResponse.json({
     success: true,
     exams: (data ?? []).map((row) => ({
@@ -147,6 +274,8 @@ export async function GET(request: NextRequest) {
       content: row.content,
       createdAt: row.created_at,
     })),
+    regenerationsUsed,
+    regenerationsRemaining,
   });
 }
 
@@ -194,11 +323,57 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabaseAdmin();
 
+  // Global, per-student regeneration ceiling — 5 ever, across every module
+  // (product direction). Checked BEFORE anything else on a variation
+  // request, so a capped-out student never even reaches the quota
+  // reservation below. A first-ever generation (isVariation === false) never
+  // counts against this — only explicit "Régénérer" clicks do.
+  //
+  // Captured outside the `if` so the final success response below can
+  // report the SAME authoritative remaining-count the RPC just computed,
+  // instead of the frontend having to guess or re-derive it separately.
+  let regenerationsRemaining: number | undefined;
+  if (isVariation) {
+    const { data: regenCount, error: regenCapError } = await supabase.rpc("reserve_module_exam_regenerate", {
+      p_user_id: user.id,
+      p_cap: MODULE_EXAM_REGENERATE_CAP,
+    });
+    if (regenCapError) {
+      console.error("[exam/generate] Échec réservation du plafond de régénération:", regenCapError.message);
+      return NextResponse.json({ success: false, error: `Vérification du plafond échouée : ${regenCapError.message}` }, { status: 500 });
+    }
+    if (regenCount === null) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Tu as atteint la limite de ${MODULE_EXAM_REGENERATE_CAP} régénérations pour l'Examen de Module.`,
+          regenerationsRemaining: 0,
+        },
+        { status: 403 }
+      );
+    }
+    // regenCount is the RPC's post-increment used-count for this student.
+    regenerationsRemaining = Math.max(0, MODULE_EXAM_REGENERATE_CAP - regenCount);
+  }
+
+  // Captured here, not read as `user.id` inside the nested function below —
+  // TS's control-flow narrowing from the `if (!user)` guard above doesn't
+  // cross a nested function-declaration boundary (same gotcha hit earlier
+  // in app/api/studio/regenerate/route.ts).
+  const userId = user.id;
+
+  /** Undoes the regeneration reservation above on a downstream failure — same "a failed attempt shouldn't cost you a unit" fairness as refundGeneration. No-op for a first-ever (non-variation) generation. */
+  async function refundModuleExamRegenerateIfNeeded() {
+    if (!isVariation) return;
+    const { error } = await supabase.rpc("refund_module_exam_regenerate", { p_user_id: userId });
+    if (error) console.warn("[exam/generate] Échec refund_module_exam_regenerate:", error.message);
+  }
+
   // Scoped to THIS user AND THIS module — a courseId the student doesn't
   // own, or one that belongs to a different module, is silently excluded.
   const { data: courses, error: coursesError } = await supabase
     .from("studio_courses")
-    .select("id, title, explication, raw_text")
+    .select("id, title, explication, raw_text, qcms")
     .eq("user_id", user.id)
     .eq("curriculum_module_id", moduleId)
     .in("id", courseIds)
@@ -206,11 +381,13 @@ export async function POST(request: NextRequest) {
 
   if (coursesError) {
     console.error("[exam/generate] Échec lecture Supabase:", coursesError);
+    await refundModuleExamRegenerateIfNeeded();
     return NextResponse.json({ success: false, error: `Lecture échouée : ${coursesError.message}` }, { status: 500 });
   }
 
   const eligibleCourses = (courses ?? []) as EligibleCourseRow[];
   if (eligibleCourses.length === 0) {
+    await refundModuleExamRegenerateIfNeeded();
     return NextResponse.json({ success: false, error: "Aucun cours sélectionné trouvé dans ce module." }, { status: 400 });
   }
 
@@ -219,47 +396,92 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
   }
 
-  let validated: ReturnType<typeof ExamGenerationSchema.parse>;
-  try {
-    const inputs = buildCourseInputs(eligibleCourses);
-
-    // SEQUENTIAL BATCHING: 4 calls of 10 questions each, awaited one after
-    // another (not in parallel) — each subsequent call is told exactly which
-    // weakPointTags the earlier batches already covered, so "logical flow
-    // and topic distribution" is enforced for real rather than left to 4
-    // independently-guessing calls. The whole exam only ever succeeds as a
-    // single atomic unit: if a batch exhausts its own retries, the entire
-    // request fails and refunds — no partial exam is ever saved.
-    const allQuestions: ExamQuestion[] = [];
-    for (let batchIndex = 1; batchIndex <= TOTAL_BATCHES; batchIndex++) {
-      const previousTopics = allQuestions.map((q) => q.weakPointTag);
-      const batchQuestions = await generateExamBatch(inputs, batchIndex, isVariation, previousTopics);
-      allQuestions.push(...batchQuestions);
-    }
-
-    const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
-    if (!result.success) {
-      // Should be unreachable in practice — each batch is already validated
-      // to exactly 10 well-formed questions, and 4×10=40 satisfies
-      // ExamGenerationSchema's own min(40).max(60). Kept as a final
-      // backstop rather than trusting the arithmetic blindly.
-      console.error("[exam/generate] Examen final invalide malgré des lots valides:", result.error.flatten());
-      throw new Error("L'IA n'a pas produit un examen valide (nombre de questions ou format incorrect). Réessaie.");
-    }
-    validated = result.data;
-  } catch (error) {
-    await refundGeneration(user.id);
-    if (error instanceof OpenRouterError) {
-      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-    }
-    console.error("[exam/generate] Erreur non gérée:", error);
-    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
+  // Cross-student cache, keyed on the SET of selected courses' content — see
+  // exam_content_cache's comment in supabase/schema.sql. Skipped entirely for
+  // variation:true requests: that flag IS this route's own "Régénérer",
+  // which must always produce (and never overwrite the canonical cache with)
+  // a fresh exam — see lib/exam-content-cache.ts's own doc comment.
+  const contentHash = computeExamContentHash(eligibleCourses);
+  let cachedContent: unknown | null = null;
+  if (!isVariation) {
+    cachedContent = await lookupExamCache(contentHash);
+    if (cachedContent) void recordExamCacheHit(contentHash);
   }
 
-  const content = sanitizeForPostgres({
-    questions: validated.questions.map((question, index) => ({ id: `q${index + 1}`, ...question })),
-  });
+  let validated: ReturnType<typeof ExamGenerationSchema.parse> | null = null;
+  if (!cachedContent) {
+    try {
+      const inputs = buildCourseInputs(eligibleCourses);
+
+      // SMART AGGREGATION (see lib/exam-pooling.ts's own header comment for
+      // the exact compatibility rules) — pool each course's own already-
+      // generated, exam-compatible QCMs FIRST, ceiling-divided so the target
+      // total lands at/above EXAM_TARGET_TOTAL regardless of course count.
+      // Applied identically on a first-ever generation AND on
+      // `variation: true` (Régénérer) — a regeneration naturally draws a
+      // different random subset whenever a course's compatible pool is
+      // larger than its target (see poolExamQuestions' own shuffle comment),
+      // satisfying "shuffle and pull a different subset" without any
+      // separate "already shown" tracking.
+      const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / eligibleCourses.length));
+      const { pooled, totalShortfall, shortfallByCourse } = poolExamQuestions(
+        eligibleCourses.map((c) => ({ title: c.title, qcms: c.qcms })),
+        targetPerCourse
+      );
+      if (shortfallByCourse.length > 0) {
+        console.log(`[exam/generate] Pool insuffisant pour ${shortfallByCourse.length} cours (fallback génération) :`, shortfallByCourse);
+      }
+
+      // The AI is ONLY invoked for the shortfall — "generate new QCMs
+      // ensuring they are completely distinct and non-overlapping with the
+      // existing ones" is enforced by feeding every pooled question's
+      // weakPointTag as previousTopics to avoid.
+      const generatedQuestions =
+        totalShortfall > 0
+          ? await generateShortfallQuestions(inputs, totalShortfall, isVariation, pooled.map((q) => q.weakPointTag))
+          : [];
+
+      // Upper-bound safety net: targetPerCourse is ceiling-divided, so for an
+      // unusually large course count the combined total could land just
+      // above ExamGenerationSchema's own max(60) — trimmed here rather than
+      // failing the whole request over an edge case that never loses the
+      // required 40-question floor (targetPerCourse*courses.length is
+      // always >= EXAM_TARGET_TOTAL by construction).
+      const allQuestions = [...pooled, ...generatedQuestions].slice(0, 60);
+
+      const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
+      if (!result.success) {
+        // Should be unreachable in practice — pooled questions are already
+        // validated by poolExamQuestions, generated ones by
+        // generateShortfallQuestions, and the combined count is
+        // constructed to satisfy ExamGenerationSchema's min(40).max(60).
+        // Kept as a final backstop rather than trusting the arithmetic
+        // blindly.
+        console.error("[exam/generate] Examen final invalide malgré des lots valides:", result.error.flatten());
+        throw new Error("L'IA n'a pas produit un examen valide (nombre de questions ou format incorrect). Réessaie.");
+      }
+      validated = result.data;
+    } catch (error) {
+      await refundGeneration(user.id);
+      await refundModuleExamRegenerateIfNeeded();
+      if (error instanceof OpenRouterError) {
+        return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+      }
+      console.error("[exam/generate] Erreur non gérée:", error);
+      return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
+    }
+  }
+
+  const content = cachedContent
+    ? cachedContent
+    : sanitizeForPostgres({
+        questions: validated!.questions.map((question, index) => ({ id: `q${index + 1}`, ...question })),
+      });
   const selectedCourses = eligibleCourses.map((course) => ({ id: course.id, title: course.title }));
+
+  if (!cachedContent && !isVariation) {
+    void storeExamCache(contentHash, content, selectedCourses);
+  }
 
   const { data: inserted, error: insertError } = await supabase
     .from("module_generated_exams")
@@ -277,6 +499,7 @@ export async function POST(request: NextRequest) {
     // failure (refunded), not a partial success, per this route's
     // atomic generate-then-save policy.
     await refundGeneration(user.id);
+    await refundModuleExamRegenerateIfNeeded();
     console.error("[exam/generate] Échec sauvegarde:", insertError);
     return NextResponse.json({ success: false, error: "L'examen a été généré mais n'a pas pu être sauvegardé. Réessaie." }, { status: 500 });
   }
@@ -289,5 +512,9 @@ export async function POST(request: NextRequest) {
       content: inserted.content,
       createdAt: inserted.created_at,
     },
+    // Only set for isVariation:true requests (see above) — a first-ever
+    // generation doesn't touch the regeneration cap, so there's nothing new
+    // to report here; the frontend's GET-history sync already covers that case.
+    ...(regenerationsRemaining !== undefined ? { regenerationsRemaining } : {}),
   });
 }

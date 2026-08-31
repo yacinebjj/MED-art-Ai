@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   Bold,
+  ChevronRight,
   Code,
   Italic,
   Link2,
   Loader2,
+  Lock,
   Maximize2,
   Minimize2,
   MoreVertical,
@@ -17,12 +19,16 @@ import {
   Redo2,
   RefreshCw,
   SlidersHorizontal,
+  Sparkles,
   SquarePen,
   Trash2,
   Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTextSelection } from "@/hooks/useTextSelection";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tStudio, getSectionLabel } from "@/lib/translations/studio";
+import { GeneratingRotatingLabel } from "@/components/course/workspace/GeneratingRotatingLabel";
 import { Button } from "@/components/ui/Button";
 import {
   DropdownMenu,
@@ -42,9 +48,10 @@ interface StudioPanelProps {
   onItemClick: (id: DemoSectionId) => void;
   onCloseSection: () => void;
   getSectionStatus: (id: DemoSectionId) => SectionStatus;
-  generatingSection: DemoSectionId | null;
-  /** Optional — omitted entirely by pages backed by a data model "Regénérer" doesn't support yet (see app/dashboard/demo/[slug]/page.tsx's legacy production pipeline), in which case the menu item is simply not rendered. */
-  regeneratingSection?: DemoSectionId | null;
+  /** A Set, not a single id — several sections can now generate concurrently (a student clicking Résumé no longer blocks clicking Cas Clinique before the first finishes). Each tile checks its OWN membership (`.has(section.id)`), never a single shared value. */
+  generatingSections: Set<DemoSectionId>;
+  /** Optional — omitted entirely by pages backed by a data model "Regénérer" doesn't support yet (see app/dashboard/demo/[slug]/page.tsx's legacy production pipeline), in which case the menu item is simply not rendered. Same Set-based shape as generatingSections. */
+  regeneratingSections?: Set<DemoSectionId>;
   onRegenerateSection?: (id: DemoSectionId) => void;
   sourceCount: number;
   isNoteOpen: boolean;
@@ -60,6 +67,8 @@ interface StudioPanelProps {
   /** Passed straight through to TextSelectionToolbar's "Add Note" — see that component's own doc comment. Optional: omitted by callers with no module in scope. */
   moduleId?: number;
   courseTitle?: string;
+  /** Passed straight through to TextSelectionToolbar so a saved highlight POSTs against the right course (see /api/highlights) — omitted by callers with no fixed slug (e.g. the generic numeric-id module workspace, which has no equivalent yet). Without this, TextSelectionToolbar's save silently no-ops. */
+  courseSlug?: string;
   /** Notified whenever the internal collapse toggle fires — the panel's own root controls its ephemeral (w-20 vs w-full) width, but the page-level `<aside>` wrapping it may want to shrink/grow its own fixed width in lockstep (see app/dashboard/module/[id]/page.tsx). Optional: a caller that omits this still gets a fully working collapse, just without the outer wrapper reacting. */
   onCollapsedChange?: (collapsed: boolean) => void;
   children: React.ReactNode;
@@ -67,10 +76,34 @@ interface StudioPanelProps {
 
 /** Contrasted, interactive icon-button style for panel chrome (collapse/expand controls). */
 const PANEL_ICON_BUTTON_CLASSES =
-  "p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-gray-100 dark:hover:bg-neutral-800 transition-colors";
+  "p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-300 active:scale-[0.94]";
 
 const TOOLBAR_BUTTON_CLASSES =
-  "rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-neutral-800";
+  "rounded-lg p-1.5 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]";
+
+/**
+ * Glassmorphism icon-button style for the exit control on the fullscreen
+ * (isSectionExpanded) overlay specifically — deliberately distinct from
+ * PANEL_ICON_BUTTON_CLASSES above. Matches, verbatim, the "floating glass
+ * pill" back-button recipe already established for full-viewport surfaces
+ * elsewhere in the app (see the "Retour aux groupes" link in
+ * components/groups/ChatRoom.tsx: border-white/20 + bg-white/10 +
+ * backdrop-blur-md + rounded-full), so exiting Studio's own full-viewport
+ * mode gets the same affordance a student already knows from that other
+ * immersive surface, not a plain flat icon button.
+ */
+const GLASS_EXIT_BUTTON_CLASSES =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-foreground shadow-lg backdrop-blur-md transition-all duration-200 hover:-translate-x-0.5 hover:bg-white/20 active:scale-90";
+
+/**
+ * Same "floating glass pill" recipe as GLASS_EXIT_BUTTON_CLASSES above, minus
+ * the horizontal hover-shift — that motion reads as "step back" and belongs
+ * to the exit control alone. Used for any other icon trigger placed on the
+ * same full-viewport glass overlay header (the "..." Régénérer menu next to
+ * it).
+ */
+const GLASS_ICON_BUTTON_CLASSES =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-foreground shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-white/20 active:scale-90";
 
 /**
  * Solid (non-alpha) background tint for the detail view — one per section,
@@ -89,29 +122,101 @@ const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
   exemples_analogies: "bg-yellow-50 dark:bg-yellow-950",
 };
 
-/** Soft tint per study mode — light-mode pastel + a discreet dark-mode counterpart. Exported for reuse by MobileStudioCards' large-card grid, so both surfaces share the exact same per-section color identity. */
-export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string }> = {
+/**
+ * Soft tint per study mode — light-mode pastel + a discreet dark-mode
+ * counterpart. Exported for reuse by MobileStudioCards' large-card grid, so
+ * both surfaces share the exact same per-section color identity. `dot` is a
+ * SOLID counterpart of `icon`'s color, spelled out as its own literal
+ * classes (not derived from `icon` at runtime via string replace) —
+ * Tailwind's JIT scanner only generates CSS for class names it can see
+ * verbatim in source, so a computed "bg-" + a runtime-extracted hue would
+ * silently produce zero CSS and render invisible.
+ */
+export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: string }> = {
   explication: {
     bg: "bg-emerald-50/80 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-900/40",
     icon: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-emerald-500 dark:bg-emerald-400",
   },
   resume: {
     bg: "bg-blue-50/80 dark:bg-blue-950/20 border-blue-200/50 dark:border-blue-900/40",
     icon: "text-blue-600 dark:text-blue-400",
+    dot: "bg-blue-500 dark:bg-blue-400",
   },
   cas_clinique: {
     bg: "bg-amber-50/80 dark:bg-amber-950/20 border-amber-200/50 dark:border-amber-900/40",
     icon: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500 dark:bg-amber-400",
   },
   qcm: {
     bg: "bg-purple-50/80 dark:bg-purple-950/20 border-purple-200/50 dark:border-purple-900/40",
     icon: "text-purple-600 dark:text-purple-400",
+    dot: "bg-purple-500 dark:bg-purple-400",
   },
   exemples_analogies: {
     bg: "bg-yellow-50/80 dark:bg-yellow-950/20 border-yellow-200/50 dark:border-yellow-900/40",
     icon: "text-yellow-600 dark:text-yellow-400",
+    dot: "bg-yellow-500 dark:bg-yellow-400",
   },
 };
+
+/**
+ * "..." trigger + Régénérer/Supprimer menu for the OPENED section's own
+ * detail-view header (both the inline collapsed header and the fullscreen
+ * overlay header below) — mirrors, item-for-item, the identical DropdownMenu
+ * already used further down for each "Récemment généré" list row: same two
+ * items, same conditional Régénérer gate (hidden entirely when the caller
+ * omits `onRegenerateSection`), same bare/unwired Supprimer. While a
+ * regeneration for THIS section is in flight, the trigger itself morphs into
+ * a static spinning RefreshCw in the same slot — matching
+ * MobileStudioCards' own CardOptionsMenu regenerating treatment — instead of
+ * opening a menu with nothing new to offer mid-flight.
+ */
+function SectionOptionsMenu({
+  sectionId,
+  onRegenerateSection,
+  isRegenerating,
+  triggerClassName,
+}: {
+  sectionId: DemoSectionId;
+  onRegenerateSection?: (id: DemoSectionId) => void;
+  isRegenerating: boolean;
+  triggerClassName: string;
+}) {
+  const { language } = useLanguage();
+
+  if (isRegenerating) {
+    return (
+      <span aria-hidden className={triggerClassName}>
+        <RefreshCw className="h-4 w-4 animate-spin" />
+      </span>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" aria-label="Options" className={triggerClassName}>
+          <MoreVertical className="h-4 w-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {/* Cas Clinique regeneration is permanently disabled by product
+            direction — the 3 generated cases must stay static forever, so
+            this item never renders for that section regardless of what the
+            caller passes as onRegenerateSection. Enforced again server-side
+            in app/api/studio/regenerate/route.ts — this is the UI half only. */}
+        {onRegenerateSection && sectionId !== "cas_clinique" && (
+          <DropdownMenuItem onSelect={() => onRegenerateSection(sectionId)}>
+            <RefreshCw className="h-4 w-4" />
+            {tStudio("regenerate", language)}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 /**
  * Right "Studio" panel: a grid of the course's real study modes (no
@@ -129,8 +234,8 @@ export function StudioPanel({
   onItemClick,
   onCloseSection,
   getSectionStatus,
-  generatingSection,
-  regeneratingSection,
+  generatingSections,
+  regeneratingSections,
   onRegenerateSection,
   sourceCount,
   isNoteOpen,
@@ -145,12 +250,63 @@ export function StudioPanel({
   onTranslateSelection,
   moduleId,
   courseTitle,
+  courseSlug,
   onCollapsedChange,
   children,
 }: StudioPanelProps) {
+  const { language } = useLanguage();
   const [isSectionExpanded, setIsSectionExpanded] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
+  const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
+  const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * The note editor is a plain <textarea> (Markdown source, rendered as
+   * Markdown elsewhere in the app — same convention as Notes), not a
+   * contentEditable rich-text surface, so there's no execCommand-style
+   * "apply bold" to call. Wrapping the current selection in the matching
+   * Markdown markers is the correct, real equivalent for a plain-text
+   * input — was previously entirely unwired (every toolbar button below
+   * had no onClick at all).
+   */
+  function wrapNoteSelection(before: string, after: string = before) {
+    const el = noteTextareaRef.current;
+    if (!el) return;
+    const { selectionStart, selectionEnd, value } = el;
+    const selected = value.slice(selectionStart, selectionEnd);
+    const next = `${value.slice(0, selectionStart)}${before}${selected}${after}${value.slice(selectionEnd)}`;
+    onNoteContentChange(next);
+    // Restore focus + a sensible selection (the wrapped text itself, or the
+    // cursor between the markers if nothing was selected) on the NEXT tick —
+    // onNoteContentChange re-renders the controlled value first.
+    requestAnimationFrame(() => {
+      el.focus();
+      const cursorStart = selectionStart + before.length;
+      const cursorEnd = cursorStart + selected.length;
+      el.setSelectionRange(cursorStart, cursorEnd);
+    });
+  }
+
+  /** Strips the common Markdown markers this toolbar itself inserts from the current selection — the "Normal" (clear formatting) button. */
+  function clearNoteSelectionFormatting() {
+    const el = noteTextareaRef.current;
+    if (!el) return;
+    const { selectionStart, selectionEnd, value } = el;
+    const selected = value.slice(selectionStart, selectionEnd);
+    const cleaned = selected.replace(/\*\*(.*?)\*\*/g, "$1").replace(/\*(.*?)\*/g, "$1").replace(/`(.*?)`/g, "$1");
+    const next = `${value.slice(0, selectionStart)}${cleaned}${value.slice(selectionEnd)}`;
+    onNoteContentChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(selectionStart, selectionStart + cleaned.length);
+    });
+  }
+
+  /** Native undo/redo history for the textarea — a controlled React input still accumulates the browser's own edit history as the student types, so execCommand can drive it directly; there is no simpler reliable equivalent for a plain <textarea>. */
+  function triggerNoteHistory(command: "undo" | "redo") {
+    noteTextareaRef.current?.focus();
+    document.execCommand(command);
+  }
 
   function toggleCollapsed() {
     setIsCollapsed((prev) => {
@@ -194,8 +350,18 @@ export function StudioPanel({
   }, []);
 
   const generations = sections.filter(
-    (section) => getSectionStatus(section.id) === "available" || generatingSection === section.id
+    (section) => getSectionStatus(section.id) === "available" || generatingSections.has(section.id)
   );
+
+  // Looked up once here (rather than re-deriving inline in three places
+  // below: the collapsed header, the expanded-overlay header, and its icon
+  // chip) so the opened section's own icon/tint can ride along the "Studio /
+  // {label}" breadcrumb — the whole point being that a student glancing at
+  // the header instantly recognizes which of the study modes they're in by
+  // its familiar color+icon identity, the same one they just clicked in the
+  // browse grid, never just a bare label.
+  const openedSectionData = openedSection ? sections.find((s) => s.id === openedSection) : undefined;
+  const openedTint = openedSection ? TILE_TINTS[openedSection] : undefined;
 
   return (
     <div
@@ -206,7 +372,7 @@ export function StudioPanel({
     >
       <div
         className={cn(
-          "flex items-center justify-between border-b border-gray-200 p-2 dark:border-neutral-800 md:p-4",
+          "flex items-center justify-between border-b border-border p-2 transition-colors duration-300 md:p-4",
           !isNoteOpen && detailBg
         )}
       >
@@ -217,24 +383,40 @@ export function StudioPanel({
             className={cn(PANEL_ICON_BUTTON_CLASSES, "flex items-center gap-2 !px-3 text-sm font-medium")}
           >
             <ArrowLeft className="h-4 w-4 shrink-0" />
-            {!isCollapsed && "Studio"}
+            {!isCollapsed && tStudio("studioHeading", language)}
           </button>
         ) : openedSection ? (
+          // "Studio / {label}" breadcrumb + the section's own icon+tint (the
+          // exact identity it carries in the browse grid) — a student
+          // stepping into a detail view always sees both where they came
+          // from and which of the study modes they're now in, never just an
+          // ambiguous back arrow + title.
           <button
             type="button"
             onClick={onCloseSection}
-            className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100"
+            className="group flex min-w-0 items-center gap-2 rounded-lg py-1 pr-2 text-sm font-semibold text-foreground transition-all duration-300 hover:-translate-x-0.5"
           >
-            <ArrowLeft className="h-4 w-4 shrink-0" />
-            {!isCollapsed && <span className="truncate">{openedLabel}</span>}
+            <ArrowLeft className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+            {!isCollapsed && (
+              <>
+                <span className="hidden text-muted-foreground transition-colors group-hover:text-foreground sm:inline">{tStudio("studioHeading", language)}</span>
+                <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:inline" />
+                {openedTint && openedSectionData && (
+                  <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg", openedTint.bg, openedTint.icon)}>
+                    <openedSectionData.icon className="h-3.5 w-3.5" />
+                  </span>
+                )}
+                <span className="truncate">{openedLabel}</span>
+              </>
+            )}
           </button>
         ) : (
           !isCollapsed && (
             <div className="flex items-center gap-2">
-              <button type="button" aria-label="Filtrer" className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("filterAria", language)} className={TOOLBAR_BUTTON_CLASSES}>
                 <SlidersHorizontal className="h-4 w-4" />
               </button>
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Studio</h2>
+              <h2 className="text-sm font-semibold text-foreground">{tStudio("studioHeading", language)}</h2>
             </div>
           )
         )}
@@ -244,7 +426,7 @@ export function StudioPanel({
             <button
               type="button"
               onClick={onDeleteNote}
-              aria-label="Supprimer la note"
+              aria-label={tStudio("deleteNoteAria", language)}
               className={PANEL_ICON_BUTTON_CLASSES}
             >
               <Trash2 className="h-4 w-4" />
@@ -252,10 +434,18 @@ export function StudioPanel({
           ) : (
             <>
               {openedSection && !isCollapsed && (
+                <SectionOptionsMenu
+                  sectionId={openedSection}
+                  onRegenerateSection={onRegenerateSection}
+                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
+                  triggerClassName={PANEL_ICON_BUTTON_CLASSES}
+                />
+              )}
+              {openedSection && !isCollapsed && (
                 <button
                   type="button"
                   onClick={() => setIsSectionExpanded(true)}
-                  aria-label="Agrandir"
+                  aria-label={tStudio("expandAria", language)}
                   className={PANEL_ICON_BUTTON_CLASSES}
                 >
                   <Maximize2 className="h-4 w-4" />
@@ -264,7 +454,7 @@ export function StudioPanel({
               <button
                 type="button"
                 onClick={toggleCollapsed}
-                aria-label={isCollapsed ? "Ouvrir le panneau" : "Réduire le panneau"}
+                aria-label={tStudio(isCollapsed ? "openPanelAria" : "collapsePanelAria", language)}
                 aria-pressed={isCollapsed}
                 className={PANEL_ICON_BUTTON_CLASSES}
               >
@@ -279,7 +469,7 @@ export function StudioPanel({
         <div className={cn("h-full overflow-y-auto", openedSection && detailBg)}>
           {openedSection ? (
             isSectionExpanded ? null : (
-              <div ref={containerRef} className="p-2 md:p-4">
+              <div ref={containerRef} data-selectable className="p-2 md:p-4">
                 {children}
               </div>
             )
@@ -288,26 +478,56 @@ export function StudioPanel({
               <div className={cn("grid gap-1.5 md:gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-2")}>
                 {sections.map((section) => {
                   const Icon = section.icon;
-                  const isGenerating = generatingSection === section.id;
+                  const isGenerating = generatingSections.has(section.id);
                   const tint = TILE_TINTS[section.id];
+                  const isDone = getSectionStatus(section.id) === "available";
+                  // Enforced Studio Pipeline — every section except
+                  // Explication Ultra-Détaillée is locked until that one is
+                  // generated for this course. Product decision, explicitly
+                  // confirmed: does not reduce chat cost, forces a real
+                  // generation on every course. getSectionStatus("explication")
+                  // reflects the CURRENT course regardless of which section
+                  // is being rendered here — reused rather than re-derived.
+                  const isLocked = section.id !== "explication" && getSectionStatus("explication") !== "available";
                   return (
                     <button
                       key={section.id}
                       type="button"
-                      disabled={isGenerating}
+                      disabled={isGenerating || isLocked}
                       onClick={() => onItemClick(section.id)}
-                      title={isCollapsed ? section.label : undefined}
+                      title={isLocked ? tStudio("lockedTooltip", language) : isCollapsed ? getSectionLabel(section.id, language) : undefined}
+                      aria-disabled={isLocked}
                       className={cn(
-                        "flex items-center gap-2 rounded-xl border text-xs font-medium text-gray-700 transition-all hover:scale-[1.01] hover:shadow-sm disabled:cursor-wait disabled:opacity-70 disabled:hover:scale-100 dark:text-gray-200 md:text-sm",
+                        "group relative flex items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-sm",
+                        isGenerating && "disabled:cursor-wait",
                         isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between p-2 text-left md:p-3",
                         tint.bg
                       )}
                     >
-                      {!isCollapsed && <span className="truncate">{section.label}</span>}
+                      {!isCollapsed && <span className="truncate">{getSectionLabel(section.id, language)}</span>}
                       {isGenerating ? (
-                        <Loader2 className={cn("shrink-0 animate-spin text-gray-400", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
+                        <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
+                      ) : isLocked ? (
+                        <Lock className={cn("shrink-0 text-muted-foreground", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
                       ) : (
-                        <Icon className={cn("shrink-0", isCollapsed ? "h-5 w-5" : "h-4 w-4", tint.icon)} />
+                        <Icon
+                          className={cn(
+                            "shrink-0 transition-transform duration-300 group-hover:scale-110",
+                            isCollapsed ? "h-5 w-5" : "h-4 w-4",
+                            tint.icon
+                          )}
+                        />
+                      )}
+                      {/* A quiet "already generated" tell (no separate label,
+                          no layout shift) so a returning student can tell
+                          apart a tile they already have content in from one
+                          they haven't opened yet at a glance, before even
+                          reading the "recent generations" list below. */}
+                      {isDone && !isGenerating && (
+                        <span
+                          aria-hidden
+                          className={cn("absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full", tint.dot)}
+                        />
                       )}
                     </button>
                   );
@@ -316,22 +536,23 @@ export function StudioPanel({
 
               {!isCollapsed && generations.length > 0 && (
                 <div className="flex flex-col gap-1">
+                  <p className="flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <Sparkles className="h-3 w-3" />
+                    {tStudio("recentlyGenerated", language)}
+                  </p>
                   {generations.map((section) => {
                     const Icon = section.icon;
-                    const isGenerating = generatingSection === section.id;
-                    const isRegenerating = regeneratingSection === section.id;
+                    const isGenerating = generatingSections.has(section.id);
+                    const isRegenerating = regeneratingSections?.has(section.id) ?? false;
 
                     if (isGenerating) {
                       return (
                         <div
                           key={section.id}
-                          className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm text-gray-500 dark:text-gray-400"
+                          className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm text-muted-foreground"
                         >
                           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                          <span className="truncate">
-                            Generating {section.label.toLowerCase()}... based on {sourceCount} source
-                            {sourceCount > 1 ? "s" : ""}
-                          </span>
+                          <GeneratingRotatingLabel className="truncate" />
                         </div>
                       );
                     }
@@ -340,10 +561,10 @@ export function StudioPanel({
                       return (
                         <div
                           key={section.id}
-                          className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm text-gray-500 dark:text-gray-400"
+                          className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm text-muted-foreground"
                         >
                           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                          <span className="truncate">Régénération de {section.label.toLowerCase()}...</span>
+                          <GeneratingRotatingLabel className="truncate" />
                         </div>
                       );
                     }
@@ -355,14 +576,14 @@ export function StudioPanel({
                         tabIndex={0}
                         onClick={() => onItemClick(section.id)}
                         onKeyDown={(e) => e.key === "Enter" && onItemClick(section.id)}
-                        className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-gray-100 dark:hover:bg-neutral-800"
+                        className="group flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2.5 transition-all duration-300 hover:translate-x-0.5 hover:bg-accent"
                       >
-                        <Icon className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
+                        <Icon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {section.label}
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {getSectionLabel(section.id, language)}
                           </p>
-                          <p className="text-xs text-gray-400">
+                          <p className="text-xs text-muted-foreground">
                             {sourceCount} source{sourceCount > 1 ? "s" : ""}
                           </p>
                         </div>
@@ -372,19 +593,19 @@ export function StudioPanel({
                               type="button"
                               onClick={(e) => e.stopPropagation()}
                               aria-label="Options"
-                              className="shrink-0 rounded-full p-1.5 text-gray-400 transition-colors hover:bg-gray-200 dark:hover:bg-neutral-700"
+                              className="shrink-0 rounded-full p-1.5 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
                             >
                               <MoreVertical className="h-4 w-4" />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {onRegenerateSection && (
+                            {onRegenerateSection && section.id !== "cas_clinique" && (
                               <DropdownMenuItem onSelect={() => onRegenerateSection(section.id)}>
                                 <RefreshCw className="h-4 w-4" />
-                                Regénérer
+                                {tStudio("regenerate", language)}
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem>Supprimer</DropdownMenuItem>
+                            <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -402,7 +623,7 @@ export function StudioPanel({
             onClick={onOpenNote}
             title={isCollapsed ? "Add note" : undefined}
             className={cn(
-              "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-gray-900 text-sm font-medium text-white shadow-lg transition-transform hover:scale-105 dark:bg-gray-100 dark:text-gray-900",
+              "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary-600 text-sm font-medium text-white shadow-glow transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 active:scale-[0.96] dark:bg-primary-500 dark:hover:bg-primary-400",
               isCollapsed ? "p-3" : "px-6 py-3"
             )}
           >
@@ -412,42 +633,48 @@ export function StudioPanel({
         )}
 
         {isNoteOpen && (
-          <div className="absolute inset-0 z-20 flex flex-col rounded-3xl bg-white dark:bg-neutral-900">
-            <div className="flex items-center gap-1 border-b border-gray-200 px-3 py-2 dark:border-neutral-800">
-              <button type="button" aria-label="Annuler" className={TOOLBAR_BUTTON_CLASSES}>
+          <div className="animate-fade-in absolute inset-0 z-20 flex flex-col rounded-3xl bg-card">
+            <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+              <button type="button" aria-label={tStudio("undoAria", language)} onClick={() => triggerNoteHistory("undo")} className={TOOLBAR_BUTTON_CLASSES}>
                 <Undo2 className="h-4 w-4" />
               </button>
-              <button type="button" aria-label="Rétablir" className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("redoAria", language)} onClick={() => triggerNoteHistory("redo")} className={TOOLBAR_BUTTON_CLASSES}>
                 <Redo2 className="h-4 w-4" />
               </button>
-              <span className="mx-1 h-4 w-px bg-gray-200 dark:bg-neutral-700" />
-              <button type="button" className={cn(TOOLBAR_BUTTON_CLASSES, "px-2 text-xs font-medium")}>
-                Normal
+              <span className="mx-1 h-4 w-px bg-border" />
+              <button
+                type="button"
+                onClick={clearNoteSelectionFormatting}
+                title="Retirer la mise en forme de la sélection"
+                className={cn(TOOLBAR_BUTTON_CLASSES, "px-2 text-xs font-medium")}
+              >
+                {tStudio("normal", language)}
               </button>
-              <button type="button" aria-label="Gras" className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("boldAria", language)} onClick={() => wrapNoteSelection("**")} className={TOOLBAR_BUTTON_CLASSES}>
                 <Bold className="h-4 w-4" />
               </button>
-              <button type="button" aria-label="Italique" className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("italicAria", language)} onClick={() => wrapNoteSelection("*")} className={TOOLBAR_BUTTON_CLASSES}>
                 <Italic className="h-4 w-4" />
               </button>
-              <button type="button" aria-label="Lien" className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("linkAria", language)} onClick={() => wrapNoteSelection("[", "](https://)")} className={TOOLBAR_BUTTON_CLASSES}>
                 <Link2 className="h-4 w-4" />
               </button>
-              <button type="button" aria-label="Code" className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("codeAria", language)} onClick={() => wrapNoteSelection("`")} className={TOOLBAR_BUTTON_CLASSES}>
                 <Code className="h-4 w-4" />
               </button>
             </div>
 
-            <p className="px-4 pt-3 text-sm font-semibold text-gray-900 dark:text-gray-100">New note</p>
+            <p className="px-4 pt-3 text-sm font-semibold text-foreground">New note</p>
 
             <textarea
+              ref={noteTextareaRef}
               value={noteContent}
               onChange={(e) => onNoteContentChange(e.target.value)}
-              placeholder="Écris ta note ici..."
-              className="flex-1 resize-none bg-transparent p-4 text-sm text-gray-900 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-600"
+              placeholder={tStudio("notePlaceholder", language)}
+              className="text-reading flex-1 resize-none bg-transparent p-4 text-foreground outline-none placeholder:text-muted-foreground"
             />
 
-            <div className="border-t border-gray-200 p-4 dark:border-neutral-800">
+            <div className="border-t border-border p-4">
               <Button
                 size="sm"
                 className="w-full rounded-xl"
@@ -455,7 +682,7 @@ export function StudioPanel({
                 disabled={isSavingNote || !noteContent.trim()}
               >
                 {isSavingNote && <Loader2 className="h-4 w-4 animate-spin" />}
-                Sauvegarder
+                {tStudio("save", language)}
               </Button>
             </div>
           </div>
@@ -476,6 +703,8 @@ export function StudioPanel({
           }}
           moduleId={moduleId}
           courseTitle={courseTitle}
+          courseSlug={courseSlug}
+          container={container}
         />
       )}
 
@@ -493,22 +722,38 @@ export function StudioPanel({
           // reliable fix rather than hoping the DOM tree never grows one.
           <div
             className={cn(
-              "fixed inset-4 z-[999] isolate flex flex-col rounded-3xl shadow-2xl",
-              detailBg || "bg-white dark:bg-neutral-900"
+              // True edge-to-edge (inset-0, no rounding) below sm — this is
+              // the actual "100dvh fullscreen" mode the mobile bottom-sheet
+              // spec asked for, not a floating panel with margins. From sm:
+              // up (real trackpad/mouse precision, no thumb reaching for a
+              // corner), the softer inset-4 floating-card treatment returns.
+              "animate-fade-in fixed inset-0 z-[999] isolate flex flex-col rounded-none shadow-glass dark:shadow-glass-dark sm:inset-4 sm:rounded-3xl",
+              detailBg || "bg-card"
             )}
           >
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-neutral-800">
-              <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{openedLabel}</span>
+            <div className="flex items-center gap-2 border-b border-border p-4">
+              {openedTint && openedSectionData && (
+                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", openedTint.bg, openedTint.icon)}>
+                  <openedSectionData.icon className="h-4 w-4" />
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{openedLabel}</span>
+              <SectionOptionsMenu
+                sectionId={openedSection}
+                onRegenerateSection={onRegenerateSection}
+                isRegenerating={regeneratingSections?.has(openedSection) ?? false}
+                triggerClassName={GLASS_ICON_BUTTON_CLASSES}
+              />
               <button
                 type="button"
                 onClick={() => setIsSectionExpanded(false)}
-                aria-label="Réduire"
-                className={PANEL_ICON_BUTTON_CLASSES}
+                aria-label={tStudio("minimizeAria", language)}
+                className={GLASS_EXIT_BUTTON_CLASSES}
               >
                 <Minimize2 className="h-4 w-4" />
               </button>
             </div>
-            <div ref={containerRef} className="flex-1 overflow-y-auto p-6">
+            <div ref={containerRef} data-selectable className="flex-1 overflow-y-auto p-6">
               {children}
             </div>
           </div>,

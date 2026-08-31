@@ -33,6 +33,7 @@ import { GastriteCasCliniqueStudio } from "@/components/course/workspace/Gastrit
 import { GastriteQcmsStudio } from "@/components/course/workspace/GastriteQcmsStudio";
 import { LazySection } from "@/components/course/workspace/LazySection";
 import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
+import { createClient } from "@/lib/supabase/client";
 
 export default function CourseSlugWorkspacePage() {
   const params = useParams<{ slug: string }>();
@@ -57,14 +58,14 @@ const SECTION_LAZY_CONFIG: Partial<
 
 function NotFoundScreen({ slug }: { slug: string }) {
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center gap-4 bg-gray-100 text-center dark:bg-neutral-950">
-      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">Cours introuvable</p>
-      <p className="max-w-sm text-sm text-gray-500 dark:text-gray-400">
+    <div className="aurora-canvas-bg flex h-dvh w-full flex-col items-center justify-center gap-4 text-center">
+      <p className="text-lg font-semibold text-foreground">Cours introuvable</p>
+      <p className="max-w-sm text-sm text-muted-foreground">
         Aucun contenu n'est disponible pour « {slug} » pour le moment.
       </p>
       <Link
         href="/dashboard"
-        className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-gray-300 dark:hover:bg-neutral-800"
+        className="glass-card flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-foreground shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow"
       >
         <ArrowLeft className="h-4 w-4" />
         Retour au dashboard
@@ -73,9 +74,41 @@ function NotFoundScreen({ slug }: { slug: string }) {
   );
 }
 
+const HIGHLIGHTS_STORAGE_PREFIX = "medart_highlights_";
+
+/**
+ * SECURITY FIX: previously keyed ONLY by course slug, with no user
+ * component — the real record (course_highlights, scoped by user_id
+ * server-side via /api/highlights) is correct, but this localStorage
+ * mirror is a pure "fallback if the API call fails" cache, and since a
+ * public course's slug (e.g. "pleuresie") is identical for EVERY student
+ * who reads it, on a shared/lab computer a stale cached copy of Student
+ * A's own highlighted text could surface for Student B the next time
+ * that API call happens to fail for them. Found during the same security
+ * audit that caught the identical pattern in InteractiveQuiz.tsx,
+ * ActiveFlashcardsDeck.tsx, and the Workspace module page. Now namespaced
+ * by userId (resolved client-side before this cache is ever touched).
+ */
+function highlightsStorageKey(userId: string, slug: string): string {
+  return `${HIGHLIGHTS_STORAGE_PREFIX}${userId}_${slug}`;
+}
+
+/** Removes every OTHER highlights cache entry in this browser's storage — the old unscoped key format, and any DIFFERENT user's own scoped entries left behind on a shared device. Safe: purely a fallback cache, the real record lives server-side. */
+function purgeForeignHighlights(currentKey: string): void {
+  try {
+    for (const existingKey of Object.keys(localStorage)) {
+      if (existingKey.startsWith(HIGHLIGHTS_STORAGE_PREFIX) && existingKey !== currentKey) {
+        localStorage.removeItem(existingKey);
+      }
+    }
+  } catch {
+    // Storage unavailable — nothing to clean up either way.
+  }
+}
+
 function LoadingScreen() {
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-gray-100 dark:bg-neutral-950">
+    <div className="aurora-canvas-bg flex h-dvh w-full items-center justify-center">
       <BrandLoader />
     </div>
   );
@@ -108,66 +141,81 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       });
 
     // 2. جلب الهايلايتس من الـ API وتطبيقها أوتوماتيكياً على الصفحة
-    fetch(`/api/highlights?slug=${slug}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled && data?.highlights) {
-          const texts = data.highlights.map((h: { selected_text: string }) => h.selected_text);
-          // تخزينهم أيضاً محلياً كاحتياط لسرعة العرض
-          localStorage.setItem(`medart_highlights_${slug}`, JSON.stringify(texts));
+    // Resolved client-side first — never touch the localStorage fallback
+    // cache before knowing WHOSE slot it is (see highlightsStorageKey's own
+    // comment).
+    void createClient()
+      .auth.getUser()
+      .then(({ data: userData }) => {
+        if (cancelled || !userData.user) return;
+        const highlightsKey = highlightsStorageKey(userData.user.id, slug);
+        purgeForeignHighlights(highlightsKey);
 
-          // تطبيق الهايلايتس بصرياً بعد اكتمال تحميل عناصر الـ DOM
-          setTimeout(() => {
-            texts.forEach((textToHighlight: string) => {
-              if (!textToHighlight) return;
-              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-              let node;
-              while ((node = walker.nextNode())) {
-                const pos = node.nodeValue?.indexOf(textToHighlight);
-                if (pos !== undefined && pos >= 0 && node.parentElement?.tagName !== "MARK") {
-                  const range = document.createRange();
-                  range.setStart(node, pos);
-                  range.setEnd(node, pos + textToHighlight.length);
-                  
-                  const mark = document.createElement("mark");
-                  mark.className = "rounded px-1 bg-yellow-300 dark:bg-yellow-500/40 text-inherit";
-                  try {
-                    range.surroundContents(mark);
-                    break;
-                  } catch {
-                    // تجاوز الحدود المتداخلة لتفادي الأخطاء
+        fetch(`/api/highlights?slug=${slug}`)
+          .then((res) => (res.ok ? res.json() : Promise.reject()))
+          .then((data) => {
+            if (!cancelled && data?.highlights) {
+              const texts = data.highlights.map((h: { selected_text: string }) => h.selected_text);
+              // تخزينهم أيضاً محلياً كاحتياط لسرعة العرض
+              localStorage.setItem(highlightsKey, JSON.stringify(texts));
+
+              // تطبيق الهايلايتس بصرياً بعد اكتمال تحميل عناصر الـ DOM
+              setTimeout(() => {
+                texts.forEach((textToHighlight: string) => {
+                  if (!textToHighlight) return;
+                  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                  let node;
+                  while ((node = walker.nextNode())) {
+                    const pos = node.nodeValue?.indexOf(textToHighlight);
+                    if (pos !== undefined && pos >= 0 && node.parentElement?.tagName !== "MARK") {
+                      const range = document.createRange();
+                      range.setStart(node, pos);
+                      range.setEnd(node, pos + textToHighlight.length);
+
+                      const mark = document.createElement("mark");
+                      mark.className = "rounded px-1 bg-yellow-300 dark:bg-yellow-500/40 text-inherit";
+                      try {
+                        range.surroundContents(mark);
+                        break;
+                      } catch {
+                        // تجاوز الحدود المتداخلة لتفادي الأخطاء
+                      }
+                    }
                   }
-                }
-              }
-            });
-          }, 800);
-        }
+                });
+              }, 800);
+            }
+          })
+          .catch(() => {
+            // في حال فشل الـ API، نحاول جلبهم من LocalStorage مباشرة
+            const saved = JSON.parse(localStorage.getItem(highlightsKey) || "[]");
+            if (saved.length > 0) {
+              setTimeout(() => {
+                saved.forEach((textToHighlight: string) => {
+                  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                  let node;
+                  while ((node = walker.nextNode())) {
+                    const pos = node.nodeValue?.indexOf(textToHighlight);
+                    if (pos !== undefined && pos >= 0 && node.parentElement?.tagName !== "MARK") {
+                      const range = document.createRange();
+                      range.setStart(node, pos);
+                      range.setEnd(node, pos + textToHighlight.length);
+                      const mark = document.createElement("mark");
+                      mark.className = "rounded px-1 bg-yellow-300 dark:bg-yellow-500/40 text-inherit";
+                      try {
+                        range.surroundContents(mark);
+                        break;
+                      } catch {}
+                    }
+                  }
+                });
+              }, 800);
+            }
+          });
       })
       .catch(() => {
-        // في حال فشل الـ API، نحاول جلبهم من LocalStorage مباشرة
-        const saved = JSON.parse(localStorage.getItem(`medart_highlights_${slug}`) || "[]");
-        if (saved.length > 0) {
-          setTimeout(() => {
-            saved.forEach((textToHighlight: string) => {
-              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-              let node;
-              while ((node = walker.nextNode())) {
-                const pos = node.nodeValue?.indexOf(textToHighlight);
-                if (pos !== undefined && pos >= 0 && node.parentElement?.tagName !== "MARK") {
-                  const range = document.createRange();
-                  range.setStart(node, pos);
-                  range.setEnd(node, pos + textToHighlight.length);
-                  const mark = document.createElement("mark");
-                  mark.className = "rounded px-1 bg-yellow-300 dark:bg-yellow-500/40 text-inherit";
-                  try {
-                    range.surroundContents(mark);
-                    break;
-                  } catch {}
-                }
-              }
-            });
-          }, 800);
-        }
+        // Impossible to resolve the current user — nothing to fall back to,
+        // just skip the highlights restore entirely for this load.
       });
 
     return () => {
@@ -225,7 +273,11 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
   }
 
   const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
-  const [generatingSection, setGeneratingSection] = useState<DemoSectionId | null>(null);
+  // Set, not a single DemoSectionId — matches the same relaxation applied to
+  // app/dashboard/module/[id]/page.tsx: a different tile already generating
+  // no longer blocks a new one from starting (StudioPanel's shared prop
+  // contract now expects a Set either way).
+  const [generatingSections, setGeneratingSections] = useState<Set<DemoSectionId>>(() => new Set());
 
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [noteContent, setNoteContent] = useState("");
@@ -288,7 +340,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
     if (!config) return;
 
     const requestSlug = slug;
-    setGeneratingSection(id);
+    setGeneratingSections((prev) => new Set(prev).add(id));
     try {
       const res = await fetch(config.endpoint, {
         method: "POST",
@@ -306,7 +358,13 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       if (currentSlugRef.current !== requestSlug) return;
       toast({ variant: "error", title: "Échec de la génération", description: "Impossible de contacter le serveur." });
     } finally {
-      if (currentSlugRef.current === requestSlug) setGeneratingSection(null);
+      if (currentSlugRef.current === requestSlug) {
+        setGeneratingSections((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
     }
   }
 
@@ -321,7 +379,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
 
   function handleStudioItemClick(id: DemoSectionId) {
     if (getSectionStatus(id) === "needs_generation") {
-      if (!generatingSection) generateSection(id);
+      if (!generatingSections.has(id)) generateSection(id);
       return;
     }
     setActiveId(id);
@@ -481,6 +539,8 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       dark={isDark}
       quotedText={quotedText}
       onClearQuote={() => setQuotedText(null)}
+      courseTitle={title || "Cours"}
+      courseSlug={slug}
     />
   );
 
@@ -496,7 +556,7 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       onItemClick={handleStudioItemClick}
       onCloseSection={() => setOpenedSection(null)}
       getSectionStatus={getSectionStatus}
-      generatingSection={generatingSection}
+      generatingSections={generatingSections}
       sourceCount={sourceCount}
       isNoteOpen={isNoteOpen}
       onOpenNote={() => setIsNoteOpen(true)}
@@ -511,18 +571,17 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       isSavingNote={isSavingNote}
       onAskSelection={handleAskSelection}
       onTranslateSelection={handleTranslateSelection}
-      // @ts-ignore : ignorer l'erreur TypeScript de courseSlug
       courseSlug={slug}
     >
       {openedSectionContent}
     </StudioPanel>
   );
 
-  const panelShellClasses =
-    "flex flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900";
+  const panelShellClasses = "glass-card flex flex-col overflow-hidden rounded-3xl shadow-glass transition-all duration-300 dark:shadow-glass-dark";
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-gray-100 dark:bg-neutral-950">
+    <div className="aurora-canvas-bg relative flex h-dvh flex-col overflow-hidden">
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
       <WorkspaceTopbar title={title} />
 
       <PomodoroStudyBanner />

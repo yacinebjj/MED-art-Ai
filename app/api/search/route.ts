@@ -29,6 +29,38 @@ const MAX_COURSES_TO_INDEX_PER_REQUEST = 2;
 const MAX_CHUNKS_PER_REQUEST = 40;
 const MATCH_COUNT = 10;
 
+/**
+ * Hard similarity floor — the real fix for a query like "fracture" coming
+ * back with an unrelated "Pleurésie purulente" chunk: match_course_chunks
+ * previously had NO threshold at all, just "return the MATCH_COUNT nearest
+ * rows, however far they actually are" — pgvector's <=> always produces
+ * SOME ordering even when every indexed chunk is genuinely unrelated to the
+ * query, so an under-matched search silently padded out with noise instead
+ * of coming back short (or empty).
+ *
+ * NOT set to 0.75+ as a first instinct might suggest: that bar is calibrated
+ * for near-duplicate/paraphrase detection (see SEMANTIC_CACHE_THRESHOLD in
+ * lib/ai/semantic-cache.ts, 0.88 — cached QUESTION vs QUESTION, or
+ * SIMILAR_COURSE_THRESHOLD in lib/content-similarity.ts, 0.9 — whole
+ * DOCUMENT vs DOCUMENT). This is a fundamentally different comparison — a
+ * short, sparse search QUERY against a long, dense course PASSAGE — and
+ * text-embedding-3-small's real similarity distribution for query-to-passage
+ * pairs sits meaningfully lower than paraphrase-to-paraphrase pairs even for
+ * a genuinely relevant match.
+ *
+ * Lowered from an initial 0.4 to 0.25 after real production use: 0.4 itself
+ * was already too strict and excluded genuinely correct matches for longer,
+ * multi-word queries (e.g. "Traumatismes du coude") — a longer query phrase
+ * dilutes its own embedding across more concepts, which tends to pull its
+ * cosine similarity against any single passage LOWER than a short, focused
+ * query does, even when that passage is exactly the right course. 0.25 is
+ * still a reasoned floor, not a fully measured one — keep using the
+ * console.log below (prints every returned similarity score) to recalibrate
+ * further: raise it if irrelevant results start slipping back through above
+ * 0.25, lower it if real courses are still being wrongly excluded.
+ */
+const MATCH_THRESHOLD = 0.25;
+
 async function ensureCoursesIndexed(supabase: ReturnType<typeof getSupabaseAdmin>) {
   // Both reads below used to silently ignore `error` — a persistent
   // permission/RLS failure made EVERY course look unindexed on EVERY
@@ -156,6 +188,7 @@ export async function POST(request: NextRequest) {
   const { data: matches, error: matchError } = await supabase.rpc("match_course_chunks", {
     query_embedding: queryEmbedding,
     match_count: MATCH_COUNT,
+    match_threshold: MATCH_THRESHOLD,
   });
 
   if (matchError) {
@@ -164,6 +197,15 @@ export async function POST(request: NextRequest) {
   }
 
   const rows = (matches ?? []) as { course_slug: string; section_label: string; content: string; similarity: number }[];
+
+  // Calibration data for MATCH_THRESHOLD above — logs the query alongside
+  // every score that cleared the floor (and how many rows came back at
+  // all), so a real, empty, or suspiciously-thin result set can be traced
+  // back to actual production searches instead of guessed at.
+  console.log(
+    `[search] query="${query.trim()}" -> ${rows.length} résultat(s) au-dessus du seuil ${MATCH_THRESHOLD}` +
+      (rows.length > 0 ? ` — scores: ${rows.map((r) => r.similarity.toFixed(3)).join(", ")}` : "")
+  );
   const uniqueSlugs = Array.from(new Set(rows.map((r) => r.course_slug)));
 
   // Enrichment only (titles/module names for display) — the real match

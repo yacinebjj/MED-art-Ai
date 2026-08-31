@@ -54,7 +54,7 @@ export default function DemoWorkspacePage() {
   return (
     <div
       className={cn(
-        "relative isolate flex h-screen w-full overflow-hidden transition-colors duration-500",
+        "relative isolate flex h-dvh w-full overflow-hidden transition-colors duration-500",
         isDark ? "bg-slate-950" : "bg-slate-50"
       )}
     >
@@ -106,7 +106,7 @@ export default function DemoWorkspacePage() {
         <Link
           href="/dashboard"
           className={cn(
-            "relative z-10 mb-4 flex items-center gap-2 text-sm font-medium transition-colors duration-300",
+            "relative z-10 mb-4 flex items-center gap-2 text-sm font-medium transition-all duration-300 hover:-translate-x-0.5",
             isDark ? "text-slate-400 hover:text-white" : "text-gray-500 hover:text-gray-900"
           )}
         >
@@ -158,7 +158,7 @@ export default function DemoWorkspacePage() {
             <button
               onClick={() => setIsDark((v) => !v)}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-all duration-300",
+                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 active:scale-[0.96]",
                 isDark
                   ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
                   : "border-slate-200 bg-white/90 text-gray-600 shadow-sm hover:bg-gray-50"
@@ -180,7 +180,7 @@ export default function DemoWorkspacePage() {
             <button
               onClick={toggleFullscreen}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-all duration-300",
+                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 active:scale-[0.96]",
                 isDark
                   ? "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
                   : "border-slate-200 bg-white/90 text-gray-600 shadow-sm hover:bg-gray-50"
@@ -284,7 +284,7 @@ export default function DemoWorkspacePage() {
                 key={id}
                 onClick={() => setActiveId(id)}
                 className={cn(
-                  "flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300",
+                  "flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300 active:scale-[0.98]",
                   isDark
                     ? isActive
                       ? "border-l-2 border-cyan-400 bg-cyan-500/10 text-white shadow-[0_0_20px_-6px_rgba(34,211,238,0.5)]"

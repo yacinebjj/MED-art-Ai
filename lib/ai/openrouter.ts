@@ -19,6 +19,46 @@ const MODEL = "anthropic/claude-sonnet-5";
 // does retire/rename slugs.
 export const HAIKU_MODEL = "anthropic/claude-haiku-4.5";
 
+// "Economy" tier for the course chat's hybrid model router (see
+// lib/chat-model-routing.ts) — a standard, single-excerpt explanation is
+// routed here instead of HAIKU_MODEL. The originally-requested
+// "google/gemini-2.5-flash" no longer exists on OpenRouter (superseded by
+// the 3.x generation) — confirmed live against
+// GET https://openrouter.ai/api/v1/models AND the model's own OpenRouter
+// page, same verification discipline as HAIKU_MODEL above.
+// "google/gemini-3.7-flash" is real, live, $0.75/M input + $3.75/M output —
+// cheaper than HAIKU_MODEL ($1/M + $5/M) but NOT an order of magnitude
+// cheaper; there is no currently-real model priced near-zero at a quality
+// bar fit for medical explanations. Re-verify the same way if this 404s.
+export const ECONOMY_MODEL = "google/gemini-3.7-flash";
+
+// Shared free-tier (":free" suffix) fallback chain — genuinely zero
+// marginal cost, used by app/api/dashboard-assistant/route.ts,
+// app/api/courses/chat/route.ts, and app/api/assistant/route.ts's
+// text-only path. Kept in ONE place so all three stay in sync rather than
+// drifting if a slug ever retires.
+//
+// Re-verified live, 2026-08-30, against GET https://openrouter.ai/api/v1/models
+// (product direction: find the best currently-available free models —
+// "meta-llama/llama-3.3-70b-instruct:free" from the previous pass no longer
+// exists, confirming free-tier slugs rotate at least as often as paid ones).
+// Replaced "poolside/laguna-s-2.1:free" (still live, but a coding-agent
+// model — a poor fit for general medical-student chat) with the Thinking
+// Machines "Inkling" pair: dramatically larger active-parameter counts
+// (41B / 12B vs Nemotron's 3B) and a 1M-token context, at the same $0 cost.
+// Ordered by capability, largest first; Nemotron kept LAST as the
+// already-proven-reliable-in-production fallback, not dropped.
+//
+// VISION: OpenRouter's own catalog describes both Inkling variants as
+// "multimodal", but that's marketing copy, not a verified test call — per
+// this session's standing "never trust an unverified capability claim"
+// discipline, this chain is still treated as TEXT-ONLY until a real image
+// request against it has been confirmed to work. app/api/assistant/route.ts
+// (the one caller that accepts image attachments) routes an image-bearing
+// message to HAIKU_MODEL instead, specifically to keep relying on
+// Anthropic's own confirmed vision support rather than an unverified claim.
+export const FREE_MODEL_CHAIN = ["thinkingmachines/inkling:free", "thinkingmachines/inkling-small:free", "nvidia/nemotron-3.5-lightning:free"];
+
 // Zero-spend Studio-content generation for local development: callOpenRouter
 // below checks this to serve a canned fixture (lib/ai/mock-data.ts) instead
 // of a real, billed call. Deliberately does NOT gate streamOpenRouter (the
@@ -31,6 +71,27 @@ export const USE_MOCK_AI = process.env.USE_MOCK_AI === "true";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Every claim in this file's comments about caching "saving money" was, until
+ * now, never actually checked against a real API response — callOpenRouter
+ * discarded `data.usage` entirely, and streamOpenRouter never even requested
+ * it (`stream_options.include_usage` is required for a streamed OpenAI-
+ * compatible completion to include a usage frame at all — see the SSE
+ * transform below). Logging the raw object (rather than picking specific
+ * field names) is deliberate: OpenRouter's pass-through shape for Anthropic's
+ * `cache_creation_input_tokens` / `cache_read_input_tokens` isn't confirmed
+ * from this codebase alone, and a wrong assumed field name would silently log
+ * `undefined` forever, which is exactly the kind of unverified claim this
+ * exists to stop making. Read these logs directly to see what's really there.
+ */
+function logUsage(label: string, usage: unknown): void {
+  if (!usage) {
+    console.log(`[openrouter:usage] ${label} — aucune donnée d'usage retournée par OpenRouter.`);
+    return;
+  }
+  console.log(`[openrouter:usage] ${label}:`, JSON.stringify(usage));
 }
 
 function extractText(content: ChatMessageInput["content"]): string {
@@ -85,7 +146,17 @@ function extractOpenRouterErrorDetail(body: string): string {
 export interface ContentBlock {
   type: "text";
   text: string;
-  cache_control?: { type: "ephemeral" };
+  // `ttl: "1h"` (vs. the default 5-minute ephemeral cache) — verified live
+  // against OpenRouter's own docs: supported end-to-end for Claude models on
+  // every provider OpenRouter routes to. Costs more to WRITE (2x input price
+  // vs 1.25x for the 5-min default) but reads are still ~90% off regardless
+  // of TTL — worth it on a block that's genuinely reused across a realistic
+  // gap between messages (a student reading/thinking for >5 min, which the
+  // default TTL would treat as a fresh, full-price write every time). On a
+  // small block (e.g. this app's persona prompt) the absolute cost delta
+  // between the two write premiums is negligible, so there's no real
+  // downside to defaulting long-lived static content to "1h".
+  cache_control?: { type: "ephemeral"; ttl?: "1h" };
 }
 
 export interface ChatMessageInput {
@@ -112,7 +183,19 @@ const DEFAULT_TIMEOUT_MS = 240_000;
  */
 export async function callOpenRouter(
   messages: ChatMessageInput[],
-  options?: { maxTokens?: number; model?: string; bypassMock?: boolean; temperature?: number; timeoutMs?: number }
+  options?: {
+    maxTokens?: number;
+    model?: string;
+    bypassMock?: boolean;
+    temperature?: number;
+    timeoutMs?: number;
+    // Same reasoning-token cap as streamOpenRouter's own `reasoning` option
+    // (see its comment) — needed here too now that lib/cache-prewarming.ts
+    // calls this non-streaming path with a model that can route to
+    // ECONOMY_MODEL, which has the same hidden-reasoning-token behavior
+    // regardless of whether the call streams or not.
+    reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean };
+  }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
   // TEXT, not by an explicit section id — it was built for one fixed set of
@@ -162,6 +245,7 @@ export async function callOpenRouter(
         messages,
         max_tokens: options?.maxTokens ?? 8192,
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
       }),
       signal: timeoutController.signal,
     });
@@ -196,6 +280,8 @@ export async function callOpenRouter(
     throw new OpenRouterError("Réponse inattendue du modèle.", 502);
   }
 
+  logUsage(`callOpenRouter model=${options?.model ?? MODEL}`, data?.usage);
+
   return content;
 }
 
@@ -219,10 +305,29 @@ export async function callOpenRouter(
  * `options.model` defaults to the standard Sonnet MODEL — pass HAIKU_MODEL
  * explicitly for the chat's highlight quick actions, which is what forces
  * that cheap-model routing rather than it happening implicitly/by accident.
+ *
+ * `options.reasoning` controls a reasoning-capable model's hidden
+ * "thinking" tokens (OpenRouter's unified `reasoning` request field — see
+ * https://openrouter.ai/docs/use-cases/reasoning-tokens). Verified live:
+ * reasoning tokens are billed as OUTPUT tokens but are NOT a separate budget
+ * from the visible completion — on a model like google/gemini-3.7-flash
+ * (lib/chat-model-routing.ts's ECONOMY_MODEL), an uncapped `effort` can
+ * silently consume most of `maxTokens` on hidden reasoning before the model
+ * writes a single word of the actual answer, which is exactly what produced
+ * real mid-sentence truncations (~796 tokens in) with no `reasoning` field
+ * ever being set. Passing `{ effort: "low" }` (~20% of the budget per
+ * OpenRouter's own documented mapping) leaves the rest for the visible
+ * reply; harmless no-op on a model with no reasoning capability at all.
  */
 export async function streamOpenRouter(
   messages: ChatMessageInput[],
-  options?: { maxTokens?: number; model?: string; timeoutMs?: number }
+  options?: {
+    maxTokens?: number;
+    model?: string;
+    timeoutMs?: number;
+    temperature?: number;
+    reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean };
+  }
 ): Promise<ReadableStream<Uint8Array>> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -251,7 +356,15 @@ export async function streamOpenRouter(
         model: options?.model ?? MODEL,
         messages,
         max_tokens: options?.maxTokens ?? 4096,
+        ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
         stream: true,
+        // Without this, a streamed OpenAI-compatible completion never
+        // includes a usage frame at all — the final SSE chunk (empty
+        // `choices`) that carries prompt/completion/cache token counts is
+        // opt-in. Every prior claim about this route's caching "working" was
+        // unverifiable without it; see logUsage's own comment above.
+        stream_options: { include_usage: true },
       }),
       signal: timeoutController.signal,
     });
@@ -297,6 +410,12 @@ export async function streamOpenRouter(
           const delta: unknown = json?.choices?.[0]?.delta?.content;
           if (typeof delta === "string" && delta.length > 0) {
             controller.enqueue(encoder.encode(delta));
+          }
+          // With stream_options.include_usage above, OpenRouter sends one
+          // final frame carrying `usage` and no real delta — this is the
+          // only place that data ever surfaces for a streamed call.
+          if (json?.usage) {
+            logUsage(`streamOpenRouter model=${options?.model ?? MODEL}`, json.usage);
           }
         } catch (error) {
           console.error("OpenRouter stream: malformed SSE frame", error, payload.slice(0, 200));

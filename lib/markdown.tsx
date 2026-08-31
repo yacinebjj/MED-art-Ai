@@ -124,37 +124,14 @@ function createMarkdownComponents(
         <span className="min-w-0">{children}</span>
       </li>
     ),
-    // فقرة تتبنى الهايلايتس المخزنة محلياً وتلونها أوتوماتيكياً أثناء الـ Render
-    p: ({ children }) => {
-      if (typeof window !== "undefined" && typeof children === "string") {
-        const pathParts = window.location.pathname.split("/");
-        const slug = pathParts[pathParts.length - 1];
-        const saved = JSON.parse(localStorage.getItem(`medart_highlights_${slug}`) || "[]");
-        
-        let rendered: React.ReactNode = children;
-        saved.forEach((phrase: string) => {
-          if (children.includes(phrase)) {
-            const parts = children.split(phrase);
-            rendered = (
-              <>
-                {parts.map((part, i) => (
-                  <span key={i}>
-                    {part}
-                    {i < parts.length - 1 && (
-                      <mark className="bg-yellow-300 dark:bg-yellow-500/40 text-inherit rounded px-1">
-                        {phrase}
-                      </mark>
-                    )}
-                  </span>
-                ))}
-              </>
-            );
-          }
-        });
-        return <p className="leading-relaxed my-6">{rendered}</p>;
-      }
-      return <p className="leading-relaxed my-6">{children}</p>;
-    },
+    // Highlights are rehydrated once, imperatively, against the real DOM by
+    // StudioPanel's own effect (lib/highlight.ts's rangeFromOffsets/
+    // restoreHighlightBySubstring) — NOT here. This renderer used to also
+    // re-highlight matching substrings on every single paragraph render by
+    // reading localStorage mid-render (impure, and reading
+    // window.location.pathname to guess the slug), which raced/duplicated
+    // against that DOM-level pass and could wrap the same phrase twice.
+    p: ({ children }) => <p className="leading-relaxed my-6">{children}</p>,
   };
 }
 

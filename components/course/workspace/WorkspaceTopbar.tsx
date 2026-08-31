@@ -14,8 +14,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
-import { Avatar, AvatarFallback } from "@/components/ui/Avatar";
 import { useToast } from "@/components/ui/Toast";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tWorkspaceTopbar } from "@/lib/translations/workspaceTopbar";
 
 interface WorkspaceTopbarProps {
   title: string;
@@ -25,6 +26,7 @@ interface WorkspaceTopbarProps {
 export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
+  const { language } = useLanguage();
   const isDark = resolvedTheme === "dark";
   // next-themes only knows the real theme after mount (it reads
   // localStorage client-side) — rendering Sun/Moon from `isDark` before that
@@ -38,12 +40,18 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   function handleCopyLink() {
     navigator.clipboard
       ?.writeText(window.location.href)
-      .then(() => toast({ variant: "success", title: "Lien copié" }))
-      .catch(() => toast({ variant: "error", title: "Échec de la copie", description: "Impossible d'accéder au presse-papiers." }));
+      .then(() => toast({ variant: "success", title: tWorkspaceTopbar("linkCopied", language) }))
+      .catch(() =>
+        toast({
+          variant: "error",
+          title: tWorkspaceTopbar("copyFailedTitle", language),
+          description: tWorkspaceTopbar("copyFailedDescription", language),
+        })
+      );
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-2 py-1 dark:border-neutral-800 dark:bg-neutral-900 sm:h-16 sm:px-6 sm:py-2">
+    <header className="glass-panel relative z-20 flex h-14 shrink-0 items-center justify-between rounded-b-3xl px-2 py-1 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6 sm:py-2">
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
         {/* Explicit back control — distinct from the logo below, which reads
             as branding rather than navigation to a hurried student. Neither
@@ -52,62 +60,79 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
             without this the only way out was the browser's own back button. */}
         <Link
           href="/dashboard"
-          aria-label="Retour au dashboard"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-neutral-800 dark:hover:text-gray-100 sm:px-2 sm:py-1.5"
+          aria-label={tWorkspaceTopbar("backToDashboard", language)}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-all duration-300 hover:-translate-x-0.5 hover:bg-accent hover:text-foreground sm:px-2 sm:py-1.5"
         >
           <ArrowLeft className="h-4 w-4" />
-          <span className="hidden sm:inline">Retour</span>
+          <span className="hidden sm:inline">{tWorkspaceTopbar("back", language)}</span>
         </Link>
-        <span className="hidden h-6 w-px shrink-0 bg-gray-200 dark:bg-neutral-700 sm:block" />
-        <Link href="/dashboard" className="hidden shrink-0 sm:flex">
+        <span className="hidden h-6 w-px shrink-0 bg-border sm:block" />
+        <Link href="/dashboard" className="hidden shrink-0 transition-transform duration-300 hover:scale-105 sm:flex">
           <Logo size="sm" />
         </Link>
-        <span className="hidden h-6 w-px shrink-0 bg-gray-200 dark:bg-neutral-700 sm:block" />
-        <h1 className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
-          {title || "Cours"}
+        <span className="hidden h-6 w-px shrink-0 bg-border sm:block" />
+        <h1 className="truncate text-sm font-semibold text-foreground sm:text-lg">
+          {title || tWorkspaceTopbar("courseFallbackTitle", language)}
         </h1>
       </div>
 
       <div className="flex items-center gap-0.5 sm:gap-2">
-        <Button variant="ghost" size="icon" aria-label="Copier le lien" onClick={handleCopyLink}>
-          <Copy className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+        <Button variant="ghost" size="icon" aria-label={tWorkspaceTopbar("copyLinkAriaLabel", language)} onClick={handleCopyLink}>
+          <Copy className="h-4 w-4 text-muted-foreground" />
         </Button>
 
         <Button
           variant="ghost"
           size="icon"
-          aria-label={isDark ? "Passer en mode clair" : "Passer en mode sombre"}
+          aria-label={
+            isDark
+              ? tWorkspaceTopbar("switchToLightMode", language)
+              : tWorkspaceTopbar("switchToDarkMode", language)
+          }
           onClick={() => setTheme(isDark ? "light" : "dark")}
         >
           {!mounted ? (
-            <Moon className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+            <Moon className="h-4 w-4 text-muted-foreground" />
           ) : isDark ? (
-            <Sun className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+            <Sun className="h-4 w-4 text-muted-foreground" />
           ) : (
-            <Moon className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+            <Moon className="h-4 w-4 text-muted-foreground" />
           )}
         </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Paramètres">
-              <Settings className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+            <Button variant="ghost" size="icon" aria-label={tWorkspaceTopbar("settings", language)}>
+              <Settings className="h-4 w-4 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>Paramètres</DropdownMenuLabel>
+            <DropdownMenuLabel>{tWorkspaceTopbar("settings", language)}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Aide</DropdownMenuItem>
-            <DropdownMenuItem>Envoyer un avis</DropdownMenuItem>
-            <DropdownMenuItem>Langue de sortie</DropdownMenuItem>
+            {/* Inertes de manière confirmée (aucune destination Aide/Feedback/Langue
+                n'existe ailleurs dans le projet) — masqués plutôt que câblés
+                sur un faux lien. Gardés dans le JSX (juste `hidden`) pour
+                réactivation triviale une fois les vraies pages prêtes. */}
+            <DropdownMenuItem className="hidden">Aide</DropdownMenuItem>
+            <DropdownMenuItem className="hidden">Envoyer un avis</DropdownMenuItem>
+            <DropdownMenuItem className="hidden">Langue de sortie</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Paramètres du compte</DropdownMenuItem>
+            {/* Same real destination as the main app's account dropdown
+                (components/layout/Topbar.tsx) — reuses the existing
+                /dashboard/settings page instead of leaving this leaf item inert. */}
+            <DropdownMenuItem asChild>
+              <Link href="/dashboard/settings">{tWorkspaceTopbar("accountSettings", language)}</Link>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Avatar className="h-8 w-8">
-          <AvatarFallback className="text-xs">ET</AvatarFallback>
-        </Avatar>
+        {/* Was a hardcoded "ET" initial — not derived from the signed-in
+            student's actual name (unlike components/layout/Topbar.tsx's real
+            Avatar), just a static placeholder. Swapped for the official
+            MedArt mark (same <Logo size="sm" /> instance already rendered on
+            the left side of this header, for a guaranteed-consistent look)
+            so this corner reads as the brand, not a fake/stale identity badge. */}
+        <Logo size="sm" className="shrink-0" />
       </div>
     </header>
   );

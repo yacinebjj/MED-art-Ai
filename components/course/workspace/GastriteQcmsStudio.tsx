@@ -39,7 +39,7 @@ export function GastriteQcmsStudio({
             </span>
             <h1 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tight mt-2">{data.titre_section}</h1>
             <p className="text-sm text-teal-100 mt-1 max-w-2xl">
-              {data.qcms.length} QCM et {data.qrocs.length} QROC à difficulté extrême — physiopathologie, histologie, complications évolutives, éradication et maladie de Biermer. Aucune complaisance.
+              {data.qcms.length} QCM{data.qrocs.length > 0 ? ` et ${data.qrocs.length} QROC` : ""} à difficulté extrême — physiopathologie, histologie, complications évolutives, éradication et maladie de Biermer. Aucune complaisance.
             </p>
           </div>
         </div>

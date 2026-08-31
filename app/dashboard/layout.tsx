@@ -1,4 +1,5 @@
 import { AuthProvider } from "@/providers/AuthProvider";
+import { PomodoroAuthSync } from "@/providers/PomodoroAuthSync";
 
 /**
  * Root layout for everything under /dashboard/**. Deliberately minimal —
@@ -11,5 +12,10 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <AuthProvider>{children}</AuthProvider>;
+  return (
+    <AuthProvider>
+      <PomodoroAuthSync />
+      {children}
+    </AuthProvider>
+  );
 }

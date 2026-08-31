@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, HAIKU_MODEL } from "@/lib/ai/openrouter";
 import {
-  STUDIO_MODEL,
   STUDIO_BYPASS_MOCK,
   STUDIO_PROMPT_CONFIG,
   STUDIO_SECTION_KEYS,
@@ -19,8 +18,18 @@ import type { DemoSectionId } from "@/lib/demo-content";
 export const runtime = "nodejs";
 export const maxDuration = 300; // same headroom as /api/studio/generate — a regenerate call is a full AI generation too.
 
-/** Maximum real generations ever produced per (course, section) — once this many variations exist, every future "Régénérer" click is served from them at $0, forever. Raised from 2 to 10 by product direction: a wider pool gives more perceived variety across the cohort while still hard-capping worst-case API spend at 10 generations per section, ever, platform-wide (not per student). */
-const MAX_VARIATIONS = 10;
+/**
+ * Maximum real generations ever produced per (course, section) — once this
+ * many variations exist, every future "Régénérer" click is served from them
+ * at $0, forever, for ANY student on that (course, section) pair, not just
+ * the one who triggered each generation — this is the actual mechanism
+ * behind "a later student's regenerate costs nothing" (product ask).
+ * Raised from 10 to 20 alongside the model switch below (STUDIO_MODEL ->
+ * HAIKU_MODEL, ~2x cheaper per token): the same worst-case-total-spend
+ * ceiling this cap was originally sized to now buys twice the stored
+ * variety for the same dollar risk.
+ */
+const MAX_VARIATIONS = 20;
 
 const VALID_SECTIONS = Object.keys(STUDIO_PROMPT_CONFIG) as DemoSectionId[];
 
@@ -89,6 +98,17 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  // Cas Clinique regeneration is permanently disabled by product direction —
+  // the 3 generated cases must stay static forever. The frontend already
+  // hides the "Régénérer" menu item for this section (StudioPanel.tsx,
+  // MobileStudioCards.tsx) — this is the real enforcement, since a client is
+  // never trusted to police its own request.
+  if (section === "cas_clinique") {
+    return NextResponse.json(
+      { success: false, error: "La régénération de la section Cas Clinique n'est pas disponible — les cas générés restent définitifs." },
+      { status: 403 }
+    );
+  }
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -130,8 +150,44 @@ export async function POST(request: NextRequest) {
   // session in ActiveFlashcardsDeck's storage-event handler).
   const userId = user.id;
 
-  /** Persists `content` into this student's own row and returns the success response — the one write/response shape shared by every path below (cache hit, freshly generated, or legacy fallback). */
-  async function saveAndRespond(content: unknown) {
+  // QCM-only, PERSONAL regeneration ceiling — 4 per (student, course),
+  // separate from and in ADDITION to the platform-wide studio_content_variations
+  // cache below (that one caps how many DISTINCT contents ever get created,
+  // shared across every student; this one caps how many times THIS student
+  // can click "Régénérer" at all, even while the shared pool still has room
+  // for more variations from other students). Checked BEFORE either
+  // regeneration path below runs — atomic check-and-increment via
+  // reserve_qcm_regenerate (supabase/schema.sql), so a cache-served variation
+  // and a fresh generation both count identically toward the cap; the two
+  // limits are independent, neither substitutes for the other.
+  if (section === "qcm") {
+    const QCM_REGENERATE_CAP = 4;
+    const { data: qcmCount, error: qcmCapError } = await supabase.rpc("reserve_qcm_regenerate", {
+      p_course_id: courseId,
+      p_user_id: userId,
+      p_cap: QCM_REGENERATE_CAP,
+    });
+    if (qcmCapError) {
+      console.error("[studio/regenerate:qcm] Échec réservation du plafond de régénération:", qcmCapError.message);
+      return NextResponse.json({ success: false, error: `Vérification du plafond échouée : ${qcmCapError.message}` }, { status: 500 });
+    }
+    if (qcmCount === null) {
+      return NextResponse.json(
+        { success: false, error: `Tu as atteint la limite de ${QCM_REGENERATE_CAP} régénérations pour l'Examen QCM de ce cours.` },
+        { status: 403 }
+      );
+    }
+  }
+
+  /** Undoes the QCM-only reservation above on a downstream failure — same "a failed attempt shouldn't cost you a unit" fairness as refundGeneration, called alongside it at every one of its call sites below. No-op for every other section. */
+  async function refundQcmRegenerateIfNeeded() {
+    if (section !== "qcm") return;
+    const { error } = await supabase.rpc("refund_qcm_regenerate", { p_course_id: courseId, p_user_id: userId });
+    if (error) console.warn("[studio/regenerate:qcm] Échec refund_qcm_regenerate:", error.message);
+  }
+
+  /** Persists `content` into this student's own row and returns the success response — the one write/response shape shared by every path below (cache hit, freshly generated, or legacy fallback). `cached` powers the frontend's UX-illusion artificial delay (lib/fake-ai-delay.ts) — true only when `content` came from studio_content_variations without a real OpenRouter call. */
+  async function saveAndRespond(content: unknown, cached = false) {
     const { error: updateError, count } = await supabase
       .from("studio_courses")
       .update({ [column]: content, updated_at: new Date().toISOString() }, { count: "exact" })
@@ -145,7 +201,7 @@ export async function POST(request: NextRequest) {
     if (count === 0) {
       return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
     }
-    return NextResponse.json({ success: true, section, data: content });
+    return NextResponse.json({ success: true, section, data: content, cached });
   }
 
   // --- Variation cache path (content_hash present) ---------------------
@@ -157,7 +213,7 @@ export async function POST(request: NextRequest) {
       // Serve a random existing variation, $0, no courseCap consumption.
       const picked = existing[Math.floor(Math.random() * existing.length)];
       await recordVariationHit(picked.id);
-      return saveAndRespond(picked.content);
+      return saveAndRespond(picked.content, true);
     }
 
     // Fewer than MAX_VARIATIONS exist — build up to the cap with a real
@@ -178,10 +234,22 @@ export async function POST(request: NextRequest) {
           { role: "system", content: buildStudioRegeneratePrompt(section, existingContentText) },
           { role: "user", content: "Génère le contenu régénéré demandé." },
         ],
-        { model: STUDIO_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+        // Haiku, not Sonnet — a light rewrite of ALREADY-correct content
+        // (see buildStudioRegeneratePrompt's own 90/10 instruction) is a
+        // fundamentally lower-risk task for a cheaper model than fresh
+        // clinical reasoning from scratch: no new differential diagnosis,
+        // no new distractor design, just rewording/restructuring text
+        // that's already been validated once. ~2x cheaper per token than
+        // Sonnet — genuine, honest savings; NOT the "90% of the original
+        // cost" some product framing implied, which isn't achievable for a
+        // fresh generation of comparable length/depth (see this route's own
+        // MAX_VARIATIONS comment for why the REAL "later regenerate is
+        // free" mechanism is the variation cache, not a cheaper model).
+        { model: HAIKU_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
       );
     } catch (error) {
       await refundGeneration(user.id);
+      await refundQcmRegenerateIfNeeded();
       if (error instanceof OpenRouterError) {
         return NextResponse.json({ success: false, error: error.message }, { status: error.status });
       }
@@ -206,6 +274,7 @@ export async function POST(request: NextRequest) {
       sanitized = result.data;
     } catch (error) {
       await refundGeneration(user.id);
+      await refundQcmRegenerateIfNeeded();
       console.error(`[studio/regenerate:${section}] Parsing/validation échoué :`, error);
       return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
     }
@@ -242,10 +311,12 @@ export async function POST(request: NextRequest) {
         { role: "system", content: buildStudioRegeneratePrompt(section, existingContentText) },
         { role: "user", content: "Génère le contenu régénéré demandé." },
       ],
-      { model: STUDIO_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+      // Haiku, not Sonnet — same reasoning as the variation-cache path above.
+      { model: HAIKU_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
     );
   } catch (error) {
     await refundGeneration(user.id);
+    await refundQcmRegenerateIfNeeded();
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }
@@ -270,6 +341,7 @@ export async function POST(request: NextRequest) {
     sanitized = result.data;
   } catch (error) {
     await refundGeneration(user.id);
+    await refundQcmRegenerateIfNeeded();
     console.error(`[studio/regenerate:${section}] Parsing/validation échoué (legacy) :`, error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
   }

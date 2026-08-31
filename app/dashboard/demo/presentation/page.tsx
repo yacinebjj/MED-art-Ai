@@ -8,7 +8,7 @@ export default function PresentationDemoPage() {
     <div className="relative">
       <Link
         href="/dashboard/demo"
-        className="absolute left-4 top-4 z-40 flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm backdrop-blur transition-colors hover:bg-white"
+        className="glass-panel absolute left-4 top-4 z-40 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground shadow-glass transition-all duration-300 hover:-translate-x-0.5 dark:shadow-glass-dark"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
         Retour à la démo

@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tDiscovery } from "@/lib/translations/discovery";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -18,6 +20,9 @@ interface StoredGlobalSummary {
   generatedAt: string;
   courseIds: number[];
 }
+
+/** Mirrors lib/module-synthesis.ts's own MIN_COURSES_REQUIRED — duplicated as a plain constant rather than imported, since that module pulls in server-only dependencies (getSupabaseAdmin, OpenRouter calls) that have no place in a "use client" bundle. Enforced again server-side in that same route (never trust a client-only gate). */
+const MIN_COURSES_REQUIRED = 5;
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
@@ -42,6 +47,7 @@ export function GlobalSummaryModal({
   moduleTitle: string;
 }) {
   const { toast } = useToast();
+  const { language } = useLanguage();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const [courses, setCourses] = useState<StudioCourseSummary[]>([]);
@@ -87,8 +93,8 @@ export function GlobalSummaryModal({
   }
 
   async function handleGenerate() {
-    if (selectedIds.size === 0) {
-      toast({ variant: "info", title: "Sélectionne au moins un cours." });
+    if (selectedIds.size < MIN_COURSES_REQUIRED) {
+      toast({ variant: "info", title: tDiscovery("selectAtLeastNCourses", language).replace("{n}", String(MIN_COURSES_REQUIRED)) });
       return;
     }
 
@@ -105,9 +111,9 @@ export function GlobalSummaryModal({
       }
 
       setSummary(data.summary);
-      toast({ variant: "success", title: "Résumé global généré" });
+      toast({ variant: "success", title: tDiscovery("globalSummaryGenerated", language) });
     } catch (error) {
-      toast({ variant: "error", title: "Échec de la génération", description: error instanceof Error ? error.message : "Erreur inconnue." });
+      toast({ variant: "error", title: tDiscovery("generationFailed", language), description: error instanceof Error ? error.message : "Erreur inconnue." });
     } finally {
       setIsGenerating(false);
     }
@@ -121,7 +127,7 @@ export function GlobalSummaryModal({
         onOverlayClick={() => onOpenChange(false)}
       >
         <DialogHeader>
-          <DialogTitle>Résumé global du module</DialogTitle>
+          <DialogTitle>{tDiscovery("globalSummaryTitle", language)}</DialogTitle>
           <DialogDescription>
             {moduleTitle} — synthèse inter-cours générée par l&apos;IA.
             {summary && ` Généré le ${formatDate(summary.generatedAt)}.`}
@@ -154,10 +160,17 @@ export function GlobalSummaryModal({
               ))}
             </div>
 
-            <Button size="sm" className="w-full" onClick={handleGenerate} disabled={isGenerating}>
+            <Button size="sm" className="w-full" onClick={handleGenerate} disabled={isGenerating || selectedIds.size < MIN_COURSES_REQUIRED}>
               {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {summary ? "Régénérer" : "Générer"}
+              {summary ? tDiscovery("regenerateButton", language) : tDiscovery("generateButton", language)}
             </Button>
+            {selectedIds.size < MIN_COURSES_REQUIRED && (
+              <p className="text-center text-xs text-muted-foreground">
+                {tDiscovery("selectAtLeastNCoursesWithCount", language)
+                  .replace("{x}", String(selectedIds.size))
+                  .replace(/{n}/g, String(MIN_COURSES_REQUIRED))}
+              </p>
+            )}
 
             {summary && (
               <div className="max-h-[50vh] overflow-y-auto rounded-xl border border-border bg-muted/30 p-4">

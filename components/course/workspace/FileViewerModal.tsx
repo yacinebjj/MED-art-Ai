@@ -1,5 +1,6 @@
 "use client";
 
+import { FileText } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 
 /** Formats Google Docs Viewer can render that a bare iframe can't (no native browser PDF-style rendering). */
@@ -45,14 +46,19 @@ export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }:
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl" onOverlayClick={() => onOpenChange(false)} onClick={(e) => e.stopPropagation()}>
         <DialogHeader>
-          <DialogTitle className="truncate">{title || "Document source"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2 truncate">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <FileText className="h-3.5 w-3.5" />
+            </span>
+            <span className="truncate">{title || "Document source"}</span>
+          </DialogTitle>
         </DialogHeader>
 
         {iframeSrc ? (
-          <iframe src={iframeSrc} title={title} className="h-[80vh] w-full rounded-xl border border-border" />
+          <iframe src={iframeSrc} title={title} className="h-[80vh] w-full rounded-xl border border-border shadow-soft" />
         ) : rawText.trim() ? (
-          <div className="h-[80vh] w-full overflow-y-auto rounded-xl border border-border bg-muted/30 p-6">
-            <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-foreground">{rawText}</pre>
+          <div className="h-[80vh] w-full overflow-y-auto rounded-xl border border-border bg-muted/30 p-6 shadow-soft">
+            <pre className="text-reading whitespace-pre-wrap break-words font-sans text-foreground">{rawText}</pre>
           </div>
         ) : (
           <p className="py-10 text-center text-sm text-muted-foreground">Aucun contenu disponible pour ce cours.</p>

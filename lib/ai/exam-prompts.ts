@@ -69,18 +69,36 @@ const VARIATION_INSTRUCTION = `CRITICAL: This is a REGENERATION. You must create
 const VARIATION_RATIO_REMINDER = `Cette exigence de nouveauté s'applique à TOUTES les questions de ce lot, standards comme cliniques : chaque question doit tester un piège/mécanisme différent de l'examen précédent. Le nombre de QCM standards vs cas cliniques indiqué ci-dessus pour ce lot reste strictement obligatoire même en régénération — ne bascule jamais vers un lot majoritairement composé de vignettes cliniques.`;
 
 /**
- * Builds ONE batch's system prompt. `questionsPerBatch`/`totalBatches` come
- * from the route (the single source of truth for the batching shape) rather
- * than being duplicated as constants here, so the two files can't drift out
- * of sync. `previousTopics` carries forward every weakPointTag already
- * produced by earlier batches in this same exam (sequential calls, not
- * parallel — see the route's own comment) so later batches can honor the
- * "logical flow and topic distribution" instruction for real, by explicitly
- * avoiding re-testing the exact same notion, rather than independently
- * guessing at non-overlap.
+ * The STATIC half of the exam prompt — persona/style + the course content
+ * itself — byte-identical across all TOTAL_BATCHES calls for one exam (the
+ * course inputs never change between batches). Deliberately split out from
+ * the per-batch instructions below so the route can send this as its own
+ * `cache_control: ephemeral`-marked system block: Anthropic's prompt cache
+ * then only charges full price for this (often large — a full course's
+ * source text) block on batch 1, and serves batches 2-N a cheap cache read
+ * instead of repricing the same course text from scratch every single time.
+ * See app/api/exam/generate/route.ts's generateExamBatch for the call site.
  */
-export function buildExamBatchPrompt(
-  courses: ExamCourseInput[],
+export function buildExamStaticSystemPrompt(courses: ExamCourseInput[]): string {
+  return `${EXAM_PERSONA_AND_STYLE}\n\nCours à couvrir :\n\n${formatCoursesBlock(courses)}`;
+}
+
+/**
+ * The DYNAMIC half — everything that legitimately changes from one batch to
+ * the next (batch index, the accumulating previousTopics list, the
+ * variation flag) — sent as the USER message rather than folded into the
+ * cached system prompt, since mixing dynamic content into a cache-marked
+ * block would break the exact-prefix match caching depends on.
+ * `questionsPerBatch`/`totalBatches` come from the route (the single source
+ * of truth for the batching shape) rather than being duplicated as constants
+ * here, so the two files can't drift out of sync. `previousTopics` carries
+ * forward every weakPointTag already produced by earlier batches in this
+ * same exam (sequential calls, not parallel — see the route's own comment)
+ * so later batches can honor the "logical flow and topic distribution"
+ * instruction for real, by explicitly avoiding re-testing the exact same
+ * notion, rather than independently guessing at non-overlap.
+ */
+export function buildExamBatchInstruction(
   batchIndex: number,
   totalBatches: number,
   questionsPerBatch: number,
@@ -108,5 +126,5 @@ export function buildExamBatchPrompt(
 
   const variationBlock = isVariation ? `\n\n${VARIATION_INSTRUCTION}\n\n${VARIATION_RATIO_REMINDER}` : "";
 
-  return `${EXAM_PERSONA_AND_STYLE}\n\n${hardLimit}\n\n${batchInstruction}${topicsBlock}${variationBlock}\n\nCours à couvrir :\n\n${formatCoursesBlock(courses)}`;
+  return `${hardLimit}\n\n${batchInstruction}${topicsBlock}${variationBlock}`;
 }

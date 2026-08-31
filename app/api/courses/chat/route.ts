@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { HAIKU_MODEL, OpenRouterError, streamOpenRouter, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { lookupSemanticCache, storeSemanticCacheEntry } from "@/lib/ai/semantic-cache";
+import { retrieveRelevantContext } from "@/lib/chat-context-retrieval";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import {
   reserveChatMessage,
@@ -12,13 +12,13 @@ import {
   reserveHighlightMessage,
   refundHighlightMessage,
 } from "@/lib/subscription";
-import { CHAT_MAX_CONTEXT_CHARS } from "@/lib/chat-constants";
+import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
+import { CHAT_SYSTEM_PROMPT_BASE, buildSystemContent } from "@/lib/chat-system-prompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // streamed chat reply — no explicit cap before, so it silently rode Vercel's platform default.
 
-const MAX_CONTEXT_CHARS = CHAT_MAX_CONTEXT_CHARS;
 // 5 exchanges (10 messages) verbatim — cost analysis showed the OLD cap of
 // 20 messages let a 30-question conversation's resent history alone balloon
 // past 1M input tokens in the worst case. Plain truncation (not LLM
@@ -26,15 +26,34 @@ const MAX_CONTEXT_CHARS = CHAT_MAX_CONTEXT_CHARS;
 // call on every message, working against the very cost this exists to cut.
 const MAX_HISTORY_MESSAGES = 10;
 
-const CHAT_SYSTEM_PROMPT_BASE = `Tu es MedArt Assistant, un professeur de médecine expert et pédagogue qui aide des étudiants en médecine, en pharmacie et en chirurgie dentaire à comprendre leur cours.
-
-Réponds de façon ultra-détaillée et rigoureuse, mais avec un ton conversationnel et chaleureux, comme si tu discutais avec l'étudiant en personne. Développe les mécanismes physiopathologiques en profondeur, donne des exemples concrets, et structure ta réponse (listes, **gras** sur les termes clés) quand ça aide à la clarté. N'hésite jamais à être exhaustif — un étudiant en médecine a besoin de comprendre le "pourquoi", pas juste le "quoi".
-
-Si on te demande de traduire un terme ou un passage médical, traduis-le fidèlement puis ajoute, si utile, une courte clarification médicale. Réponds toujours en français, sauf si on te demande explicitement une traduction vers une autre langue.
-
-CRITICAL INSTRUCTION: If the user's prompt consists of a short text excerpt, specific sentence, or paragraph, you MUST automatically recognize that they copy-pasted this directly from their medical course document. DO NOT summarize the whole document. Your SOLE purpose is to provide a laser-focused, ultra-detailed, deep medical explanation of THAT SPECIFIC EXCERPT within the context of the provided sources.
-
-You are a deeply analytical AI. Always provide long-form, highly detailed, and comprehensive answers. IMPORTANT: If the user asks a non-medical question, general knowledge question, or casual query, DO NOT block it. Answer it naturally, deeply, and helpfully like a standard world-class AI.`;
+// This route now runs EXCLUSIVELY on lib/ai/openrouter.ts's FREE_MODEL_CHAIN
+// (":free"-suffixed models — see that constant's own comment for which
+// ones, and the live verification behind them) — an explicit product
+// decision to trade the previously-tuned Haiku/economy hybrid routing (and
+// its cost-control reasoning) for genuinely zero marginal cost, ACCEPTING a
+// real, unverified quality risk on this app's core medical-explanation
+// surface (see the git history / conversation around this change for the
+// full trade-off discussion). lib/chat-model-routing.ts is left in place,
+// unused but intact, specifically so reverting to paid hybrid routing later
+// is a small, contained change if this experiment doesn't hold up.
+//
+// 8192 (raised from 800/1500 on explicit request) — free-tier models are
+// not necessarily prioritized the way a paid call is, and are NOT run
+// through this app's own cost-driven caps; a generous ceiling here is what
+// actually stops a genuinely long explanation from being cut off mid-
+// sentence. `reasoning: { effort: "low" }` is applied defensively to every
+// call on this chain (see the streamOpenRouter call below) — unlike
+// ECONOMY_MODEL, neither NVIDIA Nemotron nor Poolside Laguna has a
+// CONFIRMED hidden-reasoning-token truncation report from this app, but the
+// option is a documented no-op on a model that doesn't support it, so
+// there's no reason not to apply the same protection preemptively.
+const MAX_OUTPUT_TOKENS_NORMAL = 8192;
+// Highlight quick actions stay deliberately smaller than the main flow (a
+// concise 2-3 sentence answer, or a translation of an ≤800-char excerpt
+// never needs anywhere near 8192) but still raised from the original 700 —
+// same defensive margin against an unverified free model's reasoning
+// overhead as MAX_OUTPUT_TOKENS_NORMAL above.
+const MAX_OUTPUT_TOKENS_HIGHLIGHT = 1500;
 
 // Appended ONLY for the "Ask MedArt" text-selection quick action (concise:
 // true from the client) — never for the free-form chat input, so normal
@@ -75,36 +94,6 @@ const MAX_MESSAGE_CHARS = 4000;
 // document" — the isolation guarantee below depends on this staying tiny
 // relative to MAX_CONTEXT_CHARS (20 000).
 const ADJACENT_CONTEXT_CHARS = 300;
-
-/**
- * Builds the system message for a NORMAL (non-highlight) chat turn, as TWO
- * cache-marked content blocks instead of one plain string:
- *   1. The persona/instructions — byte-identical across every course and
- *      every student, so it's the cache hit most likely to be reused
- *      platform-wide.
- *   2. The course's raw_text — identical across every question asked about
- *      THIS course (by one student, or by any number of students studying
- *      the same course within the cache's 5-minute window), but different
- *      per course.
- * Anthropic caches by exact-prefix match, so cache_control MUST sit on
- * static content only, and nothing dynamic (history, the new question) can
- * come before it in the request — see the message array assembly below.
- */
-function buildSystemContent(sourceText: string | null): ChatMessageInput["content"] {
-  const blocks: NonNullable<Extract<ChatMessageInput["content"], unknown[]>> = [
-    { type: "text", text: CHAT_SYSTEM_PROMPT_BASE, cache_control: { type: "ephemeral" } },
-  ];
-
-  if (sourceText) {
-    blocks.push({
-      type: "text",
-      text: `Voici le cours sur lequel l'étudiant travaille actuellement (utilise-le comme contexte quand c'est pertinent, mais tu peux aussi répondre à des questions plus générales) :\n"""\n${sourceText.slice(0, MAX_CONTEXT_CHARS)}\n"""`,
-      cache_control: { type: "ephemeral" },
-    });
-  }
-
-  return blocks;
-}
 
 /**
  * Builds the system message for a HIGHLIGHT quick action (Ask MedArt /
@@ -161,12 +150,12 @@ function isBareGreeting(text: string): boolean {
  * model, must not be confused with this one.
  *
  * GET  ?slug=... -> the signed-in student's saved chat history for that course.
- * POST            -> streams the model's answer back as plain text (see
- *                     hooks/useCourseChat.ts on the frontend side) while
- *                     persisting both sides of the exchange to
- *                     `course_chat_history` — see the inline comments below
- *                     for exactly when each write happens relative to the
- *                     stream.
+ * POST           -> streams the model's answer back as plain text (see
+ *                    hooks/useCourseChat.ts on the frontend side) while
+ *                    persisting both sides of the exchange to
+ *                    `course_chat_history` — see the inline comments below
+ *                    for exactly when each write happens relative to the
+ *                    stream.
  */
 export async function GET(request: NextRequest) {
   const slug = request.nextUrl.searchParams.get("slug");
@@ -278,7 +267,6 @@ export async function POST(request: NextRequest) {
     history,
     concise,
     translate,
-    sourceText: inlineSourceText,
     selectedText,
     adjacentContext,
   } = (body ?? {}) as {
@@ -287,7 +275,6 @@ export async function POST(request: NextRequest) {
     history?: unknown;
     concise?: unknown;
     translate?: unknown;
-    sourceText?: unknown;
     /** The exact text the student highlighted — presence of this (non-empty) is what triggers isHighlightMode below. Distinct from `message`, which stays the free-form question/instruction wrapping it. */
     selectedText?: unknown;
     /** Optional, tiny excerpt immediately surrounding the selection in the SAME course — never the whole document. See ADJACENT_CONTEXT_CHARS. */
@@ -321,8 +308,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Plan quota gate — highlight mode's own pool (chatMessageCap, the
-  // free-form pool below, is checked separately after the semantic-cache
-  // lookup — see the CAS 2 section below for why it can't be checked here).
+  // free-form pool below, is checked separately further down).
   if (isHighlightMode) {
     const gate = await reserveHighlightMessage(user);
     if (!gate.allowed) {
@@ -412,65 +398,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // --- Semantic cache interception (Étape B/C/D) ----------------------------
-  // Runs BEFORE any OpenRouter call. lookupSemanticCache() already fails open
-  // internally (returns null on any embedding/RPC error) — this outer
-  // try/catch is a second, belt-and-suspenders layer so that even an
-  // unexpected exception here can never turn into a 500 for the student; it
-  // just degrades to a normal cache-miss generation below.
-  // Skipped entirely for concise quick actions: the cache doesn't distinguish
-  // "answered concisely" from "answered normally" for the same question, so
-  // serving a cached full-length answer here would defeat the whole point of
-  // the concise mode (and vice versa — caching a 2-sentence quick-action
-  // answer under the same question would truncate a later full question).
-  let cacheHit: Awaited<ReturnType<typeof lookupSemanticCache>> = null;
-  try {
-    cacheHit = isQuickAction || isBareGreetingMessage ? null : await lookupSemanticCache({ question: message, courseSlug });
-  } catch (error) {
-    console.error(
-      "[courses/chat POST] Exception inattendue pendant le lookup du cache sémantique — bascule vers OpenRouter:",
-      error instanceof Error ? error.message : error
-    );
-  }
-
-  if (cacheHit) {
-    // CAS 1 — Cache Hit: serve the stored answer instantly, zero OpenRouter
-    // calls. Still persisted to course_chat_history exactly like a live
-    // reply, so the student's transcript reads identically either way.
-    if (supabase && user) {
-      const { error } = await supabase
-        .from("course_chat_history")
-        .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: cacheHit.answer });
-      if (error) {
-        console.error("[courses/chat POST] Échec sauvegarde réponse (cache) assistant:", { code: error.code, message: error.message });
-      }
-    }
-
-    // No separate "record" call needed here anymore — reserveChatMessageDaily
-    // above already incremented the daily counter atomically before this
-    // cache lookup even ran. The monthly value cap (chatMessageCap) was
-    // never reserved for this path, and stays that way — only the abuse
-    // throttle applies to a free hit.
-
-    return new NextResponse(cacheHit.answer, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Cache": "HIT",
-        "X-Cache-Similarity": cacheHit.similarity.toFixed(4),
-      },
-    });
-  }
-
-  // Monthly value cap — atomically RESERVED only here, after the semantic-
-  // cache lookup came back empty: this is a genuine paid generation about to
-  // happen, and a $0 cache hit must never consume it, mirroring
-  // reserveGeneration's "cache hits don't count" rule. The daily
-  // abuse-throttle was already reserved earlier (before the cache lookup)
-  // since it applies to hits too. isHighlightMode is excluded — it already
-  // reserved its own separate pool above. If the generation below then
-  // fails before producing a reply, refundChatMessage() undoes this.
+  // Semantic caching REMOVED (product direction) — every chat message now
+  // always reaches a real OpenRouter call below, no "serve a stored answer
+  // for a similar-enough prior question" interception. Monthly value cap —
+  // the daily abuse-throttle was already reserved earlier above (it applies
+  // regardless). isHighlightMode is excluded — it already reserved its own
+  // separate pool above. If the generation below then fails before
+  // producing a reply, refundChatMessage() undoes this.
   if (!isHighlightMode) {
     const chatGate = await reserveChatMessage(user);
     if (!chatGate.allowed) {
@@ -478,152 +412,202 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // CAS 2 — Cache Miss: resolve the course's source text (deferred to here —
-  // no point paying this query on a cache hit, which needs neither it nor a
-  // system prompt) and fall through to the normal generation path.
-  // A caller with no matching `courses` table row (e.g. the studio_courses-
-  // backed module workspace, which has its own separate table) can supply
-  // the raw text directly instead — checked first so it always wins over a
-  // (non-existent) DB lookup rather than silently losing context. A bare
-  // greeting OR a highlight quick action skips this entirely — the isolation
-  // guarantee for highlight mode means this variable must never even be
-  // populated for it, let alone sent, so there is no code path by which the
-  // full course text could leak into a highlight request.
+  // This route no longer spends real money (see FREE_MODEL_CHAIN's own
+  // comment above) — reservePlatformCapacity (the PAID-generation circuit
+  // breaker) no longer applies here. reserveFreeTierCapacity instead guards
+  // the free-tier models' own hard, EXTERNAL, account-wide daily request cap
+  // (shared with app/api/dashboard-assistant/route.ts and
+  // lib/cache-prewarming.ts — see that function's own comment). Applies to
+  // BOTH normal chat and highlight mode: both are real free-tier calls about
+  // to happen, and that shared external ceiling doesn't distinguish between
+  // per-student pools.
+  const freeTierCapacity = await reserveFreeTierCapacity();
+  if (!freeTierCapacity.allowed) {
+    return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
+  }
+
+  // CAS 2 — Cache Miss: resolve context via RAG chunk retrieval ONLY.
+  //
+  // STRICT RULE (no exceptions): this route must NEVER inject a course's full
+  // raw_text into the prompt — not from `courses.raw_text`, not from the
+  // Workspace's inline `sourceText`, regardless of course size. A prior
+  // version fell back to the whole document (up to CHAT_MAX_CONTEXT_CHARS =
+  // 100 000 chars, ~25-30k tokens) whenever no indexed chunks were found —
+  // that fallback is exactly what produced ~$0.03-0.04/message reports (a
+  // fresh ~25k-token cache WRITE, at a premium, on every message that didn't
+  // land a cache read). Removed entirely: `sourceText` below can only ever be
+  // `null` (no chunks found — model answers from general medical knowledge,
+  // per explicit product decision) or a handful of top-K retrieved chunks
+  // (a few hundred to ~2k tokens). There is no code path left that can send
+  // "the whole course" as a chat context block, at any size.
+  //
+  // A bare greeting or a highlight quick action skips this entirely.
   let sourceText: string | null = null;
-  if (!isBareGreetingMessage && !isHighlightMode) {
-    sourceText = typeof inlineSourceText === "string" && inlineSourceText.trim() ? inlineSourceText : null;
-    if (!sourceText && courseSlug && isSupabaseConfigured()) {
-      const admin = getSupabaseAdmin();
-      // Previously ignored `error` entirely — a genuine DB failure here was
-      // indistinguishable from "this course has no raw_text", so the chat
-      // silently answered with zero course context instead of surfacing
-      // the failure. Still fails open (log, don't 500): the assistant can
-      // legitimately answer general questions with no course loaded, so a
-      // transient read failure on this ONE course's context shouldn't take
-      // the whole chat down. Found during a security audit.
-      const { data, error } = await admin.from("courses").select("raw_text").eq("slug", courseSlug).maybeSingle();
-      if (error) {
-        console.error("[courses/chat POST] Échec lecture raw_text (contexte de cours perdu pour cette réponse):", { code: error.code, message: error.message });
-      }
-      sourceText = (data as { raw_text: string | null } | null)?.raw_text ?? null;
+  if (!isBareGreetingMessage && !isHighlightMode && courseSlug) {
+    try {
+      // studio-course-{id} (Workspace) vs a real public course slug (legacy
+      // pipeline) — the slug's own shape is enough to tell them apart.
+      const studioIdMatch = courseSlug.match(/^studio-course-(\d+)$/);
+      const chunkSource = studioIdMatch ? { studioCourseId: Number(studioIdMatch[1]) } : { legacyCourseSlug: courseSlug };
+
+      // A short, anaphoric follow-up ("zid chrahli b tafsil", "donne-moi un
+      // exemple") embeds almost meaninglessly on its own — nothing in
+      // "explain in more detail" itself names the actual medical topic, so
+      // ranking chunks against THAT embedding alone would surface whatever
+      // chunks happen to score highest for a generic phrase, not the ones
+      // related to what's actually being discussed. Anchor the retrieval
+      // query to the last couple of turns (already available here as
+      // historyTurns, computed above for the model call itself) so a
+      // follow-up's embedding carries the real topic forward, not just its
+      // own bare wording.
+      const retrievalQuery = [...historyTurns.slice(-2).map((turn) => turn.content), message].join("\n");
+      sourceText = await retrieveRelevantContext(retrievalQuery, chunkSource);
+    } catch (error) {
+      // Fails open to `null` (no course context at all), NEVER to the full
+      // raw text — see the strict rule above.
+      console.error("[courses/chat POST] Échec récupération contextuelle (fail-open, réponse sans contexte de cours):", error instanceof Error ? error.message : error);
     }
   }
 
-  // Cached (static) content — system persona + course text — MUST come
-  // before any dynamic content (history, the new question) for Anthropic's
-  // prefix-based cache to have a chance of matching. Highlight mode builds a
-  // deliberately different, much smaller message array: no cache_control (a
-  // one-off selection has no repeated prefix to benefit from it), no
-  // history, no course text — see buildHighlightSystemContent's own comment
-  // for exactly what it does and doesn't receive.
+  // Cached (static) content — system persona + course text. `false` below
+  // (was `useAnthropicCaching`, computed from the old hybrid router): this
+  // route no longer ever uses an Anthropic model, so cache_control is never
+  // applicable — see buildSystemContent's own comment. Highlight mode builds
+  // a deliberately different, much smaller message array: no cache_control
+  // (a one-off selection has no repeated prefix to benefit from it
+  // regardless of model), no history, no course text — see
+  // buildHighlightSystemContent's own comment for exactly what it does and
+  // doesn't receive.
   const messages: ChatMessageInput[] = isHighlightMode
     ? [
-        { role: "system", content: buildHighlightSystemContent(isTranslate, trimmedSelectedText, trimmedAdjacentContext) },
+        {
+          role: "system",
+          content: buildHighlightSystemContent(isTranslate, trimmedSelectedText, trimmedAdjacentContext),
+        },
         { role: "user", content: message },
       ]
     : [
-        { role: "system", content: buildSystemContent(sourceText) },
-        ...historyTurns,
+        {
+          role: "system",
+          content: buildSystemContent(sourceText, false),
+        },
+        ...historyTurns.map((t): ChatMessageInput => ({ role: t.role, content: t.content })),
         { role: "user", content: message },
       ];
 
-  try {
-    // Highlight mode forces the cheap model AND a hard, low output ceiling —
-    // "2-3 phrases maximum" is already in the prompt, but a token cap is a
-    // real backstop against the model ignoring that instruction, not just a
-    // polite request. 4096 (normal mode) vs 400 (highlight) is deliberate,
-    // not a rounding choice: a highlight answer that needed more than ~300
-    // words would mean the isolation itself was the wrong call for that
-    // question, not that the cap should be raised.
-    const stream = await streamOpenRouter(
-      messages,
-      isHighlightMode ? { maxTokens: 400, model: HAIKU_MODEL } : { maxTokens: 4096 }
-    );
-
-    // Tee the stream: every chunk is forwarded to the client the instant it
-    // arrives (zero added latency, nothing buffered), while the SAME bytes
-    // are accumulated in `fullReply`. Only once the model is completely done
-    // — i.e. once `flush()` fires, strictly after the client has already
-    // received every chunk — do we write the full assistant reply to
-    // Supabase AND index it into the semantic cache. The client never waits
-    // on either write; neither is even in the response path by the time it
-    // runs.
-    let fullReply = "";
-    const decoder = new TextDecoder();
-    const persistOnFlush = new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        fullReply += decoder.decode(chunk, { stream: true });
-        controller.enqueue(chunk);
-      },
-      async flush() {
-        if (!fullReply.trim()) return;
-
-        await Promise.all([
-          (async () => {
-            if (!supabase || !user) return;
-
-            // If this exchange's own user-message row is gone, the
-            // conversation was explicitly reset (DELETE /api/courses/chat,
-            // "Nouvelle conversation") while this reply was still
-            // generating — persisting it now would resurrect a one-sided,
-            // orphaned message right after the student was told the
-            // history was cleared. Only checked when an id was actually
-            // captured; if that first insert itself failed for an
-            // unrelated reason, there's no conflicting row to worry about
-            // and the reply is persisted as before.
-            if (userMessageId !== null) {
-              const { data: stillExists } = await supabase
-                .from("course_chat_history")
-                .select("id")
-                .eq("id", userMessageId)
-                .maybeSingle();
-              if (!stillExists) return;
-            }
-
-            const { error } = await supabase
-              .from("course_chat_history")
-              .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: fullReply });
-            if (error) {
-              console.error("[courses/chat POST] Échec sauvegarde réponse assistant:", { code: error.code, message: error.message });
-            }
-          })(),
-          isQuickAction || isBareGreetingMessage
-            ? Promise.resolve()
-            : storeSemanticCacheEntry({ question: message, answer: fullReply, courseSlug }),
-          // No "record usage" call needed here anymore — reserveHighlightMessage
-          // / reserveChatMessage / reserveChatMessageDaily above already
-          // incremented atomically, before streamOpenRouter was even called.
-        ]);
-      },
-    });
-
-    return new NextResponse(stream.pipeThrough(persistOnFlush), {
-      status: 200,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Cache": "MISS",
-      },
-    });
-  } catch (error) {
-    // Refunds the reservation(s) taken above — but only covers a failure
-    // while SETTING UP the stream (streamOpenRouter() itself throwing,
-    // e.g. connection/auth/upstream-rate-limit errors before any bytes
-    // stream back). A failure mid-stream, AFTER this function has already
-    // returned the Response to Next.js, is a known, separate gap this fix
-    // does not close — flush() may not even run in that case, so neither
-    // persistence nor a refund happens today. Flagged, not silently claimed
-    // as solved; a real fix needs an error handler on the stream itself.
-    if (isHighlightMode) {
-      await refundHighlightMessage(user.id);
-    } else {
-      await refundChatMessage(user.id);
+  // Try each free model in FREE_MODEL_CHAIN in order — the first one that
+  // succeeds wins. Mirrors app/api/dashboard-assistant/route.ts's own
+  // fallback loop exactly: a free-tier model erroring (momentary
+  // saturation, a provider hiccup, a rate-limit blip) is the EXPECTED,
+  // routine case for this tier, not an exceptional one. `reasoning: {
+  // effort: "low" }` applied to every attempt — see MAX_OUTPUT_TOKENS_NORMAL's
+  // own comment for why this is a defensive default now, not a
+  // model-specific fix like it was for ECONOMY_MODEL.
+  let responseStream: ReadableStream<Uint8Array> | null = null;
+  let lastError: unknown = null;
+  const maxTokensForThisTurn = isHighlightMode ? MAX_OUTPUT_TOKENS_HIGHLIGHT : MAX_OUTPUT_TOKENS_NORMAL;
+  for (const model of FREE_MODEL_CHAIN) {
+    try {
+      responseStream = await streamOpenRouter(messages, {
+        model,
+        temperature: 0.3,
+        maxTokens: maxTokensForThisTurn,
+        reasoning: { effort: "low" },
+      });
+      break;
+    } catch (error) {
+      lastError = error;
+      console.error(
+        `[courses/chat POST] Modèle gratuit "${model}" indisponible, bascule sur le suivant:`,
+        error instanceof Error ? error.message : error
+      );
     }
-    if (error instanceof OpenRouterError) {
-      console.error(`[courses/chat POST] Erreur OpenRouter (status ${error.status}):`, error.message);
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    console.error("[courses/chat POST] Erreur non gérée:", error);
-    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
+
+  if (!responseStream) {
+    // Every free model in the chain failed — deliberately NEVER falls back
+    // to a paid model (that would silently defeat the whole point of this
+    // change). Refund whatever credit was reserved — a transient outage
+    // across the whole free tier shouldn't cost the student their monthly
+    // allowance. refundChatMessage/refundHighlightMessage take the user's
+    // id (a string), not the whole authenticated User object.
+    if (!isHighlightMode) {
+      await refundChatMessage(user.id);
+    } else {
+      await refundHighlightMessage(user.id);
+    }
+    const errMessage = lastError instanceof Error ? lastError.message : String(lastError);
+    const status = lastError instanceof OpenRouterError ? lastError.status : 500;
+    console.error("[courses/chat POST] Tous les modèles gratuits ont échoué:", { status, message: errMessage });
+    return NextResponse.json(
+      { error: "L'assistant est momentanément indisponible (forte demande sur les modèles gratuits) — réessaie dans une minute." },
+      { status: status >= 400 && status < 600 ? status : 503 }
+    );
+  }
+
+  // --- Background persistence (Étape E) ---------------------------
+  // We tee the stream so the client gets its bytes immediately (low time-to-
+  // first-token, streaming over text/event-stream) while a background closure
+  // reads the exact same chunks, accumulates the full reply, and persists the
+  // assistant's reply to course_chat_history. Vercel keeps the serverless
+  // function execution context alive until both branches of the tee are
+  // fully consumed, so the background write won't get cut off mid-stream.
+  let accumulatedReply = "";
+  const [streamForClient, streamForPersistence] = responseStream.tee();
+
+  (async () => {
+    try {
+      const reader = streamForPersistence.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          accumulatedReply += decoder.decode(value, { stream: true });
+        }
+      }
+      accumulatedReply += decoder.decode();
+
+      const finalTrimmed = accumulatedReply.trim();
+      if (!finalTrimmed) return; // Empty stream, don't persist garbage.
+
+      // Race check against DELETE /api/courses/chat ("Nouvelle conversation"):
+      // If the student clicked reset while this generation was still streaming,
+      // userMessageId's row (and any prior history for this slug/user) was
+      // deleted. We check if the user message still exists before saving the
+      // assistant reply — if it's gone, we drop the reply entirely, preventing
+      // the orphaned single-message resurrection bug.
+      let shouldPersist = true;
+      if (supabase && user && userMessageId !== null) {
+        const { count, error: checkError } = await supabase
+          .from("course_chat_history")
+          .select("id", { count: "exact", head: true })
+          .eq("id", userMessageId);
+        if (!checkError && count === 0) {
+          shouldPersist = false;
+        }
+      }
+
+      if (shouldPersist && supabase && user) {
+        const { error: insertError } = await supabase
+          .from("course_chat_history")
+          .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: finalTrimmed });
+        if (insertError) {
+          console.error("[courses/chat POST background] Échec sauvegarde réponse assistant:", { code: insertError.code, message: insertError.message });
+        }
+      }
+    } catch (bgError) {
+      console.error("[courses/chat POST background] Erreur inattendue pendant la persistance:", bgError);
+    }
+  })();
+
+  return new NextResponse(streamForClient, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Cache": "MISS",
+    },
+  });
 }

@@ -100,6 +100,8 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
       sourceText?: string;
       selectedText?: string;
       excludeFromHistory?: boolean;
+      /** Forces a fresh generation instead of a cached answer (the caching directive's required bypass/regenerate escape hatch) — see app/api/courses/chat/route.ts's own shouldBypassCache. */
+      bypassCache?: boolean;
     }
   ) {
     const exclude = options?.excludeFromHistory === true;
@@ -127,6 +129,7 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
           translate: options?.translate === true,
           sourceText: options?.sourceText,
           selectedText: options?.selectedText,
+          ...(options?.bypassCache ? { bypassCache: true } : {}),
         }),
       });
 

@@ -45,8 +45,17 @@ import { useSearchParams } from "next/navigation";
 import { Layers, Loader2, AlertTriangle, LogIn, Lock, PartyPopper, RotateCcw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { FlipFlashcard } from "@/components/study/FlipFlashcard";
+import { FlipFlashcard, type GradeFeedback } from "@/components/study/FlipFlashcard";
+import { createClient } from "@/lib/supabase/client";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tStudyTools } from "@/lib/translations/studyTools";
 import type { FlashcardPoolItem } from "@/types/flashcard";
+
+/** How long the warm "Bien joué !" / "Pas grave, on continue" confirmation
+ * stays on screen before the deck advances — long enough to register as
+ * deliberate feedback, short enough to never feel like it's stalling the
+ * session. */
+const GRADE_FEEDBACK_MS = 550;
 
 type Status = "loading" | "needs-auth" | "error" | "no-modules-active" | "empty-pool" | "quota-exceeded" | "ready";
 
@@ -67,9 +76,43 @@ interface SavedSession {
   score: { correct: number; incorrect: number };
 }
 
-/** Sorted, comma-joined active module ids — order-independent so activating the same set in a different sequence still resumes the same saved session. */
-function getStorageKey(activeModuleIds: number[]): string {
-  return STORAGE_PREFIX + [...activeModuleIds].sort((a, b) => a - b).join(",");
+/**
+ * SECURITY FIX: previously keyed ONLY by the sorted active-module-id set,
+ * with no user component at all — since localStorage is scoped to the
+ * BROWSER ORIGIN, not per-account, a student's own flashcard deck/progress/
+ * score could leak to a DIFFERENT student who later activates the same
+ * modules on the same shared/lab computer. Found during the same security
+ * audit that caught the identical pattern in the Workspace module page
+ * (app/dashboard/workspace/module/[moduleId]/page.tsx). Now namespaced by
+ * userId (resolved client-side, see the load() effect below) — order-
+ * independent on activeModuleIds so activating the same set in a different
+ * sequence still resumes the same saved session.
+ */
+function getStorageKey(userId: string, activeModuleIds: number[]): string {
+  return `${STORAGE_PREFIX}${userId}:${[...activeModuleIds].sort((a, b) => a - b).join(",")}`;
+}
+
+/** Removes every OTHER flashcard-session entry in this browser's storage — the old unscoped key format, and any DIFFERENT user's own scoped entries left behind on a shared device. Safe: this is a pure "resume where I left off" convenience cache, never the only copy of anything (the real content lives server-side), so losing a stale entry just means that other session starts fresh next time instead of resuming. */
+function purgeForeignFlashcardSessions(currentKey: string): void {
+  try {
+    for (const existingKey of Object.keys(window.localStorage)) {
+      if (existingKey.startsWith(STORAGE_PREFIX) && existingKey !== currentKey) {
+        window.localStorage.removeItem(existingKey);
+      }
+    }
+  } catch {
+    // Storage unavailable — nothing to clean up either way.
+  }
+}
+
+/** Fisher-Yates — used instead of `.sort(() => Math.random() - 0.5)`, which is a well-known non-uniform shuffle. Mirrors app/api/flashcards/pool/route.ts's own shuffle(). */
+function shuffle<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
 }
 
 function isFlashcardPoolItem(value: unknown): value is FlashcardPoolItem {
@@ -161,6 +204,7 @@ export function ActiveFlashcardsDeck() {
   // see this specific card.
   const searchParams = useSearchParams();
   const deepLinkCardId = searchParams.get("cardId");
+  const { language } = useLanguage();
 
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +219,12 @@ export function ActiveFlashcardsDeck() {
   // your quota" from the genuine completion message.
   const [backgroundQuotaExceeded, setBackgroundQuotaExceeded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // Transient post-grade confirmation shown by FlipFlashcard — see
+  // GRADE_FEEDBACK_MS. Locked via a ref (not just checking this state) so a
+  // rapid double-click on a grade button can't queue two overlapping
+  // timers/advances.
+  const [gradeFeedback, setGradeFeedback] = useState<GradeFeedback>(null);
+  const gradeFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Which localStorage slot this session belongs to — derived from the
   // active module ids returned by the pool fetch, so it's only known once
   // that resolves. Persistence (the effect further down) is a no-op until
@@ -200,7 +250,7 @@ export function ActiveFlashcardsDeck() {
         if (pool.status === 401) setStatus("needs-auth");
         else {
           setStatus("error");
-          setError(pool.error ?? "Impossible de contacter le serveur.");
+          setError(pool.error ?? tStudyTools("serverContactError", language));
         }
         return;
       }
@@ -210,7 +260,20 @@ export function ActiveFlashcardsDeck() {
         return;
       }
 
-      const key = getStorageKey(pool.activeModuleIds);
+      // Resolved from the browser's own session (fetchPool()'s 401 check
+      // above already proved a session exists) — never touch storage before
+      // knowing WHOSE slot it is. See getStorageKey's own comment.
+      const {
+        data: { user },
+      } = await createClient().auth.getUser();
+      if (cancelled) return;
+      if (!user) {
+        setStatus("needs-auth");
+        return;
+      }
+
+      const key = getStorageKey(user.id, pool.activeModuleIds);
+      purgeForeignFlashcardSessions(key);
       setStorageKey(key);
 
       // Resume where the student left off — skip the fetch/generate flow
@@ -237,7 +300,13 @@ export function ActiveFlashcardsDeck() {
         // just enough to reach the target in this one blocking round-trip.
         const topUp = await requestMoreCards(items.length);
         if (cancelled) return;
-        if (topUp.items.length > 0) items = [...items, ...topUp.items];
+        // Re-shuffle the WHOLE combined pool (not just the new portion) so
+        // the top-up batch is interleaved throughout the deck instead of
+        // landing as one contiguous, unshuffled block at the end — the
+        // pool fetch above only shuffled the original `items` on its own.
+        // Must happen before deepLinkIndex/orderedItems below, since that
+        // logic locates a deep-linked card by its position in the FINAL order.
+        if (topUp.items.length > 0) items = shuffle([...items, ...topUp.items]);
         else if (topUp.quotaExceeded) quotaExceededWithNoCards = true;
       }
 
@@ -264,6 +333,9 @@ export function ActiveFlashcardsDeck() {
     return () => {
       cancelled = true;
     };
+    // `language` is read for its value at the moment an error/status string
+    // is produced, not a reason to re-run the whole load/generate flow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey, deepLinkCardId]);
 
   // Mirrors the live session into localStorage on every change, so leaving
@@ -306,6 +378,15 @@ export function ActiveFlashcardsDeck() {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [storageKey, status]);
 
+  // Belt-and-suspenders cleanup: if the student navigates away mid-flash
+  // (e.g. switches tabs) the pending advance is cancelled rather than
+  // firing setState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (gradeFeedbackTimeoutRef.current) clearTimeout(gradeFeedbackTimeoutRef.current);
+    };
+  }, []);
+
   function handleRestart() {
     if (storageKey) clearSavedSession(storageKey);
     setReloadKey((k) => k + 1);
@@ -347,16 +428,22 @@ export function ActiveFlashcardsDeck() {
   }
 
   function handleGrade(isCorrect: boolean) {
+    if (gradeFeedbackTimeoutRef.current) return; // already mid-flash — ignore a double click
     setScore((prev) => (isCorrect ? { ...prev, correct: prev.correct + 1 } : { ...prev, incorrect: prev.incorrect + 1 }));
-    handleNext();
+    setGradeFeedback(isCorrect ? "correct" : "incorrect");
+    gradeFeedbackTimeoutRef.current = setTimeout(() => {
+      gradeFeedbackTimeoutRef.current = null;
+      setGradeFeedback(null);
+      handleNext();
+    }, GRADE_FEEDBACK_MS);
   }
 
   if (status === "loading") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-sm">Préparation de tes flashcards...</span>
+          <span className="text-sm">{tStudyTools("preparingFlashcards", language)}</span>
         </CardContent>
       </Card>
     );
@@ -364,10 +451,10 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "needs-auth") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
           <LogIn className="h-6 w-6" />
-          <p className="text-sm">Connecte-toi pour voir tes flashcards.</p>
+          <p className="text-sm">{tStudyTools("signInForFlashcards", language)}</p>
         </CardContent>
       </Card>
     );
@@ -375,7 +462,7 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "error") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
           <AlertTriangle className="h-6 w-6 text-amber-500" />
           <p className="text-sm">{error}</p>
@@ -386,12 +473,12 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "no-modules-active") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           <Layers className="h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm font-semibold text-foreground">Aucun module actif.</p>
+          <p className="text-sm font-semibold text-foreground">{tStudyTools("noActiveModulesTitle", language)}</p>
           <p className="max-w-sm text-xs text-muted-foreground">
-            Active les flashcards depuis ton tableau de bord (menu ⋮ d&apos;un module, « Activer les Flashcards »).
+            {tStudyTools("noActiveModulesFlashcardsSubtitle", language)}
           </p>
         </CardContent>
       </Card>
@@ -400,12 +487,12 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "empty-pool") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           <Layers className="h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm font-semibold text-foreground">Pas encore de contenu à réviser.</p>
+          <p className="text-sm font-semibold text-foreground">{tStudyTools("emptyPoolTitle", language)}</p>
           <p className="max-w-sm text-xs text-muted-foreground">
-            Génère d&apos;abord l&apos;Explication d&apos;un cours dans un de tes modules activés — les flashcards en sont extraites automatiquement.
+            {tStudyTools("emptyPoolSubtitle", language)}
           </p>
         </CardContent>
       </Card>
@@ -414,11 +501,11 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "quota-exceeded") {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           <Lock className="h-8 w-8 text-amber-500" />
-          <p className="text-sm font-semibold text-foreground">Limite de flashcards atteinte pour ta formule ce mois-ci.</p>
-          <p className="max-w-sm text-xs text-muted-foreground">Passe à une formule supérieure pour continuer à générer des flashcards.</p>
+          <p className="text-sm font-semibold text-foreground">{tStudyTools("flashcardQuotaTitle", language)}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">{tStudyTools("flashcardQuotaSubtitle", language)}</p>
         </CardContent>
       </Card>
     );
@@ -431,12 +518,12 @@ export function ActiveFlashcardsDeck() {
     // blitzed through faster than the background top-up could keep up, or
     // the session hit SESSION_CAP.
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           {isGeneratingMore ? (
             <>
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Génération de nouvelles flashcards...</p>
+              <p className="text-sm text-muted-foreground">{tStudyTools("generatingNewFlashcards", language)}</p>
             </>
           ) : backgroundQuotaExceeded && deck.length < SESSION_CAP ? (
             // Distinct from the completion message below — the reason no
@@ -451,8 +538,8 @@ export function ActiveFlashcardsDeck() {
             // completion and gets the normal message instead.
             <>
               <Lock className="h-8 w-8 text-amber-500" />
-              <p className="text-sm font-semibold text-foreground">Limite de flashcards atteinte pour ta formule ce mois-ci.</p>
-              <p className="max-w-sm text-xs text-muted-foreground">Passe à une formule supérieure pour continuer à générer des flashcards.</p>
+              <p className="text-sm font-semibold text-foreground">{tStudyTools("flashcardQuotaTitle", language)}</p>
+              <p className="max-w-sm text-xs text-muted-foreground">{tStudyTools("flashcardQuotaSubtitle", language)}</p>
             </>
           ) : (
             <>
@@ -465,12 +552,12 @@ export function ActiveFlashcardsDeck() {
               <PartyPopper className="h-8 w-8 text-emerald-500" />
               <p className="text-sm font-semibold text-foreground">
                 {deck.length >= SESSION_CAP
-                  ? "Fin de la session — belle série !"
-                  : "Bravo ! Tu as fait le tour des flashcards disponibles pour ce(s) cours."}
+                  ? tStudyTools("sessionCompleteStreak", language)
+                  : tStudyTools("deckExhausted", language)}
               </p>
               <Button variant="secondary" size="sm" onClick={handleRestart}>
                 <RotateCcw className="h-3.5 w-3.5" />
-                Recommencer une session
+                {tStudyTools("restartSession", language)}
               </Button>
             </>
           )}
@@ -480,14 +567,14 @@ export function ActiveFlashcardsDeck() {
   }
 
   return (
-    <Card>
+    <Card className="animate-in fade-in-0 duration-300">
       <CardHeader className="flex flex-row items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
           <Layers className="h-5 w-5" />
         </div>
-        <div className="flex-1">
-          <CardTitle>Flashcards — Modules Actifs</CardTitle>
-          <p className="text-sm text-muted-foreground">{current.courseTitle}</p>
+        <div className="min-w-0 flex-1">
+          <CardTitle>{tStudyTools("flashcardsActiveModulesTitle", language)}</CardTitle>
+          <p className="truncate text-sm text-muted-foreground">{current.courseTitle}</p>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -503,9 +590,13 @@ export function ActiveFlashcardsDeck() {
           canGoPrev={index > 0}
           score={score}
           onGrade={handleGrade}
+          feedback={gradeFeedback}
         />
         {isGeneratingMore && (
-          <p className="text-center text-xs text-muted-foreground">Préparation de la suite en arrière-plan...</p>
+          <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-muted px-3 py-1.5 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {tStudyTools("preparingMoreInBackground", language)}
+          </div>
         )}
       </CardContent>
     </Card>

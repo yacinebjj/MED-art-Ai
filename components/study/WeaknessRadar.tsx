@@ -5,6 +5,7 @@ import { Target, Loader2, AlertTriangle, LogIn } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Progress } from "@/components/ui/Progress";
 import { Badge } from "@/components/ui/Badge";
+import { cn } from "@/lib/utils";
 
 /** Shape returned by the `weakness_radar` Postgres function (see supabase/schema.sql), one row per module the student has QCM attempts in. */
 interface WeaknessRadarRow {
@@ -26,6 +27,14 @@ function tierLabel(pct: number): string {
   if (pct >= 40) return "À consolider";
   return "Point faible";
 }
+
+/** A small at-a-glance dot ahead of the module name, so the eye can scan
+ * the whole list for weak spots before reading a single word. */
+const TIER_DOT: Record<ReturnType<typeof tierBadgeVariant>, string> = {
+  success: "bg-emerald-500",
+  warning: "bg-amber-500",
+  danger: "bg-rose-500",
+};
 
 export function WeaknessRadar() {
   const [rows, setRows] = useState<WeaknessRadarRow[] | null>(null);
@@ -60,7 +69,7 @@ export function WeaknessRadar() {
 
   if (needsAuth) {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
           <LogIn className="h-6 w-6" />
           <p className="text-sm">Connecte-toi pour voir tes points faibles par module.</p>
@@ -71,7 +80,7 @@ export function WeaknessRadar() {
 
   if (error) {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
           <AlertTriangle className="h-6 w-6 text-amber-500" />
           <p className="text-sm">{error}</p>
@@ -82,7 +91,7 @@ export function WeaknessRadar() {
 
   if (rows === null) {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span className="text-sm">Calcul de ta maîtrise par module...</span>
@@ -93,7 +102,7 @@ export function WeaknessRadar() {
 
   if (rows.length === 0) {
     return (
-      <Card>
+      <Card className="animate-in fade-in-0 duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
           <Target className="h-6 w-6" />
           <p className="text-sm">
@@ -105,9 +114,9 @@ export function WeaknessRadar() {
   }
 
   return (
-    <Card>
+    <Card className="animate-in fade-in-0 duration-300">
       <CardHeader className="flex flex-row items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
           <Target className="h-5 w-5" />
         </div>
         <div>
@@ -116,10 +125,17 @@ export function WeaknessRadar() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {rows.map((row) => (
-          <div key={row.module_id} className="space-y-1.5">
+        {rows.map((row, i) => (
+          <div
+            key={row.module_id}
+            className="-mx-2 animate-in space-y-1.5 rounded-xl px-2 py-1.5 fade-in slide-in-from-bottom-1 duration-300 transition-colors hover:bg-muted/50"
+            style={{ animationDelay: `${i * 60}ms` }}
+          >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-foreground">{row.module_name}</span>
+              <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", TIER_DOT[tierBadgeVariant(row.mastery_pct)])} aria-hidden="true" />
+                {row.module_name}
+              </span>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">
                   {row.correct_attempts}/{row.total_attempts} bonnes réponses

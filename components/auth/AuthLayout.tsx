@@ -1,6 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { Logo } from "@/components/layout/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tAuth } from "@/lib/translations/auth";
 
 /**
  * Auth layout, shared by /login and /register — a single, full-screen,
@@ -20,15 +25,25 @@ import { ThemeToggle } from "@/components/layout/ThemeToggle";
  */
 export function AuthLayout({
   children,
-  title,
-  subtitle,
+  variant,
 }: {
   children: React.ReactNode;
-  title: string;
-  subtitle: string;
+  variant: "login" | "register";
 }) {
+  const { language } = useLanguage();
+  const title = tAuth(variant === "login" ? "loginTitle" : "registerTitle", language);
+  const subtitle = tAuth(variant === "login" ? "loginSubtitle" : "registerSubtitle", language);
+
   return (
-    <div className="relative flex min-h-dvh w-full items-center justify-center overflow-x-hidden overflow-y-auto bg-background px-4 py-10 sm:px-6">
+    // items-start on mobile, only centering vertically from sm: up — a
+    // vertically-centered flex column whose content overflows the viewport
+    // (RegisterForm's tall stack of fields on a short phone screen) can
+    // otherwise render with part of its top scrolled above the reachable
+    // area, since a "center" alignment splits any overflow across both
+    // edges instead of anchoring the start. Anchoring to the top on the
+    // narrowest viewports removes that risk entirely; sm:items-center keeps
+    // the polished centered look once there's reliably enough height.
+    <div className="relative flex min-h-dvh w-full items-start justify-center overflow-x-hidden overflow-y-auto bg-background px-4 py-10 sm:items-center sm:px-6">
       {/* Ambient background — a soft radial-ish glow pair, theme-aware via
           the oklch tokens (light mode: a faint teal wash; dark mode: the
           real dark --background with the same glows at lower opacity). */}
@@ -43,9 +58,14 @@ export function AuthLayout({
         <ThemeToggle />
       </div>
 
-      <div className="w-full max-w-md">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-md"
+      >
         <div className="mb-8 flex justify-center">
-          <Link href="/" className="inline-flex">
+          <Link href="/" className="inline-flex transition-transform duration-300 hover:-translate-y-0.5 active:scale-95">
             <Logo size="lg" />
           </Link>
         </div>
@@ -69,7 +89,7 @@ export function AuthLayout({
         <p className="mt-8 text-center text-xs text-muted-foreground">
           © {new Date().getFullYear()} Med Art AI — Médecine · Pharmacie · Chirurgie Dentaire
         </p>
-      </div>
+      </motion.div>
     </div>
   );
 }

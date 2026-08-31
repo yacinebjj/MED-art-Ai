@@ -1,13 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { Bell, Check, Lock } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { RevealSection } from "@/components/ui/RevealSection";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
+import { AvatarUpload } from "@/components/settings/AvatarUpload";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/providers/AuthProvider";
@@ -15,6 +18,8 @@ import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-y
 import { PushOptInButton } from "@/components/push/PushOptInButton";
 import type { StudentProfile } from "@/lib/types";
 import type { AcademicYear, Specialty } from "@/types/academic";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tSettings } from "@/lib/translations/settings";
 
 const FACULTY_OPTIONS = ALGERIAN_FACULTIES.map((name) => ({ value: name, label: name }));
 
@@ -25,6 +30,48 @@ const EMPTY_FORM: StudentProfile = {
   specialty: "medicine",
   academicYear: "",
 };
+
+// Shared visual treatment for the 4 permanently-locked fields (Email, Nom
+// complet, Spécialité, Année) — a dashed muted-tint surface instead of a
+// flat opacity-50 fade, so the saved value stays legible while the locked
+// state stays unambiguous (see task brief: "clairs... sans être moches").
+// `disabled:opacity-100` cancels Select's own baked-in `disabled:opacity-60`
+// (tailwind-merge resolves the conflict in favor of whichever is passed
+// last, i.e. this one) so the text doesn't get double-faded on top of it.
+const LOCKED_INPUT_CLASS = "cursor-not-allowed border-dashed bg-muted/50 pr-9 text-foreground/80 shadow-none disabled:opacity-100";
+const LOCKED_SELECT_CLASS = "cursor-not-allowed border-dashed bg-muted/50 text-foreground/80 shadow-none disabled:opacity-100";
+
+/** Label row for Spécialité/Année — adds the "Verrouillé" pill once a field has ever been locked, without touching the shared Select/Input components used app-wide. */
+function FieldLabelRow({ htmlFor, locked, children }: { htmlFor: string; locked?: boolean; children: string }) {
+  const { language } = useLanguage();
+  return (
+    <div className="mb-1.5 flex items-center justify-between gap-2">
+      <Label htmlFor={htmlFor} className="mb-0">
+        {children}
+      </Label>
+      {locked && (
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <Lock className="h-2.5 w-2.5" />
+          {tSettings("lockedPill", language)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Same label-row treatment for Email/Nom complet, which are ALWAYS locked (no conditional state to thread through). */
+function LockedFieldLabel({ children }: { children: string }) {
+  const { language } = useLanguage();
+  return (
+    <div className="mb-1.5 flex items-center justify-between gap-2">
+      <span className="text-sm font-medium text-foreground">{children}</span>
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <Lock className="h-2.5 w-2.5" />
+        {tSettings("lockedPill", language)}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Spécialité + Année are sourced live from Supabase (curriculum_specialties /
@@ -46,6 +93,7 @@ const EMPTY_FORM: StudentProfile = {
 export default function SettingsPage() {
   const { profile, refreshUser, refreshCurriculumProfile } = useAuth();
   const { toast } = useToast();
+  const { language } = useLanguage();
   const [form, setForm] = useState<StudentProfile>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -223,106 +271,149 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="text-2xl font-bold tracking-tight text-foreground">Paramètres du profil</h1>
+      <h1 className="text-2xl font-bold tracking-tight text-foreground">{tSettings("profileSettingsTitle", language)}</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Ces informations personnalisent le contenu généré par l'IA à ton parcours.
       </p>
 
-      <Card className="mt-6 p-6">
-        {!ready ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-            <BrandLoader className="h-6 w-6" />
-            Chargement de ton profil...
-          </div>
-        ) : (
-          <form className="space-y-5" onSubmit={handleSubmit}>
-            {error && (
-              <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-
-            <Input
-              label="Adresse e-mail"
-              name="email"
-              value={form.email ?? ""}
-              disabled
-              className="cursor-not-allowed bg-muted opacity-50"
-            />
-
+      <RevealSection>
+        <Card className="mt-6 p-6">
+          <div className="mb-5 flex items-center gap-3">
+            <AvatarUpload />
             <div>
-              <Input
-                label="Nom complet"
-                name="fullName"
-                value={form.fullName}
-                disabled
-                className="cursor-not-allowed bg-muted opacity-50"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Le nom associé à ton compte ne peut pas être modifié ici.
+              <h2 className="text-sm font-bold text-foreground">{tSettings("accountInfoTitle", language)}</h2>
+              <p className="text-xs text-muted-foreground">
+                Visibles par toi seul(e) &middot; JPG, PNG, WEBP ou GIF, 5&nbsp;Mo max pour la photo.
               </p>
             </div>
-            <Select
-              label="Faculté (Algérie)"
-              name="university"
-              options={FACULTY_OPTIONS}
-              value={form.university}
-              onValueChange={(value) => update("university", value)}
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Select
-                  label="Spécialité"
-                  name="specialty"
-                  placeholder="Choisis"
-                  options={specialtyOptions}
-                  value={specialtyId != null ? String(specialtyId) : ""}
-                  onValueChange={handleSpecialtyChange}
-                  disabled={specialtyLocked}
-                  className={specialtyLocked ? "cursor-not-allowed bg-muted opacity-50" : undefined}
-                />
-                {specialtyLocked && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    La spécialité ne peut pas être modifiée après l&apos;inscription.
-                  </p>
-                )}
-              </div>
-              <div>
-                <Select
-                  label="Année"
-                  name="academicYear"
-                  placeholder={specialtyId == null ? "Choisis d'abord une spécialité" : yearsLoading ? "Chargement..." : "Choisis"}
-                  options={yearOptions}
-                  value={academicYearId != null ? String(academicYearId) : ""}
-                  onValueChange={handleYearChange}
-                  disabled={specialtyId == null || yearsLoading || yearLocked}
-                  onDisabledOptionClick={handleDisabledYearClick}
-                />
-                {yearLocked && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    L&apos;année d&apos;étude ne peut pas être modifiée après l&apos;inscription.
-                  </p>
-                )}
-              </div>
-            </div>
-            <Button type="submit" isLoading={isSaving} disabled={isSaving}>
-              {saved && !isSaving && <Check className="h-4 w-4" />}
-              {saved && !isSaving ? "Enregistré" : "Enregistrer les modifications"}
-            </Button>
-          </form>
-        )}
-      </Card>
+          </div>
 
-      <Card className="mt-6 p-6">
-        <h2 className="text-sm font-bold text-foreground">Rappels flash</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Reçois de temps en temps une notification de ton navigateur avec une flashcard de tes modules actifs — même
-          quand l&apos;onglet n&apos;est pas ouvert.
-        </p>
-        <div className="mt-4">
-          <PushOptInButton />
-        </div>
-      </Card>
+          {!ready ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <BrandLoader className="h-6 w-6" />
+              Chargement de ton profil...
+            </div>
+          ) : (
+            <form className="space-y-5" onSubmit={handleSubmit}>
+              {error && (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+
+              <div>
+                <LockedFieldLabel>Adresse e-mail</LockedFieldLabel>
+                <div className="relative">
+                  <Input name="email" value={form.email ?? ""} disabled className={LOCKED_INPUT_CLASS} />
+                  <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+                </div>
+              </div>
+
+              <div>
+                <LockedFieldLabel>{tSettings("fullNameLabel", language)}</LockedFieldLabel>
+                <div className="relative">
+                  <Input name="fullName" value={form.fullName} disabled className={LOCKED_INPUT_CLASS} />
+                  <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+                </div>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Le nom associé à ton compte ne peut pas être modifié ici.
+                </p>
+              </div>
+
+              <Select
+                label="Faculté (Algérie)"
+                name="university"
+                options={FACULTY_OPTIONS}
+                value={form.university}
+                onValueChange={(value) => update("university", value)}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <FieldLabelRow htmlFor="specialty" locked={specialtyLocked}>
+                    Spécialité
+                  </FieldLabelRow>
+                  <Select
+                    name="specialty"
+                    placeholder={tSettings("choosePlaceholder", language)}
+                    options={specialtyOptions}
+                    value={specialtyId != null ? String(specialtyId) : ""}
+                    onValueChange={handleSpecialtyChange}
+                    disabled={specialtyLocked}
+                    className={specialtyLocked ? LOCKED_SELECT_CLASS : undefined}
+                  />
+                  {specialtyLocked && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      La spécialité ne peut pas être modifiée après l&apos;inscription.
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <FieldLabelRow htmlFor="academicYear" locked={yearLocked}>
+                    Année
+                  </FieldLabelRow>
+                  <Select
+                    name="academicYear"
+                    placeholder={
+                      specialtyId == null
+                        ? tSettings("chooseSpecialtyFirstPlaceholder", language)
+                        : yearsLoading
+                          ? tSettings("loadingEllipsis", language)
+                          : tSettings("choosePlaceholder", language)
+                    }
+                    options={yearOptions}
+                    value={academicYearId != null ? String(academicYearId) : ""}
+                    onValueChange={handleYearChange}
+                    disabled={specialtyId == null || yearsLoading || yearLocked}
+                    onDisabledOptionClick={handleDisabledYearClick}
+                    className={yearLocked ? LOCKED_SELECT_CLASS : undefined}
+                  />
+                  {yearLocked && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      L&apos;année d&apos;étude ne peut pas être modifiée après l&apos;inscription.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <Button type="submit" isLoading={isSaving} disabled={isSaving} className="w-full sm:w-auto">
+                {saved && !isSaving && <Check className="h-4 w-4" />}
+                {saved && !isSaving ? tSettings("saved", language) : tSettings("saveChanges", language)}
+              </Button>
+            </form>
+          )}
+        </Card>
+      </RevealSection>
+
+      <RevealSection delay={0.08}>
+        <Card className="mt-6 p-4 sm:p-6">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+              <Bell className="h-4 w-4" />
+            </span>
+            <h2 className="text-sm font-bold text-foreground">{tSettings("flashRemindersTitle", language)}</h2>
+          </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Reçois de temps en temps une notification de ton navigateur avec une flashcard de tes modules actifs — même
+            quand l&apos;onglet n&apos;est pas ouvert.
+          </p>
+          {/*
+            PushOptInButton renders a fixed-height, single-line (whitespace-nowrap)
+            Button and exposes no className passthrough, so its label itself can't
+            be made to wrap from here. On the narrowest phones (320-360px), "Désactiver
+            les rappels flash" can exceed what's left after the shell's own gutters plus
+            this card's padding. overflow-x-auto keeps any overflow contained to this one
+            row (a short local swipe) instead of it leaking into a page-wide horizontal
+            scroll on <main> — which inherits an effective overflow-x:auto the moment any
+            ancestor sets overflow-y:auto — or the label silently bleeding past the
+            card's rounded border. p-4 on mobile (vs p-6 from sm: up) also buys back 16px
+            of width so the common 375-428px phones fit with no scrolling at all.
+          */}
+          <div className="mt-4 overflow-x-auto scrollbar-thin">
+            <PushOptInButton />
+          </div>
+        </Card>
+      </RevealSection>
     </div>
   );
 }

@@ -52,7 +52,12 @@ export const DialogContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2",
+        // w-[calc(100%-2rem)] instead of w-full: on a narrow phone, `w-full`
+        // resolves against the viewport (this is `fixed`), so the dialog
+        // touched both screen edges with zero breathing room before
+        // max-w-lg ever kicked in. This guarantees a 1rem gutter on each
+        // side no matter how narrow the screen gets.
+        "fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-lg max-h-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto",
         "rounded-2xl border border-border bg-card p-6 shadow-card focus:outline-none",
         className
       )}

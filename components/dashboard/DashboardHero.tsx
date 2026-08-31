@@ -31,8 +31,8 @@ export function DashboardHero({ firstName, academicYearName }: DashboardHeroProp
       <div className="flex items-center gap-3 sm:gap-4">
         <AnimatedBrandMark size="sm" className="sm:hidden" />
         <AnimatedBrandMark size="md" className="hidden sm:flex" />
-        <div>
-          <h1 className="text-base font-bold tracking-tight text-foreground sm:text-xl lg:text-2xl">Bonjour Dr. {firstName} 👋</h1>
+        <div className="min-w-0">
+          <h1 className="break-words text-base font-bold tracking-tight text-foreground sm:text-xl lg:text-2xl">Bonjour Dr. {firstName} 👋</h1>
           <p className="mt-0.5 hidden text-sm text-muted-foreground sm:block">
             {academicYearName
               ? `Bienvenue dans ton espace de ${academicYearName} — choisis une unité, un module indépendant, ou ajoute un cours indépendant.`

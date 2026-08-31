@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { indexStudioCourseChunksForChat } from "@/lib/studio-explication-delta";
 import type { StudioCourseSummary } from "@/types/studio-course";
 
 export const runtime = "nodejs";
@@ -126,7 +127,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Création échouée : ${error.message}` }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true, course: toSummary(data as StudioCourseRow) });
+  const createdCourse = data as StudioCourseRow;
+
+  // Fire-and-forget: index this course's chunks so the Workspace chat's RAG
+  // retrieval (lib/chat-context-retrieval.ts) has real data from the
+  // student's very first message, instead of only getting indexed later if
+  // and when they generate a Studio "Explication" first. Never awaited —
+  // must not delay the upload response. Failure is non-fatal: chat falls
+  // back to answering from general medical knowledge with no course context
+  // block (see that route's own "no raw_text, ever" rule). Semantic-cache
+  // pre-warming (which used to run after this) was removed along with the
+  // chat semantic cache itself (product direction).
+  void indexStudioCourseChunksForChat(createdCourse.id, rawText, user.id).catch((error) =>
+    console.error("[studio/courses:create] Échec indexation en arrière-plan (non bloquant):", error instanceof Error ? error.message : error)
+  );
+
+  return NextResponse.json({ success: true, course: toSummary(createdCourse) });
 }
 
 /** "Supprimer toutes les sources" from a module card's ⋮ menu — wipes every course this student uploaded into this module. The curriculum module row itself (Anatomie, Cytologie...) is never touched, only their own studio_courses rows. */

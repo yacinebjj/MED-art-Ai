@@ -67,7 +67,7 @@ export function ChatPanel({
           <span
             className={cn(
               "flex h-6 w-6 items-center justify-center rounded-lg text-white",
-              dark ? "bg-gradient-to-br from-cyan-500 to-blue-600" : "bg-blue-600"
+              dark ? "bg-gradient-to-br from-cyan-500 to-blue-600" : "bg-gradient-to-br from-primary-500 to-primary-700"
             )}
           >
             <Sparkles className="h-3.5 w-3.5" />
@@ -103,7 +103,7 @@ export function ChatPanel({
                 message.role === "user"
                   ? dark
                     ? "bg-gradient-to-br from-cyan-600 to-blue-600 text-white"
-                    : "bg-blue-600 text-white"
+                    : "bg-primary-600 text-white"
                   : dark
                     ? "bg-white/5 text-slate-100 ring-1 ring-white/10"
                     : "bg-white/80 text-gray-900 ring-1 ring-white/60"
@@ -141,17 +141,17 @@ export function ChatPanel({
             "flex-1 rounded-lg border px-3 py-2 text-sm outline-none transition-colors",
             dark
               ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:bg-white/10"
-              : "border-white/60 bg-white/70 focus:border-blue-400 focus:bg-white"
+              : "border-white/60 bg-white/70 focus:border-primary-400 focus:bg-white"
           )}
         />
         <button
           type="submit"
           disabled={input.trim().length === 0 || isTyping}
           className={cn(
-            "flex items-center justify-center rounded-lg px-3 py-2 text-white transition-all duration-300 disabled:opacity-40",
+            "flex items-center justify-center rounded-lg px-3 py-2 text-white transition-all duration-300 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-40",
             dark
               ? "bg-gradient-to-r from-cyan-600 to-blue-600 hover:shadow-[0_0_15px_rgba(6,182,212,0.5)]"
-              : "bg-blue-600 hover:bg-blue-700"
+              : "bg-primary-600 hover:bg-primary-700 hover:shadow-glow"
           )}
         >
           <Send className="h-4 w-4" />

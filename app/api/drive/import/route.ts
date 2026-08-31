@@ -5,7 +5,10 @@ import { extractDocumentText } from "@/lib/document-extraction";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
-export const maxDuration = 60; // Drive download + file extraction — no explicit cap before, so it silently rode Vercel's platform default.
+// Bumped alongside the other upload routes' MAX_FILE_BYTES (see
+// app/api/upload/route.ts) — a large image-heavy course file downloaded
+// from Drive takes proportionally longer to extract too.
+export const maxDuration = 300;
 
 // Google Docs/Slides are NOT downloadable as bytes (they have no underlying
 // file — "alt=media" 403s on them) — they must be EXPORTED to a real format

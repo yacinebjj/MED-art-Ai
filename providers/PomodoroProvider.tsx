@@ -9,25 +9,52 @@ interface PomodoroContextType {
   toggleActive: () => void;
   toggleVisible: () => void;
   resetTimer: () => void;
+  /** Called once the real signed-in user is known (see PomodoroAuthSync in providers/PomodoroAuthSync.tsx) — this Provider is mounted ABOVE AuthProvider in app/layout.tsx, so it has no way to read the current user itself. */
+  setUserId: (userId: string | null) => void;
 }
 
 const PomodoroContext = createContext<PomodoroContextType | undefined>(undefined);
 
+// "anonymous" — the bucket used before a real user id is known (logged-out
+// visitor on a public page). Not a privacy concern on its own (nothing
+// personal accumulates for a visitor with no account), only a STARTING
+// point every account briefly passes through before setUserId swaps it out.
+const ANONYMOUS_BUCKET = "anonymous";
+
+/**
+ * Keys were previously flat, global strings ("medart_pomo_seconds", no user
+ * id anywhere in them) — meaning a SECOND real student account logging in on
+ * the same browser/machine inherited whatever elapsed time/running state the
+ * FIRST account had left behind, instead of starting at 00:00. Found while
+ * preparing a clean-state demo recording.
+ */
+function keysFor(bucket: string) {
+  return {
+    seconds: `medart_pomo_seconds:${bucket}`,
+    active: `medart_pomo_active:${bucket}`,
+    visible: `medart_pomo_visible:${bucket}`,
+  };
+}
+
 export function PomodoroProvider({ children }: { children: ReactNode }) {
+  const [bucket, setBucket] = useState(ANONYMOUS_BUCKET);
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
 
-  // استرجاع الحالة الحقيقية من localStorage عند تحميل التطبيق
+  // استرجاع الحالة الحقيقية من localStorage عند تحميل التطبيق — يعاد أيضاً
+  // في كل مرة يتغيّر فيها bucket (تبديل حساب على نفس الجهاز، أو تحديد هوية
+  // المستخدم لأول مرة بعد التحميل الأولي).
   useEffect(() => {
-    const savedSeconds = localStorage.getItem("medart_pomo_seconds");
-    const savedActive = localStorage.getItem("medart_pomo_active");
-    const savedVisible = localStorage.getItem("medart_pomo_visible");
+    const keys = keysFor(bucket);
+    const savedSeconds = localStorage.getItem(keys.seconds);
+    const savedActive = localStorage.getItem(keys.active);
+    const savedVisible = localStorage.getItem(keys.visible);
 
-    if (savedSeconds) setSeconds(parseInt(savedSeconds, 10));
-    if (savedActive) setIsActive(savedActive === "true");
+    setSeconds(savedSeconds ? parseInt(savedSeconds, 10) : 0);
+    setIsActive(savedActive === "true");
     if (savedVisible !== null) setIsVisible(savedVisible === "true");
-  }, []);
+  }, [bucket]);
 
   // تشغيل العداد وتحديث التخزين المحلي في الخلفية بشكل متزامن
   useEffect(() => {
@@ -36,7 +63,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
       interval = setInterval(() => {
         setSeconds((prev) => {
           const next = prev + 1;
-          localStorage.setItem("medart_pomo_seconds", next.toString());
+          localStorage.setItem(keysFor(bucket).seconds, next.toString());
           return next;
         });
       }, 1000);
@@ -46,30 +73,35 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isActive]);
+  }, [isActive, bucket]);
 
   const toggleActive = () => {
     const nextState = !isActive;
     setIsActive(nextState);
-    localStorage.setItem("medart_pomo_active", nextState.toString());
+    localStorage.setItem(keysFor(bucket).active, nextState.toString());
   };
 
   const toggleVisible = () => {
     const nextState = !isVisible;
     setIsVisible(nextState);
-    localStorage.setItem("medart_pomo_visible", nextState.toString());
+    localStorage.setItem(keysFor(bucket).visible, nextState.toString());
   };
 
   const resetTimer = () => {
     setSeconds(0);
     setIsActive(false);
-    localStorage.setItem("medart_pomo_seconds", "0");
-    localStorage.setItem("medart_pomo_active", "false");
+    const keys = keysFor(bucket);
+    localStorage.setItem(keys.seconds, "0");
+    localStorage.setItem(keys.active, "false");
+  };
+
+  const setUserId = (userId: string | null) => {
+    setBucket(userId ?? ANONYMOUS_BUCKET);
   };
 
   return (
     <PomodoroContext.Provider
-      value={{ seconds, isActive, isVisible, toggleActive, toggleVisible, resetTimer }}
+      value={{ seconds, isActive, isVisible, toggleActive, toggleVisible, resetTimer, setUserId }}
     >
       {children}
     </PomodoroContext.Provider>

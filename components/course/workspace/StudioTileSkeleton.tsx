@@ -1,3 +1,24 @@
+import { cn } from "@/lib/utils";
+
+/**
+ * One shimmer block — a `bg-muted` base (token-driven, correct in both
+ * themes) with a lighter band sweeping across it via the `animate-shimmer`
+ * keyframe (tailwind.config.ts, `backgroundPosition` driven so it needs no
+ * extra wrapper element). Reads as "this is actively loading", not just a
+ * flat gray placeholder — and like every animation in this app, it collapses
+ * to a static frame under `prefers-reduced-motion` (see globals.css).
+ */
+function ShimmerBlock({ className }: { className: string }) {
+  return (
+    <div
+      className={cn(
+        "animate-shimmer rounded-lg bg-gradient-to-r from-muted via-muted-foreground/10 to-muted bg-[length:200%_100%]",
+        className
+      )}
+    />
+  );
+}
+
 /**
  * Loading fallback for the heavy, dynamically-imported Studio tiles
  * (GastriteResumeStudio/GastriteCasCliniqueStudio/GastriteQcmsStudio — each
@@ -8,21 +29,21 @@
  */
 export function StudioTileSkeleton() {
   return (
-    <div className="animate-pulse space-y-4 py-2" aria-hidden="true">
-      <div className="h-7 w-2/3 rounded-lg bg-gray-200 dark:bg-neutral-800" />
+    <div className="space-y-4 py-2" aria-hidden="true">
+      <ShimmerBlock className="h-7 w-2/3" />
       <div className="flex gap-2">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-8 w-20 rounded-full bg-gray-200 dark:bg-neutral-800" />
+          <ShimmerBlock key={i} className="h-8 w-20 rounded-full" />
         ))}
       </div>
       <div className="space-y-2">
-        <div className="h-4 w-full rounded bg-gray-200 dark:bg-neutral-800" />
-        <div className="h-4 w-11/12 rounded bg-gray-200 dark:bg-neutral-800" />
-        <div className="h-4 w-4/5 rounded bg-gray-200 dark:bg-neutral-800" />
+        <ShimmerBlock className="h-4 w-full" />
+        <ShimmerBlock className="h-4 w-11/12" />
+        <ShimmerBlock className="h-4 w-4/5" />
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div className="h-24 rounded-2xl bg-gray-200 dark:bg-neutral-800" />
-        <div className="h-24 rounded-2xl bg-gray-200 dark:bg-neutral-800" />
+        <ShimmerBlock className="h-24 rounded-2xl" />
+        <ShimmerBlock className="h-24 rounded-2xl" />
       </div>
     </div>
   );

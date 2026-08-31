@@ -197,29 +197,36 @@ export default function LandingPage() {
   const { language } = useLanguage();
 
   return (
-    <div className="flex min-h-screen flex-col overflow-x-hidden">
+    <div className="flex min-h-dvh flex-col overflow-x-hidden">
       <Navbar />
 
       <main className="flex-1">
-        {/* --- Hero --- */}
-        <section className="overflow-hidden bg-slate-50 dark:bg-slate-900/40 sm:grid sm:grid-cols-2">
+        {/* --- Hero ---
+            The side-by-side split only engages at `lg:`, matching the
+            breakpoint the "How it works" section below already uses for its
+            own text/image split. Splitting as early as `sm:` (640px) used to
+            squeeze the text column and stretch the photo into a tall,
+            awkwardly-cropped strip for the whole 640-1024px tablet range —
+            this keeps the generous full-width stacked layout through
+            tablet and only goes two-up once there's actually room for it. */}
+        <section className="overflow-hidden bg-slate-50 dark:bg-slate-900/40 lg:grid lg:grid-cols-2">
           <div className="flex flex-col justify-center p-8 md:p-12 lg:px-16 lg:py-24">
-            <div className="mx-auto max-w-xl text-center sm:text-left">
-              <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-4 py-1.5 text-sm font-medium text-primary-700 dark:border-primary-800 dark:bg-primary-900/30 dark:text-primary-300">
-                <Sparkles className="h-4 w-4" />
+            <div className="mx-auto max-w-xl text-center lg:text-left">
+              <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-4 py-1.5 text-xs font-medium text-primary-700 dark:border-primary-800 dark:bg-primary-900/30 dark:text-primary-300 sm:text-sm">
+                <Sparkles className="h-4 w-4 shrink-0" />
                 {language === "fr" ? "Conçu pour les facultés de santé algériennes" : "Designed for Algerian medical faculties"}
               </span>
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white md:text-4xl">
-                {language === "fr" 
-                  ? "Ton second cerveau médical, propulsé par l'IA" 
+                {language === "fr"
+                  ? "Ton second cerveau médical, propulsé par l'IA"
                   : "Your medical second brain, powered by AI"}
               </h1>
               <p className="mt-4 text-slate-600 dark:text-slate-300">
-                {language === "fr" 
-                  ? "Transforme tes cours de Médecine, Pharmacie et Chirurgie Dentaire en explications, résumés et QCM sur-mesure." 
+                {language === "fr"
+                  ? "Transforme tes cours de Médecine, Pharmacie et Chirurgie Dentaire en explications, résumés et QCM sur-mesure."
                   : "Transform your Medicine, Pharmacy, and Dental Surgery courses into tailored explanations, summaries, and MCQs."}
               </p>
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">
                 <Button asChild size="lg" className="w-full shadow-[0_0_35px_rgba(20,184,166,0.4)] sm:w-auto">
                   <Link href="/register">
                     {language === "fr" ? "Commencer gratuitement" : "Start for free"}
@@ -232,8 +239,8 @@ export default function LandingPage() {
               </div>
             </div>
           </div>
-          <div className="relative h-56 w-full sm:h-full">
-            <Image src="/1.jpg" alt="Étudiant en médecine révisant avec Med Art AI" fill sizes="(min-width: 640px) 50vw, 100vw" className="object-cover" priority />
+          <div className="relative h-64 w-full sm:h-80 lg:h-full">
+            <Image src="/1.jpg" alt="Étudiant en médecine révisant avec Med Art AI" fill sizes="(min-width: 1024px) 50vw, 100vw" className="object-cover" priority />
           </div>
         </section>
 
@@ -393,10 +400,16 @@ export default function LandingPage() {
                 <RevealSection key={plan.id} delay={index * 0.1} className="h-full">
                   <MotionCard
                     className={cn(
-                      "flex h-full flex-col p-6 sm:p-8",
+                      "relative flex h-full flex-col p-6 sm:p-8",
                       isFeatured && "border-primary-400 shadow-[0_0_40px_rgba(20,184,166,0.2)] dark:border-primary-600"
                     )}
                   >
+                    {isFeatured && (
+                      <span className="absolute -top-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-gradient-to-r from-primary-500 to-secondary-600 px-4 py-1 text-xs font-semibold text-white shadow-soft">
+                        <Sparkles className="h-3 w-3" />
+                        {language === "fr" ? "Le plus populaire" : "Most popular"}
+                      </span>
+                    )}
                     <h3 className="text-lg font-bold text-foreground">{plan.label}</h3>
                     <p className="mt-1 text-sm text-muted-foreground">{plan.tagline}</p>
                     <div className="mt-6 flex items-baseline gap-1">

@@ -7,9 +7,13 @@ import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/documen
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
-export const maxDuration = 60;
+// Bumped alongside MAX_FILE_BYTES below — see app/api/upload/route.ts's own
+// comment for why (large image-heavy PDFs need more parsing time, and this
+// is still subject to whatever hard ceiling the hosting platform enforces
+// regardless of what's declared here).
+export const maxDuration = 300;
 
-const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 Mo — same cap as /api/upload.
+const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo — same cap as /api/upload.
 const STUDY_PLAN_SOURCES_BUCKET = "study-plan-sources";
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 const ACCEPTED_EXTENSIONS = [...ACCEPTED_DOCUMENT_EXTENSIONS, ...IMAGE_EXTENSIONS];

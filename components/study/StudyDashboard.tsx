@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { BookOpenCheck, Coffee, Minus, Pause, Play, Plus, RotateCcw, ShieldAlert, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
+import { Card } from "@/components/ui/Card";
 import { usePomodoro } from "@/providers/PomodoroProvider";
 
 type TimerMode = "study" | "break";
@@ -58,8 +59,8 @@ function DurationStepper({
   onChange: (next: number) => void;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
-      <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+    <div className="flex flex-1 flex-col items-center gap-2 rounded-2xl border border-border bg-muted/40 p-4">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
         <Icon className="h-3.5 w-3.5" />
         <span className="text-[11px] font-semibold uppercase tracking-wide">{label}</span>
       </div>
@@ -69,20 +70,20 @@ function DurationStepper({
           onClick={() => onChange(clamp(value - step, min, max))}
           disabled={disabled || value <= min}
           aria-label={`Diminuer ${label}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Minus className="h-4 w-4" />
         </button>
-        <span className="w-16 text-center text-lg font-black tabular-nums text-slate-900 dark:text-white">
+        <span className="w-16 text-center text-lg font-black tabular-nums text-foreground">
           {value}
-          <span className="ml-0.5 text-xs font-medium text-slate-400 dark:text-slate-500">{unit}</span>
+          <span className="ml-0.5 text-xs font-medium text-muted-foreground">{unit}</span>
         </span>
         <button
           type="button"
           onClick={() => onChange(clamp(value + step, min, max))}
           disabled={disabled || value >= max}
           aria-label={`Augmenter ${label}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -187,22 +188,22 @@ export function StudyDashboard() {
   const isStudyMode = currentMode === "study";
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 font-sans text-slate-800 dark:text-slate-200">
+    <div className="mx-auto w-full max-w-3xl space-y-6 font-sans text-foreground">
       {cheatWarningVisible && (
-        <div className="flex items-center gap-3 rounded-2xl border-2 border-rose-300 bg-rose-50 p-4 text-rose-800 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+        <div className="flex animate-in items-center gap-3 rounded-2xl border-2 border-rose-300 bg-rose-50 p-4 text-rose-800 shadow-sm fade-in slide-in-from-top-2 duration-300 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
           <ShieldAlert className="h-5 w-5 shrink-0" />
           <p className="text-sm font-bold">Session en pause : activité en arrière-plan détectée. Reste concentré !</p>
         </div>
       )}
 
       {/* Centralized Pomodoro Timer */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft dark:border-slate-800 dark:bg-slate-900 sm:p-10">
+      <Card className="p-6 sm:p-10">
         <div className="flex flex-col items-center gap-6">
           <div
             className={cn(
               "inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition-colors duration-300",
               isStudyMode
-                ? "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300"
+                ? "bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
                 : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
             )}
           >
@@ -211,9 +212,9 @@ export function StudyDashboard() {
           </div>
 
           {/* Circular progress ring */}
-          <div className="relative flex items-center justify-center">
-            <svg width={220} height={220} viewBox="0 0 220 220" className="-rotate-90">
-              <circle cx={110} cy={110} r={radius} fill="none" strokeWidth={12} className="stroke-slate-100 dark:stroke-slate-800" />
+          <div className="relative flex w-[220px] max-w-full items-center justify-center">
+            <svg width="100%" height="100%" viewBox="0 0 220 220" className="-rotate-90">
+              <circle cx={110} cy={110} r={radius} fill="none" strokeWidth={12} className="stroke-muted" />
               <circle
                 cx={110}
                 cy={110}
@@ -223,14 +224,14 @@ export function StudyDashboard() {
                 strokeLinecap="round"
                 strokeDasharray={circumference}
                 strokeDashoffset={dashOffset}
-                className={cn("transition-[stroke-dashoffset] duration-1000 ease-linear", isStudyMode ? "stroke-teal-500" : "stroke-amber-500")}
+                className={cn("transition-[stroke-dashoffset] duration-1000 ease-linear", isStudyMode ? "stroke-primary-500" : "stroke-amber-500")}
               />
             </svg>
             <div className="absolute flex flex-col items-center">
-              <p className="text-5xl font-black tabular-nums tracking-tight text-slate-900 dark:text-white sm:text-6xl">
+              <p className="text-5xl font-black tabular-nums tracking-tight text-foreground sm:text-6xl">
                 {formatTime(seconds % totalPhaseSeconds)}
               </p>
-              <p className="mt-1 text-xs font-semibold text-slate-400 dark:text-slate-500">
+              <p className="mt-1 text-xs font-semibold text-muted-foreground">
                 Cycle {currentCycle} / {cycles}
               </p>
             </div>
@@ -241,8 +242,8 @@ export function StudyDashboard() {
               type="button"
               onClick={handleToggleRunning}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white shadow-sm transition-all duration-200 active:scale-95",
-                isRunning ? "bg-amber-500 hover:bg-amber-600" : "bg-teal-600 hover:bg-teal-700"
+                "flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white shadow-sm transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                isRunning ? "bg-amber-500 hover:bg-amber-600" : "bg-primary-600 hover:bg-primary-700"
               )}
             >
               {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
@@ -252,7 +253,7 @@ export function StudyDashboard() {
             <button
               type="button"
               onClick={handleReset}
-              className="flex items-center gap-2 rounded-xl bg-slate-100 px-6 py-3 text-sm font-bold text-slate-600 shadow-sm transition-all duration-200 hover:bg-slate-200 active:scale-95 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              className="flex items-center gap-2 rounded-xl bg-muted px-6 py-3 text-sm font-bold text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-accent-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <RotateCcw className="h-4 w-4" />
               Réinitialiser
@@ -261,7 +262,7 @@ export function StudyDashboard() {
         </div>
 
         {/* Duration / cycles settings */}
-        <div className="mt-8 flex flex-col gap-3 border-t border-slate-100 pt-6 dark:border-slate-800 sm:flex-row">
+        <div className="mt-8 flex flex-col gap-3 border-t border-border pt-6 sm:flex-row">
           <DurationStepper
             label="Étude"
             icon={BookOpenCheck}
@@ -295,20 +296,17 @@ export function StudyDashboard() {
             onChange={handleCyclesChange}
           />
         </div>
-      </div>
+      </Card>
 
       {/* Mocked time-tracking stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {MOCK_STATS.map((stat) => (
-          <div
-            key={stat.label}
-            className="rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-soft dark:border-slate-800 dark:bg-slate-900"
-          >
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          <Card key={stat.label} className="p-5 text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Temps d&apos;étude — {stat.label}
             </p>
-            <p className="mt-1 text-2xl font-black text-slate-900 dark:text-white">{stat.value}</p>
-          </div>
+            <p className="mt-1 text-2xl font-black text-foreground">{stat.value}</p>
+          </Card>
         ))}
       </div>
     </div>

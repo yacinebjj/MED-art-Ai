@@ -16,44 +16,31 @@ export interface LocalChatMessage extends ChatMessage {
   status: MessageStatus;
 }
 
-type GroupPosition = "single" | "top" | "middle" | "bottom";
-
-const MINE_RADIUS: Record<GroupPosition, string> = {
-  single: "rounded-2xl rounded-br-md",
-  top: "rounded-2xl rounded-br-md",
-  middle: "rounded-2xl rounded-tr-md rounded-br-md",
-  bottom: "rounded-2xl rounded-tr-md",
-};
-
-const OTHER_RADIUS: Record<GroupPosition, string> = {
-  single: "rounded-2xl rounded-bl-md",
-  top: "rounded-2xl rounded-bl-md",
-  middle: "rounded-2xl rounded-tl-md rounded-bl-md",
-  bottom: "rounded-2xl rounded-tl-md",
-};
-
-function groupPosition(isFirst: boolean, isLast: boolean): GroupPosition {
-  if (isFirst && isLast) return "single";
-  if (isFirst) return "top";
-  if (isLast) return "bottom";
-  return "middle";
-}
-
 const TIME_FORMAT = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
 interface MessageBubbleProps {
   message: LocalChatMessage;
   isMine: boolean;
+  /** Only used to decide whether to show the sender's name above the bubble — avatars themselves render on every row, per the adopted design. */
   isFirstInGroup: boolean;
-  isLastInGroup: boolean;
   theme: ChatTheme;
   onRetry: (message: LocalChatMessage) => void;
 }
 
-export function MessageBubble({ message, isMine, isFirstInGroup, isLastInGroup, theme, onRetry }: MessageBubbleProps) {
+function initial(name: string | null): string {
+  return (name ?? "?").trim().charAt(0).toUpperCase() || "?";
+}
+
+/**
+ * Avatar-per-row bubble layout (adapted from a supplied HTML mockup):
+ * a colored initial-letter avatar next to every message, white/card bubble
+ * for others, themed bubble for mine, shadow + rounded-xl throughout.
+ * No "Seen" read-receipt — deliberately omitted, this app has no per-
+ * recipient read tracking, and fabricating one would be a fake UI signal.
+ */
+export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry }: MessageBubbleProps) {
   const { toast } = useToast();
   const [hovered, setHovered] = useState(false);
-  const position = groupPosition(isFirstInGroup, isLastInGroup);
 
   function copyText() {
     if (!message.contentText) return;
@@ -66,64 +53,67 @@ export function MessageBubble({ message, isMine, isFirstInGroup, isLastInGroup, 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 380, damping: 28 }}
-      className={cn("flex items-end gap-1.5", isMine ? "justify-end" : "justify-start")}
+      className={cn("flex items-end gap-2", isMine && "flex-row-reverse")}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Hover-revealed quick action — a real, working "copy" utility rather than a decorative placeholder. */}
-      {message.type === "text" && (
-        <button
-          type="button"
-          onClick={copyText}
-          className={cn(
-            "mb-1 rounded-full p-1.5 text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground",
-            hovered ? "opacity-100" : "pointer-events-none opacity-0",
-            isMine ? "order-first" : "order-last"
-          )}
-          aria-label="Copier le message"
-          title="Copier"
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </button>
-      )}
+      <div
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold shadow-sm ring-2 ring-background transition-transform duration-300",
+          isMine ? cn(theme.bubble) : "bg-muted text-foreground"
+        )}
+      >
+        {initial(message.senderName)}
+      </div>
 
-      <div className="max-w-[75%]">
-        {!isMine && isFirstInGroup && <p className="mb-0.5 px-1 text-xs font-semibold text-muted-foreground">{message.senderName ?? "Étudiant(e)"}</p>}
+      <div className={cn("flex max-w-[85%] flex-col sm:max-w-[70%]", isMine && "items-end")}>
+        {!isMine && isFirstInGroup && <p className="mb-1 px-1 text-xs font-semibold text-muted-foreground">{message.senderName ?? "Étudiant(e)"}</p>}
 
-        <div
-          className={cn(
-            "relative px-3.5 py-2 text-sm shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-opacity",
-            isMine ? cn(theme.bubble, MINE_RADIUS[position]) : cn("bg-muted text-foreground", OTHER_RADIUS[position]),
-            message.status === "sending" && "opacity-70",
-            message.status === "failed" && "bg-destructive/90 text-destructive-foreground"
-          )}
-        >
+        <div className="flex items-center gap-1.5">
+          {/* Hover-revealed quick action — a real, working "copy" utility rather than a decorative placeholder. */}
           {message.type === "text" && (
-            <span className="whitespace-pre-wrap pr-9">
-              {message.contentText}
-              <span
-                className={cn(
-                  "absolute bottom-1.5 right-3 flex items-center gap-0.5 text-[10px]",
-                  isMine ? "text-white/70" : "text-muted-foreground"
-                )}
-              >
-                {TIME_FORMAT.format(new Date(message.createdAt))}
-                {isMine && <StatusIcon status={message.status} />}
-              </span>
-            </span>
+            <button
+              type="button"
+              onClick={copyText}
+              className={cn(
+                "order-first rounded-full p-1.5 text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground",
+                isMine && "order-last",
+                hovered ? "opacity-100" : "pointer-events-none opacity-0"
+              )}
+              aria-label="Copier le message"
+              title="Copier"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
           )}
 
-          {message.type === "image" && message.mediaUrl && <ChatImage src={message.mediaUrl} />}
-          {message.type === "video" && message.mediaUrl && <video src={message.mediaUrl} controls className="max-h-64 max-w-full rounded-xl" />}
-          {message.type === "audio" && message.mediaUrl && <AudioPlayer src={message.mediaUrl} onColoredBubble={isMine} />}
+          <div
+            className={cn(
+              "relative text-sm transition-all duration-300",
+              message.type === "text" && "whitespace-pre-wrap",
+              // Image messages show the picture alone — no bubble background/padding/rounded-xl,
+              // since ChatImage already carries its own rounded corners + lightbox chrome and a
+              // wrapper bubble around it would double up as a visible frame.
+              message.type !== "image" &&
+                cn(
+                  "rounded-xl px-4 py-2 shadow-card hover:shadow-glow",
+                  isMine ? cn(theme.bubble) : "bg-card text-foreground",
+                  message.status === "failed" && "bg-destructive/90 text-destructive-foreground"
+                ),
+              message.status === "sending" && "opacity-70"
+            )}
+          >
+            {message.type === "text" && message.contentText}
+            {message.type === "image" && message.mediaUrl && <ChatImage src={message.mediaUrl} />}
+            {message.type === "video" && message.mediaUrl && <video src={message.mediaUrl} controls className="max-h-64 max-w-full rounded-lg" />}
+            {message.type === "audio" && message.mediaUrl && <AudioPlayer src={message.mediaUrl} onColoredBubble={isMine} />}
+          </div>
         </div>
 
-        {message.type !== "text" && (
-          <p className={cn("mt-0.5 flex items-center gap-1 px-1 text-[10px] text-muted-foreground", isMine ? "justify-end" : "justify-start")}>
-            {TIME_FORMAT.format(new Date(message.createdAt))}
-            {isMine && <StatusIcon status={message.status} />}
-          </p>
-        )}
+        <p className="mt-1 flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
+          {TIME_FORMAT.format(new Date(message.createdAt))}
+          {isMine && <StatusIcon status={message.status} />}
+        </p>
 
         {message.status === "failed" && (
           <button

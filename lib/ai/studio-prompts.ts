@@ -1,4 +1,5 @@
 import type { DemoSectionId } from "@/lib/demo-content";
+import type { ContentBlock } from "@/lib/ai/openrouter";
 import {
   CAS_CLINIQUE_SYSTEM_PROMPT,
   EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
@@ -46,40 +47,89 @@ export const STUDIO_BYPASS_MOCK = true;
 /**
  * CAS_CLINIQUE_SYSTEM_PROMPT (imported above) asks for exactly 1 case —
  * correct for the production pipeline, which persists one course at a time.
- * The Studio mandate now requires a MINIMUM of 5 distinct clinical cases.
- * Overridden by APPENDING an emphatic override (not by editing the shared
- * production prompt, which app/api/generate/cas-clinique/route.ts still
- * relies on for real courses) — the model reads the whole prompt, so a late,
- * explicit override reliably wins over the earlier "exactement 1" line while
- * every other rule (schema, keys, icon/color palette) stays identical.
+ * The Studio mandate settled on EXACTLY THREE cases per course (reverted
+ * down from an earlier "minimum 5" mandate, and reverted away from a
+ * lazy/progressive one-case-at-a-time generation flow that used to live here
+ * — both undone for cost reasons: 3 well-chosen cases in one call is cheaper
+ * than 5, and simpler/more predictable to bill than an open-ended "generate
+ * more on demand" flow). Overridden by APPENDING an emphatic override (not by
+ * editing the shared production prompt, which
+ * app/api/generate/cas-clinique/route.ts still relies on for real courses) —
+ * the model reads the whole prompt, so a late, explicit override reliably
+ * wins over the earlier "exactement 1" line while every other rule (schema,
+ * keys, icon/color palette) stays identical.
  */
 const STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT = `${CAS_CLINIQUE_SYSTEM_PROMPT}
 
-SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "cases" doit contenir un MINIMUM ABSOLU DE CINQ (5) cas cliniques complets et distincts — jamais moins, quelle que soit la longueur du cours source. Choisis 5 archétypes cliniques réellement différents du même cours (par exemple : forme typique, forme atypique/piège diagnostique, urgence/forme grave, terrain particulier, complication évolutive) — jamais deux fois le même angle. Chaque cas doit avoir ses 5 actes intégralement rédigés (interrogatoire complet, examen physique complet, bilan complémentaire complet, raisonnement différentiel, prise en charge) — aucun raccourci, aucun acte vide. Chaque cas garde son propre "id" unique ("cas-1" à "cas-5", ou plus si tu identifies un 6e archétype pertinent) et son propre "numero" séquentiel.
+SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "cases" doit contenir EXACTEMENT TROIS (3) cas cliniques complets et distincts — ni plus, ni moins, quelle que soit la longueur du cours source. Choisis les 3 présentations cliniques les PLUS IMPORTANTES et les PLUS FRÉQUENTES de ce cours — celles qu'un étudiant a la plus forte probabilité de croiser à l'examen ou en stage — plutôt que de viser la diversité d'angles rares ou exotiques. Chaque cas doit avoir ses 5 actes intégralement rédigés (interrogatoire complet, examen physique complet, bilan complémentaire complet, raisonnement différentiel, prise en charge) — aucun raccourci, aucun acte vide. Chaque cas garde son propre "id" unique ("cas-1" à "cas-3") et son propre "numero" séquentiel.
 
-PROFONDEUR PHYSIOPATHOLOGIQUE OBLIGATOIRE (Golden Standard — non négociable) : dans CHAQUE cas, pour CHAQUE champ "pourquoi" (acte2_examen_physique, acte3_examens_complementaires, acte4_raisonnement.items) ainsi que pour "acte4_raisonnement.conclusion", détaille minutieusement le mécanisme physiopathologique exact — le processus tissulaire, cellulaire ou moléculaire précis qui relie le symptôme ou le signe observé à la maladie — avec une rigueur médicale absolue. Un "pourquoi" superficiel du type "car c'est un signe évocateur de X" est STRICTEMENT INTERDIT ; explique le mécanisme d'action réel, étape par étape si nécessaire, qui produit ce signe chez CE patient précis.`;
+PROFONDEUR PHYSIOPATHOLOGIQUE OBLIGATOIRE (Golden Standard — non négociable) : dans CHAQUE cas, pour CHAQUE champ "pourquoi" (acte2_examen_physique, acte3_examens_complementaires, acte4_raisonnement.items) ainsi que pour "acte4_raisonnement.conclusion", détaille minutieusement le mécanisme physiopathologique exact — le processus tissulaire, cellulaire ou moléculaire précis qui relie le symptôme ou le signe observé à la maladie — avec une rigueur médicale absolue. Un "pourquoi" superficiel du type "car c'est un signe évocateur de X" est STRICTEMENT INTERDIT ; explique le mécanisme d'action réel, étape par étape si nécessaire, qui produit ce signe chez CE patient précis.
+
+ÉLAGAGE LÉGER (nouveau — ne touche ni la structure ni la profondeur ci-dessus) : élimine uniquement les mots et tournures de remplissage qui n'apportent aucune information clinique (répétitions inutiles, formules creuses) dans "acte1_interrogatoire", "acte2_examen_physique" et ailleurs — sans raccourcir un seul échange, une seule étape d'examen, ou un seul "pourquoi" physiopathologique.
+
+INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète, sans exception — chacune des 3 cas doit contenir CHACUNE de ses clés ("id", "numero", "archetype", "icon", "color", "titre", "scene", "vitals", "acte1_interrogatoire", "acte2_examen_physique", "acte3_examens_complementaires", "acte4_raisonnement" avec "items" ET "conclusion", "acte5_prise_en_charge" avec "items" ET "surveillance"). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé de niveau supérieur ou imbriquée — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.`;
 
 /**
  * RESUME_SYSTEM_PROMPT (imported above) already mandates the exact 6-mode
- * structure — the Golden Standard mandate isn't about structure here, it's
- * about depth: the client flagged that generated bullets can read as bare
- * keyword lists. This override doesn't touch structure/schema at all, only
- * demands every bullet actually explain itself.
+ * structure — never touched here. The mandate for this override shifted from
+ * "never leave a bare keyword, always explain why/how" (verbose by
+ * construction — that was actively adding length) to the opposite priority:
+ * maximum density. Every bullet still needs enough context to stand alone
+ * (a bare keyword is still banned), but now as ONE short, dense sentence
+ * instead of an explanatory passage.
+ *
+ * Single-shot generation (product direction, explicitly reverted from an
+ * earlier lazy per-mode-loading + cross-student cache architecture): all 6
+ * modes are always generated together in one call, the instant the Résumé
+ * tab is opened — no per-mode click-to-generate, no separate cache. The
+ * cost lever here is exclusively prompt density (fewer words per bullet),
+ * not deferred/partial generation.
  */
 const STUDIO_RESUME_SYSTEM_PROMPT = `${RESUME_SYSTEM_PROMPT}
 
-SURCHARGE OBLIGATOIRE (Golden Standard — renforce, sans jamais réduire ni restructurer, les consignes ci-dessus) : pour CHAQUE puce ou point clé de CHAQUE mode (cards.items, cheatsheet cards.items, astuces.details, guideline steps.content, etc.), n'écris JAMAIS un mot-clé ou un terme isolé sans contexte. Pour chaque concept ou point clé, fournis systématiquement une brève explication claire de son rôle et de son fonctionnement. Ne laisse aucune zone d'ombre — l'étudiant doit comprendre le "pourquoi" et le "comment" sans avoir besoin de chercher ailleurs. Ceci ne change ni le nombre de puces demandé ni la structure des 6 modes, seulement le contenu de chaque puce.`;
+SURCHARGE OBLIGATOIRE — DENSITÉ MAXIMALE (remplace toute consigne de longueur/verbosité ci-dessus ; la structure des 6 modes reste strictement inchangée) : chaque puce ou point clé (cards.items, cheatsheet cards.items, astuces.details, guideline steps.content, etc.) doit être UNE SEULE phrase courte, dense et autonome — jamais un mot-clé isolé sans aucun contexte, mais jamais non plus une phrase longue ou un mini-paragraphe explicatif. Élimine systématiquement : toute répétition d'une idée déjà énoncée ailleurs dans le même mode, les phrases de transition ou d'introduction sans contenu médical ("il est important de noter que...", "on peut également souligner que..."), et tout mot ou adjectif de remplissage. Le résultat doit être nettement plus compact qu'une rédaction non filtrée, sans jamais donner l'impression d'un résumé tronqué ou incomplet — chaque puce doit rester immédiatement compréhensible seule, juste débarrassée de tout superflu.
+
+INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE de chaque puce, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète du mode généré (toutes ses clés de premier niveau et imbriquées telles que définies dans le schéma — hero, sections, ddx_table, pieges, cards, steps, quotes, perles, items — même quand une clé n'est pas utilisée par CE mode précis, auquel cas renvoie-la comme tableau vide [] ou objet aux champs vides, jamais comme clé absente). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.`;
 
 /**
- * QCMS_SYSTEM_PROMPT (imported above) asks for 8-12 QCM + 4-6 QROC — correct
- * for a normal révision session, but the Studio mandate now requires a much
- * larger "épreuve" (minimum 30 QCM + 5 QROC). Same append-only override
- * strategy as cas clinique above, for the same reason (production route
- * still needs the original counts).
+ * QCMS_SYSTEM_PROMPT (imported above) asks for 8-12 QCM + 4-6 QROC — the
+ * Studio mandate went through a "minimum 30 QCM + 5 QROC" phase (real cost
+ * driver: 30+ questions, each with a 5-option explanation, is a LOT of
+ * completion tokens) before settling on the current, cost-conscious target:
+ * exactly 15 QCM, and QROC dropped entirely — a focused, high-quality 15-
+ * question set instead of a 35-item épreuve most students never finish
+ * anyway. `qrocs` stays a required key in STUDIO_SCHEMAS (StudioQcmsSchema,
+ * now with no minimum) so InteractiveQuiz — SHARED with the real per-course
+ * production pipeline via GastriteQcmsStudio/ExamQcmStudio, never edited to
+ * assume Studio-only behavior — keeps receiving the exact prop shape it
+ * always has; it already hides its QROC section entirely when the array is
+ * empty (see that component's own comment).
  */
 const STUDIO_QCMS_SYSTEM_PROMPT = `${QCMS_SYSTEM_PROMPT}
 
-SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "qcms" doit contenir un MINIMUM ABSOLU DE TRENTE (30) QCM, et le tableau "qrocs" un minimum de CINQ (5) QROC — jamais moins, quelle que soit la longueur du cours source. Les questions doivent être de niveau Résidanat, réellement difficiles (distracteurs plausibles, questions à réponses multiples incluses), avec une explication complète pour chaque option existante (A à E). Numérote "id" séquentiellement à partir de 1, sans trou, pour chacun des deux tableaux.`;
+SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "qcms" doit contenir EXACTEMENT QUINZE (15) QCM — ni plus, ni moins, quelle que soit la longueur du cours source. AUCUN QROC : ignore toute mention de QROC dans les consignes ci-dessus — le tableau "qrocs" doit être renvoyé comme un tableau VIDE ([]), sans générer la moindre question QROC. Les 15 QCM doivent être de niveau Résidanat, réellement difficiles (distracteurs plausibles, questions à réponses multiples incluses), avec une explication complète pour chaque option existante (A à E). Numérote "id" séquentiellement à partir de 1, sans trou.`;
+
+/**
+ * EXPLICATION_SYSTEM_PROMPT (imported above) is the shared, production-proven
+ * prompt — NEVER edited directly, so the real per-course pipeline
+ * (app/api/generate/explication/route.ts) is unaffected, same reasoning as
+ * every other override in this file. The Studio mandate asks for a 10-15%
+ * length reduction to cut AI cost WITHOUT losing medical depth, chapter
+ * structure, or the clinical/magistral style — this override targets filler
+ * specifically, never medical substance, so it's an APPEND, not a rewrite.
+ */
+const STUDIO_EXPLICATION_SYSTEM_PROMPT = `${EXPLICATION_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE — CONCISION SANS PERTE DE PROFONDEUR : conserve intégralement la structure en chapitres, le niveau de détail médical, le style magistral et la rigueur clinique déjà exigés ci-dessus — RIEN de médical ne doit disparaître, aucun mécanisme, aucune notion du cours source ne doit être coupé ou résumé à l'excès. Réduis UNIQUEMENT le volume de mots consacré aux tournures rédactionnelles non-informatives : phrases de transition creuses, reformulations d'une idée déjà exprimée, adjectifs et adverbes de remplissage sans valeur clinique. Vise une réduction globale d'environ 10 à 15% du nombre de mots par rapport à une rédaction non filtrée, obtenue exclusivement en éliminant ce type de superflu rédactionnel.`;
+
+/**
+ * Same reasoning as STUDIO_EXPLICATION_SYSTEM_PROMPT above, lighter touch —
+ * the mandate here is to keep every analogy and its full pedagogical
+ * richness completely intact, trimming only the prose AROUND them.
+ */
+const STUDIO_EXEMPLES_ANALOGIES_SYSTEM_PROMPT = `${EXEMPLES_ANALOGIES_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE — LÉGER ÉLAGAGE (remplace toute consigne de longueur ci-dessus) : garde intégralement chaque analogie, son ton Darija+français, et sa richesse pédagogique — aucune analogie ni aucune notion du cours ne doit disparaître. Allège légèrement UNIQUEMENT les phrases qui entourent les analogies (transitions, répétitions d'une idée déjà illustrée) pour réduire modestement le volume total, sans jamais sacrifier la clarté, le ton ou la profondeur qui caractérisent cette section.`;
 
 interface StudioPromptConfig {
   systemPrompt: string;
@@ -97,13 +147,28 @@ interface StudioPromptConfig {
   maxTokens: number;
 }
 
-/** Only the tiles the existing Studio UI actually renders (lib/demo-content.ts's DEMO_SECTIONS) get a prompt — there is no 6th tile to add one for. */
+// explication: deliberately reset to 32000 — explicit product decision to
+// accept the higher one-time cost (~$0.21 on STUDIO_MODEL = Sonnet 5) for a
+// genuinely massive, zero-truncation-risk course explication. This is the
+// ONE section where a large, expensive ceiling is an intentional choice,
+// not an unmeasured default.
+//
+// The other 4 sections: checked against REAL past generations already
+// stored in studio_content_cache (a local, read-only Supabase query — zero
+// OpenRouter tokens spent to check this): estimated real completion-token
+// usage (chars/4) ranged from ~5,400 (exemples_analogies) to ~12,747
+// (cas_clinique), all well under 32,000. Lowered to 20,000 — roughly 1.6x
+// the highest real value observed (cas_clinique), a real safety margin
+// rather than a tight fit, given the sample was thin (n=1 for 3 of the 5
+// sections) and a bigger/longer real course could legitimately need more
+// than what's been generated so far. Re-check with more real data as
+// studio_content_cache accumulates more entries.
 export const STUDIO_PROMPT_CONFIG: Record<DemoSectionId, StudioPromptConfig> = {
-  explication: { systemPrompt: EXPLICATION_SYSTEM_PROMPT, maxTokens: 32000 },
-  resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 32000 },
-  cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 32000 },
-  qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 32000 },
-  exemples_analogies: { systemPrompt: EXEMPLES_ANALOGIES_SYSTEM_PROMPT, maxTokens: 32000 },
+  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 32000 },
+  resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
+  cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
+  qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 20000 },
+  exemples_analogies: { systemPrompt: STUDIO_EXEMPLES_ANALOGIES_SYSTEM_PROMPT, maxTokens: 20000 },
 };
 
 /** Maps each Studio tile id to the top-level JSON key its prompt actually returns. "qcm" is the one mismatch — DEMO_SECTIONS uses the singular tile id, but QCMS_SYSTEM_PROMPT (shared with production) returns the plural "qcms" key. */
@@ -116,24 +181,52 @@ export const STUDIO_SECTION_KEYS: Record<DemoSectionId, string> = {
 };
 
 /**
- * Builds the FINAL system-prompt string sent to the model: the tile's static
- * instructions (STUDIO_PROMPT_CONFIG[actionType].systemPrompt) followed by
- * the course's full raw text, injected directly into the system message
- * itself — not as a separate user-message turn. This is a deliberate
- * architecture choice: the course content is the one thing every instruction
- * above it refers to ("basé sur ce cours..."), so it belongs in the same
- * message as those instructions, immediately before the final directive that
- * triggers generation.
+ * Builds the system message's content blocks: the course's full raw text as
+ * its OWN `cache_control: ephemeral`-marked block, FIRST — followed by the
+ * tile's per-section instructions as a second, uncached block.
+ *
+ * Was previously ONE flat string, course text embedded in the MIDDLE
+ * (instructions -> course text -> trailing directive), sent as a plain
+ * string with no cache_control at all — meaning generating Explication,
+ * then Résumé, then Cas Clinique, then QCM, then Exemples/Analogies for the
+ * SAME course resent the exact same course text (up to
+ * MAX_SOURCE_CHARS=60,000 chars) at FULL price, once per section, even
+ * though it never changes between those calls. That's the dominant driver
+ * of "generating a whole course's Studio tiles costs $X" for a long course —
+ * not any one section's own cost, but paying full price for the same input
+ * block five separate times.
+ *
+ * The course-content block MUST come first (not interleaved with
+ * per-section instructions, which differ every call) for Anthropic's cache
+ * to be reused ACROSS different section types: cache matching is an exact-
+ * prefix match, so anything section-specific before the cached block would
+ * invalidate reuse for every other section. Mirrors
+ * lib/course-generation-shared.ts's buildSectionMessages (the legacy
+ * courses-table pipeline), which already does exactly this.
  */
-export function buildStudioSystemPrompt(actionType: DemoSectionId, courseContent: string): string {
-  const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
-  return `${basePrompt}
-
-Voici le texte intégral du cours :
-
-${courseContent}
-
-Basé strictement sur ce texte, génère le contenu demandé, au format JSON exact spécifié ci-dessus, sans jamais inventer d'information absente de ce texte.`;
+export function buildStudioSystemMessage(actionType: DemoSectionId, courseContent: string, overrideBasePrompt?: string): ContentBlock[] {
+  const basePrompt = overrideBasePrompt ?? STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
+  return [
+    {
+      type: "text",
+      text: `Voici le texte intégral du cours :\n\n${courseContent}`,
+      // ttl: "1h" (vs. the default 5 min) — a student browsing Studio's
+      // multiple windows (Explication, then Résumé, then Cas Clinique...)
+      // very plausibly takes longer than 5 minutes reading/deciding between
+      // clicks; the default TTL would silently turn every one of those
+      // later sections into a fresh, full-price cache WRITE instead of a
+      // cheap cache READ. Same reasoning already applied to the course chat
+      // route (app/api/courses/chat/route.ts) — verified live against
+      // OpenRouter's docs: 1h costs more to write (2x vs 1.25x) but reads
+      // are still ~90% off regardless, and the absolute cost delta on one
+      // write is worth it the moment even one more section reads from it.
+      cache_control: { type: "ephemeral", ttl: "1h" },
+    },
+    {
+      type: "text",
+      text: `${basePrompt}\n\nBasé strictement sur ce texte, génère le contenu demandé, au format JSON exact spécifié ci-dessus, sans jamais inventer d'information absente de ce texte.`,
+    },
+  ];
 }
 
 /**

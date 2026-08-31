@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTheme } from "next-themes";
+import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, BookOpenText, FileSpreadsheet, History, Layers, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
@@ -14,7 +15,10 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
 import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
 import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
+import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tWorkspaceSynthesis } from "@/lib/translations/workspaceSynthesis";
 
 /**
  * PHASE 2 — real generation calls wired to
@@ -46,9 +50,24 @@ type WorkspaceGenerationType = "global_summary" | "keywords_table";
 // Workspace output" — course_workspace_cache (see schema.sql) is a GLOBAL,
 // cross-student, service-role-only dedup cache keyed by content hash, not a
 // per-user history, so it can't answer "what was on this student's screen
-// last time". localStorage fills that gap until a real table exists: keyed
-// per module so switching modules never shows another module's output.
+// last time". localStorage fills that gap until a real table exists.
+//
+// SECURITY FIX: this key was previously scoped ONLY by moduleId, with no
+// user component at all — since localStorage is scoped to the BROWSER
+// ORIGIN, not per-account, this meant Student A generating a Résumé/Table
+// on a shared computer (a lab computer, a shared household device) and
+// Student B later logging into the SAME browser and opening the SAME
+// module would see Student A's own generated content (a real synthesis of
+// Student A's own uploaded courses) with zero backend check — a genuine
+// cross-account data leak. Found during a security audit. Now namespaced
+// by the current user's id (resolved client-side below) — both the restore
+// and persist effects are gated on it being resolved first, so neither
+// effect ever touches storage before it's known WHOSE slot to use.
 const WORKSPACE_HISTORY_STORAGE_PREFIX = "medart_workspace_history_";
+
+function workspaceHistoryStorageKey(userId: string, moduleId: number): string {
+  return `${WORKSPACE_HISTORY_STORAGE_PREFIX}${userId}_${moduleId}`;
+}
 
 interface HistoryEntry {
   id: string;
@@ -80,6 +99,7 @@ export default function ModuleWorkspacePage() {
   const moduleId = Number(params.moduleId);
   const { resolvedTheme } = useTheme();
   const { toast } = useToast();
+  const { language } = useLanguage();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const isDark = mounted && resolvedTheme === "dark";
@@ -101,16 +121,41 @@ export default function ModuleWorkspacePage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
 
+  // Resolved once on mount — see workspaceHistoryStorageKey's own comment
+  // for why every localStorage read/write below is gated on this being
+  // non-null first (never touch storage before knowing WHOSE slot it is).
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (!cancelled && data.user) setUserId(data.user.id);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Restore whatever this student last generated for THIS module, once on
   // mount — fixes the reported bug where leaving and coming back lost the
-  // summary/keyword table. Deliberately keyed only on `moduleId` (not a
-  // continuous sync): the save effect below is what keeps localStorage
-  // current as new generations happen; this only ever needs to run once,
-  // right when the page opens.
+  // summary/keyword table. Deliberately keyed only on `moduleId` and
+  // `userId` (not a continuous sync): the save effect below is what keeps
+  // localStorage current as new generations happen; this only ever needs
+  // to run once, right when the page opens (and once `userId` resolves,
+  // whichever happens later).
   useEffect(() => {
-    if (!Number.isInteger(moduleId)) return;
+    if (!Number.isInteger(moduleId) || !userId) return;
+    // One-time cleanup of the OLD, unscoped-by-user key format — if a
+    // previous version of this page ever wrote one on this browser, it
+    // must never be read by a DIFFERENT account on the same machine again.
     try {
-      const raw = localStorage.getItem(WORKSPACE_HISTORY_STORAGE_PREFIX + moduleId);
+      localStorage.removeItem(WORKSPACE_HISTORY_STORAGE_PREFIX + moduleId);
+    } catch {
+      // Storage unavailable — nothing to clean up either way.
+    }
+    try {
+      const raw = localStorage.getItem(workspaceHistoryStorageKey(userId, moduleId));
       if (!raw) return;
       const saved = JSON.parse(raw) as { history?: HistoryEntry[]; activeHistoryId?: string | null };
       if (!Array.isArray(saved.history) || saved.history.length === 0) return;
@@ -122,7 +167,7 @@ export default function ModuleWorkspacePage() {
       // Corrupted or foreign localStorage value — ignore, page just starts empty.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moduleId]);
+  }, [moduleId, userId]);
 
   // Persist after every new/selected entry so a later visit (or a mid-session
   // refresh) can restore it. `output` isn't a dependency here on purpose — it
@@ -130,14 +175,14 @@ export default function ModuleWorkspacePage() {
   // generation prepends to history AND sets output together; viewHistoryEntry
   // sets both together too), so tracking those two is sufficient.
   useEffect(() => {
-    if (!Number.isInteger(moduleId) || history.length === 0) return;
+    if (!Number.isInteger(moduleId) || !userId || history.length === 0) return;
     try {
-      localStorage.setItem(WORKSPACE_HISTORY_STORAGE_PREFIX + moduleId, JSON.stringify({ history, activeHistoryId }));
+      localStorage.setItem(workspaceHistoryStorageKey(userId, moduleId), JSON.stringify({ history, activeHistoryId }));
     } catch {
       // Storage full or unavailable (private browsing) — non-fatal, generation
       // still works for the current session, it just won't survive a reload.
     }
-  }, [moduleId, history, activeHistoryId]);
+  }, [moduleId, userId, history, activeHistoryId]);
 
   useEffect(() => {
     if (!Number.isInteger(moduleId)) return;
@@ -214,10 +259,19 @@ export default function ModuleWorkspacePage() {
     });
   }
 
-  const hasSelection = selectedIds.size > 0;
+  /** Mirrors lib/module-synthesis.ts's own MIN_COURSES_REQUIRED — duplicated as a plain constant rather than imported, since that module pulls in server-only dependencies (getSupabaseAdmin, OpenRouter calls) that have no place in a "use client" bundle. Enforced again server-side in that same route (never trust a client-only gate). */
+  const MIN_COURSES_REQUIRED = 5;
+  const hasSelection = selectedIds.size >= MIN_COURSES_REQUIRED;
   const isGenerating = isGeneratingSummary || isGeneratingKeywords;
 
   async function generate(type: WorkspaceGenerationType) {
+    if (selectedIds.size < MIN_COURSES_REQUIRED) {
+      toast({
+        variant: "info",
+        title: tWorkspaceSynthesis("minSelectionToast", language).replace("{n}", String(MIN_COURSES_REQUIRED)),
+      });
+      return;
+    }
     const setLoading = type === "global_summary" ? setIsGeneratingSummary : setIsGeneratingKeywords;
     setLoading(true);
     setFallbackNotice(null);
@@ -229,7 +283,11 @@ export default function ModuleWorkspacePage() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.success) {
-        toast({ variant: "error", title: "Échec de la génération", description: body?.error ?? "Réessaie." });
+        toast({
+          variant: "error",
+          title: tWorkspaceSynthesis("generationFailedTitle", language),
+          description: body?.error ?? tWorkspaceSynthesis("generationFailedRetryDescription", language),
+        });
         return;
       }
       const content = body.content as string;
@@ -253,16 +311,26 @@ export default function ModuleWorkspacePage() {
       // before the modular-chunk pivot; now it's normal for most requests
       // to be a mix, which is exactly the point.
       if (body.fullyCached) {
-        toast({ variant: "success", title: "Entièrement en cache", description: "Résultat instantané, aucun coût de génération." });
+        toast({
+          variant: "success",
+          title: tWorkspaceSynthesis("fullyCachedTitle", language),
+          description: tWorkspaceSynthesis("fullyCachedDescription", language),
+        });
       } else if (typeof body.coursesFromCache === "number" && body.coursesFromCache > 0) {
         toast({
           variant: "success",
-          title: "Génération partielle",
-          description: `${body.coursesFromCache} cours déjà en cache, ${body.coursesGenerated} générés à l'instant.`,
+          title: tWorkspaceSynthesis("partialGenerationTitle", language),
+          description: tWorkspaceSynthesis("partialGenerationDescription", language)
+            .replace("{cached}", String(body.coursesFromCache))
+            .replace("{generated}", String(body.coursesGenerated)),
         });
       }
     } catch {
-      toast({ variant: "error", title: "Échec de la génération", description: "Impossible de contacter le serveur." });
+      toast({
+        variant: "error",
+        title: tWorkspaceSynthesis("generationFailedTitle", language),
+        description: tWorkspaceSynthesis("generationFailedServerDescription", language),
+      });
     } finally {
       setLoading(false);
     }
@@ -279,21 +347,30 @@ export default function ModuleWorkspacePage() {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col bg-slate-50 dark:bg-neutral-950">
-      <WorkspaceTopbar title={moduleTitle || "Résumé du module"} />
+    <div className="aurora-canvas-bg relative flex h-dvh w-full flex-col">
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+      <WorkspaceTopbar title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)} />
 
       <PomodoroStudyBanner />
 
-      <div className="flex min-h-0 flex-1">
+      {/* Stacks vertically below md (a fixed w-80 sidebar next to flex-1 main
+          — the previous unconditional `flex` row — left almost no room for
+          the main panel on phones, sometimes none at all; this mirrors the
+          flex-col/md:flex-row + floating glass-card panel treatment already
+          used by the sibling exam generator workspace). Sidebar gets a
+          bounded height on mobile so both the source list and the
+          generation area stay reachable without one eating the whole
+          viewport. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4">
         {/* ── Sources sidebar ─────────────────────────────────────────── */}
-        <aside className="flex w-80 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-          <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-4 dark:border-neutral-800">
+        <aside className="glass-card flex max-h-[40vh] w-full shrink-0 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark md:h-auto md:max-h-none md:w-80">
+          <div className="flex items-center gap-2 border-b border-white/30 px-4 py-4 dark:border-white/10">
             <Layers className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Sources du module</h2>
+            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("sourcesHeading", language)}</h2>
           </div>
 
           {courses && courses.length > 0 && (
-            <label className="flex cursor-pointer items-center gap-3 border-b border-gray-100 px-4 py-3 transition-colors hover:bg-gray-50 dark:border-neutral-800 dark:hover:bg-neutral-800/60">
+            <label className="flex cursor-pointer items-center gap-3 border-b border-white/30 px-4 py-3 transition-colors hover:bg-white/50 dark:border-white/10 dark:hover:bg-white/5">
               <Checkbox
                 checked={selectAllState === "indeterminate" ? "indeterminate" : selectAllState === "checked"}
                 onCheckedChange={toggleAll}
@@ -326,7 +403,7 @@ export default function ModuleWorkspacePage() {
                   <li key={course.id}>
                     <label
                       className={cn(
-                        "flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60",
+                        "flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 transition-all duration-300 hover:bg-white/50 dark:hover:bg-white/5",
                         selectedIds.has(course.id) && "bg-teal-50 dark:bg-teal-500/10"
                       )}
                     >
@@ -341,10 +418,10 @@ export default function ModuleWorkspacePage() {
 
           {history.length > 0 && (
             <>
-              <hr className="mx-4 my-2 border-gray-200 dark:border-neutral-800" />
+              <hr className="mx-4 my-2 border-white/30 dark:border-white/10" />
               <div className="flex items-center gap-2 px-4 py-2">
                 <History className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-                <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Résultats</h2>
+                <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("resultsHeading", language)}</h2>
               </div>
               <ul className="max-h-56 space-y-1 overflow-y-auto px-2 pb-3">
                 {history.map((entry) => (
@@ -353,14 +430,17 @@ export default function ModuleWorkspacePage() {
                       type="button"
                       onClick={() => viewHistoryEntry(entry)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60",
+                        "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition-all duration-300 active:scale-[0.98] hover:bg-white/50 dark:hover:bg-white/5",
                         activeHistoryId === entry.id
-                          ? "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300"
+                          ? "bg-teal-50 text-teal-700 shadow-soft dark:bg-teal-500/10 dark:text-teal-300"
                           : "text-gray-600 dark:text-gray-300"
                       )}
                     >
                       {entry.type === "global_summary" ? <Sparkles className="h-3.5 w-3.5 shrink-0" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />}
-                      {entry.type === "global_summary" ? "Résumé" : "Tableau"} {entry.ordinal}
+                      {entry.type === "global_summary"
+                        ? tWorkspaceSynthesis("entryTypeSummary", language)
+                        : tWorkspaceSynthesis("entryTypeTable", language)}{" "}
+                      {entry.ordinal}
                     </button>
                   </li>
                 ))}
@@ -370,8 +450,8 @@ export default function ModuleWorkspacePage() {
         </aside>
 
         {/* ── Generation main area ────────────────────────────────────── */}
-        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-6 py-4 dark:border-neutral-800 dark:bg-neutral-900">
+        <main className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
+          <div className="flex flex-wrap items-center gap-3 border-b border-white/30 px-4 py-4 dark:border-white/10 sm:px-6">
             <Button onClick={handleGenerateGlobalSummary} disabled={!hasSelection || isGenerating} size="lg">
               {isGeneratingSummary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               Générer un Résumé Global
@@ -381,23 +461,37 @@ export default function ModuleWorkspacePage() {
               Générer Tableau des Mots-Clés
             </Button>
             {!hasSelection && (
-              <span className="text-xs text-gray-400 dark:text-gray-500">Sélectionne au moins un cours dans la barre latérale.</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                {tWorkspaceSynthesis("minSelectionHint", language).replace("{n}", String(MIN_COURSES_REQUIRED))} (
+                {selectedIds.size}/{MIN_COURSES_REQUIRED}).
+              </span>
             )}
           </div>
 
-          <div className="flex-1 px-6 py-8 md:px-10">
+          <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 md:px-10">
             {fallbackNotice && fallbackNotice.length > 0 && (
-              <div className="not-prose mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="not-prose mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+              >
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
                   {fallbackNotice.length} cours sans Explication générée ont utilisé leur texte source brut à la place, pour une
                   qualité de synthèse potentiellement moindre : <strong>{fallbackNotice.join(", ")}</strong>.
                 </span>
-              </div>
+              </motion.div>
             )}
 
+            <AnimatePresence mode="wait">
             {isGenerating ? (
-              <div className="flex flex-col items-center gap-4 py-24 text-center">
+              <motion.div
+                key="generating"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex flex-col items-center gap-4 py-16 text-center sm:py-24"
+              >
                 <div className="relative flex h-16 w-16 items-center justify-center">
                   <span className="absolute inset-0 animate-ping rounded-full bg-teal-400/30" />
                   <Sparkles className="relative h-8 w-8 text-teal-600 dark:text-teal-400" />
@@ -408,14 +502,21 @@ export default function ModuleWorkspacePage() {
                 <p className="max-w-xs text-xs text-gray-400 dark:text-gray-500">
                   Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.
                 </p>
-              </div>
+              </motion.div>
             ) : output ? (
               // Was previously rendered with NO prose wrapper at all — every
               // heading/table/blockquote style this whole page exists to
               // showcase was silently inert. Fixed alongside the requested
               // border overrides (TABLE_BORDER_OVERRIDES_*) rather than as a
               // separate change, since both land on this same element.
-              <div className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}>
+              <motion.div
+                key="output"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}
+              >
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
@@ -436,15 +537,24 @@ export default function ModuleWorkspacePage() {
                 >
                   {normalizeCallouts(output)}
                 </ReactMarkdown>
-              </div>
+              </motion.div>
             ) : (
-              <div className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "flex flex-col items-center gap-3 py-24 text-center opacity-60")}>
-                <Sparkles className="h-10 w-10 text-teal-500" />
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "flex flex-col items-center gap-3 py-16 text-center opacity-60 sm:py-24")}
+              >
+                <span className="flex h-14 w-14 animate-float items-center justify-center rounded-2xl bg-teal-50 not-prose dark:bg-teal-500/10">
+                  <Sparkles className="h-7 w-7 text-teal-500" />
+                </span>
                 <p className="!my-0 text-base font-medium not-prose text-gray-500 dark:text-gray-400">
                   Choisis tes sources puis lance une génération pour voir le résultat ici.
                 </p>
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
           </div>
         </main>
       </div>

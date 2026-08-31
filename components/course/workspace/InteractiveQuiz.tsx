@@ -24,6 +24,7 @@ import { useToast } from "@/components/ui/Toast";
 import { findBestMatchingSection } from "@/lib/weakness-matching";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
+import { createClient } from "@/lib/supabase/client";
 
 /**
  * Shared interactive quiz engine — used by both GastriteQcmsStudio.tsx (the
@@ -425,8 +426,36 @@ interface PersistedQuizState {
   gradedQrocs: Record<number, boolean>;
 }
 
-function quizProgressStorageKey(courseSlug: string): string {
-  return `medart:quiz-progress:${courseSlug}`;
+const QUIZ_PROGRESS_STORAGE_PREFIX = "medart:quiz-progress:";
+
+/**
+ * SECURITY FIX: previously keyed ONLY by courseSlug, with no user component
+ * — harmless for Studio's own generated courses (courseSlug there is
+ * "studio-course-<id>", and studio_courses.id is already globally unique
+ * per row, so it can never collide across students), but a REAL leak for
+ * the shared, fixed-slug public courses (Pleurésie/Gastrite/Appendicite):
+ * every student reading the SAME public course used the exact same key, so
+ * on a shared/lab computer, Student A's own QCM answers/progress could show
+ * up for Student B the next time they opened that same public course.
+ * Found during the same security audit that caught the identical pattern in
+ * ActiveFlashcardsDeck.tsx and the Workspace module page. Now namespaced by
+ * userId (resolved client-side, see the restore-on-mount effect below).
+ */
+function quizProgressStorageKey(userId: string, courseSlug: string): string {
+  return `${QUIZ_PROGRESS_STORAGE_PREFIX}${userId}:${courseSlug}`;
+}
+
+/** Removes every OTHER quiz-progress entry in this browser's storage — the old unscoped key format, and any DIFFERENT user's own scoped entries left behind on a shared device. Safe: pure "resume where I left off" convenience, the real attempt record already lives server-side (see /api/srs/attempt) — losing a stale local entry just means that other session's local restore starts fresh next time. */
+function purgeForeignQuizProgress(currentKey: string): void {
+  try {
+    for (const existingKey of Object.keys(localStorage)) {
+      if (existingKey.startsWith(QUIZ_PROGRESS_STORAGE_PREFIX) && existingKey !== currentKey) {
+        localStorage.removeItem(existingKey);
+      }
+    }
+  } catch {
+    // Storage unavailable — nothing to clean up either way.
+  }
 }
 
 export function InteractiveQuiz({
@@ -457,18 +486,38 @@ export function InteractiveQuiz({
   // effects in dev to surface missing-cleanup bugs; without this guard the
   // toast below would show twice on every load).
   const hasRestoredRef = useRef(false);
-
-  // Restore-on-mount: runs once per course. Only sets local UI state (never
-  // re-POSTs to /api/srs/attempt — those attempts were already recorded
-  // server-side the first time they happened, re-sending them would just be
-  // redundant network calls).
+  // Resolved once on mount — see quizProgressStorageKey's own comment for
+  // why both the restore and auto-save effects below are gated on this
+  // being non-null first (never touch storage before knowing WHOSE slot it
+  // is). Also gates isPreview, since a Studio preview course has no real
+  // signed-in reader guaranteed either way.
+  const [userId, setUserId] = useState<string | null>(null);
   useEffect(() => {
-    if (hasRestoredRef.current) return;
+    let cancelled = false;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (!cancelled && data.user) setUserId(data.user.id);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Restore-on-mount: runs once per course, once userId resolves. Only sets
+  // local UI state (never re-POSTs to /api/srs/attempt — those attempts
+  // were already recorded server-side the first time they happened,
+  // re-sending them would just be redundant network calls).
+  useEffect(() => {
+    if (hasRestoredRef.current || !userId) return;
     hasRestoredRef.current = true;
+
+    const key = quizProgressStorageKey(userId, courseSlug);
+    purgeForeignQuizProgress(key);
 
     let saved: PersistedQuizState | null = null;
     try {
-      const raw = localStorage.getItem(quizProgressStorageKey(courseSlug));
+      const raw = localStorage.getItem(key);
       if (raw) saved = JSON.parse(raw) as PersistedQuizState;
     } catch {
       saved = null; // Corrupted or unavailable localStorage — start fresh, never crash the quiz over it.
@@ -485,21 +534,22 @@ export function InteractiveQuiz({
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseSlug]);
+  }, [courseSlug, userId]);
 
   // Auto-save: fires after every interaction that changes answer state (the
   // effect runs post-commit, so it always sees the fresh value — never a
   // stale closure). A plain localStorage write triggers no state update, so
   // this can't cycle back into itself.
   useEffect(() => {
+    if (!userId) return;
     if (Object.keys(qcmAnswers).length === 0 && Object.keys(revealedQrocs).length === 0) return;
     try {
       const state: PersistedQuizState = { qcmAnswers, revealedQrocs, gradedQrocs };
-      localStorage.setItem(quizProgressStorageKey(courseSlug), JSON.stringify(state));
+      localStorage.setItem(quizProgressStorageKey(userId, courseSlug), JSON.stringify(state));
     } catch {
       // Quota exceeded / private mode — losing the local save is not worth interrupting the quiz over.
     }
-  }, [courseSlug, qcmAnswers, revealedQrocs, gradedQrocs]);
+  }, [courseSlug, userId, qcmAnswers, revealedQrocs, gradedQrocs]);
 
   function handleViewConcept(qcm: Qcm) {
     const matchedSection = explicationMarkdown
@@ -603,25 +653,27 @@ export function InteractiveQuiz({
         </div>
       </section>
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-2 border-b-2 border-orange-200 dark:border-orange-900/40 pb-2">
-          <PenLine className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-          <h2 className="text-lg font-black uppercase tracking-wide text-orange-700 dark:text-orange-400">Épreuve QROC ({qrocs.length} questions)</h2>
-        </div>
-        <div className="space-y-4">
-          {qrocs.map((qroc) => (
-            <QrocCard
-              key={qroc.id}
-              qroc={qroc}
-              revealed={!!revealedQrocs[qroc.id]}
-              onReveal={() => setRevealedQrocs((prev) => ({ ...prev, [qroc.id]: true }))}
-              grading={gradingKey === `qroc-${qroc.id}`}
-              graded={gradedQrocs[qroc.id] ?? null}
-              onGrade={(isCorrect) => recordQrocAttempt(qroc.id, isCorrect)}
-            />
-          ))}
-        </div>
-      </section>
+      {qrocs.length > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-center gap-2 border-b-2 border-orange-200 dark:border-orange-900/40 pb-2">
+            <PenLine className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+            <h2 className="text-lg font-black uppercase tracking-wide text-orange-700 dark:text-orange-400">Épreuve QROC ({qrocs.length} questions)</h2>
+          </div>
+          <div className="space-y-4">
+            {qrocs.map((qroc) => (
+              <QrocCard
+                key={qroc.id}
+                qroc={qroc}
+                revealed={!!revealedQrocs[qroc.id]}
+                onReveal={() => setRevealedQrocs((prev) => ({ ...prev, [qroc.id]: true }))}
+                grading={gradingKey === `qroc-${qroc.id}`}
+                graded={gradedQrocs[qroc.id] ?? null}
+                onGrade={(isCorrect) => recordQrocAttempt(qroc.id, isCorrect)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <ConceptModal state={conceptModal} onClose={() => setConceptModal(null)} isDark={isDark} />
     </div>

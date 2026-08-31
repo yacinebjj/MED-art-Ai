@@ -21,7 +21,13 @@ const EMPTY_CURRICULUM_PROFILE: StudentCurriculumProfile = {
 
 interface AuthContextValue {
   user: User | null;
-  profile: StudentProfile | null;
+  /**
+   * `avatarUrl` isn't part of the base `StudentProfile` shape (lib/types.ts) —
+   * unlike the other fields, it lives in the `profiles` table, not
+   * auth.users.user_metadata (see fetchAvatarUrl below) — so it's merged in
+   * here as an intersection rather than added to that shared type.
+   */
+  profile: (StudentProfile & { avatarUrl: string | null }) | null;
   /** The student's real filière/année choice — see app/api/profile/route.ts. `null` fields mean "not chosen yet", not "medicine, 1st year" (no fabricated default). */
   curriculumProfile: StudentCurriculumProfile | null;
   loading: boolean;
@@ -32,6 +38,8 @@ interface AuthContextValue {
   refreshUser: () => Promise<void>;
   /** Call after PATCH /api/profile succeeds so the new specialty/année show up immediately. */
   refreshCurriculumProfile: () => Promise<void>;
+  /** Call after POST /api/profile/avatar succeeds so the new photo shows up immediately wherever `profile.avatarUrl` is read (Settings, and later Sidebar/Topbar). */
+  refreshAvatarUrl: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -43,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [trial, setTrial] = useState<TrialInfo | null>(null);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [curriculumProfile, setCurriculumProfile] = useState<StudentCurriculumProfile | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -92,6 +101,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  /** `profiles.avatar_url` — fetched separately from /api/profile/avatar (GET) rather than folded into fetchCurriculumProfile above, since that route's shape (app/api/profile/route.ts) is out of this feature's scope. */
+  async function fetchAvatarUrl() {
+    try {
+      const res = await fetch("/api/profile/avatar");
+      const data = await res.json().catch(() => ({}));
+      setAvatarUrl(res.ok ? data.avatarUrl ?? null : null);
+    } catch {
+      setAvatarUrl(null);
+    }
+  }
+
   // Keyed on user?.id (a primitive), not the `user` object itself: the auth
   // bootstrap effect above calls setUser twice on every page load — once
   // from getUser(), once from onAuthStateChange's initial event — each with
@@ -103,9 +123,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) {
       setCurriculumProfile(null);
+      setAvatarUrl(null);
       return;
     }
     fetchCurriculumProfile();
+    fetchAvatarUrl();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -119,7 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
   }
 
-  const profile = user ? profileFromUser(user) : null;
+  const profile = user ? { ...profileFromUser(user), avatarUrl } : null;
 
   return (
     <AuthContext.Provider
@@ -133,6 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signOut,
         refreshUser,
         refreshCurriculumProfile: fetchCurriculumProfile,
+        refreshAvatarUrl: fetchAvatarUrl,
       }}
     >
       {children}
