@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, MID_TIER_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
 import { buildStudyPlanGenerationPrompt, buildStudyPlanRefinementPrompt, type StudyPlanCourseInput } from "@/lib/ai/study-planner-prompts";
 import { StudyPlanGenerationSchema, StudyPlanRefinementSchema } from "@/lib/ai/study-planner-schemas";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
@@ -140,7 +140,11 @@ export async function POST(request: NextRequest) {
             { role: "system", content: prompt },
             { role: "user", content: message.trim() },
           ],
-          { model: MID_TIER_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
+          // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
+          // NOT independently tested (only the initial-generation call
+          // below was) — same prompt family and schema shape, applied here
+          // for consistency, under the same knowingly-accepted tradeoff.
+          { model: CHEAP_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
         );
       }, StudyPlanRefinementSchema);
 
@@ -159,7 +163,15 @@ export async function POST(request: NextRequest) {
           { role: "system", content: prompt },
           { role: "user", content: "Génère le planning de révision demandé." },
         ],
-        { model: MID_TIER_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
+        // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
+        // Personalized, per-student, UNCACHED. Tested with one real call
+        // AFTER hardening buildStudyPlanGenerationPrompt's date-range
+        // instruction (a real defect found here first: the plan silently
+        // stopped short of the exam date) — confirmed fixed, exact date
+        // coverage, clean schema — a knowingly-accepted tradeoff on a small
+        // sample, per the product owner's own explicit "runway over
+        // accuracy margin" decision.
+        { model: CHEAP_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
       );
     }, StudyPlanGenerationSchema);
 

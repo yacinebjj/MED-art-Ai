@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, MID_TIER_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
 import { buildRemediationPrompt, type RemediationSourceItem } from "@/lib/ai/remediation-prompts";
 import { RemediationPlanSchema } from "@/lib/ai/remediation-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -239,7 +239,13 @@ export async function POST(_request: NextRequest) {
         { role: "system", content: prompt },
         { role: "user", content: "Génère le plan de remédiation demandé." },
       ],
-      { model: MID_TIER_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 110_000 } // route's own maxDuration is 120s — fail cleanly before the platform kills it
+      // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
+      // Personalized, per-student, UNCACHED — direct real savings on every
+      // call. Tested with one real call: clean schema, correct priority
+      // ordering, medically-accurate plan — a knowingly-accepted tradeoff
+      // on a small sample, per the product owner's own explicit "runway
+      // over accuracy margin" decision.
+      { model: CHEAP_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 110_000 } // route's own maxDuration is 120s — fail cleanly before the platform kills it
     );
 
     // parseJsonResponse itself already logs the raw response + attempts a

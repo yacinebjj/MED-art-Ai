@@ -46,26 +46,57 @@ export const ECONOMY_MODEL = "google/gemini-3.7-flash";
 // Re-verify the same way if this ever 404s.
 export const MID_TIER_MODEL = "openai/gpt-5-mini";
 
-// Cheapest tier — SCOPED to app/api/exam/generate/route.ts's exam-shortfall
-// QCM batches only (single-correct-answer, 5 options, <40-word explanations,
-// no clinical framing). Chosen after a real side-by-side test of 3 cheaper
-// candidates against this exact prompt+schema, each independently
-// adversarially re-verified for medical accuracy on a real course
-// (Hémolyse): deepseek/deepseek-v3.2 ($0.0025/8-question batch) and
-// qwen/qwen3-235b-a22b-2507 ($0.0022/batch) were both even cheaper, but the
-// adversarial pass on EACH found a real factual error in a distractor's
-// explanation text (deepseek: swapped the source's own PK/G6PD aerobic-vs-
-// anaerobic labeling; qwen: hemopexin binding claim contradicts real
-// hematology) — neither flipped an answer key, but both are genuine
-// inaccuracies a student would read. gpt-5-nano ($0.0049/batch, still ~5-6x
-// cheaper than ECONOMY_MODEL's $0.026-0.03/batch) was the only one of the 3
-// the adversarial pass confirmed with ZERO issues. Confirmed live,
-// 2026-08-31, against GET https://openrouter.ai/api/v1/models: $0.05/M
-// input + $0.40/M output, 400K context. Re-verify the same way if this
-// 404s, and do NOT reuse this constant for a different prompt/task without
-// its own test — this is a narrow, task-specific pick, not a general
-// "cheapest available" default.
-export const NANO_MODEL = "openai/gpt-5-nano";
+// TRIED AND REVERTED: "openai/gpt-5-nano" was adopted for
+// app/api/exam/generate/route.ts's exam-shortfall QCM batches after passing
+// a real side-by-side test against 2 even-cheaper candidates (both of which
+// had a confirmed factual error on independent adversarial review, while
+// gpt-5-nano had none) — but real production usage then surfaced what that
+// one-shot test missed: it doesn't reliably hit an exact structured-output
+// count under load (two separate real failures: a 6-question batch came
+// back as 7, and later even an 8-question batch — the "safe", standard
+// round size — failed the same way). A handful of clean test calls is not
+// enough evidence for a count-exactness guarantee; briefly reverted the exam
+// route to HAIKU_MODEL. Left this history here instead of silently deleting
+// it so the same mistake (trusting a small sample for a hard-exactness
+// requirement) isn't repeated on the next cost-cutting pass.
+
+// EXPLICIT, KNOWINGLY-ACCEPTED ACCURACY TRADEOFF — the product owner's own
+// deliberate choice to prioritize runway over a measured, non-zero accuracy
+// margin, with the explicit intent to revisit once the product has more
+// revenue. Re-verify this tradeoff (or drop a given call site back to its
+// previous model) rather than silently assuming it's still the right call
+// once that revisit happens.
+//
+// Testing depth differs by call site — read this before adding a new one:
+// - app/api/exam/generate/route.ts's exam-shortfall QCM batches: the ONLY
+//   call site with deep validation — 2 full rounds, 8 independent real
+//   trials each, plus independent adversarial re-verification of the best
+//   sample. Structural reliability is perfect (16/16 trials produced
+//   exactly the requested count, correct schema), but medical-accuracy is
+//   NOT: even after hardening the prompt with an explicit "never substitute
+//   your own general medical knowledge for what the source text
+//   specifically says" instruction (see EXAM_PERSONA_AND_STYLE's own
+//   "RIGUEUR ABSOLUE" paragraph), 2 of 8 trials still introduced a real,
+//   source-contradicting biochemistry claim (a pathway-labeling mixup, e.g.
+//   aérobie/anaérobie) in a distractor's explanation — a measured ~25%
+//   per-batch recurrence rate, confirmed by independent review. HAIKU_MODEL
+//   never showed this failure mode in the same testing and remains the
+//   technically safer choice for THIS call site specifically.
+// - lib/module-synthesis.ts's buildCrossCourseSynthesis, app/api/flashcards
+//   /generate/route.ts, app/api/study/remediation-plan/generate/route.ts,
+//   app/api/study-planner/generate/route.ts, and app/api/notes/organize
+//   /route.ts: each tested with only 1-2 real calls (not the 16-trial depth
+//   above) before switching. Those calls were clean (schema-valid, medically
+//   sound on manual read), and two real defects found along the way — the
+//   study-planner silently dropping the final days of a long plan, and
+//   notes/organize returning a full HTML document instead of a fragment —
+//   were fixed by hardening their own prompts (see each file's own
+//   comments). But a small sample is exactly what the exam-QCM finding
+//   above warns against trusting for a hard-accuracy guarantee — these
+//   call sites carry a real, currently-unquantified version of the same
+//   kind of risk, accepted on the same "runway over accuracy margin" basis
+//   without the same amount of evidence behind it.
+export const CHEAP_MODEL = "deepseek/deepseek-v3.2";
 
 // Shared free-tier (":free" suffix) fallback chain — genuinely zero
 // marginal cost, used by app/api/dashboard-assistant/route.ts,

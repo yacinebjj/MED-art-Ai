@@ -458,6 +458,37 @@ export async function runStudioExplicationDeltaPipeline(
  * Persists this course's OWN chapter map so future uploads (any university)
  * can delta against it.
  */
+/**
+ * Last-resort recovery for a genuinely broken/truncated JSON response from
+ * runStudioExplicationFreshGenerationWithTagging specifically: "explication"
+ * is the FIRST key the model writes, "explicationChapterChunks" (a
+ * disposable cache-optimization hint — see this function's own header
+ * comment on why a wrong/missing value there is harmless) is the SECOND and
+ * LAST. Confirmed live (real production failure, then reproduced): when the
+ * combined explication+chunk-tagging response hits a JSON defect — token
+ * ceiling, an escaping quirk, anything — while writing that disposable
+ * SECOND field, the actual lesson content the student is waiting on is very
+ * often already complete and sitting right there in the raw text, just
+ * unreachable via a normal JSON.parse because the OVERALL document never
+ * closed cleanly. This targeted, self-contained regex recovers ONLY that
+ * one string value — not a general JSON repair — so it can never accidentally
+ * "recover" a genuinely truncated explication (an unclosed string simply
+ * won't match) or silently serve a suspiciously short fragment (rejected
+ * below by the same 50-char floor StudioTextSchema itself enforces). If it
+ * can't cleanly recover, this returns null and the caller's original error
+ * surfaces exactly as it did before this recovery path existed.
+ */
+function recoverExplicationOnly(raw: string): string | null {
+  const match = raw.match(/"explication"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (!match) return null;
+  try {
+    const decoded = JSON.parse(`"${match[1]}"`) as string;
+    return decoded.trim().length >= 50 ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runStudioExplicationFreshGenerationWithTagging(
   courseId: number,
   truncatedText: string,
@@ -477,12 +508,15 @@ export async function runStudioExplicationFreshGenerationWithTagging(
   // rule) a clean register match and zero JSON-escaping failures, at ~76%
   // lower cost per call. The `explicationChapterChunks` tagging field this
   // call additionally requests (via explicationChunkTaggingAddendum) was
-  // NOT part of that test, but a wrong/missing value there only degrades a
-  // background cross-university cache-reuse optimization — see
-  // parseChapterChunkNumbers's `?? []` fallback above and this file's own
-  // "fails open by construction" header comment — it can never affect the
-  // explicationMarkdown actually served to the student. Scoped to ONLY this
-  // call site: the cross-university delta-chapter/wrapper calls below use
+  // NOT part of that test — turned out to be the real gap: a real
+  // production failure showed this SECOND field can occasionally push a
+  // combined response into a JSON defect (token ceiling, an escaping
+  // quirk) that fails the WHOLE parse, discarding an explication that was
+  // often already complete. recoverExplicationOnly (below) now recovers
+  // that case specifically — the tagging metadata is still genuinely
+  // disposable (parseChapterChunkNumbers's `?? []` fallback), but a broken
+  // JSON around it is no longer allowed to take the explicationMarkdown down
+  // with it. Scoped to ONLY this call site: the cross-university delta-chapter/wrapper calls below use
   // different, untested prompts and deliberately keep the Sonnet default.
   const raw = await callOpenRouter(
     [
@@ -495,7 +529,18 @@ export async function runStudioExplicationFreshGenerationWithTagging(
     { model: ECONOMY_MODEL, maxTokens, bypassMock: true }
   );
 
-  const parsed = parseJsonResponse(raw);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = parseJsonResponse(raw);
+  } catch (error) {
+    const recovered = recoverExplicationOnly(raw);
+    if (!recovered) throw error;
+    console.warn(
+      "[studio-explication-delta] JSON global invalide/tronqué, mais 'explication' récupérée isolément (chunk-tagging perdu pour cette génération, non bloquant pour l'étudiant):",
+      error instanceof Error ? error.message : error
+    );
+    parsed = { explication: recovered, explicationChapterChunks: [] };
+  }
   const explicationMarkdown = typeof parsed.explication === "string" ? parsed.explication : "";
   if (!explicationMarkdown.trim()) {
     throw new Error("La réponse de l'IA ne contient pas de champ 'explication' exploitable.");

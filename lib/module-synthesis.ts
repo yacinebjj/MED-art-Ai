@@ -22,7 +22,7 @@
 
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, HAIKU_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
 import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
 import {
   buildSummaryChunkPrompt,
@@ -153,7 +153,15 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
       { role: "system", content: prompt },
       { role: "user", content: "Génère la synthèse transversale demandée." },
     ],
-    { model: HAIKU_MODEL, maxTokens: 1200, bypassMock: true }
+    // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
+    // This is the PERSONALIZED, per-student, uncached cross-course
+    // combination step (never the cross-student-cached per-course chunk
+    // generation just above, which deliberately stays on STUDIO_MODEL).
+    // Tested with one real call: clean schema, medically accurate and
+    // genuinely additive cross-course synthesis — a knowingly-accepted
+    // tradeoff on a small sample, per the product owner's own explicit
+    // "runway over accuracy margin" decision.
+    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true }
   );
 
   const parsed = parseJsonResponse(raw);

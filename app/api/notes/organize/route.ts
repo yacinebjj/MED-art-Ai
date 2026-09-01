@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { callOpenRouter, HAIKU_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { errorMessage } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
@@ -25,7 +25,8 @@ Consignes STRICTES :
 3. Si tu vois des comparaisons ou des listes de symptômes/traitements, crée des tableaux HTML propres (<table>, <thead>, <tr>, <th>, <tbody>, <td>).
 4. Ajoute des couleurs discrètes et professionnelles en utilisant des styles inline pour mettre en évidence ce qui est important (ex: <span style="color: #059669; font-weight: bold;"> pour le traitement, <span style="color: #e11d48; font-weight: bold;"> pour les alertes/symptômes graves).
 5. Garde l'exactitude médicale stricte.
-6. Ne renvoie AUCUN texte en dehors du code HTML. Ne mets pas de balise de bloc de code (pas de \`\`\`html au début ou à la fin). Donne juste le HTML directement.`;
+6. Ne renvoie AUCUN texte en dehors du code HTML. Ne mets pas de balise de bloc de code (pas de \`\`\`html au début ou à la fin). Donne juste le HTML directement.
+7. FRAGMENT UNIQUEMENT, JAMAIS UN DOCUMENT COMPLET : ta réponse est insérée TELLE QUELLE à l'intérieur d'une page existante. Ne génère JAMAIS <!DOCTYPE>, <html>, <head>, <title>, <style>, ni <body> — ces balises casseraient la mise en page de l'éditeur. Ne définis AUCUNE règle CSS dans une balise <style> et n'utilise AUCUNE classe CSS (pas de class="...") : la SEULE façon de styliser un élément est l'attribut "style" en ligne directement sur cet élément, exactement comme dans l'exemple de la règle 4. Commence directement par le premier <h2> ou <p> du contenu, sans aucune balise englobante avant.`;
 
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -59,7 +60,15 @@ export async function POST(request: NextRequest) {
         { role: "system", content: ORGANIZE_SYSTEM_PROMPT },
         { role: "user", content },
       ],
-      { maxTokens: 4096, model: HAIKU_MODEL }
+      // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
+      // Personalized, per-student, UNCACHED. Tested with one real call
+      // AFTER hardening ORGANIZE_SYSTEM_PROMPT's rule 7 (a real defect
+      // found here first: returned a full HTML document instead of a
+      // fragment) — confirmed fixed, clean fragment output, medically
+      // accurate reorganization — a knowingly-accepted tradeoff on a small
+      // sample, per the product owner's own explicit "runway over accuracy
+      // margin" decision.
+      { maxTokens: 4096, model: CHEAP_MODEL }
     );
 
     const organizedContent = raw.replace(/^```html\s*/i, "").replace(/```\s*$/i, "");

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, NANO_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
 import { buildExamBatchInstruction, buildExamStaticSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
 import { ExamGenerationSchema, ExamQuestionSchema } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -33,11 +33,12 @@ const EXAM_BATCH_MAX_TOKENS = 16_000;
 const QUESTIONS_PER_BATCH = 8;
 // 1 initial attempt + 2 retries — bounded so a persistently broken batch
 // still fails (and refunds) the whole exam rather than looping indefinitely.
-// Raised from 2 after a real production failure: NANO_MODEL occasionally
-// mis-hits an exact non-round count (e.g. a 6-question remainder chunk) —
-// combined with the over-generation repair right above this loop (which
-// already recovers the "1 too many" case for free, no retry needed), this
-// extra attempt is the safety net for genuine under-generation instead.
+// Raised from 2 after a real production failure (a cheaper model of the day
+// occasionally mis-hit an exact count) — kept at 3 as a general safety net
+// even after reverting that model choice (see HAIKU_MODEL's call site
+// below): the over-generation repair right above this loop already recovers
+// a "1 too many" response for free, no retry needed, so this extra attempt
+// is specifically for genuine under-generation or a malformed question.
 const MAX_BATCH_ATTEMPTS = 3;
 
 // SMART AGGREGATION (product direction): the exam total no longer comes
@@ -152,24 +153,26 @@ async function generateExamBatch(
           { role: "user", content: batchInstruction },
         ],
         {
-          // NANO_MODEL (gpt-5-nano), not Sonnet, Haiku, or Flash — a
-          // deliberate cost decision made SAFE by the pooling design above
-          // (see poolExamQuestions), not a blanket exam-quality downgrade.
-          // Most of a well-established course's exam now comes from POOLED
-          // Studio QCMs (reused verbatim from the Studio QCM tile, which
-          // stays on Flash — see app/api/studio/generate/route.ts's own
-          // comment) and never touches this call at all — this function
-          // only ever generates the SHORTFALL, a residual top-up, so this
-          // model choice only affects a fraction of the exam. Chosen after a
-          // real 3-way test against this exact prompt+schema (see
-          // NANO_MODEL's own comment in lib/ai/openrouter.ts): the two even-
-          // cheaper candidates tested (DeepSeek v3.2, Qwen3-235B) each had a
-          // real factual error surface on independent adversarial review;
-          // this one didn't. Was Sonnet (~$0.50/exam observed, flagged as
-          // unacceptable), then Haiku 4.5, then briefly Flash; this is
-          // cheaper still (~5-6x under Flash's own per-batch cost) and
-          // passed its own adversarial verification clean.
-          model: NANO_MODEL,
+          // CHEAP_MODEL (DeepSeek v3.2) — see its own extensive comment
+          // in lib/ai/openrouter.ts for the full history: this is an
+          // EXPLICIT, KNOWINGLY-ACCEPTED accuracy tradeoff, not a blind cost
+          // cut. Rigorously tested (2 rounds, 16 real trials, independent
+          // adversarial re-verification): perfect structural reliability,
+          // but a measured ~25% per-batch chance of a distractor explanation
+          // containing a real, source-contradicting biochemistry claim
+          // (mitigated somewhat, not eliminated, by EXAM_PERSONA_AND_STYLE's
+          // "RIGUEUR ABSOLUE" hardening paragraph). HAIKU_MODEL tested
+          // cleanly with no such failure and remains the technically safer
+          // choice — the product owner explicitly chose to accept this
+          // measured risk for the cost savings at this stage, intending to
+          // revisit later. Made lower-stakes cost-wise by the pooling design
+          // above (see poolExamQuestions): most of a well-established
+          // course's exam comes from POOLED Studio QCMs (reused verbatim
+          // from the Studio QCM tile, which stays on Flash) and never
+          // touches this call at all — this function only ever generates
+          // the SHORTFALL, a residual top-up, so this model choice only
+          // affects a fraction of the exam.
+          model: CHEAP_MODEL,
           maxTokens: EXAM_BATCH_MAX_TOKENS,
           bypassMock: true,
           ...(isVariation ? { temperature: VARIATION_TEMPERATURE } : {}),
@@ -242,12 +245,14 @@ async function generateShortfallQuestions(
     const count = Math.min(QUESTIONS_PER_BATCH, remaining);
     // ALWAYS request the full QUESTIONS_PER_BATCH, never the smaller
     // remainder `count` — confirmed live (real production failure, then
-    // reproduced on demand) that NANO_MODEL reliably hits the STANDARD
-    // round batch size (8) but noticeably less reliably hits an odd
-    // remainder count (e.g. exactly 6), even with generateExamBatch's own
-    // over-generation repair and retries. Asking for the size it's actually
-    // good at, then keeping only the `count` this chunk still needs and
-    // discarding the (tiny, ~fraction-of-a-cent) surplus, is more robust
+    // reproduced on demand) that a cheaper model tried for this call
+    // reliably hit the STANDARD round batch size (8) but noticeably less
+    // reliably hit an odd remainder count (e.g. exactly 6), even with
+    // generateExamBatch's own over-generation repair and retries — a
+    // model-agnostic precaution kept even after reverting to HAIKU_MODEL.
+    // Asking for the size any model is most practiced at, then keeping only
+    // the `count` this chunk still needs and discarding the (tiny,
+    // ~fraction-of-a-cent) surplus, is more robust
     // than trying to make the model reliably hit an arbitrary exact number.
     const batchQuestions = await generateExamBatch(inputs, ALL_STANDARD_BATCH_INDEX, ALL_STANDARD_BATCH_INDEX, QUESTIONS_PER_BATCH, isVariation, topics);
     const taken = batchQuestions.slice(0, count);

@@ -24,14 +24,37 @@ function formatCourseList(courses: StudyPlanCourseInput[]): string {
   return courses.map((c, i) => `${i + 1}. ${c.title}`).join("\n");
 }
 
+/**
+ * Calendar days from `todayIso` up to (but excluding) `examDateIso` — the
+ * exact count of dates the plan must cover (a subset become rest days with
+ * no "days" entry, but every OTHER date in this range needs one). Computed
+ * here rather than left implicit in the prompt's prose: a real production
+ * failure (deepseek/deepseek-v3.2, tested as a cheaper candidate for this
+ * route) silently stopped generating partway through a long range and left
+ * the final several days before the exam with no plan at all, no rest-day
+ * marker, no explanation — an unenforced date RANGE description gives a
+ * model nothing concrete to self-check against. Spelling out the exact
+ * number gives every model (not just deepseek) a hard, verifiable target,
+ * the same "EXACTLY N" pattern already used for exam batch counts elsewhere
+ * in this codebase.
+ */
+function countDaysExclusive(todayIso: string, examDateIso: string): number {
+  const start = new Date(`${todayIso}T00:00:00Z`).getTime();
+  const end = new Date(`${examDateIso}T00:00:00Z`).getTime();
+  return Math.max(0, Math.round((end - start) / 86_400_000));
+}
+
 /** System prompt for the FIRST generation — builds the full weekly schedule from scratch. */
 export function buildStudyPlanGenerationPrompt(config: StudyPlanConfigInput): string {
   const { courses, hoursPerDay, restDays, examDate, today, programText } = config;
+  const totalDayCount = countDaysExclusive(today, examDate);
 
   return `${COACH_PERSONA}
 
 ## Mission
 Génère un planning de révision JOUR PAR JOUR, depuis aujourd'hui (${today}) jusqu'à la veille de l'examen (${examDate} exclus — l'étudiant ne doit pas réviser le jour même).
+
+LIMITE STRICTE DE PÉRIODE (non négociable) : cette période couvre EXACTEMENT ${totalDayCount} jours calendaires consécutifs (du ${today} inclus au jour juste avant ${examDate} inclus). Tu dois traiter CHACUNE de ces ${totalDayCount} dates, sans exception et sans t'arrêter avant la fin : pour CHAQUE date, soit tu ajoutes une entrée dans "days" avec au moins un item, soit tu la traites explicitement comme un jour de repos (donc aucune entrée pour cette date, jamais un tableau vide). Ne t'arrête JAMAIS avant d'avoir couvert TOUTES les ${totalDayCount} dates, même si le planning devient répétitif vers la fin (dans ce cas, privilégie la révision/consolidation plutôt que de laisser des jours sans rien) — les derniers jours avant l'examen sont les PLUS importants à ne jamais oublier.
 
 ## Contraintes strictes
 - Heures d'étude disponibles par jour : ${hoursPerDay}h (ne dépasse JAMAIS ce total par jour, tous cours confondus).

@@ -2,8 +2,7 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
-import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
 import { buildDefinitiveFlashcardSetPrompt } from "@/lib/ai/flashcard-prompts";
 import { FlashcardGenerationSchema } from "@/lib/ai/flashcard-schemas";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
@@ -197,7 +196,16 @@ export async function POST(request: NextRequest) {
           { role: "system", content: prompt },
           { role: "user", content: "Génère l'ensemble définitif de flashcards demandé." },
         ],
-        { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 50_000 } // route's own maxDuration is 60s — fail cleanly before the platform kills it
+        // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
+        // This "definitive set" generation is cross-student CACHED
+        // (flashcards_content_cache, keyed by content hash) — a cheaper
+        // model only saves money on a genuine cache miss (first-ever
+        // generation for a given course), not per student, but every miss
+        // still costs real money once. Tested with one real call: clean
+        // schema, 26/26 medically-accurate cards — a knowingly-accepted
+        // tradeoff on a small sample, per the product owner's own explicit
+        // "runway over accuracy margin" decision.
+        { model: CHEAP_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 50_000 } // route's own maxDuration is 60s — fail cleanly before the platform kills it
       );
     } catch (error) {
       await refundGeneration(user.id);
