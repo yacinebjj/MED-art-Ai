@@ -557,7 +557,10 @@ function CourseSlugWorkspace({ slug }: { slug: string }) {
       onCloseSection={() => setOpenedSection(null)}
       getSectionStatus={getSectionStatus}
       generatingSections={generatingSections}
-      sourceCount={sourceCount}
+      // Legacy pipeline (no Regénérer, no per-course updated_at) — no real
+      // generation timestamp exists here, so RelativeTime is simply given
+      // null and renders nothing rather than fabricating one.
+      lastGeneratedAt={null}
       isNoteOpen={isNoteOpen}
       onOpenNote={() => setIsNoteOpen(true)}
       onBackFromNote={() => setIsNoteOpen(false)}

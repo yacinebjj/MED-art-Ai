@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
-import { buildStudyPlanGenerationPrompt, buildStudyPlanRefinementPrompt, type StudyPlanCourseInput } from "@/lib/ai/study-planner-prompts";
-import { StudyPlanGenerationSchema, StudyPlanRefinementSchema } from "@/lib/ai/study-planner-schemas";
+import { buildStudyPlanGenerationPrompt, buildStudyPlanRefinementPrompt, countDaysExclusive, type StudyPlanCourseInput } from "@/lib/ai/study-planner-prompts";
+import { PlanDaySchema, StudyPlanGenerationSchema, StudyPlanRefinementSchema } from "@/lib/ai/study-planner-schemas";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
@@ -13,14 +13,37 @@ export const runtime = "nodejs";
 export const maxDuration = 300; // same class of work as /api/studio/generate — a full multi-week schedule generation.
 
 const MAX_ATTEMPTS = 2; // 1 retry on a malformed/invalid AI response, same convention as exam/generate.
-// A full multi-week "days" array (StudyPlanGenerationSchema has no upper
-// bound on plan length — a real exam-date window can run months out) is a
-// large, unbounded structured JSON output; 8192 tokens truncated mid-plan on
-// a real stress test. Doubled for real headroom. parseJsonResponse also now
-// repairs a truncated response as a second line of defense (recovers
-// whatever complete days made it through instead of hard-failing the whole
-// plan) — see that function's own comment in lib/course-generation-shared.ts.
-const GENERATION_MAX_TOKENS = 16_384;
+
+// A real production failure on a mere 30-day plan surfaced the exact error
+// string thrown below ("L'IA n'a pas produit un planning valide. Réessaie.")
+// — NOT a token-truncation/timeout, a schema rejection: StudyPlanGenerationSchema's
+// nested day/item objects were `.strict()`, so a SINGLE day anywhere in a long
+// plan carrying one stray extra field (CHEAP_MODEL/deepseek does this
+// occasionally) failed the ENTIRE response, every attempt, deterministically —
+// and the failure rate only gets worse as the plan gets longer (more days =
+// more chances for one to be malformed). Fixed at the schema level (dropped
+// `.strict()` — see lib/ai/study-planner-schemas.ts's comment) and with the
+// lenient per-day recovery in generateWithRetry below, which now salvages a
+// plan even if a handful of individual days really are unparseable instead of
+// discarding the whole thing.
+//
+// Separately, the requested plan length was capped at a fixed 16,384-token
+// output ceiling regardless of how many days were requested — nowhere near
+// enough headroom for a 3-month (~90-day) plan, and uncomfortably tight even
+// for 30. Now scaled to the actual requested day count instead: a generous
+// per-day allowance plus a fixed base for the surrounding JSON/coachMessage,
+// capped safely under deepseek-v3.2's own real 65,536-token completion
+// ceiling (confirmed live against GET https://openrouter.ai/api/v1/models —
+// re-verify if CHEAP_MODEL ever changes). parseJsonResponse's own truncation
+// repair (lib/course-generation-shared.ts) remains a second line of defense
+// on top of this for whatever edge case still runs over budget.
+const GENERATION_MAX_TOKENS_BASE = 4_000;
+const GENERATION_MAX_TOKENS_PER_DAY = 950;
+const GENERATION_MAX_TOKENS_CEILING = 60_000;
+
+function computeGenerationMaxTokens(totalDayCount: number): number {
+  return Math.min(GENERATION_MAX_TOKENS_CEILING, GENERATION_MAX_TOKENS_BASE + totalDayCount * GENERATION_MAX_TOKENS_PER_DAY);
+}
 
 interface StudyPlanConfigRow {
   id: number;
@@ -130,6 +153,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
   }
 
+  const totalDayCount = countDaysExclusive(config.today, config.examDate);
+  const generationMaxTokens = computeGenerationMaxTokens(totalDayCount);
+
   try {
     if (isRefinement) {
       const history = [...(planRow.refinement_chat ?? []), { role: "user" as const, content: message.trim() }];
@@ -144,7 +170,7 @@ export async function POST(request: NextRequest) {
           // NOT independently tested (only the initial-generation call
           // below was) — same prompt family and schema shape, applied here
           // for consistency, under the same knowingly-accepted tradeoff.
-          { model: CHEAP_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
+          { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true }
         );
       }, StudyPlanRefinementSchema);
 
@@ -171,7 +197,7 @@ export async function POST(request: NextRequest) {
         // coverage, clean schema — a knowingly-accepted tradeoff on a small
         // sample, per the product owner's own explicit "runway over
         // accuracy margin" decision.
-        { model: CHEAP_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true }
+        { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true }
       );
     }, StudyPlanGenerationSchema);
 
@@ -202,15 +228,16 @@ export async function POST(request: NextRequest) {
  *  2. JSON.parse fails on the raw text (truncation, stray prose before/after
  *     the JSON) — parseJsonResponse already logs the raw response's first
  *     1000 chars and attempts a truncation repair internally.
- *  3. JSON.parse SUCCEEDS but zod rejects the shape (schema.strict() mode
- *     means even one extra/missing/mistyped field fails everything) — this
- *     one was previously logged as just `result.error` (the raw ZodError
- *     object, not always legible from console output) with NO visibility
- *     into what the model actually returned. Now logs the full flattened
- *     zod error AND the parsed object itself, so a real schema drift (the
- *     model adding a field the schema doesn't expect, e.g.) is immediately
- *     diagnosable from server logs instead of indistinguishable from a
- *     truncation.
+ *  3. JSON.parse SUCCEEDS but zod rejects the shape — this one was
+ *     previously logged as just `result.error` (the raw ZodError object, not
+ *     always legible from console output) with NO visibility into what the
+ *     model actually returned. Now logs the full flattened zod error AND the
+ *     parsed object itself, so a real schema drift (the model adding a field
+ *     the schema doesn't expect, e.g.) is immediately diagnosable from
+ *     server logs instead of indistinguishable from a truncation. Before
+ *     giving up on this attempt, also tries recoverPartialPlan() below — a
+ *     real production failure confirmed this exact case: one malformed day
+ *     out of 30 failed the WHOLE plan, every attempt, deterministically.
  */
 async function generateWithRetry<T>(
   call: () => Promise<string>,
@@ -248,17 +275,56 @@ async function generateWithRetry<T>(
     }
 
     const result = schema.safeParse(parsed);
-    if (!result.success) {
-      lastError = new Error("L'IA n'a pas produit un planning valide. Réessaie.");
-      console.error(
-        `[study-planner/generate] JSON valide mais hors-schéma (tentative ${attempt}/${MAX_ATTEMPTS}) — détail zod:`,
-        JSON.stringify(result.error?.flatten(), null, 2),
-        "\nObjet reçu du modèle (2000 premiers caractères):",
-        JSON.stringify(parsed).slice(0, 2000)
-      );
-      continue;
-    }
-    return result.data as T;
+    if (result.success) return result.data as T;
+
+    const recovered = recoverPartialPlan(parsed, schema);
+    if (recovered) return recovered;
+
+    lastError = new Error("L'IA n'a pas produit un planning valide. Réessaie.");
+    console.error(
+      `[study-planner/generate] JSON valide mais hors-schéma, et non récupérable même partiellement (tentative ${attempt}/${MAX_ATTEMPTS}) — détail zod:`,
+      JSON.stringify(result.error?.flatten(), null, 2),
+      "\nObjet reçu du modèle (2000 premiers caractères):",
+      JSON.stringify(parsed).slice(0, 2000)
+    );
   }
   throw lastError instanceof Error ? lastError : new Error("La génération du planning a échoué après plusieurs tentatives.");
+}
+
+/**
+ * Salvages a plan when the FULL response fails schema validation only
+ * because one or more individual days are malformed — the real failure that
+ * prompted this: `.strict()`'s all-or-nothing behavior meant a single day
+ * anywhere in a 30-day plan carrying one stray field failed the entire
+ * response, every attempt, deterministically (the model tends to repeat the
+ * same habit on retry). Validates each day in `parsed.days` on its own
+ * against PlanDaySchema, drops whichever ones don't parse, then re-validates
+ * the reconstructed object against the full schema — so a genuinely broken
+ * `coachMessage`/`assistantReply` (i.e. NOT a days-only problem) still fails
+ * here and falls through to the caller's normal retry/error path. Returns
+ * `null` (never fabricates a day) if nothing at all survives.
+ */
+function recoverPartialPlan<T>(
+  parsed: Record<string, unknown>,
+  schema: { safeParse: (v: unknown) => { success: boolean; data?: T } }
+): T | null {
+  if (!Array.isArray(parsed.days)) return null;
+
+  const validDays: unknown[] = [];
+  for (const day of parsed.days) {
+    const dayResult = PlanDaySchema.safeParse(day);
+    if (dayResult.success) validDays.push(dayResult.data);
+  }
+  if (validDays.length === 0) return null;
+
+  const retried = schema.safeParse({ ...parsed, days: validDays });
+  if (!retried.success) return null;
+
+  const dropped = parsed.days.length - validDays.length;
+  if (dropped > 0) {
+    console.warn(
+      `[study-planner/generate] Récupération partielle : ${dropped} jour(s) hors-schéma ignoré(s) sur ${parsed.days.length} — ${validDays.length} jour(s) conservé(s) et retournés à l'étudiant.`
+    );
+  }
+  return retried.data as T;
 }

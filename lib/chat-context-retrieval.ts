@@ -183,7 +183,20 @@ export async function retrieveRelevantContext(question: string, source: ChunkSou
     }
     if (!data || data.length === 0) return null; // not indexed yet — no context, don't fail.
 
-    const questionEmbedding = await getEmbedding(question);
+    // The embedding call (getEmbedding, a REAL paid OpenRouter call) only
+    // fires past this point — deliberately AFTER confirming chunks actually
+    // exist, never before, so an unindexed course never pays for a wasted
+    // embedding. But once we know chunks exist, the Explication-chapters
+    // lookup below doesn't depend on the embedding result (or vice versa) —
+    // only on `source`, already known — so the two run concurrently instead
+    // of strictly one after the other, shaving a full DB round trip off this
+    // route's pre-stream latency for every Workspace-course chat message.
+    const [questionEmbedding, chapterFetch] = await Promise.all([
+      getEmbedding(question),
+      "studioCourseId" in source
+        ? supabase.from("studio_course_explication_chapters").select("heading, content, source_chunk_indices").eq("course_id", source.studioCourseId)
+        : Promise.resolve(null),
+    ]);
 
     const ranked = (data as ChunkRow[])
       .map((row) => ({ content: row.content, chunkIndex: row.chunk_index, similarity: cosineSimilarity(questionEmbedding, toEmbeddingArray(row.embedding)) }))
@@ -195,13 +208,11 @@ export async function retrieveRelevantContext(question: string, source: ChunkSou
     // Hybrid Validation Layer (see EXPLICATION_SLOT_CHARS's own comment) —
     // only attempted for Workspace courses, and only actually used per-slot
     // when that specific chunk is referenced by an already-generated
-    // Explication chapter. One extra read, no extra embedding call.
+    // Explication chapter. Already fetched above, concurrently with the
+    // embedding call.
     let chapterByChunkIndex: Map<number, ExplicationChapterRow> | null = null;
-    if ("studioCourseId" in source) {
-      const { data: chapterData, error: chapterError } = await supabase
-        .from("studio_course_explication_chapters")
-        .select("heading, content, source_chunk_indices")
-        .eq("course_id", source.studioCourseId);
+    if ("studioCourseId" in source && chapterFetch) {
+      const { data: chapterData, error: chapterError } = chapterFetch;
       if (chapterError) {
         console.error("[chat-context-retrieval] Échec lecture chapitres d'Explication (fail-open, chunks bruts utilisés):", chapterError.message);
       } else if (chapterData && chapterData.length > 0) {

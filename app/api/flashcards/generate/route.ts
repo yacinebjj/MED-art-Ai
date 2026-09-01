@@ -90,24 +90,31 @@ export async function POST(request: NextRequest) {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("flashcard_active_module_ids")
+    .select("flashcard_active_module_ids, flashcard_active_course_ids")
     .eq("id", user.id)
-    .maybeSingle<{ flashcard_active_module_ids: number[] | null }>();
+    .maybeSingle<{ flashcard_active_module_ids: number[] | null; flashcard_active_course_ids: number[] | null }>();
 
   if (profileError) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${profileError.message}` }, { status: 500 });
   }
 
   const activeModuleIds = profile?.flashcard_active_module_ids ?? [];
-  if (activeModuleIds.length === 0) {
+  const activeCourseIds = profile?.flashcard_active_course_ids ?? [];
+  if (activeModuleIds.length === 0 && activeCourseIds.length === 0) {
     return NextResponse.json({ success: false, error: "Aucun module actif." }, { status: 400 });
   }
+
+  // Same union as /api/flashcards/pool — a course is eligible if EITHER its
+  // whole module is active OR it was individually picked.
+  const orFilters: string[] = [];
+  if (activeModuleIds.length > 0) orFilters.push(`curriculum_module_id.in.(${activeModuleIds.join(",")})`);
+  if (activeCourseIds.length > 0) orFilters.push(`id.in.(${activeCourseIds.join(",")})`);
 
   const { data: courses, error: coursesError } = await supabase
     .from("studio_courses")
     .select("id, title, curriculum_module_id, explication, flashcard_queue")
     .eq("user_id", user.id)
-    .in("curriculum_module_id", activeModuleIds)
+    .or(orFilters.join(","))
     .not("explication", "is", null);
 
   if (coursesError) {

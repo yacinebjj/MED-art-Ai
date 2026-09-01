@@ -58,7 +58,8 @@ export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }:
           <iframe src={iframeSrc} title={title} className="h-[80vh] w-full rounded-xl border border-border shadow-soft" />
         ) : rawText.trim() ? (
           <div className="h-[80vh] w-full overflow-y-auto rounded-xl border border-border bg-muted/30 p-6 shadow-soft">
-            <pre className="text-reading whitespace-pre-wrap break-words font-sans text-foreground">{rawText}</pre>
+            {/* text-select-stable — see its own comment in app/globals.css: fixes a sub-pixel blur on text selection under a Framer Motion ancestor's transform. */}
+            <pre className="text-reading text-select-stable whitespace-pre-wrap break-words font-sans text-foreground">{rawText}</pre>
           </div>
         ) : (
           <p className="py-10 text-center text-sm text-muted-foreground">Aucun contenu disponible pour ce cours.</p>

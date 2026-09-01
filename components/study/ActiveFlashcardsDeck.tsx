@@ -46,6 +46,7 @@ import { Layers, Loader2, AlertTriangle, LogIn, Lock, PartyPopper, RotateCcw } f
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { FlipFlashcard, type GradeFeedback } from "@/components/study/FlipFlashcard";
+import { FlashcardCoursePicker } from "@/components/study/FlashcardCoursePicker";
 import { createClient } from "@/lib/supabase/client";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudyTools } from "@/lib/translations/studyTools";
@@ -88,8 +89,10 @@ interface SavedSession {
  * independent on activeModuleIds so activating the same set in a different
  * sequence still resumes the same saved session.
  */
-function getStorageKey(userId: string, activeModuleIds: number[]): string {
-  return `${STORAGE_PREFIX}${userId}:${[...activeModuleIds].sort((a, b) => a - b).join(",")}`;
+function getStorageKey(userId: string, activeModuleIds: number[], activeCourseIds: number[]): string {
+  const modulesPart = [...activeModuleIds].sort((a, b) => a - b).join(",");
+  const coursesPart = [...activeCourseIds].sort((a, b) => a - b).join(",");
+  return `${STORAGE_PREFIX}${userId}:${modulesPart}:${coursesPart}`;
 }
 
 /** Removes every OTHER flashcard-session entry in this browser's storage — the old unscoped key format, and any DIFFERENT user's own scoped entries left behind on a shared device. Safe: this is a pure "resume where I left off" convenience cache, never the only copy of anything (the real content lives server-side), so losing a stale entry just means that other session starts fresh next time instead of resuming. */
@@ -156,7 +159,7 @@ function clearSavedSession(key: string): void {
 }
 
 async function fetchPool(): Promise<
-  | { ok: true; items: FlashcardPoolItem[]; activeModuleCount: number; activeModuleIds: number[] }
+  | { ok: true; items: FlashcardPoolItem[]; activeModuleCount: number; activeModuleIds: number[]; activeCourseIds: number[] }
   | { ok: false; status: number; error?: string }
 > {
   const res = await fetch("/api/flashcards/pool").catch(() => null);
@@ -171,6 +174,7 @@ async function fetchPool(): Promise<
     items: Array.isArray(body.items) ? body.items : [],
     activeModuleCount: body.activeModuleCount ?? 0,
     activeModuleIds: Array.isArray(body.activeModuleIds) ? body.activeModuleIds : [],
+    activeCourseIds: Array.isArray(body.activeCourseIds) ? body.activeCourseIds : [],
   };
 }
 
@@ -255,7 +259,9 @@ export function ActiveFlashcardsDeck() {
         return;
       }
 
-      if (pool.activeModuleCount === 0) {
+      // Nothing active AT ALL — a whole module, or a specific course picked
+      // via FlashcardCoursePicker, either one is enough to leave this state.
+      if (pool.activeModuleCount === 0 && pool.activeCourseIds.length === 0) {
         setStatus("no-modules-active");
         return;
       }
@@ -272,7 +278,7 @@ export function ActiveFlashcardsDeck() {
         return;
       }
 
-      const key = getStorageKey(user.id, pool.activeModuleIds);
+      const key = getStorageKey(user.id, pool.activeModuleIds, pool.activeCourseIds);
       purgeForeignFlashcardSessions(key);
       setStorageKey(key);
 
@@ -392,6 +398,11 @@ export function ActiveFlashcardsDeck() {
     setReloadKey((k) => k + 1);
   }
 
+  /** FlashcardCoursePicker just changed profiles.flashcard_active_course_ids — reload the pool so the new selection takes effect. No explicit clearSavedSession: the new selection resolves to a DIFFERENT composite storageKey (see getStorageKey), so the old session simply isn't read; purgeForeignFlashcardSessions cleans it up on the next load. */
+  function handleSelectionChanged() {
+    setReloadKey((k) => k + 1);
+  }
+
   function maybeTriggerBackgroundGeneration(nextIndex: number) {
     const remainingAhead = deckRef.current.length - nextIndex;
     if (remainingAhead > LOW_WATER_MARK || deckRef.current.length >= SESSION_CAP || generatingRef.current) return;
@@ -480,6 +491,7 @@ export function ActiveFlashcardsDeck() {
           <p className="max-w-sm text-xs text-muted-foreground">
             {tStudyTools("noActiveModulesFlashcardsSubtitle", language)}
           </p>
+          <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
         </CardContent>
       </Card>
     );
@@ -576,6 +588,7 @@ export function ActiveFlashcardsDeck() {
           <CardTitle>{tStudyTools("flashcardsActiveModulesTitle", language)}</CardTitle>
           <p className="truncate text-sm text-muted-foreground">{current.courseTitle}</p>
         </div>
+        <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
       </CardHeader>
       <CardContent className="space-y-3">
         <FlipFlashcard

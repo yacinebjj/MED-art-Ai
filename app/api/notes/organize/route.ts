@@ -5,7 +5,30 @@ import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openroute
 import { errorMessage } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Was 60 — fine for a short note, but a long output (see MAX_OUTPUT_TOKENS
+// below) genuinely needs more wall-clock room to generate.
+export const maxDuration = 180;
+
+// The output cap used to be a flat 4096 tokens no matter how much a student
+// wrote — a real problem reported directly: students who fill a long note
+// then click "Organiser avec l'IA" got a cut-off reorganization, because the
+// HTML output (headings, tables, inline styles) runs noticeably LARGER in
+// tokens than the plain-text input it restructures. Scaled to the actual
+// input size instead: ~1 token per 3.2 characters (a reasonable French-text
+// estimate) plus a 1.7x allowance for HTML markup overhead, floored at the
+// old 4096 (a short note shouldn't get a smaller budget than before) and
+// capped safely under CHEAP_MODEL's (deepseek-v3.2) real 65,536-token
+// completion ceiling, confirmed live against
+// GET https://openrouter.ai/api/v1/models — re-verify if CHEAP_MODEL changes.
+const MIN_OUTPUT_TOKENS = 4_096;
+const MAX_OUTPUT_TOKENS = 32_000;
+const CHARS_PER_TOKEN_ESTIMATE = 3.2;
+const HTML_MARKUP_OVERHEAD = 1.7;
+
+function computeOrganizeMaxTokens(inputLength: number): number {
+  const estimated = Math.ceil((inputLength / CHARS_PER_TOKEN_ESTIMATE) * HTML_MARKUP_OVERHEAD);
+  return Math.min(MAX_OUTPUT_TOKENS, Math.max(MIN_OUTPUT_TOKENS, estimated));
+}
 
 /**
  * Reformats a student's free-form note into structured HTML (headings,
@@ -68,7 +91,7 @@ export async function POST(request: NextRequest) {
       // accurate reorganization — a knowingly-accepted tradeoff on a small
       // sample, per the product owner's own explicit "runway over accuracy
       // margin" decision.
-      { maxTokens: 4096, model: CHEAP_MODEL }
+      { maxTokens: computeOrganizeMaxTokens(content.length), model: CHEAP_MODEL }
     );
 
     const organizedContent = raw.replace(/^```html\s*/i, "").replace(/```\s*$/i, "");

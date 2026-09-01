@@ -41,10 +41,13 @@ export function SourceDocumentPanel({ title, rawText, onClose }: SourceDocumentP
       </div>
       {/* text-reading (a hair larger, more generous line-height/tracking than
           text-sm) — this is raw, continuous document text meant to be read
-          start to finish, the exact long-form case that class exists for. */}
+          start to finish, the exact long-form case that class exists for.
+          text-select-stable — see its own comment in app/globals.css: fixes
+          a sub-pixel blur on text selection under a Framer Motion ancestor's
+          transform, reported specifically on this "Afficher le cours" view. */}
       <div className="flex-1 overflow-y-auto p-6">
         {rawText.trim() ? (
-          <pre className="text-reading whitespace-pre-wrap break-words font-sans text-foreground/90">
+          <pre className="text-reading text-select-stable whitespace-pre-wrap break-words font-sans text-foreground/90">
             {rawText}
           </pre>
         ) : (

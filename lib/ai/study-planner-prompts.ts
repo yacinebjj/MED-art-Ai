@@ -38,7 +38,7 @@ function formatCourseList(courses: StudyPlanCourseInput[]): string {
  * the same "EXACTLY N" pattern already used for exam batch counts elsewhere
  * in this codebase.
  */
-function countDaysExclusive(todayIso: string, examDateIso: string): number {
+export function countDaysExclusive(todayIso: string, examDateIso: string): number {
   const start = new Date(`${todayIso}T00:00:00Z`).getTime();
   const end = new Date(`${examDateIso}T00:00:00Z`).getTime();
   return Math.max(0, Math.round((end - start) / 86_400_000));

@@ -1323,6 +1323,18 @@ create policy "Users manage their own flashcard activations"
 alter table profiles add column if not exists flashcard_active_module_ids integer[] not null default '{}';
 
 -- ---------------------------------------------------------------------------
+-- Per-COURSE flashcard selection, additive to flashcard_active_module_ids
+-- above — a student picking 2-3 specific courses (FlashcardCoursePicker,
+-- components/study/FlashcardCoursePicker.tsx) instead of activating a whole
+-- module. /api/flashcards/pool and /api/flashcards/generate both union this
+-- with flashcard_active_module_ids's own courses (a course counts as
+-- eligible if EITHER its whole module is active OR it's individually
+-- picked here), never one replacing the other. Same plain-array-on-profiles
+-- pattern as flashcard_active_module_ids, for the same PostgREST reason.
+-- ---------------------------------------------------------------------------
+alter table profiles add column if not exists flashcard_active_course_ids bigint[] not null default '{}';
+
+-- ---------------------------------------------------------------------------
 -- studio_courses: a student's own AI-generated courses (uploaded PDF/DOCX/
 -- pasted text -> Studio's Explication/Résumé/Cas Clinique/QCM/Exemples
 -- tiles). Was NEVER defined in this file — created/migrated by hand in the

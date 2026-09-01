@@ -152,6 +152,9 @@ function LinearStatRow({
             <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400" style={{ width: `${clamped}%` }} />
           )}
         </div>
+        {/* Proactive, not just a bare "—": an empty track with no caption at
+            all could read as "broken" rather than "no data yet" at a glance. */}
+        {pct === undefined && <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Aucune donnée pour le moment</p>}
       </div>
     </div>
   );

@@ -22,6 +22,15 @@ interface PushSubscriptionRecord {
   keys: { p256dh: string; auth: string };
 }
 
+/** French label for a Studio section id, for push copy — a small local map rather than importing lib/demo-content (a client-oriented module with icon components this server-only file has no business pulling in). */
+const STUDIO_SECTION_PUSH_LABELS: Record<string, string> = {
+  explication: "L'Explication Ultra-Détaillée",
+  resume: "Le Résumé",
+  cas_clinique: "Le Cas Clinique",
+  qcm: "Le QCM",
+  exemples_analogies: "Les Exemples & Analogies",
+};
+
 interface StudioCourseFlashcardRow {
   id: number;
   title: string;
@@ -97,6 +106,63 @@ export async function dispatchFlashcardPushToUser(userId: string): Promise<numbe
   }
 
   return sentCount;
+}
+
+/**
+ * Point 6 ("content is ready" notification) — real Web Push, not the
+ * browser's page-scoped Notification API: a plain `new Notification(...)`
+ * only fires while the exact tab that requested permission is still open on
+ * the right page, which defeats the entire point for a student who
+ * navigated away or closed the tab while a real generation (Explication/QCM
+ * can run into the minutes) kept working server-side. Reuses the SAME VAPID/
+ * webpush/push_subscriptions infrastructure dispatchFlashcardPushToUser
+ * above already relies on. Fire-and-forget from the caller (never awaited
+ * inline with the generation response) and fail-open by design — a push
+ * failure must never turn an otherwise-successful generation into an error.
+ */
+export async function dispatchStudioGenerationPush(userId: string, courseTitle: string, sectionId: string, url: string): Promise<void> {
+  try {
+    ensureVapidConfigured();
+  } catch (error) {
+    console.warn("[push] VAPID non configuré — notification de fin de génération ignorée:", error instanceof Error ? error.message : error);
+    return;
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("push_subscriptions")
+    .eq("id", userId)
+    .maybeSingle<{ push_subscriptions: PushSubscriptionRecord[] | null }>();
+
+  if (error || !profile) return;
+  const subscriptions = profile.push_subscriptions ?? [];
+  if (subscriptions.length === 0) return;
+
+  const sectionLabel = STUDIO_SECTION_PUSH_LABELS[sectionId] ?? "Le contenu";
+  const payload = JSON.stringify({
+    title: "✅ MedArt AI",
+    body: `${sectionLabel} de "${courseTitle}" est prêt.`,
+    url,
+  });
+
+  const results = await Promise.allSettled(subscriptions.map((subscription) => webpush.sendNotification(subscription, payload)));
+
+  const stillValid: PushSubscriptionRecord[] = [];
+  results.forEach((result, i) => {
+    if (result.status === "fulfilled") {
+      stillValid.push(subscriptions[i]);
+      return;
+    }
+    const statusCode = (result.reason as { statusCode?: number } | undefined)?.statusCode;
+    if (statusCode !== 404 && statusCode !== 410) {
+      stillValid.push(subscriptions[i]);
+    }
+  });
+
+  if (stillValid.length !== subscriptions.length) {
+    await supabase.from("profiles").update({ push_subscriptions: stillValid }).eq("id", userId);
+  }
 }
 
 /**

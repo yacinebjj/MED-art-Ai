@@ -29,6 +29,7 @@ import { useTextSelection } from "@/hooks/useTextSelection";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
 import { GeneratingRotatingLabel } from "@/components/course/workspace/GeneratingRotatingLabel";
+import { RelativeTime } from "@/components/ui/RelativeTime";
 import { Button } from "@/components/ui/Button";
 import {
   DropdownMenu,
@@ -53,7 +54,8 @@ interface StudioPanelProps {
   /** Optional — omitted entirely by pages backed by a data model "Regénérer" doesn't support yet (see app/dashboard/demo/[slug]/page.tsx's legacy production pipeline), in which case the menu item is simply not rendered. Same Set-based shape as generatingSections. */
   regeneratingSections?: Set<DemoSectionId>;
   onRegenerateSection?: (id: DemoSectionId) => void;
-  sourceCount: number;
+  /** ISO timestamp of the active course's last section save (studio_courses.updated_at) — powers the "Récemment généré" list's relative-time label (RelativeTime). Same value for every row today (row-level, not per-section — see StudioCourseFull's own comment); null before anything has ever been generated. */
+  lastGeneratedAt: string | null;
   isNoteOpen: boolean;
   onOpenNote: () => void;
   onBackFromNote: () => void;
@@ -237,7 +239,7 @@ export function StudioPanel({
   generatingSections,
   regeneratingSections,
   onRegenerateSection,
-  sourceCount,
+  lastGeneratedAt,
   isNoteOpen,
   onOpenNote,
   onBackFromNote,
@@ -469,7 +471,10 @@ export function StudioPanel({
         <div className={cn("h-full overflow-y-auto", openedSection && detailBg)}>
           {openedSection ? (
             isSectionExpanded ? null : (
-              <div ref={containerRef} data-selectable className="p-2 md:p-4">
+              // text-select-stable — see its own comment in app/globals.css:
+              // fixes a sub-pixel blur on text selection under this panel's
+              // own Framer Motion (motion.*) ancestors' transform.
+              <div ref={containerRef} data-selectable className="text-select-stable p-2 md:p-4">
                 {children}
               </div>
             )
@@ -584,7 +589,7 @@ export function StudioPanel({
                             {getSectionLabel(section.id, language)}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {sourceCount} source{sourceCount > 1 ? "s" : ""}
+                            <RelativeTime timestamp={lastGeneratedAt} />
                           </p>
                         </div>
                         <DropdownMenu>
@@ -753,7 +758,8 @@ export function StudioPanel({
                 <Minimize2 className="h-4 w-4" />
               </button>
             </div>
-            <div ref={containerRef} data-selectable className="flex-1 overflow-y-auto p-6">
+            {/* text-select-stable — see its own comment in app/globals.css. */}
+            <div ref={containerRef} data-selectable className="text-select-stable flex-1 overflow-y-auto p-6">
               {children}
             </div>
           </div>,

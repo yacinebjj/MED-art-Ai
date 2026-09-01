@@ -352,78 +352,30 @@ export async function POST(request: NextRequest) {
         ? history.filter(isHistoryTurn).slice(-MAX_HISTORY_MESSAGES)
         : [];
 
-  // Save the student's message BEFORE anything else (cache lookup or model
-  // call) — if either fails a moment later, their question is still on record.
-  // The row's own id is captured (not just discarded) so the streaming
-  // flush() below can detect a real, otherwise-invisible race: if the
-  // student clicks "Nouvelle conversation" (DELETE /api/courses/chat, see
-  // that route) while THIS reply is still generating, that row gets wiped
-  // mid-flight — without this check, the assistant's reply would still
-  // land in course_chat_history once the stream finishes, resurrecting a
-  // one-sided, orphaned message right after the student was told the
-  // conversation was cleared.
-  let userMessageId: number | null = null;
+  // Save the student's message — its id is only ever read later, inside the
+  // background persistence closure below (the "Nouvelle conversation" race
+  // check), never on this handler's own critical path to the model call. Was
+  // previously AWAITED right here regardless, costing one full DB round trip
+  // before the daily/chat gates (and, transitively, the model call itself)
+  // even started, for zero benefit to anything before that closure runs.
+  // Fired without blocking instead; awaited where it's actually needed.
+  let userMessageIdPromise: Promise<number | null> = Promise.resolve(null);
   if (supabase && user) {
-    const { data: insertedRow, error } = await supabase
-      .from("course_chat_history")
-      .insert({ user_id: user.id, course_slug: courseSlug, role: "user", content: message })
-      .select("id")
-      .single();
-    if (error) {
-      console.error("[courses/chat POST] Échec sauvegarde message utilisateur:", { code: error.code, message: error.message });
-      // Not fatal — the student can still get an answer even if we failed
-      // to log their side of it.
-    } else {
-      userMessageId = (insertedRow as { id: number }).id;
-    }
-  }
-
-  // Daily chat gate — ATOMICALLY reserves (checks AND increments in one
-  // step, see reserveChatMessageDaily's own comment) BEFORE the semantic-
-  // cache lookup below, so it applies to cache HITS too, not just real
-  // generations. Deliberate: DAILY_CHAT_LIMIT exists to bound request
-  // VOLUME (abuse/scraping prevention), not spend — a script hammering
-  // already-cached questions 500 times a day is exactly what this must
-  // still block, even though every one of those answers is free.
-  // reserveChatMessage's monthly chatMessageCap is NOT reserved here — that
-  // cap represents paid-usage value to the student, and a $0 cache hit
-  // shouldn't eat into it (unlike the daily cap, which is purely an
-  // anti-abuse throttle, not a value ledger). No refund path needed for
-  // this one: a cache hit can't fail, and the real-generation path reserves
-  // it here, before anywhere the call could fail.
-  if (!isHighlightMode) {
-    const dailyGate = await reserveChatMessageDaily(user);
-    if (!dailyGate.allowed) {
-      return NextResponse.json({ error: dailyGate.reason }, { status: 403 });
-    }
-  }
-
-  // Semantic caching REMOVED (product direction) — every chat message now
-  // always reaches a real OpenRouter call below, no "serve a stored answer
-  // for a similar-enough prior question" interception. Monthly value cap —
-  // the daily abuse-throttle was already reserved earlier above (it applies
-  // regardless). isHighlightMode is excluded — it already reserved its own
-  // separate pool above. If the generation below then fails before
-  // producing a reply, refundChatMessage() undoes this.
-  if (!isHighlightMode) {
-    const chatGate = await reserveChatMessage(user);
-    if (!chatGate.allowed) {
-      return NextResponse.json({ error: chatGate.reason }, { status: 403 });
-    }
-  }
-
-  // This route no longer spends real money (see FREE_MODEL_CHAIN's own
-  // comment above) — reservePlatformCapacity (the PAID-generation circuit
-  // breaker) no longer applies here. reserveFreeTierCapacity instead guards
-  // the free-tier models' own hard, EXTERNAL, account-wide daily request cap
-  // (shared with app/api/dashboard-assistant/route.ts and
-  // lib/cache-prewarming.ts — see that function's own comment). Applies to
-  // BOTH normal chat and highlight mode: both are real free-tier calls about
-  // to happen, and that shared external ceiling doesn't distinguish between
-  // per-student pools.
-  const freeTierCapacity = await reserveFreeTierCapacity();
-  if (!freeTierCapacity.allowed) {
-    return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
+    userMessageIdPromise = Promise.resolve(
+      supabase
+        .from("course_chat_history")
+        .insert({ user_id: user.id, course_slug: courseSlug, role: "user", content: message })
+        .select("id")
+        .single()
+    ).then(({ data, error }) => {
+      if (error) {
+        console.error("[courses/chat POST] Échec sauvegarde message utilisateur:", { code: error.code, message: error.message });
+        // Not fatal — the student can still get an answer even if we failed
+        // to log their side of it.
+        return null;
+      }
+      return (data as { id: number }).id;
+    });
   }
 
   // CAS 2 — Cache Miss: resolve context via RAG chunk retrieval ONLY.
@@ -441,33 +393,95 @@ export async function POST(request: NextRequest) {
   // (a few hundred to ~2k tokens). There is no code path left that can send
   // "the whole course" as a chat context block, at any size.
   //
-  // A bare greeting or a highlight quick action skips this entirely.
-  let sourceText: string | null = null;
-  if (!isBareGreetingMessage && !isHighlightMode && courseSlug) {
-    try {
-      // studio-course-{id} (Workspace) vs a real public course slug (legacy
-      // pipeline) — the slug's own shape is enough to tell them apart.
-      const studioIdMatch = courseSlug.match(/^studio-course-(\d+)$/);
-      const chunkSource = studioIdMatch ? { studioCourseId: Number(studioIdMatch[1]) } : { legacyCourseSlug: courseSlug };
+  // A bare greeting or a highlight quick action skips this entirely. Fired
+  // here as a promise, NOT awaited yet — retrieveRelevantContext is a pure,
+  // fail-open READ with no side effects, so it's safe to let it run
+  // CONCURRENTLY with the quota gates just below instead of strictly after
+  // them: if a gate ends up rejecting, this result is simply discarded (one
+  // wasted embedding+DB read in that comparatively rare case), in exchange
+  // for real latency saved on every allowed message. The gates themselves
+  // are NOT given the same treatment — see the comment just below for why.
+  const contextPromise: Promise<string | null> =
+    !isBareGreetingMessage && !isHighlightMode && courseSlug
+      ? (async () => {
+          try {
+            // studio-course-{id} (Workspace) vs a real public course slug
+            // (legacy pipeline) — the slug's own shape is enough to tell them apart.
+            const studioIdMatch = courseSlug.match(/^studio-course-(\d+)$/);
+            const chunkSource = studioIdMatch ? { studioCourseId: Number(studioIdMatch[1]) } : { legacyCourseSlug: courseSlug };
 
-      // A short, anaphoric follow-up ("zid chrahli b tafsil", "donne-moi un
-      // exemple") embeds almost meaninglessly on its own — nothing in
-      // "explain in more detail" itself names the actual medical topic, so
-      // ranking chunks against THAT embedding alone would surface whatever
-      // chunks happen to score highest for a generic phrase, not the ones
-      // related to what's actually being discussed. Anchor the retrieval
-      // query to the last couple of turns (already available here as
-      // historyTurns, computed above for the model call itself) so a
-      // follow-up's embedding carries the real topic forward, not just its
-      // own bare wording.
-      const retrievalQuery = [...historyTurns.slice(-2).map((turn) => turn.content), message].join("\n");
-      sourceText = await retrieveRelevantContext(retrievalQuery, chunkSource);
-    } catch (error) {
-      // Fails open to `null` (no course context at all), NEVER to the full
-      // raw text — see the strict rule above.
-      console.error("[courses/chat POST] Échec récupération contextuelle (fail-open, réponse sans contexte de cours):", error instanceof Error ? error.message : error);
+            // A short, anaphoric follow-up ("zid chrahli b tafsil", "donne-moi un
+            // exemple") embeds almost meaninglessly on its own — nothing in
+            // "explain in more detail" itself names the actual medical topic, so
+            // ranking chunks against THAT embedding alone would surface whatever
+            // chunks happen to score highest for a generic phrase, not the ones
+            // related to what's actually being discussed. Anchor the retrieval
+            // query to the last couple of turns (already available here as
+            // historyTurns, computed above for the model call itself) so a
+            // follow-up's embedding carries the real topic forward, not just its
+            // own bare wording.
+            const retrievalQuery = [...historyTurns.slice(-2).map((turn) => turn.content), message].join("\n");
+            return await retrieveRelevantContext(retrievalQuery, chunkSource);
+          } catch (error) {
+            // Fails open to `null` (no course context at all), NEVER to the full
+            // raw text — see the strict rule above.
+            console.error("[courses/chat POST] Échec récupération contextuelle (fail-open, réponse sans contexte de cours):", error instanceof Error ? error.message : error);
+            return null;
+          }
+        })()
+      : Promise.resolve(null);
+
+  // Daily chat gate — ATOMICALLY reserves (checks AND increments in one
+  // step, see reserveChatMessageDaily's own comment). Deliberate:
+  // DAILY_CHAT_LIMIT exists to bound request VOLUME (abuse/scraping
+  // prevention), not spend — a script hammering the same question 500 times
+  // a day is exactly what this must still block. reserveChatMessage's
+  // monthly chatMessageCap is reserved separately just below.
+  //
+  // This gate, reserveChatMessage, and reserveFreeTierCapacity stay strictly
+  // SEQUENTIAL relative to EACH OTHER (unlike contextPromise above) — each
+  // is a real reserve-with-refund-on-failure operation (see
+  // reserveChatMessage's own comment: it increments a usage counter
+  // immediately, refunded only if the generation later fails). Running them
+  // concurrently would let a later gate's RPC fire — and increment its own
+  // counter — even when an earlier gate had already rejected the request,
+  // over-charging a student's quota for a message that never actually sent.
+  if (!isHighlightMode) {
+    const dailyGate = await reserveChatMessageDaily(user);
+    if (!dailyGate.allowed) {
+      return NextResponse.json({ error: dailyGate.reason }, { status: 403 });
     }
   }
+
+  // Semantic caching REMOVED (product direction) — every chat message now
+  // always reaches a real OpenRouter call below, no "serve a stored answer
+  // for a similar-enough prior question" interception. isHighlightMode is
+  // excluded — it already reserved its own separate pool above. If the
+  // generation below then fails before producing a reply,
+  // refundChatMessage() undoes this.
+  if (!isHighlightMode) {
+    const chatGate = await reserveChatMessage(user);
+    if (!chatGate.allowed) {
+      return NextResponse.json({ error: chatGate.reason }, { status: 403 });
+    }
+  }
+
+  // This route no longer spends real money (see FREE_MODEL_CHAIN's own
+  // comment above) — reservePlatformCapacity (the PAID-generation circuit
+  // breaker) no longer applies here. reserveFreeTierCapacity instead guards
+  // the free-tier models' own hard, EXTERNAL, account-wide daily request cap
+  // (shared with app/api/dashboard-assistant/route.ts and
+  // lib/cache-prewarming.ts — see that function's own comment). Applies to
+  // BOTH normal chat and highlight mode: both are real free-tier calls about
+  // to happen, and that shared external ceiling doesn't distinguish between
+  // per-student pools. Kept sequential after the two gates above for the
+  // same over-charging reason explained there.
+  const freeTierCapacity = await reserveFreeTierCapacity();
+  if (!freeTierCapacity.allowed) {
+    return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
+  }
+
+  const sourceText = await contextPromise;
 
   // Cached (static) content — system persona + course text. `false` below
   // (was `useAnthropicCaching`, computed from the old hybrid router): this
@@ -576,7 +590,11 @@ export async function POST(request: NextRequest) {
       // userMessageId's row (and any prior history for this slug/user) was
       // deleted. We check if the user message still exists before saving the
       // assistant reply — if it's gone, we drop the reply entirely, preventing
-      // the orphaned single-message resurrection bug.
+      // the orphaned single-message resurrection bug. userMessageIdPromise was
+      // fired way back before the quota gates/model call, so it's already
+      // resolved by the time the stream finishes — this await is instant in
+      // practice, not a real wait.
+      const userMessageId = await userMessageIdPromise;
       let shouldPersist = true;
       if (supabase && user && userMessageId !== null) {
         const { count, error: checkError } = await supabase

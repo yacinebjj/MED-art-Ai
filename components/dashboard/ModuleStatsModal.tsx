@@ -132,6 +132,16 @@ export function ModuleStatsModal({
 
             <div className="space-y-2">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Réussite QCM</p>
+              {/* Proactive message when the WHOLE module has zero QCM data —
+                  a wall of per-row "—" dashes with no explanation reads as
+                  "broken" at a glance rather than "no data yet". Each row's
+                  own "—" stays underneath for the (more common) mixed case
+                  where only some courses in the module lack attempts. */}
+              {data.courses.every((c) => c.qcmSuccessPct === undefined) && (
+                <p className="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-800/30 dark:text-slate-400">
+                  Aucun QCM tenté dans ce module pour l&apos;instant.
+                </p>
+              )}
               {data.courses.map((course) => (
                 <div key={course.id} className="flex items-center gap-3">
                   <p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{course.title}</p>

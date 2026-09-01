@@ -20,6 +20,7 @@ import { lookupStudioContentCache, recordStudioCacheHit, storeStudioContentCache
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { runStudioExplicationDeltaPipeline, runStudioExplicationFreshGenerationWithTagging } from "@/lib/studio-explication-delta";
 import { EXPLICATION_CHUNK_TAGGING_ADDENDUM } from "@/lib/prompts/public-course-sections";
+import { dispatchStudioGenerationPush } from "@/lib/push/dispatch";
 import type { DemoSectionId } from "@/lib/demo-content";
 
 export const runtime = "nodejs";
@@ -189,10 +190,10 @@ export async function POST(request: NextRequest) {
   const adminForSource = getSupabaseAdmin();
   const { data: courseRow, error: courseRowError } = await adminForSource
     .from("studio_courses")
-    .select("raw_text")
+    .select("raw_text, title, curriculum_module_id")
     .eq("id", courseId)
     .eq("user_id", user.id)
-    .maybeSingle<{ raw_text: string | null }>();
+    .maybeSingle<{ raw_text: string | null; title: string | null; curriculum_module_id: number | null }>();
   if (courseRowError) {
     console.error("[studio/generate] Échec lecture raw_text (fail-open vers documentContext si fourni):", courseRowError.message);
   }
@@ -454,6 +455,25 @@ export async function POST(request: NextRequest) {
 
   if (servedFromCache && cacheRowId) {
     await recordStudioCacheHit(cacheRowId);
+  }
+
+  // "Content is ready" push — see dispatchStudioGenerationPush's own header
+  // comment for why this uses real Web Push instead of the page-scoped
+  // Notification API. Only for a genuine fresh generation, never a cache hit
+  // (servedFromCache resolves in ~1-2s behind a fake UX delay — the student
+  // is essentially always still on the page for that, a push would be
+  // redundant). AWAITED, not fire-and-forget: this is a serverless function
+  // (see maxDuration above) — work left running after the response is
+  // returned has no platform guarantee of actually finishing here, unlike a
+  // long-lived server process. Still never allowed to turn an
+  // already-successful generation into an error response — any failure is
+  // caught and logged, not rethrown.
+  if (!servedFromCache && courseRow?.title && courseRow.curriculum_module_id) {
+    try {
+      await dispatchStudioGenerationPush(user.id, courseRow.title, actionType, `/dashboard/module/${courseRow.curriculum_module_id}`);
+    } catch (error) {
+      console.error(`[studio/generate:${actionType}] Échec envoi push (non bloquant):`, error);
+    }
   }
 
   return NextResponse.json({ success: true, actionType, data: finalData, cached: servedFromCache, cacheMode });

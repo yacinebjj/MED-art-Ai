@@ -36,6 +36,7 @@ interface StudioCourseFullRow {
   qcms: StudioCourseFull["qcms"];
   exemples_analogies: string | null;
   source_file_url: string | null;
+  updated_at: string | null;
 }
 
 function toFullCourse(row: StudioCourseFullRow): StudioCourseFull {
@@ -49,6 +50,7 @@ function toFullCourse(row: StudioCourseFullRow): StudioCourseFull {
     qcms: row.qcms,
     exemplesAnalogies: row.exemples_analogies,
     sourceFileUrl: row.source_file_url,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -71,7 +73,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("studio_courses")
-    .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url")
+    .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url, updated_at")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
