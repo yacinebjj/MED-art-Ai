@@ -41,7 +41,7 @@ import { MAX_LEITNER_BOX } from "@/lib/srs";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
 import { DEMO_SECTIONS, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
 import { getInFlightGeneration, trackGeneration } from "@/lib/studio-generation-tracker";
-import { SlidesGeneratingLabel } from "@/components/course/workspace/SlidesGeneratingLabel";
+import { PodcastGeneratingLabel } from "@/components/course/workspace/PodcastGeneratingLabel";
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
@@ -76,8 +76,8 @@ const InfographicViewer = dynamic(
   () => import("@/components/course/workspace/InfographicViewer").then((m) => m.InfographicViewer),
   { ssr: false }
 );
-const SlideDeckViewer = dynamic(
-  () => import("@/components/course/workspace/SlideDeckViewer").then((m) => m.SlideDeckViewer),
+const AudioPodcastViewer = dynamic(
+  () => import("@/components/course/workspace/AudioPodcastViewer").then((m) => m.AudioPodcastViewer),
   { ssr: false }
 );
 
@@ -101,8 +101,8 @@ function getSectionValue(course: StudioCourseFull, section: DemoSectionId): unkn
       return course.exemplesAnalogies;
     case "infographic":
       return course.infographicUrl;
-    case "slides":
-      return course.slideUrls;
+    case "audio":
+      return course.audioUrl;
   }
 }
 
@@ -120,8 +120,8 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
       return { ...course, exemplesAnalogies: value };
     case "infographic":
       return { ...course, infographicUrl: value };
-    case "slides":
-      return { ...course, slideUrls: value };
+    case "audio":
+      return { ...course, audioUrl: value };
   }
 }
 
@@ -589,7 +589,7 @@ export default function ModuleWorkspacePage() {
       sourceFileUrl,
       updatedAt: created.createdAt,
       infographicUrl: null,
-      slideUrls: null,
+      audioUrl: null,
     };
     courseCacheRef.current.set(created.id, fullCourse);
     setActiveCourse(fullCourse);
@@ -776,9 +776,9 @@ export default function ModuleWorkspacePage() {
     // needs to react to a rejection, only to "has it settled yet".
     const generationPromise = (async () => {
       try {
-        // "infographic" and "slides" are NOT among the 5 JSON sections (see
+        // "infographic" and "audio" are NOT among the 5 JSON sections (see
         // lib/demo-content.ts's JsonSectionId comment) — each calls its own
-        // dedicated route (image response(s), its own cross-student cache
+        // dedicated route (image/audio response, its own cross-student cache
         // table, no studio_courses column to save into) instead of
         // postStudioGenerate below. All three branches converge back onto
         // the exact same withSectionValue/cache-update/UX-illusion handling
@@ -799,13 +799,14 @@ export default function ModuleWorkspacePage() {
           }
           resultValue = data.imageUrl;
           cached = Boolean(data.cached);
-        } else if (id === "slides") {
-          // Same dedicated-route pattern as "infographic" above — a mini
-          // deck (studio_slides_cache), never routed through
-          // postStudioGenerate. Real latency is higher (a planning call
-          // plus SLIDE_COUNT_TARGET parallel image calls, ~20-40s) but uses
-          // the exact same fetch/spinner/tracker machinery regardless.
-          const res = await fetch("/api/studio/slides", {
+        } else if (id === "audio") {
+          // Same dedicated-route pattern as "infographic" above —
+          // a single narrated episode (studio_podcast_cache), never routed
+          // through postStudioGenerate. Real latency is the highest of any
+          // Studio tile (a script-writing call plus one streamed ~10-15 min
+          // audio narration, ~1-4 min total) but uses the exact same
+          // fetch/spinner/tracker machinery regardless.
+          const res = await fetch("/api/studio/podcast", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ courseId }),
@@ -814,7 +815,7 @@ export default function ModuleWorkspacePage() {
           if (!res.ok || !data.success) {
             throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
           }
-          resultValue = data.slideUrls;
+          resultValue = data.audioUrl;
           cached = Boolean(data.cached);
         } else {
           // /api/studio/generate now saves to Supabase itself before returning
@@ -1300,12 +1301,12 @@ export default function ModuleWorkspacePage() {
       ) : openedSection && generatingSections.has(openedSection) ? (
         <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
           <BrandLoader className="h-6 w-6" />
-          {/* Slides genuinely take ~20-40s (a planning call + several
-              parallel image calls) — a rotating, feature-specific message
-              reads as "working", where the generic static line would read
-              as stalled over that much longer wait. */}
-          {openedSection === "slides" ? (
-            <SlidesGeneratingLabel className="text-sm text-muted-foreground" />
+          {/* Podcast Audio genuinely takes ~1-4 min (a script-writing call
+              plus one streamed ~10-15 min narration) — a rotating,
+              feature-specific message reads as "working", where the generic
+              static line would read as stalled over that much longer wait. */}
+          {openedSection === "audio" ? (
+            <PodcastGeneratingLabel className="text-sm text-muted-foreground" />
           ) : (
             <p className="text-sm text-muted-foreground">Génération en cours...</p>
           )}
@@ -1366,8 +1367,8 @@ export default function ModuleWorkspacePage() {
             {openedSection === "infographic" && activeCourse.infographicUrl && (
               <InfographicViewer key={activeCourse.id} imageUrl={activeCourse.infographicUrl} courseTitle={activeCourse.title} />
             )}
-            {openedSection === "slides" && activeCourse.slideUrls && activeCourse.slideUrls.length > 0 && (
-              <SlideDeckViewer key={activeCourse.id} slideUrls={activeCourse.slideUrls} courseTitle={activeCourse.title} />
+            {openedSection === "audio" && activeCourse.audioUrl && (
+              <AudioPodcastViewer key={activeCourse.id} audioUrl={activeCourse.audioUrl} courseTitle={activeCourse.title} />
             )}
           </Suspense>
         </div>

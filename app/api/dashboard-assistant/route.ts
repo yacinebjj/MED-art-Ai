@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
+import { reserveChatMessageDaily } from "@/lib/subscription";
 import { errorMessage } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
@@ -19,16 +20,23 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 /**
- * Dashboard Assistant — a free, general-purpose chat surface for the
- * dashboard home (outside any course/module), distinct from
- * app/api/assistant/route.ts (the paid MedArt Assistant, Haiku-routed). Also
- * distinct from app/api/courses/chat/route.ts (the Workspace course chat) —
- * that route now ALSO runs on FREE_MODEL_CHAIN (see its own header comment),
- * but is a separate feature with its own RAG/context and its own share of
- * the SAME account-wide free-tier request ceiling (lib/platform-spend-guard.ts's
- * reserveFreeTierCapacity). This route runs EXCLUSIVELY on OpenRouter's
- * ":free"-suffixed models — genuinely zero marginal cost per message, by
- * design, never a fallback to a paid model.
+ * Dashboard Assistant — a general-purpose chat surface for the dashboard
+ * home (outside any course/module), distinct from app/api/assistant/route.ts
+ * (the paid MedArt Assistant, Haiku-routed). Also distinct from
+ * app/api/courses/chat/route.ts (the Workspace course chat) — that route
+ * shares the exact same DeepSeek-then-free tiering logic (see its own header
+ * comment) but is a separate feature with its own RAG/context and its own
+ * share of the SAME account-wide free-tier request ceiling
+ * (lib/platform-spend-guard.ts's reserveFreeTierCapacity).
+ *
+ * MODEL TIER (product direction) — no longer free-only. The first
+ * DAILY_CHAT_LIMIT (20, see lib/subscription.ts) messages/day route to
+ * CHEAP_MODEL (DeepSeek, paid but cheap and fast); every message after that
+ * silently falls back to FREE_MODEL_CHAIN below — zero alert, zero error
+ * shown, same "try the next one" mechanism the free-model loop already used.
+ * The daily gate is reserveChatMessageDaily, the SAME atomic, TOCTOU-safe RPC
+ * app/api/courses/chat/route.ts already reserves against — this route now
+ * shares that one daily pool instead of having none at all.
  *
  * FREE_MODEL_CHAIN lives in lib/ai/openrouter.ts (shared with courses/chat
  * and lib/cache-prewarming.ts) — see that constant's own comment for the
@@ -128,15 +136,12 @@ export async function POST(request: NextRequest) {
 
   const historyTurns: HistoryTurn[] = Array.isArray(history) ? history.filter(isHistoryTurn).slice(-MAX_HISTORY_MESSAGES) : [];
 
-  // Shared daily ceiling on OpenRouter's real, external free-tier request
-  // cap (see reserveDashboardAssistantCapacity's own comment) — reserved
-  // ONCE per message, covering the whole fallback attempt below, not once
-  // per model tried (a message that falls back from model A to model B is
-  // still one message from the student's and the platform's point of view).
-  const capacity = await reserveFreeTierCapacity();
-  if (!capacity.allowed) {
-    return NextResponse.json({ error: capacity.reason }, { status: 503 });
-  }
+  // Daily paid-tier gate (see this file's header comment) — decides whether
+  // THIS message tries CHEAP_MODEL first. Deliberately checked BEFORE (and
+  // independently of) reserveFreeTierCapacity below: a message served by
+  // DeepSeek touches the free tier's external ceiling not at all, so it must
+  // never be blocked by that unrelated circuit breaker being saturated.
+  const dailyGate = await reserveChatMessageDaily(user);
 
   const messages: ChatMessageInput[] = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -152,11 +157,35 @@ export async function POST(request: NextRequest) {
     { role: "user", content: message },
   ];
 
-  // Try each free model in order — the first one that succeeds wins. A
-  // free-tier model erroring (momentary saturation, a provider hiccup, a
-  // rate-limit blip) is the EXPECTED, routine case for this tier, not an
-  // exceptional one, so this loop treats it as the normal path.
+  // Try each candidate model in order — the first one that succeeds wins. A
+  // model erroring (momentary saturation, a provider hiccup, a rate-limit
+  // blip) is the EXPECTED, routine case here, not an exceptional one — this
+  // is also what makes a DeepSeek failure fall through to the free chain
+  // automatically, silently, with no separate handling needed.
   let lastError: unknown = null;
+
+  if (dailyGate.allowed) {
+    try {
+      const stream = await streamOpenRouter(messages, { model: CHEAP_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5 });
+      return new NextResponse(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Model-Used": CHEAP_MODEL },
+      });
+    } catch (error) {
+      lastError = error;
+      console.error("[dashboard-assistant] CHEAP_MODEL (DeepSeek) indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  // Reached either because the daily paid allowance is already spent, or
+  // DeepSeek just failed above — NOW reserve the shared external free-tier
+  // ceiling (see reserveDashboardAssistantCapacity's own comment), since
+  // we're actually about to spend some of it.
+  const capacity = await reserveFreeTierCapacity();
+  if (!capacity.allowed) {
+    return NextResponse.json({ error: capacity.reason }, { status: 503 });
+  }
+
   for (const model of FREE_MODEL_CHAIN) {
     try {
       const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5 });

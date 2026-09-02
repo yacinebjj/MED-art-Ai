@@ -123,7 +123,7 @@ const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
   qcm: "bg-purple-50 dark:bg-purple-950",
   exemples_analogies: "bg-yellow-50 dark:bg-yellow-950",
   infographic: "bg-rose-50 dark:bg-rose-950",
-  slides: "bg-cyan-50 dark:bg-cyan-950",
+  audio: "bg-orange-50 dark:bg-orange-950",
 };
 
 /**
@@ -167,10 +167,10 @@ export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: 
     icon: "text-rose-600 dark:text-rose-400",
     dot: "bg-rose-500 dark:bg-rose-400",
   },
-  slides: {
-    bg: "bg-cyan-50/80 dark:bg-cyan-950/20 border-cyan-200/50 dark:border-cyan-900/40",
-    icon: "text-cyan-600 dark:text-cyan-400",
-    dot: "bg-cyan-500 dark:bg-cyan-400",
+  audio: {
+    bg: "bg-orange-50/80 dark:bg-orange-950/20 border-orange-200/50 dark:border-orange-900/40",
+    icon: "text-orange-600 dark:text-orange-400",
+    dot: "bg-orange-500 dark:bg-orange-400",
   },
 };
 
@@ -220,14 +220,17 @@ function SectionOptionsMenu({
             this item never renders for that section regardless of what the
             caller passes as onRegenerateSection. Enforced again server-side
             in app/api/studio/regenerate/route.ts — this is the UI half only.
-            Infographic and Slides have no variations cache (their own cache
+            Infographic and Audio have no variations cache (their own cache
             tables each hold ONE canonical result per content hash, unlike
-            studio_content_variations) — regenerating would just re-serve the
-            identical cached result, so this item never renders for either;
-            there is no separate route to enforce this server-side since
-            neither /api/studio/infographic nor /api/studio/slides has a
-            "regenerate" mode at all. */}
-        {onRegenerateSection && sectionId !== "cas_clinique" && sectionId !== "infographic" && sectionId !== "slides" && (
+            studio_content_variations) — regenerating would just re-serve
+            the identical cached result, so this item never renders for
+            either; there is no separate route to enforce this server-side
+            since neither /api/studio/infographic nor /api/studio/podcast
+            has a "regenerate" mode at all. */}
+        {onRegenerateSection &&
+          sectionId !== "cas_clinique" &&
+          sectionId !== "infographic" &&
+          sectionId !== "audio" && (
           <DropdownMenuItem onSelect={() => onRegenerateSection(sectionId)}>
             <RefreshCw className="h-4 w-4" />
             {tStudio("regenerate", language)}
@@ -623,7 +626,10 @@ export function StudioPanel({
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {onRegenerateSection && section.id !== "cas_clinique" && section.id !== "infographic" && section.id !== "slides" && (
+                            {onRegenerateSection &&
+                              section.id !== "cas_clinique" &&
+                              section.id !== "infographic" &&
+                              section.id !== "audio" && (
                               <DropdownMenuItem onSelect={() => onRegenerateSection(section.id)}>
                                 <RefreshCw className="h-4 w-4" />
                                 {tStudio("regenerate", language)}

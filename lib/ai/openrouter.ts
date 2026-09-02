@@ -442,6 +442,294 @@ export async function generateOpenRouterImage(
   return { imageDataUrl, text: typeof message?.content === "string" ? message.content : null };
 }
 
+// Studio "Podcast Audio" tab — confirmed live against
+// GET https://openrouter.ai/api/v1/models (2026-09-02): real id, output
+// modality includes "audio". Real minimal calibration test confirmed: (1)
+// streaming REQUIRES `audio.format: "pcm16"` (mp3/wav are rejected with a 400
+// once `stream: true`), (2) narration runs at ~20 audio tokens/second, (3)
+// `completion`/`audio_output` are billed at the SAME rate on this model
+// ($0.0000024/token) — so a real 10-15 min episode costs roughly $0.02-0.04.
+// Cross-student cached (lib/studio-podcast-cache.ts), so this is paid once
+// per distinct course, not once per student.
+export const AUDIO_MODEL = "openai/gpt-audio-mini";
+
+export interface GeneratedAudioResult {
+  /** Raw 24kHz mono 16-bit PCM samples, no container — caller must encode (see lib/audio/mp3-encoder.ts) before storing anywhere. */
+  pcm16: Buffer;
+  /** The model's own transcript of what it actually said — logged for debugging, never shown to students (the script that WAS the request is already known to the caller). */
+  transcript: string;
+}
+
+/**
+ * Audio-generation counterpart to callOpenRouter/generateOpenRouterImage
+ * above — confirmed live (2026-09-02) that `openai/gpt-audio-mini` REJECTS
+ * audio output entirely unless `stream: true` ("Audio output requires
+ * stream: true"), so this can't reuse callOpenRouter's plain-JSON shape. The
+ * response is OpenAI-style SSE with `choices[0].delta.audio.{data,transcript}`
+ * fragments instead of `streamOpenRouter`'s plain-text content deltas, so
+ * this accumulates the WHOLE thing into one buffer before returning rather
+ * than piping through — the caller (app/api/studio/podcast/route.ts) needs
+ * the complete audio before it can encode-and-upload, there is no "the
+ * browser plays it as it arrives" use case here like the chat's streaming.
+ */
+export async function generateOpenRouterAudio(
+  messages: ChatMessageInput[],
+  options?: { model?: string; voice?: string; maxTokens?: number; timeoutMs?: number }
+): Promise<GeneratedAudioResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
+  }
+
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+        "X-Title": "Med Art AI",
+      },
+      body: JSON.stringify({
+        model: options?.model ?? AUDIO_MODEL,
+        modalities: ["text", "audio"],
+        audio: { voice: options?.voice ?? "alloy", format: "pcm16" },
+        max_tokens: options?.maxTokens ?? 8192,
+        stream: true,
+        stream_options: { include_usage: true },
+        messages,
+      }),
+      signal: timeoutController.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter audio generation timed out after ${timeoutMs}ms`);
+      throw new OpenRouterError("La génération audio met trop de temps. Réessaie dans un instant.", 504);
+    }
+    console.error("OpenRouter audio generation fetch failed", error);
+    throw new OpenRouterError("L'appel au modèle audio a échoué. Réessaie dans un instant.", 502);
+  }
+
+  if (!res.ok || !res.body) {
+    clearTimeout(timeoutId);
+    const body = await res.text().catch(() => "");
+    const detail = extractOpenRouterErrorDetail(body);
+    console.error(`OpenRouter audio API error (${res.status})`, body.slice(0, 500));
+    throw new OpenRouterError(`La génération audio a échoué : ${detail}`, res.status);
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const audioB64Parts: string[] = [];
+  const transcriptParts: string[] = [];
+  let usage: unknown = null;
+
+  try {
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+
+        let json: any;
+        try {
+          json = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+
+        if (json.usage) usage = json.usage;
+        const delta = json?.choices?.[0]?.delta;
+        if (!delta) continue;
+        if (delta.audio?.data) audioB64Parts.push(delta.audio.data);
+        if (delta.audio?.transcript) transcriptParts.push(delta.audio.transcript);
+      }
+    }
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  logUsage(`generateOpenRouterAudio model=${options?.model ?? AUDIO_MODEL}`, usage);
+
+  const audioB64 = audioB64Parts.join("");
+  if (!audioB64) {
+    console.error("OpenRouter audio generation returned no audio data");
+    throw new OpenRouterError("Le modèle n'a renvoyé aucun audio exploitable.", 502);
+  }
+
+  return { pcm16: Buffer.from(audioB64, "base64"), transcript: transcriptParts.join("") };
+}
+
+// Dashboard "Audio to Smart Notes" — Phase 1 (STT). This app's hard rule is
+// 100% OpenRouter, zero third-party API keys — so this uses OpenRouter's OWN
+// dedicated transcription endpoint (`/api/v1/audio/transcriptions`, a
+// DIFFERENT endpoint from `/chat/completions`, confirmed live 2026-09-02 via
+// openrouter.ai/blog/tutorials/transcription-on-openrouter), never a direct
+// call to Groq or any other STT provider.
+//
+// Model confirmed live via GET /api/v1/models?output_modalities=transcription
+// (2026-09-02): `openai/whisper-large-v3-turbo` is real and present, same
+// model family/name this app previously called directly on Groq. Billing
+// unit CONFIRMED by a real call (2026-09-02): `usage` returns `{seconds,
+// cost}`, no token counts at all — billed by audio DURATION, not tokens.
+//
+// SURPRISE, also confirmed by a real A/B test on the identical clip: passing
+// a `language` hint (e.g. "fr") does NOT change the transcript output on a
+// French/Darija-mixed clip, but roughly TRIPLES the effective rate —
+// ~$0.04/hour with `language: "fr"` vs ~$0.012/hour with no `language` at
+// all (auto-detect). This route deliberately never passes `language` — see
+// app/api/lecture-notes/process/route.ts's own call site.
+//
+// ALSO CONFIRMED, and more important than the price: on a real clip
+// containing an embedded Darija/Arabic-script phrase, this model did not
+// mis-transcribe that segment (which the CAFE/NADI benchmarks' WER numbers
+// would predict) — it SILENTLY DROPPED it from the output entirely, with
+// both a "fr" language hint and with none. This is worse than a garbled
+// transcription: lost content here can never be "reconstructed from
+// context" by the Phase 2 extraction prompt, because it was never
+// transcribed in the first place. Only tested on one short synthetic clip —
+// real classroom audio (background noise, real accents, longer Darija
+// passages) may behave differently, better or worse.
+export const TRANSCRIPTION_MODEL = "openai/whisper-large-v3-turbo";
+
+const OPENROUTER_TRANSCRIPTION_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
+
+export type TranscriptionFormat = "wav" | "mp3" | "flac" | "m4a" | "ogg" | "webm" | "aac";
+
+const TRANSCRIPTION_FORMAT_MIME: Record<TranscriptionFormat, string> = {
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  ogg: "audio/ogg",
+  webm: "audio/webm",
+  aac: "audio/aac",
+};
+
+// Kept safely under the endpoint's DOCUMENTED multipart cap (25 MB,
+// confirmed live 2026-09-02) rather than right at it — base64 in the JSON
+// path below is for files ABOVE this line only, where multipart genuinely
+// isn't an option.
+const MULTIPART_SAFE_MAX_BYTES = 24 * 1024 * 1024;
+
+export interface TranscriptionResult {
+  text: string;
+  /** Raw usage object from OpenRouter — logged, not parsed into named fields (see logUsage's own comment on why: an assumed field name for an unconfirmed shape is exactly the kind of unverified claim this codebase no longer makes). */
+  usage: unknown;
+}
+
+/**
+ * Real failure, confirmed live 2026-09-02: a request comfortably over a few
+ * MB sent via the JSON/base64 path came back as a non-2xx HTTP status with a
+ * COMPLETELY EMPTY body — the classic signature of a proxy/gateway rejecting
+ * an oversized request before it ever reaches the actual transcription
+ * model, not a real API error with a message. The docs describe base64 JSON
+ * as "supporting larger files" than multipart's documented 25 MB cap, but
+ * never state a real number — that claim doesn't hold up in practice.
+ *
+ * Fix: prefer multipart/form-data (the endpoint's OTHER supported input
+ * mode, matching the OpenAI-compatible "file + model" shape) for any file
+ * that fits under the multipart path's DOCUMENTED 25 MB limit — which is
+ * every file this feature will see in practice except a genuine multi-hour
+ * lecture. JSON/base64 is now only the FALLBACK for files that exceed that,
+ * where there is no alternative — its real behavior at large sizes is still
+ * unverified (see the module-level comment above `TRANSCRIPTION_MODEL`).
+ */
+export async function transcribeAudioViaOpenRouter(
+  buffer: Buffer,
+  format: TranscriptionFormat,
+  options?: { language?: string; timeoutMs?: number }
+): Promise<TranscriptionResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
+  }
+
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  const useMultipart = buffer.length <= MULTIPART_SAFE_MAX_BYTES;
+  const baseHeaders = {
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+    "X-Title": "Med Art AI",
+  };
+
+  let res: Response;
+  try {
+    if (useMultipart) {
+      const form = new FormData();
+      form.append("model", TRANSCRIPTION_MODEL);
+      // Uint8Array.from(...) — same reasoning as lib/audio/mp3-encoder.ts's
+      // own comment: Buffer's underlying ArrayBufferLike isn't assignable to
+      // BlobPart's stricter ArrayBuffer type.
+      form.append("file", new Blob([Uint8Array.from(buffer)], { type: TRANSCRIPTION_FORMAT_MIME[format] }), `audio.${format}`);
+      if (options?.language) form.append("language", options.language);
+
+      res = await fetch(OPENROUTER_TRANSCRIPTION_URL, {
+        method: "POST",
+        // No Content-Type here — fetch sets the correct multipart boundary
+        // itself from the FormData instance; setting it manually breaks it.
+        headers: baseHeaders,
+        body: form,
+        signal: timeoutController.signal,
+      });
+    } else {
+      res = await fetch(OPENROUTER_TRANSCRIPTION_URL, {
+        method: "POST",
+        headers: { ...baseHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: TRANSCRIPTION_MODEL,
+          input_audio: { data: buffer.toString("base64"), format },
+          ...(options?.language ? { language: options.language } : {}),
+        }),
+        signal: timeoutController.signal,
+      });
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter transcription timed out after ${timeoutMs}ms`);
+      throw new OpenRouterError("La transcription met trop de temps. Réessaie dans un instant.", 504);
+    }
+    console.error("OpenRouter transcription fetch failed", error);
+    throw new OpenRouterError("L'appel à la transcription a échoué. Réessaie dans un instant.", 502);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const detail = extractOpenRouterErrorDetail(body);
+    console.error(`OpenRouter transcription API error (${res.status}, multipart=${useMultipart})`, body.slice(0, 500));
+    // The HTTP status is now ALWAYS in the message the client sees — an
+    // empty `detail` used to silently hide whether this was even a real API
+    // error vs. a bare proxy rejection.
+    throw new OpenRouterError(`La transcription a échoué (HTTP ${res.status}) : ${detail}`, res.status);
+  }
+
+  const data = await res.json();
+  logUsage(`transcribeAudioViaOpenRouter model=${TRANSCRIPTION_MODEL}`, data?.usage);
+
+  const text = data?.text;
+  if (typeof text !== "string" || !text.trim()) {
+    console.error("OpenRouter transcription returned an unexpected payload", JSON.stringify(data).slice(0, 500));
+    throw new OpenRouterError("La transcription est revenue vide — le fichier est peut-être inaudible ou silencieux.", 502);
+  }
+
+  return { text, usage: data?.usage };
+}
+
 /**
  * Same OpenRouter call as `callOpenRouter`, but with `stream: true` — returns
  * a `ReadableStream` of PLAIN TEXT (just the incremental content deltas, no

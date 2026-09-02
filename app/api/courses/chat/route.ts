@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { retrieveRelevantContext } from "@/lib/chat-context-retrieval";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -438,6 +438,19 @@ export async function POST(request: NextRequest) {
   // a day is exactly what this must still block. reserveChatMessage's
   // monthly chatMessageCap is reserved separately just below.
   //
+  // REPURPOSED (product direction) — this gate no longer BLOCKS the
+  // request on `!allowed`. It now decides which model TIER this message
+  // gets: the first DAILY_CHAT_LIMIT (20) messages/day route to CHEAP_MODEL
+  // (DeepSeek, paid but cheap and fast); every message after that silently
+  // falls back to FREE_MODEL_CHAIN — same zero-alert, zero-error-message
+  // transition the free-model fallback loop below already does for a
+  // mid-tier outage. The atomic RPC itself is UNCHANGED (still the same
+  // TOCTOU-safe reserve_daily_chat_messages_used — see that function's own
+  // security-fix comment in lib/subscription.ts) — only how this route
+  // reacts to its result changed. Highlight mode ("Ask MedArt" on a
+  // selection) is deliberately excluded, same as before: it has its own,
+  // separate highlightMessageCap pool, untouched by this daily counter.
+  //
   // This gate, reserveChatMessage, and reserveFreeTierCapacity stay strictly
   // SEQUENTIAL relative to EACH OTHER (unlike contextPromise above) — each
   // is a real reserve-with-refund-on-failure operation (see
@@ -446,11 +459,10 @@ export async function POST(request: NextRequest) {
   // concurrently would let a later gate's RPC fire — and increment its own
   // counter — even when an earlier gate had already rejected the request,
   // over-charging a student's quota for a message that never actually sent.
+  let useDeepSeekTier = false;
   if (!isHighlightMode) {
     const dailyGate = await reserveChatMessageDaily(user);
-    if (!dailyGate.allowed) {
-      return NextResponse.json({ error: dailyGate.reason }, { status: 403 });
-    }
+    useDeepSeekTier = dailyGate.allowed;
   }
 
   // Semantic caching REMOVED (product direction) — every chat message now
@@ -464,21 +476,6 @@ export async function POST(request: NextRequest) {
     if (!chatGate.allowed) {
       return NextResponse.json({ error: chatGate.reason }, { status: 403 });
     }
-  }
-
-  // This route no longer spends real money (see FREE_MODEL_CHAIN's own
-  // comment above) — reservePlatformCapacity (the PAID-generation circuit
-  // breaker) no longer applies here. reserveFreeTierCapacity instead guards
-  // the free-tier models' own hard, EXTERNAL, account-wide daily request cap
-  // (shared with app/api/dashboard-assistant/route.ts and
-  // lib/cache-prewarming.ts — see that function's own comment). Applies to
-  // BOTH normal chat and highlight mode: both are real free-tier calls about
-  // to happen, and that shared external ceiling doesn't distinguish between
-  // per-student pools. Kept sequential after the two gates above for the
-  // same over-charging reason explained there.
-  const freeTierCapacity = await reserveFreeTierCapacity();
-  if (!freeTierCapacity.allowed) {
-    return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
   }
 
   const sourceText = await contextPromise;
@@ -509,39 +506,75 @@ export async function POST(request: NextRequest) {
         { role: "user", content: message },
       ];
 
-  // Try each free model in FREE_MODEL_CHAIN in order — the first one that
-  // succeeds wins. Mirrors app/api/dashboard-assistant/route.ts's own
-  // fallback loop exactly: a free-tier model erroring (momentary
-  // saturation, a provider hiccup, a rate-limit blip) is the EXPECTED,
-  // routine case for this tier, not an exceptional one. `reasoning: {
+  // Try each candidate model in order — the first one that succeeds wins.
+  // `useDeepSeekTier` prepends CHEAP_MODEL (DeepSeek) when this message is
+  // within the daily 20-message paid allowance (see the dailyGate comment
+  // above); every other case (highlight mode, or the daily cap already
+  // spent) uses FREE_MODEL_CHAIN exactly as before. Mirrors
+  // app/api/dashboard-assistant/route.ts's own fallback loop: a model
+  // erroring (momentary saturation, a provider hiccup, a rate-limit blip) is
+  // the EXPECTED, routine case here, not an exceptional one — this is also
+  // what makes DeepSeek's own transient failures fall through to the free
+  // chain automatically, for free, with no extra handling. `reasoning: {
   // effort: "low" }` applied to every attempt — see MAX_OUTPUT_TOKENS_NORMAL's
   // own comment for why this is a defensive default now, not a
-  // model-specific fix like it was for ECONOMY_MODEL.
+  // model-specific fix like it was for ECONOMY_MODEL; it's a documented
+  // no-op on a model (like DeepSeek here) that doesn't support it.
   let responseStream: ReadableStream<Uint8Array> | null = null;
   let lastError: unknown = null;
   const maxTokensForThisTurn = isHighlightMode ? MAX_OUTPUT_TOKENS_HIGHLIGHT : MAX_OUTPUT_TOKENS_NORMAL;
-  for (const model of FREE_MODEL_CHAIN) {
+
+  if (useDeepSeekTier) {
     try {
       responseStream = await streamOpenRouter(messages, {
-        model,
+        model: CHEAP_MODEL,
         temperature: 0.3,
         maxTokens: maxTokensForThisTurn,
         reasoning: { effort: "low" },
       });
-      break;
     } catch (error) {
       lastError = error;
-      console.error(
-        `[courses/chat POST] Modèle gratuit "${model}" indisponible, bascule sur le suivant:`,
-        error instanceof Error ? error.message : error
-      );
+      console.error("[courses/chat POST] CHEAP_MODEL (DeepSeek) indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
     }
   }
 
   if (!responseStream) {
-    // Every free model in the chain failed — deliberately NEVER falls back
-    // to a paid model (that would silently defeat the whole point of this
-    // change). Refund whatever credit was reserved — a transient outage
+    // Reached either because this message was already over the daily paid
+    // allowance (or is highlight mode, never eligible for it), or DeepSeek
+    // just failed above — NOW reserve the free-tier models' own hard,
+    // EXTERNAL, account-wide daily request cap (shared with
+    // app/api/dashboard-assistant/route.ts and lib/cache-prewarming.ts — see
+    // that function's own comment), since we're actually about to spend some
+    // of it. Checking this BEFORE knowing whether DeepSeek would succeed
+    // would wrongly block a message the paid tier could have served fine,
+    // just because the free tier happens to be saturated.
+    const freeTierCapacity = await reserveFreeTierCapacity();
+    if (!freeTierCapacity.allowed) {
+      return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
+    }
+
+    for (const model of FREE_MODEL_CHAIN) {
+      try {
+        responseStream = await streamOpenRouter(messages, {
+          model,
+          temperature: 0.3,
+          maxTokens: maxTokensForThisTurn,
+          reasoning: { effort: "low" },
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+        console.error(
+          `[courses/chat POST] Modèle gratuit "${model}" indisponible, bascule sur le suivant:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+  }
+
+  if (!responseStream) {
+    // Every model tried (DeepSeek if applicable, then the whole free chain)
+    // failed. Refund whatever credit was reserved — a transient outage
     // across the whole free tier shouldn't cost the student their monthly
     // allowance. refundChatMessage/refundHighlightMessage take the user's
     // id (a string), not the whole authenticated User object.

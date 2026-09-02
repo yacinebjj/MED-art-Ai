@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { FileText, Plus, Search, Settings, Sparkles, UploadCloud } from "lucide-react";
 import { DashboardHero } from "@/components/dashboard/DashboardHero";
 import { UploadModal } from "@/components/dashboard/UploadModal";
+import { LectureNotesUploader } from "@/components/dashboard/LectureNotesUploader";
 import { PublicCourseCard } from "@/components/dashboard/PublicCourseCard";
 import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -273,6 +274,18 @@ export default function DashboardPage() {
           </button>
         </form>
       </motion.div>
+
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.09, ease: [0.22, 1, 0.36, 1] }}
+        className="mb-4 sm:mb-8 lg:mb-10"
+      >
+        <h2 className="mb-2 text-base font-bold tracking-tight text-foreground sm:mb-4 sm:text-xl">
+          Audio to Smart Notes
+        </h2>
+        <LectureNotesUploader />
+      </motion.section>
 
       <motion.section
         initial={{ opacity: 0, y: 20 }}

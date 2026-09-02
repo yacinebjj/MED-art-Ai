@@ -5,13 +5,13 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { lookupStudioInfographicCache } from "@/lib/studio-infographic-cache";
-import { lookupStudioSlidesCache } from "@/lib/studio-slides-cache";
+import { lookupStudioPodcastCache } from "@/lib/studio-podcast-cache";
 import type { JsonSectionId } from "@/lib/demo-content";
 import type { StudioCourseFull } from "@/types/studio-course";
 
 export const runtime = "nodejs";
 
-/** JsonSectionId (tile id) -> studio_courses column name — "infographic" is deliberately excluded, see lib/demo-content.ts's own comment on JsonSectionId. "qcm" -> "qcms" is the one mismatch, same as lib/ai/studio-prompts.ts's STUDIO_SECTION_KEYS. */
+/** JsonSectionId (tile id) -> studio_courses column name — "infographic"/"audio" are deliberately excluded, see lib/demo-content.ts's own comment on JsonSectionId. "qcm" -> "qcms" is the one mismatch, same as lib/ai/studio-prompts.ts's STUDIO_SECTION_KEYS. */
 const SECTION_TO_COLUMN: Record<JsonSectionId, string> = {
   explication: "explication",
   resume: "resume",
@@ -42,7 +42,7 @@ interface StudioCourseFullRow {
   updated_at: string | null;
 }
 
-function toFullCourse(row: StudioCourseFullRow, infographicUrl: string | null, slideUrls: string[] | null): StudioCourseFull {
+function toFullCourse(row: StudioCourseFullRow, infographicUrl: string | null, audioUrl: string | null): StudioCourseFull {
   return {
     id: row.id,
     title: row.title,
@@ -55,7 +55,7 @@ function toFullCourse(row: StudioCourseFullRow, infographicUrl: string | null, s
     sourceFileUrl: row.source_file_url,
     updatedAt: row.updated_at,
     infographicUrl,
-    slideUrls,
+    audioUrl,
   };
 }
 
@@ -92,21 +92,18 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   }
 
   const row = data as StudioCourseFullRow;
-  // Derived, not stored on this row — see StudioCourseFull.infographicUrl's
-  // own comment. A lookup failure (or no Explication yet) just means no
-  // infographie is shown yet, never blocks loading the rest of the course.
   // Derived, not stored on this row — see StudioCourseFull.infographicUrl's/
-  // slideUrls' own comments. A lookup failure (or no Explication yet) just
+  // audioUrl's own comments. A lookup failure (or no Explication yet) just
   // means neither is shown yet, never blocks loading the rest of the course.
   // Same hash computed once, reused for both lookups (both tables are keyed
   // by the SAME sha256(normalizeText(explication)) — no collision risk,
   // different tables), run in parallel rather than sequentially.
   const contentHash = row.explication ? sha256(normalizeText(row.explication)) : null;
-  const [infographicUrl, slideUrls] = contentHash
-    ? await Promise.all([lookupStudioInfographicCache(contentHash), lookupStudioSlidesCache(contentHash)])
+  const [infographicUrl, audioUrl] = contentHash
+    ? await Promise.all([lookupStudioInfographicCache(contentHash), lookupStudioPodcastCache(contentHash)])
     : [null, null];
 
-  return NextResponse.json({ success: true, course: toFullCourse(row, infographicUrl, slideUrls) });
+  return NextResponse.json({ success: true, course: toFullCourse(row, infographicUrl, audioUrl) });
 }
 
 /** Saves one tile's freshly generated content — called right after /api/studio/generate succeeds, so a page refresh (or coming back tomorrow) never has to regenerate it. */

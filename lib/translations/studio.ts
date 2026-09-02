@@ -62,7 +62,7 @@ const SECTION_LABELS: Record<DemoSectionId, Record<Language, string>> = {
   qcm: { fr: "Examen QCMs", en: "MCQ Exam" },
   exemples_analogies: { fr: "Exemples & Analogies", en: "Examples & Analogies" },
   infographic: { fr: "Infographie", en: "Infographic" },
-  slides: { fr: "Slides", en: "Slides" },
+  audio: { fr: "Podcast Audio", en: "Audio Podcast" },
 };
 
 export function getSectionLabel(id: DemoSectionId, language: Language): string {

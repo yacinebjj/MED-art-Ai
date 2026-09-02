@@ -39,10 +39,10 @@ export interface StudioCourseFull {
    */
   infographicUrl: string | null;
   /**
-   * Ordered array of public Supabase Storage URLs for this course's
-   * generated "Slides" mini-deck, or `null` if none exists yet. Same
-   * derived-not-stored pattern as infographicUrl above, backed by
-   * studio_slides_cache — app/api/studio/slides/route.ts owns writing it.
+   * Public Supabase Storage URL of this course's generated "Podcast Audio"
+   * episode (.mp3), or `null` if none exists yet. Same derived-not-stored
+   * pattern as infographicUrl above, backed by studio_podcast_cache —
+   * app/api/studio/podcast/route.ts owns writing it.
    */
-  slideUrls: string[] | null;
+  audioUrl: string | null;
 }

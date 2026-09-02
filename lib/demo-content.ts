@@ -5,7 +5,7 @@ import {
   ListChecks,
   Lightbulb,
   Network,
-  Presentation,
+  Headphones,
   type LucideIcon,
 } from "lucide-react";
 
@@ -16,25 +16,32 @@ export type DemoSectionId =
   | "qcm"
   | "exemples_analogies"
   | "infographic"
-  | "slides";
+  | "audio";
 
 /**
  * The 5 original sections: JSON/text content, validated against a Zod
  * schema, generated+saved through the generic /api/studio/generate pipeline
  * (STUDIO_PROMPT_CONFIG, STUDIO_SCHEMAS, SECTION_TO_COLUMN). "infographic"
- * and "slides" are excluded — both are IMAGE-based
- * (google/gemini-3.1-flash-image-preview via OpenRouter), have no JSON
- * schema, aren't saved as studio_courses columns (they live in their own
- * shared cache tables instead — studio_infographic_cache /
- * studio_slides_cache, see each table's own comment in supabase/schema.sql),
- * and are generated through their own dedicated routes
- * (app/api/studio/infographic/route.ts, app/api/studio/slides/route.ts).
+ * and "audio" are excluded — "infographic" is IMAGE-based
+ * (google/gemini-3.1-flash-image-preview via OpenRouter) and "audio" is
+ * AUDIO-based (openai/gpt-audio-mini via OpenRouter), neither has a JSON
+ * schema, neither is saved as a studio_courses column (they live in their
+ * own shared cache tables instead — studio_infographic_cache /
+ * studio_podcast_cache, see each table's own comment in supabase/schema.sql),
+ * and each is generated through its own dedicated route
+ * (app/api/studio/infographic/route.ts, app/api/studio/podcast/route.ts).
  * This narrower type is what every `Record<_, ...>` mapping built for the
  * generic pipeline (STUDIO_PROMPT_CONFIG etc.) should use instead of the
  * full DemoSectionId, so TypeScript itself enforces that neither is ever
  * accidentally routed through that pipeline.
+ *
+ * (Slides tab removed by explicit product direction — Studio now focuses on
+ * text, flashcards, and chat; see git history for the removed
+ * app/api/studio/slides/route.ts, lib/ai/slides-prompts.ts,
+ * lib/studio-slides-cache.ts, and the SlideDeckViewer/SlidesGeneratingLabel
+ * components if this ever needs resurrecting.)
  */
-export type JsonSectionId = Exclude<DemoSectionId, "infographic" | "slides">;
+export type JsonSectionId = Exclude<DemoSectionId, "infographic" | "audio">;
 
 export interface DemoSection {
   id: DemoSectionId;
@@ -723,18 +730,18 @@ Ce mode réexplique le cours avec des analogies de la vie de tous les jours (bou
 Une carte visuelle unique du cours — origines, mécanismes, manifestations cliniques, diagnostic et traitement, réunis dans une seule image de synthèse.`,
   },
   {
-    id: "slides",
-    label: "Slides",
-    icon: Presentation,
+    id: "audio",
+    label: "Podcast Audio",
+    icon: Headphones,
     accent: {
-      active: "border-cyan-300 bg-cyan-50 text-cyan-800",
-      chip: "bg-cyan-100 text-cyan-600",
-      hover: "hover:-translate-y-1 hover:bg-cyan-50 hover:text-cyan-600 hover:shadow-md",
+      active: "border-orange-300 bg-orange-50 text-orange-800",
+      chip: "bg-orange-100 text-orange-600",
+      hover: "hover:-translate-y-1 hover:bg-orange-50 hover:text-orange-600 hover:shadow-md",
     },
-    // Never actually rendered as markdown — this tile's real content is an
-    // ordered array of images (activeCourse.slideUrls), not this string.
-    content: `## Slides
+    // Never actually rendered as markdown — this tile's real content is a
+    // single audio file (activeCourse.audioUrl), not this string.
+    content: `## Podcast Audio
 
-Un mini-deck de présentation visuelle du cours — titre, points clés et message essentiel, en quelques diapositives prêtes à réviser ou à présenter.`,
+Un épisode de podcast de 10 à 15 minutes qui reprend le cours à voix haute — mélange français médical et darija, pour réviser en écoutant, même en déplacement.`,
   },
 ];
