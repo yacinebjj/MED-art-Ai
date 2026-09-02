@@ -66,7 +66,9 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
       {PRIMARY_ITEMS.map((item) => {
         const isActive =
           item.href === "/dashboard"
-            ? pathname === "/dashboard" || pathname.startsWith("/dashboard/module/") || pathname.startsWith("/dashboard/demo/")
+            ? pathname === "/dashboard" ||
+              pathname.startsWith("/dashboard/module/") ||
+              pathname.startsWith("/dashboard/audio-workspace")
             : pathname === item.href;
         const Icon = item.icon;
         return (

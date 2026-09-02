@@ -206,12 +206,16 @@ export default function SearchPage() {
                     <div className="space-y-3">
                       {moduleResults.map((r, i) => (
                         <motion.div key={`${r.courseSlug}-${r.sectionLabel}-${i}`} variants={RESULT_ITEM_VARIANTS}>
-                          <Link
-                            href={`/dashboard/demo/${r.courseSlug}`}
+                          {/* Was a Link to /dashboard/demo/${slug} — that page (the
+                              retired "cours indépendant" pipeline) no longer exists.
+                              Rendered inert rather than left pointing at a 404;
+                              the underlying `courses`-table search index itself is
+                              untouched here — a real follow-up, not done in this
+                              pass. */}
+                          <div
                             className={cn(
-                              "glass-card block rounded-2xl p-4 shadow-glass transition-all duration-300",
-                              "hover:-translate-y-0.5 hover:shadow-primary-500/20",
-                              "dark:shadow-glass-dark dark:hover:shadow-primary-400/20"
+                              "glass-card block rounded-2xl p-4 shadow-glass",
+                              "opacity-70"
                             )}
                           >
                             <div className="mb-1 flex items-center gap-2">
@@ -224,7 +228,7 @@ export default function SearchPage() {
                             <p dir="auto" className="line-clamp-2 text-sm text-slate-600 dark:text-gray-400">
                               {r.excerpt}
                             </p>
-                          </Link>
+                          </div>
                         </motion.div>
                       ))}
                     </div>

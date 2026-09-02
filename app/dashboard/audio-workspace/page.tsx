@@ -22,7 +22,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, CheckCircle2, FileAudio, Loader2, Save, Sparkles, UploadCloud, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileAudio, Loader2, Mic, Save, Sparkles, Square, UploadCloud, X } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES } from "@/lib/markdown";
 import { LectureNotesGeneratingLabel } from "@/components/dashboard/LectureNotesGeneratingLabel";
@@ -35,6 +35,12 @@ type Status = "idle" | "staged" | "processing" | "done" | "error";
 
 function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+function formatDuration(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 export default function AudioWorkspacePage() {
@@ -53,6 +59,12 @@ export default function AudioWorkspacePage() {
   const [title, setTitle] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
 
   function stageFile(selected: File) {
     setFile(selected);
@@ -70,6 +82,11 @@ export default function AudioWorkspacePage() {
     setJobId(null);
     setIsSaved(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    // Defensive cleanup — recordingStreamRef should already be null by the
+    // time a file is staged (onstop clears it), but a stray open mic stream
+    // must never survive past this point regardless.
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
   }
 
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -83,6 +100,57 @@ export default function AudioWorkspacePage() {
     const dropped = e.dataTransfer.files?.[0];
     if (dropped) stageFile(dropped);
   }, []);
+
+  /**
+   * Records straight from the mic (getUserMedia + MediaRecorder) so a student
+   * can capture a live lecture without a separate voice-memo app. The
+   * resulting Blob (typically audio/webm — already a supported format end to
+   * end, see lib/audio/browser-chunking.ts/lib/ai/openrouter.ts's
+   * TranscriptionFormat) is wrapped into a plain File and fed through the
+   * EXACT SAME stageFile()/handleGenerate() pipeline as an uploaded file —
+   * no separate backend path needed for this input method.
+   */
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordedChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const extension = (recorder.mimeType || "audio/webm").includes("ogg") ? "ogg" : "webm";
+        const recordedFile = new File([blob], `enregistrement-${Date.now()}.${extension}`, { type: blob.type });
+        stageFile(recordedFile);
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+    } catch (error) {
+      toast({
+        variant: "error",
+        title: "Micro inaccessible",
+        description: error instanceof Error ? error.message : "Autorise l'accès au micro pour enregistrer directement.",
+      });
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  }
 
   async function handleGenerate() {
     if (!file) return;
@@ -194,27 +262,61 @@ export default function AudioWorkspacePage() {
 
           <input ref={fileInputRef} type="file" accept={ACCEPTED_EXTENSIONS} onChange={onInputChange} className="hidden" />
 
-          {!file ? (
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDragOver(true);
-              }}
-              onDragLeave={() => setIsDragOver(false)}
-              onDrop={onDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={cn(
-                "flex flex-1 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-300",
-                isDragOver
-                  ? "border-primary-400 bg-primary-50/50 dark:bg-primary-950/20"
-                  : "border-border hover:border-primary-400 hover:bg-accent"
-              )}
-            >
-              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-950/40 dark:text-orange-400">
-                <UploadCloud className="h-7 w-7" />
+          {isRecording ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-2xl border-2 border-red-300 bg-red-50/50 p-10 text-center dark:border-red-900/50 dark:bg-red-950/20">
+              <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600 shadow-sm dark:bg-red-950/40 dark:text-red-400">
+                <span className="absolute inset-0 animate-ping rounded-2xl bg-red-400/40" />
+                <Mic className="relative h-7 w-7" />
               </span>
-              <p className="text-sm font-semibold text-foreground">Glisse-dépose ton enregistrement ici</p>
-              <p className="text-xs text-muted-foreground">ou clique pour choisir un fichier — M4A, MP3, WAV, OGG</p>
+              <p className="text-sm font-semibold text-foreground">Enregistrement en cours...</p>
+              <p className="font-mono text-2xl font-bold text-red-600 dark:text-red-400">{formatDuration(recordingSeconds)}</p>
+              <button
+                type="button"
+                onClick={stopRecording}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-500 hover:shadow-md"
+              >
+                <Square className="h-4 w-4" />
+                Arrêter et transcrire
+              </button>
+            </div>
+          ) : !file ? (
+            <div className="flex flex-1 flex-col gap-3">
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragOver(true);
+                }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={onDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={cn(
+                  "flex flex-1 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-300",
+                  isDragOver
+                    ? "border-primary-400 bg-primary-50/50 dark:bg-primary-950/20"
+                    : "border-border hover:border-primary-400 hover:bg-accent"
+                )}
+              >
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-950/40 dark:text-orange-400">
+                  <UploadCloud className="h-7 w-7" />
+                </span>
+                <p className="text-sm font-semibold text-foreground">Glisse-dépose ton enregistrement ici</p>
+                <p className="text-xs text-muted-foreground">ou clique pour choisir un fichier — M4A, MP3, WAV, OGG</p>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs font-medium text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                ou
+                <span className="h-px flex-1 bg-border" />
+              </div>
+
+              <button
+                type="button"
+                onClick={startRecording}
+                className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-card p-4 text-sm font-semibold text-foreground shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-50/50 hover:shadow-md dark:hover:border-red-900/50 dark:hover:bg-red-950/20"
+              >
+                <Mic className="h-4 w-4 text-red-600 dark:text-red-400" />
+                Enregistrer le prof en direct
+              </button>
             </div>
           ) : (
             <div className="flex flex-col gap-4">
