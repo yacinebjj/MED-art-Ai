@@ -13,7 +13,7 @@ import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/cour
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { lookupVariations, insertVariation, recordVariationHit } from "@/lib/studio-content-variations";
-import type { DemoSectionId } from "@/lib/demo-content";
+import type { JsonSectionId } from "@/lib/demo-content";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // same headroom as /api/studio/generate — a regenerate call is a full AI generation too.
@@ -31,9 +31,9 @@ export const maxDuration = 300; // same headroom as /api/studio/generate — a r
  */
 const MAX_VARIATIONS = 20;
 
-const VALID_SECTIONS = Object.keys(STUDIO_PROMPT_CONFIG) as DemoSectionId[];
+const VALID_SECTIONS = Object.keys(STUDIO_PROMPT_CONFIG) as JsonSectionId[];
 
-function isValidSection(value: unknown): value is DemoSectionId {
+function isValidSection(value: unknown): value is JsonSectionId {
   return typeof value === "string" && (VALID_SECTIONS as string[]).includes(value);
 }
 

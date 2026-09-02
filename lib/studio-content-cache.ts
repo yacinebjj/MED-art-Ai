@@ -38,7 +38,7 @@
 
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { computeMinHashSignature, estimateSimilarity, normalizeText, sha256 } from "@/lib/content-similarity";
-import type { DemoSectionId } from "@/lib/demo-content";
+import type { JsonSectionId } from "@/lib/demo-content";
 
 /**
  * Deliberately a bit under the "~90% variance" the fuzzy tier targets:
@@ -66,7 +66,7 @@ export interface StudioCacheLookupResult {
 }
 
 /** Checked before every OpenRouter call in app/api/studio/generate/route.ts. Returns `{ hit: false }` on any Supabase error or misconfiguration — a lookup failure must never block generation, only skip the optimization. */
-export async function lookupStudioContentCache(section: DemoSectionId, rawText: string): Promise<StudioCacheLookupResult> {
+export async function lookupStudioContentCache(section: JsonSectionId, rawText: string): Promise<StudioCacheLookupResult> {
   if (!isSupabaseConfigured()) return { hit: false };
   const supabase = getSupabaseAdmin();
   const normalized = normalizeText(rawText);
@@ -134,7 +134,7 @@ export async function lookupStudioContentCache(section: DemoSectionId, rawText: 
  * own generation already succeeded and must not be blocked by a caching
  * side-effect failing.
  */
-export async function storeStudioContentCache(section: DemoSectionId, rawText: string, data: unknown): Promise<void> {
+export async function storeStudioContentCache(section: JsonSectionId, rawText: string, data: unknown): Promise<void> {
   if (!isSupabaseConfigured()) return;
   const supabase = getSupabaseAdmin();
   const normalized = normalizeText(rawText);

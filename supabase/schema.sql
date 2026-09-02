@@ -1460,6 +1460,74 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- studio_infographic_cache: cross-student cache for the Studio "Infographie /
+-- Mindmap" tab (google/gemini-3.1-flash-image-preview via OpenRouter — see
+-- lib/ai/openrouter.ts's generateOpenRouterImage). Same shape/philosophy as
+-- flashcards_content_cache just above: keyed by
+-- sha256(normalizeText(explication)), one row per distinct course
+-- explication, ever, across the whole shared catalog. Confirmed live
+-- (2026-09-02): a real generation costs ~$0.07 (1120 image completion
+-- tokens at OpenRouter's $0.00006/token image_output rate — a per-token
+-- rate, not a per-image flat price), paid ONCE per distinct course
+-- regardless of how many students study it. `image_url` points into
+-- Supabase Storage (bucket "studio-infographics", created on first use by
+-- app/api/studio/infographic/route.ts) — never a base64 blob in this table.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_infographic_cache (
+  content_hash text primary key,
+  image_url text not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz
+);
+
+alter table studio_infographic_cache enable row level security;
+drop policy if exists "Deny all client access" on studio_infographic_cache;
+create policy "Deny all client access" on studio_infographic_cache for all using (false);
+
+create or replace function increment_studio_infographic_cache_hit_count(p_content_hash text)
+returns void
+language sql
+as $$
+  update studio_infographic_cache set hit_count = hit_count + 1, last_hit_at = now() where content_hash = p_content_hash;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- studio_slides_cache: cross-student cache for the Studio "Slides" tab (a
+-- 6-slide mini-deck, google/gemini-3.1-flash-image-preview via OpenRouter,
+-- one image call per slide run in parallel — see
+-- app/api/studio/slides/route.ts). Same shape/philosophy as
+-- studio_infographic_cache just above: keyed by
+-- sha256(normalizeText(explication)) (the SAME hash function, a different
+-- table — no collision risk), one row per distinct course explication, ever,
+-- across the whole shared catalog. Confirmed live (2026-09-02, a real
+-- 4-slide test): ~$0.086/slide average (some slides costing more — a
+-- denser composition like a pie chart + pictogram grid on one slide used
+-- ~2x the image tokens of a simpler one) — a real 6-slide deck costs
+-- roughly $0.45-0.55, paid ONCE per distinct course, never per student.
+-- `slide_urls` is an ORDERED jsonb array of Supabase Storage public URLs
+-- (bucket "studio-slides", created on first use) — never base64 blobs.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_slides_cache (
+  content_hash text primary key,
+  slide_urls jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz
+);
+
+alter table studio_slides_cache enable row level security;
+drop policy if exists "Deny all client access" on studio_slides_cache;
+create policy "Deny all client access" on studio_slides_cache for all using (false);
+
+create or replace function increment_studio_slides_cache_hit_count(p_content_hash text)
+returns void
+language sql
+as $$
+  update studio_slides_cache set hit_count = hit_count + 1, last_hit_at = now() where content_hash = p_content_hash;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- ARCHITECTURAL PIVOT (superseding the original module_synthesis_cache):
 -- caching by the SET of selected courses combinatorially exploded — student
 -- A selecting {course1,course2,course3} and student B selecting
@@ -2385,6 +2453,8 @@ revoke execute on function increment_studio_cache_hit_count(uuid) from anon, aut
 revoke execute on function increment_variation_hit_count(uuid) from anon, authenticated;
 revoke execute on function increment_course_workspace_cache_hit_count(text, text) from anon, authenticated;
 revoke execute on function increment_flashcards_content_cache_hit_count(text) from anon, authenticated;
+revoke execute on function increment_studio_infographic_cache_hit_count(text) from anon, authenticated;
+revoke execute on function increment_studio_slides_cache_hit_count(text) from anon, authenticated;
 revoke execute on function weakness_radar(uuid) from anon, authenticated;
 revoke execute on function course_mastery(uuid) from anon, authenticated;
 revoke execute on function course_weak_qcms(uuid, text, int) from anon, authenticated;

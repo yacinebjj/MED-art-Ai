@@ -4,6 +4,8 @@ import {
   Stethoscope,
   ListChecks,
   Lightbulb,
+  Network,
+  Presentation,
   type LucideIcon,
 } from "lucide-react";
 
@@ -12,7 +14,27 @@ export type DemoSectionId =
   | "resume"
   | "cas_clinique"
   | "qcm"
-  | "exemples_analogies";
+  | "exemples_analogies"
+  | "infographic"
+  | "slides";
+
+/**
+ * The 5 original sections: JSON/text content, validated against a Zod
+ * schema, generated+saved through the generic /api/studio/generate pipeline
+ * (STUDIO_PROMPT_CONFIG, STUDIO_SCHEMAS, SECTION_TO_COLUMN). "infographic"
+ * and "slides" are excluded — both are IMAGE-based
+ * (google/gemini-3.1-flash-image-preview via OpenRouter), have no JSON
+ * schema, aren't saved as studio_courses columns (they live in their own
+ * shared cache tables instead — studio_infographic_cache /
+ * studio_slides_cache, see each table's own comment in supabase/schema.sql),
+ * and are generated through their own dedicated routes
+ * (app/api/studio/infographic/route.ts, app/api/studio/slides/route.ts).
+ * This narrower type is what every `Record<_, ...>` mapping built for the
+ * generic pipeline (STUDIO_PROMPT_CONFIG etc.) should use instead of the
+ * full DemoSectionId, so TypeScript itself enforces that neither is ever
+ * accidentally routed through that pipeline.
+ */
+export type JsonSectionId = Exclude<DemoSectionId, "infographic" | "slides">;
 
 export interface DemoSection {
   id: DemoSectionId;
@@ -682,5 +704,37 @@ D. Une contracture généralisée
     content: `## Exemples & Analogies
 
 Ce mode réexplique le cours avec des analogies de la vie de tous les jours (bouteilles, tuyaux, ballons...), pour comprendre le mécanisme de la maladie, déduire les signes de l'examen clinique, et repérer les pièges classiques de QCM.`,
+  },
+  {
+    id: "infographic",
+    label: "Infographie",
+    icon: Network,
+    accent: {
+      active: "border-rose-300 bg-rose-50 text-rose-800",
+      chip: "bg-rose-100 text-rose-600",
+      hover: "hover:-translate-y-1 hover:bg-rose-50 hover:text-rose-600 hover:shadow-md",
+    },
+    // Never actually rendered as markdown — this tile's real content is an
+    // image (activeCourse.infographicUrl), not this string. Kept only for
+    // parity with the other DemoSection entries and the legacy hardcoded
+    // demo course, which has no image to show here.
+    content: `## Infographie Mindmap
+
+Une carte visuelle unique du cours — origines, mécanismes, manifestations cliniques, diagnostic et traitement, réunis dans une seule image de synthèse.`,
+  },
+  {
+    id: "slides",
+    label: "Slides",
+    icon: Presentation,
+    accent: {
+      active: "border-cyan-300 bg-cyan-50 text-cyan-800",
+      chip: "bg-cyan-100 text-cyan-600",
+      hover: "hover:-translate-y-1 hover:bg-cyan-50 hover:text-cyan-600 hover:shadow-md",
+    },
+    // Never actually rendered as markdown — this tile's real content is an
+    // ordered array of images (activeCourse.slideUrls), not this string.
+    content: `## Slides
+
+Un mini-deck de présentation visuelle du cours — titre, points clés et message essentiel, en quelques diapositives prêtes à réviser ou à présenter.`,
   },
 ];

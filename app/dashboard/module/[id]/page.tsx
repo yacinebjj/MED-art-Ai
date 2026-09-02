@@ -41,6 +41,7 @@ import { MAX_LEITNER_BOX } from "@/lib/srs";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
 import { DEMO_SECTIONS, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
 import { getInFlightGeneration, trackGeneration } from "@/lib/studio-generation-tracker";
+import { SlidesGeneratingLabel } from "@/components/course/workspace/SlidesGeneratingLabel";
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
@@ -71,6 +72,14 @@ const GastriteQcmsStudio = dynamic(
   () => import("@/components/course/workspace/GastriteQcmsStudio").then((m) => m.GastriteQcmsStudio),
   { ssr: false }
 );
+const InfographicViewer = dynamic(
+  () => import("@/components/course/workspace/InfographicViewer").then((m) => m.InfographicViewer),
+  { ssr: false }
+);
+const SlideDeckViewer = dynamic(
+  () => import("@/components/course/workspace/SlideDeckViewer").then((m) => m.SlideDeckViewer),
+  { ssr: false }
+);
 
 /**
  * Reads/writes one Studio tile's value on a StudioCourseFull — the single
@@ -90,6 +99,10 @@ function getSectionValue(course: StudioCourseFull, section: DemoSectionId): unkn
       return course.qcms;
     case "exemples_analogies":
       return course.exemplesAnalogies;
+    case "infographic":
+      return course.infographicUrl;
+    case "slides":
+      return course.slideUrls;
   }
 }
 
@@ -105,6 +118,10 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
       return { ...course, qcms: value };
     case "exemples_analogies":
       return { ...course, exemplesAnalogies: value };
+    case "infographic":
+      return { ...course, infographicUrl: value };
+    case "slides":
+      return { ...course, slideUrls: value };
   }
 }
 
@@ -571,6 +588,8 @@ export default function ModuleWorkspacePage() {
       exemplesAnalogies: null,
       sourceFileUrl,
       updatedAt: created.createdAt,
+      infographicUrl: null,
+      slideUrls: null,
     };
     courseCacheRef.current.set(created.id, fullCourse);
     setActiveCourse(fullCourse);
@@ -757,23 +776,67 @@ export default function ModuleWorkspacePage() {
     // needs to react to a rejection, only to "has it settled yet".
     const generationPromise = (async () => {
       try {
-        // /api/studio/generate now saves to Supabase itself before returning
-        // success (atomic generate-then-save — see that route's header
-        // comment), so there's no separate PATCH here anymore: a refresh
-        // right after this resolves already reloads straight from Supabase,
-        // and a refresh/tab-close mid-generation never burns an OpenRouter
-        // call for a result that never gets saved. Note: no course text is
-        // sent in this request anymore — the backend fetches its own raw_text
-        // by courseId (see that route's own comment) instead of trusting this
-        // client to resend a 60,000-char payload on every single click.
-        // Every section (Explication, Résumé, Cas Clinique, QCM,
-        // Exemples&Analogies) generates its complete content in ONE call on
-        // first open — Résumé's earlier lazy per-mode loading was reverted by
-        // explicit product direction (single-shot, hyper-concise prompt
-        // instead — see STUDIO_RESUME_SYSTEM_PROMPT's own comment).
-        const { res, data } = await postStudioGenerate(id, courseId);
-        if (!res.ok || !data.success) {
-          throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
+        // "infographic" and "slides" are NOT among the 5 JSON sections (see
+        // lib/demo-content.ts's JsonSectionId comment) — each calls its own
+        // dedicated route (image response(s), its own cross-student cache
+        // table, no studio_courses column to save into) instead of
+        // postStudioGenerate below. All three branches converge back onto
+        // the exact same withSectionValue/cache-update/UX-illusion handling
+        // immediately after, so the surrounding spinner/tracker machinery
+        // stays identical for every tile.
+        let resultValue: unknown;
+        let cached: boolean;
+
+        if (id === "infographic") {
+          const res = await fetch("/api/studio/infographic", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ courseId }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.success) {
+            throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
+          }
+          resultValue = data.imageUrl;
+          cached = Boolean(data.cached);
+        } else if (id === "slides") {
+          // Same dedicated-route pattern as "infographic" above — a mini
+          // deck (studio_slides_cache), never routed through
+          // postStudioGenerate. Real latency is higher (a planning call
+          // plus SLIDE_COUNT_TARGET parallel image calls, ~20-40s) but uses
+          // the exact same fetch/spinner/tracker machinery regardless.
+          const res = await fetch("/api/studio/slides", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ courseId }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.success) {
+            throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
+          }
+          resultValue = data.slideUrls;
+          cached = Boolean(data.cached);
+        } else {
+          // /api/studio/generate now saves to Supabase itself before returning
+          // success (atomic generate-then-save — see that route's header
+          // comment), so there's no separate PATCH here anymore: a refresh
+          // right after this resolves already reloads straight from Supabase,
+          // and a refresh/tab-close mid-generation never burns an OpenRouter
+          // call for a result that never gets saved. Note: no course text is
+          // sent in this request anymore — the backend fetches its own raw_text
+          // by courseId (see that route's own comment) instead of trusting this
+          // client to resend a 60,000-char payload on every single click.
+          // Every section (Explication, Résumé, Cas Clinique, QCM,
+          // Exemples&Analogies) generates its complete content in ONE call on
+          // first open — Résumé's earlier lazy per-mode loading was reverted by
+          // explicit product direction (single-shot, hyper-concise prompt
+          // instead — see STUDIO_RESUME_SYSTEM_PROMPT's own comment).
+          const { res, data } = await postStudioGenerate(id, courseId);
+          if (!res.ok || !data.success) {
+            throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
+          }
+          resultValue = data.data;
+          cached = Boolean(data.cached);
         }
 
         // UX ILLUSION (product direction) — a cache hit is instant, but the
@@ -783,7 +846,7 @@ export default function ModuleWorkspacePage() {
         // since it's cleared only in the `finally` block below, after this
         // resolves. Never applied to a genuine cache miss — a real generation
         // already takes real time.
-        if (data.cached) {
+        if (cached) {
           await wait(randomFakeDelayMs());
         }
 
@@ -797,7 +860,7 @@ export default function ModuleWorkspacePage() {
           // /api/studio/generate just did server-side, so the "Récemment
           // généré" list's relative-time label reflects this generation
           // immediately, without waiting for a refetch.
-          const updated = { ...withSectionValue(baseCourse, id, data.data), updatedAt: new Date().toISOString() };
+          const updated = { ...withSectionValue(baseCourse, id, resultValue), updatedAt: new Date().toISOString() };
           courseCacheRef.current.set(courseId, updated);
           // Only apply to the visible state if the student hasn't switched to a different course while this was generating.
           setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
@@ -1237,7 +1300,15 @@ export default function ModuleWorkspacePage() {
       ) : openedSection && generatingSections.has(openedSection) ? (
         <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
           <BrandLoader className="h-6 w-6" />
-          <p className="text-sm text-muted-foreground">Génération en cours...</p>
+          {/* Slides genuinely take ~20-40s (a planning call + several
+              parallel image calls) — a rotating, feature-specific message
+              reads as "working", where the generic static line would read
+              as stalled over that much longer wait. */}
+          {openedSection === "slides" ? (
+            <SlidesGeneratingLabel className="text-sm text-muted-foreground" />
+          ) : (
+            <p className="text-sm text-muted-foreground">Génération en cours...</p>
+          )}
         </div>
       ) : openedSection && activeCourse && getSectionValue(activeCourse, openedSection) ? (
         <div className="animate-fade-in">
@@ -1291,6 +1362,12 @@ export default function ModuleWorkspacePage() {
                 courseSlug={`studio-course-${activeCourse.id}`}
                 explicationMarkdown={activeCourse.explication ?? undefined}
               />
+            )}
+            {openedSection === "infographic" && activeCourse.infographicUrl && (
+              <InfographicViewer key={activeCourse.id} imageUrl={activeCourse.infographicUrl} courseTitle={activeCourse.title} />
+            )}
+            {openedSection === "slides" && activeCourse.slideUrls && activeCourse.slideUrls.length > 0 && (
+              <SlideDeckViewer key={activeCourse.id} slideUrls={activeCourse.slideUrls} courseTitle={activeCourse.title} />
             )}
           </Suspense>
         </div>

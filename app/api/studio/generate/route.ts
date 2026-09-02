@@ -21,7 +21,7 @@ import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { runStudioExplicationDeltaPipeline, runStudioExplicationFreshGenerationWithTagging } from "@/lib/studio-explication-delta";
 import { EXPLICATION_CHUNK_TAGGING_ADDENDUM } from "@/lib/prompts/public-course-sections";
 import { dispatchStudioGenerationPush } from "@/lib/push/dispatch";
-import type { DemoSectionId } from "@/lib/demo-content";
+import type { JsonSectionId } from "@/lib/demo-content";
 
 export const runtime = "nodejs";
 // Explication/QCM/exemples_analogies routinely run 1-3+ minutes at
@@ -32,9 +32,9 @@ export const runtime = "nodejs";
 // other hosts, which have no such cap.
 export const maxDuration = 300;
 
-const VALID_ACTION_TYPES = Object.keys(STUDIO_PROMPT_CONFIG) as DemoSectionId[];
+const VALID_ACTION_TYPES = Object.keys(STUDIO_PROMPT_CONFIG) as JsonSectionId[];
 
-function isValidActionType(value: unknown): value is DemoSectionId {
+function isValidActionType(value: unknown): value is JsonSectionId {
   return typeof value === "string" && (VALID_ACTION_TYPES as string[]).includes(value);
 }
 
@@ -49,7 +49,7 @@ function isValidActionType(value: unknown): value is DemoSectionId {
  */
 function parseAndValidateStudioSection(
   raw: string,
-  actionType: DemoSectionId,
+  actionType: JsonSectionId,
   sectionKey: string
 ): { success: true; data: unknown } | { success: false; correctiveNote: string } {
   let parsedValue: unknown;

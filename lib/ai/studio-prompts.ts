@@ -1,4 +1,4 @@
-import type { DemoSectionId } from "@/lib/demo-content";
+import type { JsonSectionId } from "@/lib/demo-content";
 import type { ContentBlock } from "@/lib/ai/openrouter";
 import {
   CAS_CLINIQUE_SYSTEM_PROMPT,
@@ -165,7 +165,7 @@ interface StudioPromptConfig {
 // sections) and a bigger/longer real course could legitimately need more
 // than what's been generated so far. Re-check with more real data as
 // studio_content_cache accumulates more entries.
-export const STUDIO_PROMPT_CONFIG: Record<DemoSectionId, StudioPromptConfig> = {
+export const STUDIO_PROMPT_CONFIG: Record<JsonSectionId, StudioPromptConfig> = {
   explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 32000 },
   resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
@@ -174,7 +174,7 @@ export const STUDIO_PROMPT_CONFIG: Record<DemoSectionId, StudioPromptConfig> = {
 };
 
 /** Maps each Studio tile id to the top-level JSON key its prompt actually returns. "qcm" is the one mismatch — DEMO_SECTIONS uses the singular tile id, but QCMS_SYSTEM_PROMPT (shared with production) returns the plural "qcms" key. */
-export const STUDIO_SECTION_KEYS: Record<DemoSectionId, string> = {
+export const STUDIO_SECTION_KEYS: Record<JsonSectionId, string> = {
   explication: "explication",
   resume: "resume",
   cas_clinique: "cas_clinique",
@@ -206,7 +206,7 @@ export const STUDIO_SECTION_KEYS: Record<DemoSectionId, string> = {
  * lib/course-generation-shared.ts's buildSectionMessages (the legacy
  * courses-table pipeline), which already does exactly this.
  */
-export function buildStudioSystemMessage(actionType: DemoSectionId, courseContent: string, overrideBasePrompt?: string): ContentBlock[] {
+export function buildStudioSystemMessage(actionType: JsonSectionId, courseContent: string, overrideBasePrompt?: string): ContentBlock[] {
   const basePrompt = overrideBasePrompt ?? STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
   return [
     {
@@ -248,7 +248,7 @@ export function buildStudioSystemMessage(actionType: DemoSectionId, courseConten
  * below, same as before. See that function's own comment for what this
  * change actually does and doesn't save.
  */
-const REGENERATE_INSTRUCTIONS: Record<DemoSectionId, string> = {
+const REGENERATE_INSTRUCTIONS: Record<JsonSectionId, string> = {
   explication:
     "Réécris cette explication en gardant 90% du contenu IDENTIQUE : mêmes informations médicales, même structure, même exactitude factuelle, mot pour mot là où c'est déjà correct. Modifie UNIQUEMENT environ 10% — la formulation, les mots de transition, le rythme des phrases — pour que ça sonne fraîchement écrit, sans jamais sacrifier la continuité pédagogique ni la longueur du contenu.",
   resume:
@@ -286,7 +286,7 @@ const REGENERATE_INSTRUCTIONS: Record<DemoSectionId, string> = {
  * slightly more — "not resending the raw PDF" was never the expensive part
  * to begin with.
  */
-export function buildStudioRegeneratePrompt(actionType: DemoSectionId, existingContent: string): string {
+export function buildStudioRegeneratePrompt(actionType: JsonSectionId, existingContent: string): string {
   const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
   const instruction = REGENERATE_INSTRUCTIONS[actionType];
   return `${basePrompt}
@@ -318,7 +318,7 @@ Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
  * fresh generation (see STUDIO_DELTA_MAX_TOKENS below) — an edit pass, not
  * a rewrite.
  */
-export function buildStudioDeltaAdaptationPrompt(actionType: DemoSectionId, baseContentJson: string, newSourceText: string): string {
+export function buildStudioDeltaAdaptationPrompt(actionType: JsonSectionId, baseContentJson: string, newSourceText: string): string {
   const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
   return `${basePrompt}
 
@@ -343,6 +343,6 @@ Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
  * since explication/qcm/cas_clinique already have very different ceilings
  * from each other for the SAME reason at full-generation time.
  */
-export function studioDeltaMaxTokens(actionType: DemoSectionId): number {
+export function studioDeltaMaxTokens(actionType: JsonSectionId): number {
   return Math.round(STUDIO_PROMPT_CONFIG[actionType].maxTokens * 0.35);
 }

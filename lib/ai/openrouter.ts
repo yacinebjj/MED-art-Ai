@@ -351,6 +351,97 @@ export async function callOpenRouter(
   return content;
 }
 
+// Studio "Infographie / Mindmap" tab — confirmed live against
+// GET https://openrouter.ai/api/v1/models (2026-09-02): real id, output
+// modality includes "image". Real test generation confirmed the ACTUAL cost
+// (~$0.07/image, 1120 image completion tokens at this model's
+// $0.00006/token image_output rate — NOT a per-image flat price, which the
+// tiny-looking per-unit number could otherwise be misread as) — see
+// lib/studio-infographic-cache.ts's own comment. Cross-student cached
+// there, so this is paid once per distinct course, not once per student.
+const IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+
+export interface GeneratedImageResult {
+  /** `data:image/...;base64,...` — the raw model output, not yet uploaded anywhere. Caller decodes and stores it (see app/api/studio/infographic/route.ts). */
+  imageDataUrl: string;
+  /** Accompanying prose, if the model returned any alongside the image — rarely meaningful here, kept only for debugging/logging. */
+  text: string | null;
+}
+
+/**
+ * Image-generation counterpart to callOpenRouter above — a fundamentally
+ * different request (`modalities: ["text", "image"]`) and response shape
+ * (`choices[0].message.images`, an array of `{type, image_url: {url}}`, NOT
+ * a plain `content` string) from every text-only call in this app, so it
+ * gets its own function rather than overloading callOpenRouter's contract.
+ * Confirmed live (2026-09-02, real test call against
+ * IMAGE_MODEL/google/gemini-3.1-flash-image-preview): this exact response
+ * shape is what comes back — `message.images[0].image_url.url` as a real
+ * `data:image/png;base64,...` URL.
+ */
+export async function generateOpenRouterImage(
+  messages: ChatMessageInput[],
+  options?: { model?: string; timeoutMs?: number }
+): Promise<GeneratedImageResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
+  }
+
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+        "X-Title": "Med Art AI",
+      },
+      body: JSON.stringify({
+        model: options?.model ?? IMAGE_MODEL,
+        modalities: ["text", "image"],
+        messages,
+      }),
+      signal: timeoutController.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter image generation timed out after ${timeoutMs}ms`);
+      throw new OpenRouterError("La génération de l'image met trop de temps. Réessaie dans un instant.", 504);
+    }
+    console.error("OpenRouter image generation fetch failed", error);
+    throw new OpenRouterError("L'appel au modèle d'image a échoué. Réessaie dans un instant.", 502);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const detail = extractOpenRouterErrorDetail(body);
+    console.error(`OpenRouter image API error (${res.status})`, body.slice(0, 500));
+    throw new OpenRouterError(`La génération de l'image a échoué : ${detail}`, res.status);
+  }
+
+  const data = await res.json();
+  logUsage(`generateOpenRouterImage model=${options?.model ?? IMAGE_MODEL}`, data?.usage);
+
+  const message = data?.choices?.[0]?.message;
+  const images = message?.images;
+  const imageDataUrl = Array.isArray(images) && images.length > 0 ? images[0]?.image_url?.url : undefined;
+
+  if (typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image/")) {
+    console.error("OpenRouter image generation returned no usable image", JSON.stringify(data).slice(0, 500));
+    throw new OpenRouterError("Le modèle n'a renvoyé aucune image exploitable.", 502);
+  }
+
+  return { imageDataUrl, text: typeof message?.content === "string" ? message.content : null };
+}
+
 /**
  * Same OpenRouter call as `callOpenRouter`, but with `stream: true` — returns
  * a `ReadableStream` of PLAIN TEXT (just the incremental content deltas, no

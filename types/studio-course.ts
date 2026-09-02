@@ -28,4 +28,21 @@ export interface StudioCourseFull {
   sourceFileUrl: string | null;
   /** ISO timestamp, bumped by /api/studio/generate and /api/studio/regenerate on every section save (row-level, not per-section — see StudioPanel's "Récemment généré" list, the only current consumer). Powers a relative "il y a 5 minutes" label instead of the previous, per-row-identical "{sourceCount} source(s)" text. */
   updatedAt: string | null;
+  /**
+   * Public Supabase Storage URL of this course's generated Mindmap
+   * infographie, or `null` if none exists yet. NOT a studio_courses column —
+   * derived on every GET /api/studio/courses/[id] by hashing `explication`
+   * and checking the shared, cross-student studio_infographic_cache table
+   * (see that table's own comment in supabase/schema.sql). Never written via
+   * the generic PATCH /api/studio/courses/[id] section-save endpoint —
+   * app/api/studio/infographic/route.ts owns writing this cache directly.
+   */
+  infographicUrl: string | null;
+  /**
+   * Ordered array of public Supabase Storage URLs for this course's
+   * generated "Slides" mini-deck, or `null` if none exists yet. Same
+   * derived-not-stored pattern as infographicUrl above, backed by
+   * studio_slides_cache — app/api/studio/slides/route.ts owns writing it.
+   */
+  slideUrls: string[] | null;
 }

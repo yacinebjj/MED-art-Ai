@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { DemoSectionId } from "@/lib/demo-content";
+import type { JsonSectionId } from "@/lib/demo-content";
 
 /**
  * Zod mirrors of lib/course-slug-content.ts's Gastrite-prefixed interfaces —
@@ -171,7 +171,7 @@ export const StudioQcmsSchema = z.object({
 const StudioTextSchema = z.string().min(50);
 
 /** One schema per Studio tile, keyed the same way as STUDIO_PROMPT_CONFIG/STUDIO_SECTION_KEYS in lib/ai/studio-prompts.ts. */
-export const STUDIO_SCHEMAS: Record<DemoSectionId, z.ZodTypeAny> = {
+export const STUDIO_SCHEMAS: Record<JsonSectionId, z.ZodTypeAny> = {
   explication: StudioTextSchema,
   resume: StudioResumeSchema,
   cas_clinique: StudioCasCliniqueSchema,

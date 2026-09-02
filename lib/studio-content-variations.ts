@@ -12,7 +12,7 @@
  */
 
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import type { DemoSectionId } from "@/lib/demo-content";
+import type { JsonSectionId } from "@/lib/demo-content";
 
 interface VariationRow {
   id: string;
@@ -26,7 +26,7 @@ export interface VariationLookupResult {
 }
 
 /** Fail-open: any Supabase error resolves to `{ existing: [] }`, which the caller treats as "generate a fresh one" — a lookup failure must never block regeneration, only skip the optimization. */
-export async function lookupVariations(contentHash: string, section: DemoSectionId): Promise<VariationLookupResult> {
+export async function lookupVariations(contentHash: string, section: JsonSectionId): Promise<VariationLookupResult> {
   if (!isSupabaseConfigured()) return { existing: [] };
 
   try {
@@ -60,7 +60,7 @@ export async function lookupVariations(contentHash: string, section: DemoSection
  */
 export async function insertVariation(
   contentHash: string,
-  section: DemoSectionId,
+  section: JsonSectionId,
   variationIndex: number,
   content: unknown
 ): Promise<{ id: string; conflict: false } | { conflict: true }> {

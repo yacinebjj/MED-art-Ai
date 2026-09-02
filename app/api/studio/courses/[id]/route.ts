@@ -3,13 +3,16 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
-import type { DemoSectionId } from "@/lib/demo-content";
+import { normalizeText, sha256 } from "@/lib/content-similarity";
+import { lookupStudioInfographicCache } from "@/lib/studio-infographic-cache";
+import { lookupStudioSlidesCache } from "@/lib/studio-slides-cache";
+import type { JsonSectionId } from "@/lib/demo-content";
 import type { StudioCourseFull } from "@/types/studio-course";
 
 export const runtime = "nodejs";
 
-/** DemoSectionId (tile id) -> studio_courses column name. "qcm" -> "qcms" is the one mismatch, same as lib/ai/studio-prompts.ts's STUDIO_SECTION_KEYS. */
-const SECTION_TO_COLUMN: Record<DemoSectionId, string> = {
+/** JsonSectionId (tile id) -> studio_courses column name — "infographic" is deliberately excluded, see lib/demo-content.ts's own comment on JsonSectionId. "qcm" -> "qcms" is the one mismatch, same as lib/ai/studio-prompts.ts's STUDIO_SECTION_KEYS. */
+const SECTION_TO_COLUMN: Record<JsonSectionId, string> = {
   explication: "explication",
   resume: "resume",
   cas_clinique: "cas_clinique",
@@ -17,7 +20,7 @@ const SECTION_TO_COLUMN: Record<DemoSectionId, string> = {
   exemples_analogies: "exemples_analogies",
 };
 
-function isValidSection(value: unknown): value is DemoSectionId {
+function isValidSection(value: unknown): value is JsonSectionId {
   return typeof value === "string" && Object.keys(SECTION_TO_COLUMN).includes(value);
 }
 
@@ -39,7 +42,7 @@ interface StudioCourseFullRow {
   updated_at: string | null;
 }
 
-function toFullCourse(row: StudioCourseFullRow): StudioCourseFull {
+function toFullCourse(row: StudioCourseFullRow, infographicUrl: string | null, slideUrls: string[] | null): StudioCourseFull {
   return {
     id: row.id,
     title: row.title,
@@ -51,6 +54,8 @@ function toFullCourse(row: StudioCourseFullRow): StudioCourseFull {
     exemplesAnalogies: row.exemples_analogies,
     sourceFileUrl: row.source_file_url,
     updatedAt: row.updated_at,
+    infographicUrl,
+    slideUrls,
   };
 }
 
@@ -86,7 +91,22 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true, course: toFullCourse(data as StudioCourseFullRow) });
+  const row = data as StudioCourseFullRow;
+  // Derived, not stored on this row — see StudioCourseFull.infographicUrl's
+  // own comment. A lookup failure (or no Explication yet) just means no
+  // infographie is shown yet, never blocks loading the rest of the course.
+  // Derived, not stored on this row — see StudioCourseFull.infographicUrl's/
+  // slideUrls' own comments. A lookup failure (or no Explication yet) just
+  // means neither is shown yet, never blocks loading the rest of the course.
+  // Same hash computed once, reused for both lookups (both tables are keyed
+  // by the SAME sha256(normalizeText(explication)) — no collision risk,
+  // different tables), run in parallel rather than sequentially.
+  const contentHash = row.explication ? sha256(normalizeText(row.explication)) : null;
+  const [infographicUrl, slideUrls] = contentHash
+    ? await Promise.all([lookupStudioInfographicCache(contentHash), lookupStudioSlidesCache(contentHash)])
+    : [null, null];
+
+  return NextResponse.json({ success: true, course: toFullCourse(row, infographicUrl, slideUrls) });
 }
 
 /** Saves one tile's freshly generated content — called right after /api/studio/generate succeeds, so a page refresh (or coming back tomorrow) never has to regenerate it. */

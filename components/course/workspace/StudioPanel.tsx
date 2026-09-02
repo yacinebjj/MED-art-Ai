@@ -122,6 +122,8 @@ const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
   cas_clinique: "bg-amber-50 dark:bg-amber-950",
   qcm: "bg-purple-50 dark:bg-purple-950",
   exemples_analogies: "bg-yellow-50 dark:bg-yellow-950",
+  infographic: "bg-rose-50 dark:bg-rose-950",
+  slides: "bg-cyan-50 dark:bg-cyan-950",
 };
 
 /**
@@ -159,6 +161,16 @@ export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: 
     bg: "bg-yellow-50/80 dark:bg-yellow-950/20 border-yellow-200/50 dark:border-yellow-900/40",
     icon: "text-yellow-600 dark:text-yellow-400",
     dot: "bg-yellow-500 dark:bg-yellow-400",
+  },
+  infographic: {
+    bg: "bg-rose-50/80 dark:bg-rose-950/20 border-rose-200/50 dark:border-rose-900/40",
+    icon: "text-rose-600 dark:text-rose-400",
+    dot: "bg-rose-500 dark:bg-rose-400",
+  },
+  slides: {
+    bg: "bg-cyan-50/80 dark:bg-cyan-950/20 border-cyan-200/50 dark:border-cyan-900/40",
+    icon: "text-cyan-600 dark:text-cyan-400",
+    dot: "bg-cyan-500 dark:bg-cyan-400",
   },
 };
 
@@ -207,8 +219,15 @@ function SectionOptionsMenu({
             direction — the 3 generated cases must stay static forever, so
             this item never renders for that section regardless of what the
             caller passes as onRegenerateSection. Enforced again server-side
-            in app/api/studio/regenerate/route.ts — this is the UI half only. */}
-        {onRegenerateSection && sectionId !== "cas_clinique" && (
+            in app/api/studio/regenerate/route.ts — this is the UI half only.
+            Infographic and Slides have no variations cache (their own cache
+            tables each hold ONE canonical result per content hash, unlike
+            studio_content_variations) — regenerating would just re-serve the
+            identical cached result, so this item never renders for either;
+            there is no separate route to enforce this server-side since
+            neither /api/studio/infographic nor /api/studio/slides has a
+            "regenerate" mode at all. */}
+        {onRegenerateSection && sectionId !== "cas_clinique" && sectionId !== "infographic" && sectionId !== "slides" && (
           <DropdownMenuItem onSelect={() => onRegenerateSection(sectionId)}>
             <RefreshCw className="h-4 w-4" />
             {tStudio("regenerate", language)}
@@ -604,7 +623,7 @@ export function StudioPanel({
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {onRegenerateSection && section.id !== "cas_clinique" && (
+                            {onRegenerateSection && section.id !== "cas_clinique" && section.id !== "infographic" && section.id !== "slides" && (
                               <DropdownMenuItem onSelect={() => onRegenerateSection(section.id)}>
                                 <RefreshCw className="h-4 w-4" />
                                 {tStudio("regenerate", language)}
