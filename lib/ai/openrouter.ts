@@ -648,7 +648,14 @@ export interface TranscriptionResult {
 export async function transcribeAudioViaOpenRouter(
   buffer: Buffer,
   format: TranscriptionFormat,
-  options?: { language?: string; timeoutMs?: number }
+  // temperature defaults to 0 (deterministic, most-likely-token decoding) —
+  // Whisper-family models are well known to "hallucinate" invented words
+  // during silence/noise/low-confidence audio, and a real fidelity issue was
+  // reported on this exact pipeline (see lib/ai/lecture-notes-prompts.ts's
+  // own hardening comment). A higher temperature only adds decoding
+  // randomness, which is never wanted for a transcription meant to be
+  // word-for-word faithful.
+  options?: { language?: string; timeoutMs?: number; temperature?: number }
 ): Promise<TranscriptionResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -676,6 +683,7 @@ export async function transcribeAudioViaOpenRouter(
       // BlobPart's stricter ArrayBuffer type.
       form.append("file", new Blob([Uint8Array.from(buffer)], { type: TRANSCRIPTION_FORMAT_MIME[format] }), `audio.${format}`);
       if (options?.language) form.append("language", options.language);
+      form.append("temperature", String(options?.temperature ?? 0));
 
       res = await fetch(OPENROUTER_TRANSCRIPTION_URL, {
         method: "POST",
@@ -692,6 +700,7 @@ export async function transcribeAudioViaOpenRouter(
         body: JSON.stringify({
           model: TRANSCRIPTION_MODEL,
           input_audio: { data: buffer.toString("base64"), format },
+          temperature: options?.temperature ?? 0,
           ...(options?.language ? { language: options.language } : {}),
         }),
         signal: timeoutController.signal,

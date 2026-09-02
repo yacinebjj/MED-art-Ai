@@ -17,12 +17,12 @@ import { tDiscovery } from "@/lib/translations/discovery";
  */
 
 interface SearchResult {
-  courseSlug: string;
+  courseId: number;
   courseTitle: string;
+  moduleId: number;
   moduleName: string | null;
   sectionLabel: string;
   excerpt: string;
-  similarity: number;
 }
 
 const RESULTS_GROUP_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
@@ -205,17 +205,18 @@ export default function SearchPage() {
                     </div>
                     <div className="space-y-3">
                       {moduleResults.map((r, i) => (
-                        <motion.div key={`${r.courseSlug}-${r.sectionLabel}-${i}`} variants={RESULT_ITEM_VARIANTS}>
-                          {/* Was a Link to /dashboard/demo/${slug} — that page (the
-                              retired "cours indépendant" pipeline) no longer exists.
-                              Rendered inert rather than left pointing at a 404;
-                              the underlying `courses`-table search index itself is
-                              untouched here — a real follow-up, not done in this
-                              pass. */}
-                          <div
+                        <motion.div key={`${r.courseId}-${r.sectionLabel}-${i}`} variants={RESULT_ITEM_VARIANTS}>
+                          {/* Opens the real Module Workspace — search now only ever
+                              indexes studio_courses, strictly scoped to the
+                              signed-in student's own rows (see app/api/search
+                              /route.ts), so this course is guaranteed reachable
+                              and guaranteed theirs. */}
+                          <Link
+                            href={`/dashboard/module/${r.moduleId}`}
                             className={cn(
-                              "glass-card block rounded-2xl p-4 shadow-glass",
-                              "opacity-70"
+                              "glass-card block rounded-2xl p-4 shadow-glass transition-all duration-300",
+                              "hover:-translate-y-0.5 hover:shadow-primary-500/20",
+                              "dark:shadow-glass-dark dark:hover:shadow-primary-400/20"
                             )}
                           >
                             <div className="mb-1 flex items-center gap-2">
@@ -228,7 +229,7 @@ export default function SearchPage() {
                             <p dir="auto" className="line-clamp-2 text-sm text-slate-600 dark:text-gray-400">
                               {r.excerpt}
                             </p>
-                          </div>
+                          </Link>
                         </motion.div>
                       ))}
                     </div>

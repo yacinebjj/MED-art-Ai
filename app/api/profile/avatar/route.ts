@@ -137,11 +137,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "L'envoi de la photo a échoué. Réessaie." }, { status: 500 });
   }
 
+  // .eq("id", user.id) targets the service-role UPDATE itself — RLS isn't
+  // actually in play here at all (getSupabaseAdmin() bypasses it entirely),
+  // so an update failure is NOT an RLS/permission issue. The most likely
+  // real cause, confirmed by this project's own history: `avatar_url` was
+  // added to `profiles` via `alter table ... add column if not exists` in
+  // supabase/schema.sql, and that statement may never have actually been run
+  // against the live Supabase project (this repo has no migration tool — see
+  // that column's own "Point 13" comment). Surfacing the real Postgres/
+  // PostgREST error (e.g. "Could not find the 'avatar_url' column") instead
+  // of a fixed generic message is what makes that diagnosable without
+  // guessing, matching every other route in this app that hit the same
+  // class of bug.
   const { error: updateError } = await supabase.from("profiles").update({ avatar_url: avatarUrl }).eq("id", user.id);
   if (updateError) {
-    console.error("[profile/avatar] Photo uploadée mais mise à jour du profil échouée:", updateError);
+    console.error("[profile/avatar] Photo uploadée mais mise à jour du profil échouée:", {
+      code: updateError.code,
+      message: updateError.message,
+      details: updateError.details,
+      hint: updateError.hint,
+    });
     return NextResponse.json(
-      { success: false, error: "La photo a été envoyée mais le profil n'a pas pu être mis à jour." },
+      {
+        success: false,
+        error: `La photo a été envoyée mais le profil n'a pas pu être mis à jour : ${updateError.message}`,
+        supabase: { code: updateError.code, message: updateError.message, details: updateError.details, hint: updateError.hint },
+      },
       { status: 500 }
     );
   }

@@ -1416,12 +1416,23 @@ export default function ModuleWorkspacePage() {
           <div
             className={cn(
               "grid flex-1 gap-4 overflow-hidden transition-all duration-300",
-              isSplitScreen ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
+              // Was `isSplitScreen ? "...lg:grid-cols-2" : "grid-cols-1"` — that
+              // ignored isStudioCollapsed entirely, so collapsing/closing
+              // Studio inside split-screen mode left the grid hardcoded at a
+              // 50/50 split with an empty collapsed-Studio cell, and Chat never
+              // reclaimed the freed width. Collapsed Studio now renders in its
+              // own w-20 rail OUTSIDE this grid (below) instead, so Chat's
+              // single remaining grid column can genuinely stretch full-width.
+              isSplitScreen && !isStudioCollapsed ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
             )}
           >
             <main className={panelShellClasses}>{chatPanel}</main>
-            {isSplitScreen && <aside className={panelShellClasses}>{studioPanel}</aside>}
+            {isSplitScreen && !isStudioCollapsed && <aside className={panelShellClasses}>{studioPanel}</aside>}
           </div>
+
+          {isSplitScreen && isStudioCollapsed && (
+            <aside className={cn(panelShellClasses, "w-20 shrink-0 transition-all duration-300")}>{studioPanel}</aside>
+          )}
 
           {!isSplitScreen && (
             <aside className={cn(panelShellClasses, "shrink-0 transition-all duration-300", isStudioCollapsed ? "w-20" : "w-96")}>

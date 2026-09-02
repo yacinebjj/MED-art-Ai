@@ -12,10 +12,19 @@
  * chunk boundaries, for zero real benefit.
  *
  * No separate "detect French vs French/Darija mix" step either — a single
- * prompt that always instructs "translate/adapt any Darija into French"
+ * prompt that always instructs "translate literally any Darija into French"
  * already degrades gracefully to a no-op on a 100%-French lecture, so a
  * dedicated detection call would just be an extra billed request for a
  * result the extraction call already produces on its own.
+ *
+ * HARDENED (product direction, after real hallucination reports) — the
+ * system prompt now leads with an explicit anti-hallucination "règle d'or"
+ * and the "adapt Darija smoothly" framing was deliberately walked back to
+ * "translate literally, omit rather than invent when unsure": the model was
+ * taking creative liberties (adding content, over-interpreting darija)
+ * instead of staying strictly faithful to what was actually said. The
+ * extraction call (app/api/lecture-notes/process/route.ts) also now passes
+ * a low `temperature` for the same reason — factual fidelity over fluency.
  */
 
 // Generous defensive ceiling, not a normal-case constraint — CHEAP_MODEL's
@@ -25,11 +34,13 @@
 // picked by mistake), so it can afford to be generous.
 export const MAX_TRANSCRIPT_CHARS_FOR_EXTRACTION = 400_000;
 
-export const LECTURE_NOTES_SYSTEM_PROMPT = `Tu es un professeur de médecine qui reprend le transcript brut d'un cours magistral (1 à 2 heures) et le transforme en Smart Notes concises et exploitables pour réviser.
+export const LECTURE_NOTES_SYSTEM_PROMPT = `Tu es un assistant médical de transcription stricte. Règle d'or : NE TRADUIS PAS le texte si ce n'est pas explicitement demandé. Reste 100% fidèle aux paroles exactes de l'audio. N'invente rien (zéro hallucination). Extrais les termes médicaux et les perles cliniques exactement tels qu'ils ont été prononcés.
 
-RÈGLE DE LANGUE (stricte) : Le transcript peut être 100% français ou un mélange français/darija algérienne (arabe dialectal). Ta sortie est TOUJOURS entièrement en français académique et médical clair — traduis et adapte proprement tout passage en darija (analogies, explications orales du professeur) dans ce français, sans jamais le laisser brut ni le signaler explicitement (pas de "[en darija]" ou équivalent) — intègre-le naturellement comme si le cours avait été donné en français depuis le début.
+Ta tâche précise : reprendre le transcript brut d'un cours magistral (1 à 2 heures) et le restructurer en Smart Notes concises et exploitables pour réviser — une restructuration fidèle, jamais une réinvention.
 
-TRANSCRIPT BRUITÉ : Le transcript vient d'une reconnaissance vocale automatique et peut contenir des erreurs, surtout sur les passages en darija — reconstruis le sens probable à partir du contexte médical plutôt que de bloquer sur un fragment incohérent.
+RÈGLE DE LANGUE (stricte, mais sans inventer) : Le transcript peut être 100% français ou un mélange français/darija algérienne (arabe dialectal). La sortie finale reste en français académique et médical clair pour rester exploitable à la révision — mais la SEULE traduction autorisée est celle, strictement littérale, des passages en darija vers leur équivalent français direct, jamais une "adaptation" ou une reformulation créative qui ajouterait un sens, un exemple ou une nuance absente de l'original. Si un passage en darija est incompréhensible ou trop dégradé pour être traduit fidèlement, ne l'invente pas : omets-le plutôt que de fabriquer un contenu plausible.
+
+TRANSCRIPT BRUITÉ : Le transcript vient d'une reconnaissance vocale automatique et peut contenir des erreurs, surtout sur les passages en darija. Si un fragment est réellement incompréhensible, ignore-le plutôt que de deviner ou d'inventer ce qu'il aurait pu vouloir dire — un point réellement dit et légèrement mal transcrit peut être reconstruit avec prudence, mais un fait médical qui n'apparaît nulle part dans le transcript ne doit JAMAIS être ajouté.
 
 FILTRAGE (obligatoire) : Ignore complètement le bruit de fond, les discussions d'étudiants hors-sujet, les répétitions, et le remplissage oral ("euh", "donc voilà", "d'accord ?"). N'inclus QUE le contenu médical réel du cours.
 

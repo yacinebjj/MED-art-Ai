@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { getEmbedding } from "@/lib/ai/embeddings";
-import { buildCourseChunks } from "@/lib/search/chunking";
 import { rateLimit, RATE_LIMITS, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 
@@ -10,133 +8,77 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Real semantic search (embeddings + pgvector cosine similarity) over every
- * public course's Explication/Résumé/Cas Clinique/QCM content — see
- * lib/search/chunking.ts for how a course is split into chunks, and
- * supabase/schema.sql for the `course_chunks` table + `match_course_chunks`
- * function this depends on.
+ * Search over the signed-in student's OWN Studio courses — REWRITTEN
+ * (product direction, after a real cross-account data-leak report): this
+ * used to query the now-retired `courses` table (the old "cours
+ * indépendant" pipeline, see git history) via pgvector semantic search, with
+ * NO user scoping anywhere in the query — `ensureCoursesIndexed` read every
+ * course platform-wide, and `match_course_chunks` had no user/module filter
+ * at all. Any student searching any word could see any OTHER student's
+ * uploaded course content. That whole embedding/pgvector index
+ * (course_chunks, match_course_chunks) was built for that retired table and
+ * is not reused here.
  *
- * Self-healing index: any course that has never been chunked gets indexed
- * right here, on the first search that runs after it, instead of hooking
- * into every content-generation route (explication/resume/cas-clinique/qcm)
- * separately. Bounded per request (MAX_COURSES_TO_INDEX × capped chunk
- * count) so one search can't trigger an unbounded embedding bill or a
- * request that hangs for minutes — the tradeoff is that a brand-new course
- * may need a couple of searches before it's fully indexed, not one.
+ * STRICT ISOLATION: the only query below is `.eq("user_id", user.id")` on
+ * `studio_courses` — every row a student can ever create is already scoped
+ * to a curriculum module THEY THEMSELVES opened (there is no "upload to
+ * someone else's module" path anywhere in this app), so this single filter
+ * guarantees both "only my courses" and "only my modules" — no separate
+ * enrollment table exists or is needed.
+ *
+ * Deliberately plain substring matching (no embeddings, no new pgvector
+ * index) — a single student's own course set is small (dozens, not
+ * thousands), so a full per-user row scan is cheap, and building a whole new
+ * semantic index for `studio_courses` is real, separate work this fix does
+ * not attempt. Matching happens in application code (not a PostgREST
+ * `.ilike` filter) because `resume`/`cas_clinique`/`qcms` are jsonb columns,
+ * not text — PostgREST can't ilike-filter those directly without a cast this
+ * query builder can't express, so each row is fetched once (already scoped
+ * to this user, so this is not an isolation risk) and matched here instead.
  */
 
-const MAX_COURSES_TO_INDEX_PER_REQUEST = 2;
-const MAX_CHUNKS_PER_REQUEST = 40;
-const MATCH_COUNT = 10;
+const MAX_RESULTS = 20;
+const EXCERPT_RADIUS = 120;
 
-/**
- * Hard similarity floor — the real fix for a query like "fracture" coming
- * back with an unrelated "Pleurésie purulente" chunk: match_course_chunks
- * previously had NO threshold at all, just "return the MATCH_COUNT nearest
- * rows, however far they actually are" — pgvector's <=> always produces
- * SOME ordering even when every indexed chunk is genuinely unrelated to the
- * query, so an under-matched search silently padded out with noise instead
- * of coming back short (or empty).
- *
- * NOT set to 0.75+ as a first instinct might suggest: that bar is calibrated
- * for near-duplicate/paraphrase detection (see SEMANTIC_CACHE_THRESHOLD in
- * lib/ai/semantic-cache.ts, 0.88 — cached QUESTION vs QUESTION, or
- * SIMILAR_COURSE_THRESHOLD in lib/content-similarity.ts, 0.9 — whole
- * DOCUMENT vs DOCUMENT). This is a fundamentally different comparison — a
- * short, sparse search QUERY against a long, dense course PASSAGE — and
- * text-embedding-3-small's real similarity distribution for query-to-passage
- * pairs sits meaningfully lower than paraphrase-to-paraphrase pairs even for
- * a genuinely relevant match.
- *
- * Lowered from an initial 0.4 to 0.25 after real production use: 0.4 itself
- * was already too strict and excluded genuinely correct matches for longer,
- * multi-word queries (e.g. "Traumatismes du coude") — a longer query phrase
- * dilutes its own embedding across more concepts, which tends to pull its
- * cosine similarity against any single passage LOWER than a short, focused
- * query does, even when that passage is exactly the right course. 0.25 is
- * still a reasoned floor, not a fully measured one — keep using the
- * console.log below (prints every returned similarity score) to recalibrate
- * further: raise it if irrelevant results start slipping back through above
- * 0.25, lower it if real courses are still being wrongly excluded.
- */
-const MATCH_THRESHOLD = 0.25;
+interface StudioCourseSearchRow {
+  id: number;
+  title: string;
+  curriculum_module_id: number;
+  explication: string | null;
+  resume: unknown;
+  cas_clinique: unknown;
+  qcms: unknown;
+  exemples_analogies: string | null;
+}
 
-async function ensureCoursesIndexed(supabase: ReturnType<typeof getSupabaseAdmin>) {
-  // Both reads below used to silently ignore `error` — a persistent
-  // permission/RLS failure made EVERY course look unindexed on EVERY
-  // request, triggering a real embedding call each time instead of the
-  // intended "index once, then skip" behavior. Found during a security
-  // audit. Bailing out here (not indexing anything this request) rather
-  // than throwing — this is a best-effort pre-warm for the REAL search
-  // below, which must still run even if this step can't determine what
-  // needs indexing.
-  const { data: indexedRows, error: indexedError } = await supabase.from("course_chunks").select("course_slug");
-  if (indexedError) {
-    console.error("[search:ensureCoursesIndexed] Échec lecture course_chunks — indexation ignorée ce tour-ci:", indexedError.message);
-    return;
-  }
-  const indexedSlugs = new Set((indexedRows ?? []).map((r: { course_slug: string }) => r.course_slug));
-
-  const { data: allCourses, error: allCoursesError } = await supabase.from("courses").select("slug");
-  if (allCoursesError) {
-    console.error("[search:ensureCoursesIndexed] Échec lecture courses — indexation ignorée ce tour-ci:", allCoursesError.message);
-    return;
-  }
-  const missingSlugs = (allCourses ?? [])
-    .map((c: { slug: string }) => c.slug)
-    .filter((slug: string) => !indexedSlugs.has(slug))
-    .slice(0, MAX_COURSES_TO_INDEX_PER_REQUEST);
-
-  if (missingSlugs.length === 0) return;
-
-  // The DB column is named "resumé" (French accent) and aliased to "resume"
-  // here — same workaround as app/api/courses/slug/[slug]/route.ts's
-  // parseJsonColumn comment: supabase-js's compile-time select-string parser
-  // can't statically parse the accented column name, so the result is cast.
-  interface CourseToIndex {
-    slug: string;
-    module_id: number | null;
-    explication: string | null;
-    resume: unknown;
-    cas_clinique: unknown;
-    qcms: unknown;
-    exemples_analogies: string | null;
-  }
-
-  const { data: coursesToIndex } = (await supabase
-    .from("courses")
-    .select("slug, module_id, explication, resume:resumé, cas_clinique, qcms, exemples_analogies")
-    .in("slug", missingSlugs)) as unknown as { data: CourseToIndex[] | null };
-
-  let chunksIndexedSoFar = 0;
-  for (const course of coursesToIndex ?? []) {
-    if (chunksIndexedSoFar >= MAX_CHUNKS_PER_REQUEST) break;
-
-    const chunks = buildCourseChunks({
-      slug: course.slug,
-      explication: course.explication,
-      resume: course.resume,
-      casClinique: course.cas_clinique,
-      qcms: course.qcms,
-      exemplesAnalogies: course.exemples_analogies,
-    }).slice(0, MAX_CHUNKS_PER_REQUEST - chunksIndexedSoFar);
-
-    if (chunks.length === 0) continue;
-
-    const embeddings = await Promise.all(chunks.map((chunk) => getEmbedding(chunk.content)));
-    const rows = chunks.map((chunk, i) => ({
-      course_slug: course.slug,
-      module_id: course.module_id,
-      section_label: chunk.sectionLabel,
-      chunk_index: i,
-      content: chunk.content,
-      embedding: embeddings[i],
-    }));
-
-    await supabase.from("course_chunks").upsert(rows, { onConflict: "course_slug,section_label,chunk_index" });
-    chunksIndexedSoFar += chunks.length;
+/** Flattens any section value (plain string or jsonb object) into a searchable/excerptable string. */
+function sectionText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
   }
 }
+
+/** A short, centered window of context around the first match — never the raw JSON blob a jsonb section would otherwise produce. */
+function excerptAround(text: string, query: string): string {
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text.replace(/\s+/g, " ").trim().slice(0, EXCERPT_RADIUS * 2);
+  const start = Math.max(0, idx - EXCERPT_RADIUS);
+  const end = Math.min(text.length, idx + query.length + EXCERPT_RADIUS);
+  const slice = text.slice(start, end).replace(/\s+/g, " ").trim();
+  return `${start > 0 ? "…" : ""}${slice}${end < text.length ? "…" : ""}`;
+}
+
+const SECTION_LABELS: Record<string, string> = {
+  explication: "Explication",
+  resume: "Résumé",
+  cas_clinique: "Cas Clinique",
+  qcms: "QCM",
+  exemples_analogies: "Exemples & Analogies",
+};
 
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -167,78 +109,73 @@ export async function POST(request: NextRequest) {
   if (typeof query !== "string" || !query.trim()) {
     return NextResponse.json({ error: "Le champ 'query' est requis." }, { status: 400 });
   }
+  const q = query.trim();
+  const qLower = q.toLowerCase();
 
   const supabase = getSupabaseAdmin();
 
-  try {
-    await ensureCoursesIndexed(supabase);
-  } catch (error) {
-    console.error("[search] Échec de l'indexation à la volée:", errorMessage(error));
-    // Indexing failures never block the search itself — courses already
-    // indexed from a prior request still return real results.
-  }
+  const { data: rows, error: rowsError } = await supabase
+    .from("studio_courses")
+    .select("id, title, curriculum_module_id, explication, resume, cas_clinique, qcms, exemples_analogies")
+    .eq("user_id", user.id)
+    .returns<StudioCourseSearchRow[]>();
 
-  let queryEmbedding: number[];
-  try {
-    queryEmbedding = await getEmbedding(query.trim());
-  } catch (error) {
-    return NextResponse.json({ error: `Échec de la recherche : ${errorMessage(error)}` }, { status: 500 });
-  }
-
-  const { data: matches, error: matchError } = await supabase.rpc("match_course_chunks", {
-    query_embedding: queryEmbedding,
-    match_count: MATCH_COUNT,
-    match_threshold: MATCH_THRESHOLD,
-  });
-
-  if (matchError) {
-    console.error("[search] Échec de match_course_chunks:", { code: matchError.code, message: matchError.message });
+  if (rowsError) {
+    console.error("[search] Échec lecture studio_courses:", rowsError.message);
     return NextResponse.json({ error: "La recherche a échoué." }, { status: 500 });
   }
 
-  const rows = (matches ?? []) as { course_slug: string; section_label: string; content: string; similarity: number }[];
+  type Hit = { courseId: number; courseTitle: string; moduleId: number; sectionLabel: string; excerpt: string };
+  const hits: Hit[] = [];
 
-  // Calibration data for MATCH_THRESHOLD above — logs the query alongside
-  // every score that cleared the floor (and how many rows came back at
-  // all), so a real, empty, or suspiciously-thin result set can be traced
-  // back to actual production searches instead of guessed at.
-  console.log(
-    `[search] query="${query.trim()}" -> ${rows.length} résultat(s) au-dessus du seuil ${MATCH_THRESHOLD}` +
-      (rows.length > 0 ? ` — scores: ${rows.map((r) => r.similarity.toFixed(3)).join(", ")}` : "")
-  );
-  const uniqueSlugs = Array.from(new Set(rows.map((r) => r.course_slug)));
+  for (const course of rows ?? []) {
+    const sections: [string, unknown][] = [
+      ["explication", course.explication],
+      ["resume", course.resume],
+      ["cas_clinique", course.cas_clinique],
+      ["qcms", course.qcms],
+      ["exemples_analogies", course.exemples_analogies],
+    ];
 
-  // Enrichment only (titles/module names for display) — the real match
-  // results above are already valid without it, so a failure here logs and
-  // degrades to unlabeled results rather than failing the whole search.
-  // Previously silently ignored `error` entirely (no logging at all).
-  const { data: courseRows, error: courseRowsError } = await supabase.from("courses").select("slug, title, module_id").in("slug", uniqueSlugs);
-  if (courseRowsError) {
-    console.error("[search] Échec lecture courses (enrichissement titres/modules):", courseRowsError.message);
+    const titleMatches = course.title.toLowerCase().includes(qLower);
+
+    for (const [sectionKey, rawValue] of sections) {
+      const text = sectionText(rawValue);
+      if (!text) continue;
+      if (!titleMatches && !text.toLowerCase().includes(qLower)) continue;
+
+      hits.push({
+        courseId: course.id,
+        courseTitle: course.title,
+        moduleId: course.curriculum_module_id,
+        sectionLabel: SECTION_LABELS[sectionKey] ?? sectionKey,
+        excerpt: titleMatches && !text.toLowerCase().includes(qLower) ? text.replace(/\s+/g, " ").trim().slice(0, EXCERPT_RADIUS * 2) : excerptAround(text, q),
+      });
+
+      if (hits.length >= MAX_RESULTS) break;
+    }
+    if (hits.length >= MAX_RESULTS) break;
   }
-  const moduleIds = Array.from(new Set((courseRows ?? []).map((c: { module_id: number | null }) => c.module_id).filter((id: number | null): id is number => id != null)));
+
+  console.log(`[search] user=${user.id} query="${q}" -> ${hits.length} résultat(s) (studio_courses, scopé à cet utilisateur)`);
+
+  const moduleIds = Array.from(new Set(hits.map((h) => h.moduleId)));
   const { data: moduleRows, error: moduleRowsError } = moduleIds.length
-    ? await supabase.from("modules").select("id, name").in("id", moduleIds)
-    : { data: [] as { id: number; name: string }[], error: null };
+    ? await supabase.from("curriculum_modules").select("id, title").in("id", moduleIds)
+    : { data: [] as { id: number; title: string }[], error: null };
   if (moduleRowsError) {
-    console.error("[search] Échec lecture modules (enrichissement titres/modules):", moduleRowsError.message);
+    console.error("[search] Échec lecture curriculum_modules (enrichissement noms de module):", moduleRowsError.message);
   }
+  const moduleTitleById = new Map((moduleRows ?? []).map((m: { id: number; title: string }) => [m.id, m.title]));
 
-  const courseBySlug = new Map((courseRows ?? []).map((c: { slug: string; title: string; module_id: number | null }) => [c.slug, c]));
-  const moduleById = new Map((moduleRows ?? []).map((m: { id: number; name: string }) => [m.id, m.name]));
-
-  const results = rows.map((row) => {
-    const course = courseBySlug.get(row.course_slug);
-    const moduleName = course?.module_id != null ? moduleById.get(course.module_id) ?? null : null;
-    return {
-      courseSlug: row.course_slug,
-      courseTitle: course?.title ?? row.course_slug,
-      moduleName,
-      sectionLabel: row.section_label,
-      excerpt: row.content.slice(0, 240),
-      similarity: row.similarity,
-    };
-  });
+  const results = hits.map((h) => ({
+    courseId: h.courseId,
+    courseTitle: h.courseTitle,
+    moduleId: h.moduleId,
+    moduleName: moduleTitleById.get(h.moduleId) ?? null,
+    sectionLabel: h.sectionLabel,
+    excerpt: h.excerpt,
+  }));
 
   return NextResponse.json({ results });
 }

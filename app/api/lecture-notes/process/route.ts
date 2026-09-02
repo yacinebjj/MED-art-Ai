@@ -103,7 +103,11 @@ export async function POST(request: NextRequest) {
         { role: "system", content: LECTURE_NOTES_SYSTEM_PROMPT },
         { role: "user", content: buildLectureNotesUserMessage(excerpt) },
       ],
-      { model: CHEAP_MODEL, maxTokens: 2000, bypassMock: true }
+      // temperature 0.2 — factual fidelity over fluency (product direction,
+      // after real hallucination reports on this exact route). See
+      // LECTURE_NOTES_SYSTEM_PROMPT's own comment for the matching prompt
+      // hardening.
+      { model: CHEAP_MODEL, maxTokens: 2000, temperature: 0.2, bypassMock: true }
     );
 
     await supabase
