@@ -118,14 +118,29 @@ SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "q
  * EXPLICATION_SYSTEM_PROMPT (imported above) is the shared, production-proven
  * prompt — NEVER edited directly, so the real per-course pipeline
  * (app/api/generate/explication/route.ts) is unaffected, same reasoning as
- * every other override in this file. The Studio mandate asks for a 10-15%
- * length reduction to cut AI cost WITHOUT losing medical depth, chapter
- * structure, or the clinical/magistral style — this override targets filler
- * specifically, never medical substance, so it's an APPEND, not a rewrite.
+ * every other override in this file.
+ *
+ * MANDATE REVERSED (explicit product decision, definitive): the Studio
+ * override used to ask for a 10-15% length REDUCTION for cost reasons.
+ * That is now the OPPOSITE of what's wanted — maximum exhaustiveness,
+ * explicitly at the expense of cost/length, is the goal. Every word,
+ * sentence and line of the source material must be explained in
+ * painstaking detail; nothing gets summarized away. See maxTokens below
+ * (raised alongside this prompt change) — a longer mandate needs more room
+ * to actually complete, and fixInvalidJsonEscapes/repairTruncatedJson
+ * (lib/course-generation-shared.ts) are the safety net if a course is long
+ * enough to still hit that higher ceiling.
  */
 const STUDIO_EXPLICATION_SYSTEM_PROMPT = `${EXPLICATION_SYSTEM_PROMPT}
 
-SURCHARGE OBLIGATOIRE — CONCISION SANS PERTE DE PROFONDEUR : conserve intégralement la structure en chapitres, le niveau de détail médical, le style magistral et la rigueur clinique déjà exigés ci-dessus — RIEN de médical ne doit disparaître, aucun mécanisme, aucune notion du cours source ne doit être coupé ou résumé à l'excès. Réduis UNIQUEMENT le volume de mots consacré aux tournures rédactionnelles non-informatives : phrases de transition creuses, reformulations d'une idée déjà exprimée, adjectifs et adverbes de remplissage sans valeur clinique. Vise une réduction globale d'environ 10 à 15% du nombre de mots par rapport à une rédaction non filtrée, obtenue exclusivement en éliminant ce type de superflu rédactionnel.
+SURCHARGE OBLIGATOIRE — EXHAUSTIVITÉ MAXIMALE (remplace toute consigne de concision ou de réduction ci-dessus) : ceci est la consigne la PLUS IMPORTANTE de tout ce prompt. L'objectif n'est PAS un cours dense mais raisonnable — c'est l'explication la plus longue, la plus détaillée et la plus complète qu'il soit humainement possible de produire sur ce cours, au point qu'AUCUNE information, aucun mot, aucune phrase, aucune ligne du texte source ne reste sans être développé, expliqué et recontextualisé. Vise l'exhaustivité absolue, jamais la brièveté — quand tu hésites entre "couper pour rester concis" et "développer davantage", développe TOUJOURS davantage.
+
+Concrètement :
+- Pour CHAQUE phrase du texte source, explique non seulement CE qu'elle dit, mais POURQUOI c'est vrai, COMMENT ce mécanisme fonctionne en détail, et QUELLES sont ses implications cliniques — jamais une simple reformulation ou paraphrase de la phrase source.
+- N'omets JAMAIS un détail, un chiffre, une exception, une nuance ou un cas particulier présent dans le texte source sous prétexte qu'il semble mineur — un étudiant qui lit ton explication ne doit JAMAIS avoir besoin de retourner au texte source pour combler un manque.
+- Multiplie les exemples, les analogies et les reformulations pédagogiques pour CHAQUE concept, plutôt que de te contenter d'une seule explication — plus il y a d'angles différents pour faire comprendre la même notion, mieux c'est.
+- Le nombre de chapitres et leur longueur individuelle doivent s'étendre autant que le contenu source le permet réellement — ne t'arrête JAMAIS par souci de longueur, de coût, ou de "c'est probablement suffisant". Si le texte source est riche, vise largement plus de 8000 mots, sans plafond réel — plus long et plus détaillé est toujours strictement préférable.
+- Cette exhaustivité ne doit JAMAIS être obtenue en ajoutant du remplissage vide (répétitions creuses, tournures sans contenu médical) — chaque mot supplémentaire doit apporter une vraie information, un vrai mécanisme, un vrai exemple clinique en plus, jamais du bavardage.
 
 SURCHARGE OBLIGATOIRE — TUTOIEMENT STRICT : tu t'adresses à UN SEUL étudiant que tu connais et que tu coaches personnellement, jamais à un auditoire. Utilise EXCLUSIVEMENT la deuxième personne du singulier ("tu", "toi", "ton", "ta", "tes") du tout premier au tout dernier mot — le vouvoiement ("vous", "votre", "vos") est FORMELLEMENT INTERDIT, y compris dans l'introduction, l'avant-propos et le récapitulatif final où le risque de glisser vers un registre plus académique est le plus fort. C'est ce tutoiement constant qui crée le ton "professeur chaleureux en tête-à-tête" exigé ci-dessus — un seul "vous" égaré rompt cet effet pour tout le reste du texte.`;
 
@@ -154,18 +169,26 @@ interface StudioPromptConfig {
   maxTokens: number;
 }
 
-// explication: raised 32000 -> 32768 (explicit product instruction, after
-// real "cours très long" production truncation reports) — kept as the ONE
-// section with a large ceiling even after the model-policy change below
-// (every section, Explication included, now runs on ECONOMY_MODEL — see
-// this file's own header comment) precisely because it's the longest,
-// deepest-detail section by design. Note this alone does not fully solve
-// truncation on a GENUINELY long course — `reasoning: { effort: "low" }`
-// (see app/api/studio/generate/route.ts and lib/studio-explication-delta.ts)
-// still reserves ~20% of this budget for hidden reasoning tokens, and
-// recoverExplicationOnly's unclosed-string recovery (same file) is the real
-// safety net when the visible explication text itself still runs past
-// whatever's left.
+// explication: raised again, 32768 -> 65536 (explicit product instruction:
+// "exhaustivité maximale" — every word/sentence/line of the source explained
+// in painstaking detail, no length ceiling in spirit — see
+// STUDIO_EXPLICATION_SYSTEM_PROMPT's own header comment for the matching
+// prompt rewrite). HONESTY NOTE: this value is NOT live-verified against
+// google/gemini-3.7-flash's real maximum completion-token ceiling (no
+// financial authorization for a real test call at the time of this change)
+// — if OpenRouter/the model rejects or silently clamps a request this
+// large, that will surface as a real, visible error or a shorter-than-
+// requested completion, never a silent corruption: fixInvalidJsonEscapes/
+// repairTruncatedJson (lib/course-generation-shared.ts) still recover
+// whatever was actually written before any cutoff, exactly as they do at
+// the previous, already-proven 32768 ceiling. Lower this back toward 32768
+// if a live test ever shows this specific number failing outright.
+//
+// `reasoning: { effort: "low" }` (see app/api/studio/generate/route.ts and
+// lib/studio-explication-delta.ts) still reserves ~20% of this larger
+// budget for hidden reasoning tokens, leaving roughly 52K tokens of real
+// headroom for the visible explication text — a meaningful increase over
+// the previous ~26K.
 //
 // The other 4 sections: checked against REAL past generations already
 // stored in studio_content_cache (a local, read-only Supabase query — zero
@@ -178,7 +201,7 @@ interface StudioPromptConfig {
 // than what's been generated so far. Re-check with more real data as
 // studio_content_cache accumulates more entries.
 export const STUDIO_PROMPT_CONFIG: Record<JsonSectionId, StudioPromptConfig> = {
-  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 32768 },
+  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 65536 },
   resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
   qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 20000 },
