@@ -55,6 +55,17 @@ interface ChatDocumentPanelProps {
   sources?: { id: number; title: string }[];
   activeSourceId?: number | null;
   onSelectSource?: (id: number) => void;
+  /**
+   * Multi-select variant of the badge above (Point 2 — desktop only): when
+   * both are provided, the dropdown renders a checkbox per source (several
+   * can be checked at once) instead of a single-select Check-mark list, and
+   * the badge shows "N source(s)" from `selectedSourceIds.size` rather than
+   * the plain `sourceCount` prop. Takes priority over
+   * activeSourceId/onSelectSource when both are present. Optional: the
+   * mobile caller keeps the original single-select pair above untouched.
+   */
+  selectedSourceIds?: Set<number>;
+  onToggleSource?: (id: number) => void;
   /** Passed straight through to TextSelectionToolbar's "Add Note" — see that component's own doc comment. Optional: omitted by callers with no module in scope. `courseTitle` is the active SOURCE's title (not `title` above, which is this panel's module-level heading) so an aggregated note correctly tags which course an excerpt came from. */
   moduleId?: number;
   courseTitle?: string;
@@ -93,6 +104,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     sources,
     activeSourceId,
     onSelectSource,
+    selectedSourceIds,
+    onToggleSource,
     moduleId,
     courseTitle,
     courseSlug,
@@ -233,7 +246,10 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
         <div>
           <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {sourceCount} source{sourceCount > 1 ? "s" : ""} · {dateLabel}
+            {(() => {
+              const count = selectedSourceIds ? selectedSourceIds.size : sourceCount;
+              return `${count} source${count > 1 ? "s" : ""}`;
+            })()} · {dateLabel}
           </p>
         </div>
 
@@ -385,22 +401,46 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             placeholder="Type..."
             className="flex-1 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
-          {sources && sources.length > 0 && onSelectSource ? (
+          {sources && sources.length > 0 && (onToggleSource || onSelectSource) ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className="shrink-0">
+                <button type="button" className="flex shrink-0 items-center gap-1.5">
+                  <Pin className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                   <Badge variant="neutral" className="cursor-pointer transition-colors hover:bg-accent">
-                    {sourceCount} source{sourceCount > 1 ? "s" : ""}
+                    {selectedSourceIds ? selectedSourceIds.size : sourceCount} source
+                    {(selectedSourceIds ? selectedSourceIds.size : sourceCount) > 1 ? "s" : ""}
                   </Badge>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {sources.map((source) => (
-                  <DropdownMenuItem key={source.id} onSelect={() => onSelectSource(source.id)}>
-                    {source.id === activeSourceId && <Check className="h-4 w-4" />}
-                    <span className="truncate">{source.title}</span>
-                  </DropdownMenuItem>
-                ))}
+                {sources.map((source) =>
+                  onToggleSource && selectedSourceIds ? (
+                    <DropdownMenuItem
+                      key={source.id}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onToggleSource(source.id);
+                      }}
+                    >
+                      <span
+                        className={cn(
+                          "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border",
+                          selectedSourceIds.has(source.id)
+                            ? "border-primary-500 bg-primary-500 text-white"
+                            : "border-muted-foreground/40"
+                        )}
+                      >
+                        {selectedSourceIds.has(source.id) && <Check className="h-2.5 w-2.5" />}
+                      </span>
+                      <span className="truncate">{source.title}</span>
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem key={source.id} onSelect={() => onSelectSource?.(source.id)}>
+                      {source.id === activeSourceId && <Check className="h-4 w-4" />}
+                      <span className="truncate">{source.title}</span>
+                    </DropdownMenuItem>
+                  )
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (

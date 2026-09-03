@@ -12,7 +12,10 @@ export const MODULE_PAGE_TRANSLATIONS = {
   // ModuleSourcesPanel — desktop header
   sourcesHeading: { fr: "Sources", en: "Sources" },
   closePanelAriaLabel: { fr: "Fermer le panneau", en: "Close panel" },
+  collapsePanelAriaLabel: { fr: "Réduire le panneau", en: "Collapse panel" },
+  openPanelAriaLabel: { fr: "Ouvrir le panneau", en: "Open panel" },
   searchWebPlaceholder: { fr: "Rechercher sur le web...", en: "Search the web..." },
+  selectSourceAriaLabel: { fr: "Inclure dans la conversation", en: "Include in conversation" },
 
   // ModuleSourcesPanel — empty state
   noSourcesEmptyState: {

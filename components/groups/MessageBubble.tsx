@@ -106,7 +106,9 @@ export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry 
             {message.type === "text" && message.contentText}
             {message.type === "image" && message.mediaUrl && <ChatImage src={message.mediaUrl} />}
             {message.type === "video" && message.mediaUrl && <video src={message.mediaUrl} controls className="max-h-64 max-w-full rounded-lg" />}
-            {message.type === "audio" && message.mediaUrl && <AudioPlayer src={message.mediaUrl} onColoredBubble={isMine} />}
+            {message.type === "audio" && message.mediaUrl && (
+              <AudioPlayer src={message.mediaUrl} onColoredBubble={isMine && !theme.isLight} />
+            )}
           </div>
         </div>
 

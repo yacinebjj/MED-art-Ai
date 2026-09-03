@@ -338,7 +338,7 @@ const ChatBubble = memo(function ChatBubble({
             </div>
           )}
           {(!attachment || attachment.caption) && (
-            <div className="whitespace-pre-wrap rounded-2xl rounded-br-sm bg-emerald-600 px-4 py-3 text-sm leading-relaxed text-white shadow-sm sm:text-[15px]">
+            <div className="whitespace-pre-wrap rounded-2xl rounded-br-sm border border-black/5 bg-white px-4 py-3 text-sm leading-relaxed text-gray-900 shadow-sm sm:text-[15px]">
               {attachment ? attachment.caption : message.content}
             </div>
           )}
@@ -949,7 +949,7 @@ export default function AssistantPage() {
 
   return (
     <div
-      className="flex h-full overflow-hidden bg-transparent"
+      className="flex h-full overflow-hidden bg-background"
       style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
     >
       <ConversationSidebar
@@ -962,7 +962,7 @@ export default function AssistantPage() {
         onDelete={handleDeleteConversation}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <div className="flex shrink-0 items-center gap-1 px-4 pt-3 sm:px-6">
           <Tooltip>
             <TooltipTrigger asChild>

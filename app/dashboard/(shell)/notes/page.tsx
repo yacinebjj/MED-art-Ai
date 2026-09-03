@@ -410,6 +410,15 @@ function NotesPageContent() {
             selectedId && "flex",
             isFullscreen ? "fixed inset-0 z-50 h-dvh w-screen overflow-y-auto rounded-none bg-background p-4 sm:p-8" : "h-full p-5"
           )}
+          // The fullscreen note editor is `fixed inset-0` — it fully escapes
+          // this page's own outer keyboardInset-aware wrapper (see that
+          // div's own style prop above), so without this, the "Sauvegarder"
+          // button at the bottom of the form can end up hidden behind the
+          // on-screen keyboard with no scroll room left to reach it. Adds
+          // that same reserved space back, scoped to fullscreen only (the
+          // non-fullscreen path already gets keyboard clearance from the
+          // outer wrapper it never escapes).
+          style={isFullscreen && keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
         >
           {!selectedNote ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">

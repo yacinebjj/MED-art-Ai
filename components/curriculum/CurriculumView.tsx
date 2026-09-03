@@ -8,6 +8,7 @@ import { BookOpenText, Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertica
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tDiscovery } from "@/lib/translations/discovery";
+import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
 import { useToast } from "@/components/ui/Toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
@@ -87,6 +88,7 @@ const TITLE_CLASSES = "line-clamp-2 px-1 text-center text-sm font-bold text-fore
 const BENTO_GRID_CLASSES = "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:gap-6 xl:grid-cols-4";
 
 function SubModulePill({ module: mod }: { module: CurriculumModule }) {
+  const { language } = useLanguage();
   return (
     <Link
       href={`/dashboard/module/${mod.id}`}
@@ -98,7 +100,7 @@ function SubModulePill({ module: mod }: { module: CurriculumModule }) {
       onClick={(e) => e.stopPropagation()}
       className="rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
     >
-      {mod.title}
+      {translateCurriculumName(mod.title, language)}
     </Link>
   );
 }
@@ -227,7 +229,7 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
           <img src={`/illustrations/${mod.id}.png`} className="w-24 h-24 object-contain mb-4" alt={mod.title} />
           une fois les vraies illustrations dessinées disponibles côté client. */}
       <div className={ILLUSTRATION_CONTAINER_CLASSES}>{illustration}</div>
-      <p className={TITLE_CLASSES}>{mod.title}</p>
+      <p className={TITLE_CLASSES}>{translateCurriculumName(mod.title, language)}</p>
 
       <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
         <DialogContent className="max-w-sm" onClick={(e) => e.stopPropagation()}>
@@ -266,6 +268,7 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { language } = useLanguage();
   const illustration = getCartoonIllustration(unit.title);
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -292,7 +295,7 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
           <img src={`/illustrations/unit-${unit.id}.png`} className="w-24 h-24 object-contain mb-4" alt={unit.title} />
           une fois les vraies illustrations dessinées disponibles côté client. */}
       <div className={ILLUSTRATION_CONTAINER_CLASSES}>{illustration}</div>
-      <p className={TITLE_CLASSES}>{unit.title}</p>
+      <p className={TITLE_CLASSES}>{translateCurriculumName(unit.title, language)}</p>
       <p className="mt-1 text-xs font-medium text-muted-foreground">
         {unit.modules.length} module{unit.modules.length > 1 ? "s" : ""}
       </p>

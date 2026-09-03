@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   Bold,
+  ChevronDown,
   ChevronRight,
   Code,
   Italic,
@@ -24,9 +25,11 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
+import { INFOGRAPHIC_MODEL_OPTIONS, type InfographicModelKey } from "@/lib/ai/infographic-prompts";
+import { type PodcastDialect } from "@/lib/ai/podcast-prompts";
 import { cn } from "@/lib/utils";
 import { useTextSelection } from "@/hooks/useTextSelection";
-import { useLanguage } from "@/providers/LanguageProvider";
+import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
 import { GeneratingRotatingLabel } from "@/components/course/workspace/GeneratingRotatingLabel";
 import { RelativeTime } from "@/components/ui/RelativeTime";
@@ -42,11 +45,41 @@ import type { DemoSection, DemoSectionId } from "@/lib/demo-content";
 
 export type SectionStatus = "available" | "needs_generation";
 
+/**
+ * Pre-generation options gathered from a tile's own arrow/dropdown menu (see
+ * TileOptionsMenu below) — a superset covering every section type, with only
+ * the fields relevant to the clicked section ever populated by the caller
+ * (app/dashboard/module/[id]/page.tsx routes each into the right fetch:
+ * language/customPrompt into /api/studio/generate's body, model+language into
+ * /api/studio/infographic's, dialect into /api/studio/podcast's).
+ */
+export interface TileGenerationOptions {
+  language?: "fr" | "en";
+  /** Explication tile only. */
+  customPrompt?: string;
+  /** Infographie tile only. */
+  model?: InfographicModelKey;
+  /** Podcast Audio tile only. */
+  dialect?: PodcastDialect;
+}
+
+/** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. */
+const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
+  "explication",
+  "resume",
+  "cas_clinique",
+  "qcm",
+  "infographic",
+  "audio",
+]);
+
 interface StudioPanelProps {
   sections: DemoSection[];
   openedSection: DemoSectionId | null;
   openedLabel: string;
   onItemClick: (id: DemoSectionId) => void;
+  /** Fires from a tile's arrow/options menu "Générer" button — same generation as onItemClick, but carrying the student's chosen language/prompt/model/dialect. Optional: a caller that omits this simply never renders the arrow (every tile falls back to a plain onItemClick-only button). */
+  onItemClickWithOptions?: (id: DemoSectionId, options: TileGenerationOptions) => void;
   onCloseSection: () => void;
   getSectionStatus: (id: DemoSectionId) => SectionStatus;
   /** A Set, not a single id — several sections can now generate concurrently (a student clicking Résumé no longer blocks clicking Cas Clinique before the first finishes). Each tile checks its OWN membership (`.has(section.id)`), never a single shared value. */
@@ -242,6 +275,141 @@ function SectionOptionsMenu({
   );
 }
 
+const LANGUAGE_SELECT_CLASSES =
+  "w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground outline-none transition-colors focus:border-primary-400";
+
+/**
+ * Pre-generation options popover for one grid tile — a hand-rolled floating
+ * panel (not the shared DropdownMenu/Radix primitive used everywhere else in
+ * this file) specifically because it hosts real form controls (a `<select>`,
+ * a `<textarea>`) that Radix's DropdownMenuContent would auto-close on
+ * interacting with, since it isn't built to host a form. A fixed
+ * transparent backdrop behind it (z-40, this panel at z-50) closes it on any
+ * outside click — the same "click away to dismiss" behavior a Radix menu
+ * gets for free.
+ */
+function TileOptionsMenu({
+  sectionId,
+  language,
+  onClose,
+  onGenerate,
+}: {
+  sectionId: DemoSectionId;
+  language: Language;
+  onClose: () => void;
+  onGenerate: (options: TileGenerationOptions) => void;
+}) {
+  const [draftLanguage, setDraftLanguage] = useState<"fr" | "en">("fr");
+  const [draftCustomPrompt, setDraftCustomPrompt] = useState("");
+  const [draftModel, setDraftModel] = useState<InfographicModelKey>("nano-banana-2");
+  const [draftDialect, setDraftDialect] = useState<PodcastDialect>("fr-darija");
+
+  function handleGenerate() {
+    const options: TileGenerationOptions =
+      sectionId === "infographic"
+        ? { language: draftLanguage, model: draftModel }
+        : sectionId === "audio"
+          ? { dialect: draftDialect }
+          : sectionId === "explication"
+            ? { language: draftLanguage, customPrompt: draftCustomPrompt.trim() || undefined }
+            : { language: draftLanguage };
+    onGenerate(options);
+    onClose();
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={tStudio("collapsePanelAria", language)}
+        tabIndex={-1}
+        className="fixed inset-0 z-40 cursor-default"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+      />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="absolute right-0 top-full z-50 mt-1 w-64 space-y-2.5 rounded-xl border border-border bg-card p-3 text-left shadow-glass dark:shadow-glass-dark"
+      >
+        {sectionId === "audio" ? (
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {language === "fr" ? "Langue / dialecte" : "Language / dialect"}
+            </p>
+            <select
+              value={draftDialect}
+              onChange={(e) => setDraftDialect(e.target.value as PodcastDialect)}
+              onClick={(e) => e.stopPropagation()}
+              className={LANGUAGE_SELECT_CLASSES}
+            >
+              <option value="fr">🇫🇷 Français</option>
+              <option value="en">🇬🇧 English</option>
+              <option value="fr-darija">🇫🇷🇩🇿 Français-Arabe (Darija Algérienne)</option>
+              <option value="en-darija">🇬🇧🇩🇿 English-Arabic (Darija Algérienne)</option>
+            </select>
+          </div>
+        ) : (
+          <>
+            {sectionId === "infographic" && (
+              <div className="space-y-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {language === "fr" ? "Modèle" : "Model"}
+                </p>
+                <select
+                  value={draftModel}
+                  onChange={(e) => setDraftModel(e.target.value as InfographicModelKey)}
+                  onClick={(e) => e.stopPropagation()}
+                  className={LANGUAGE_SELECT_CLASSES}
+                >
+                  {Object.entries(INFOGRAPHIC_MODEL_OPTIONS).map(([key, opt]) => (
+                    <option key={key} value={key}>
+                      {language === "fr" ? opt.labelFr : opt.labelEn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {language === "fr" ? "Langue" : "Language"}
+              </p>
+              <select
+                value={draftLanguage}
+                onChange={(e) => setDraftLanguage(e.target.value as "fr" | "en")}
+                onClick={(e) => e.stopPropagation()}
+                className={LANGUAGE_SELECT_CLASSES}
+              >
+                <option value="fr">🇫🇷 Français</option>
+                <option value="en">🇬🇧 Anglais</option>
+              </select>
+            </div>
+            {sectionId === "explication" && (
+              <div className="space-y-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {language === "fr" ? "Consigne personnalisée" : "Custom instructions"}
+                </p>
+                <textarea
+                  value={draftCustomPrompt}
+                  onChange={(e) => setDraftCustomPrompt(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  placeholder={language === "fr" ? "Décris ce que tu veux détailler..." : "Describe what you want to detail..."}
+                  rows={3}
+                  className="w-full resize-none rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary-400"
+                />
+              </div>
+            )}
+          </>
+        )}
+        <Button size="sm" className="w-full rounded-lg" onClick={handleGenerate}>
+          {tStudio("generateAction", language)}
+        </Button>
+      </div>
+    </>
+  );
+}
+
 /**
  * Right "Studio" panel: a grid of the course's real study modes (no
  * fabricated "Audio Overview"/"Flashcards" tiles for features this app
@@ -256,6 +424,7 @@ export function StudioPanel({
   openedSection,
   openedLabel,
   onItemClick,
+  onItemClickWithOptions,
   onCloseSection,
   getSectionStatus,
   generatingSections,
@@ -281,6 +450,7 @@ export function StudioPanel({
   const { language } = useLanguage();
   const [isSectionExpanded, setIsSectionExpanded] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [optionsMenuFor, setOptionsMenuFor] = useState<DemoSectionId | null>(null);
   const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -516,47 +686,85 @@ export function StudioPanel({
                   // reflects the CURRENT course regardless of which section
                   // is being rendered here — reused rather than re-derived.
                   const isLocked = section.id !== "explication" && getSectionStatus("explication") !== "available";
+                  // The arrow/options menu only makes sense BEFORE a section
+                  // has ever been generated — once it exists, "Régénérer"
+                  // (SectionOptionsMenu, on the opened detail view) is the
+                  // relevant follow-up action, not a fresh set of
+                  // language/prompt options. Exemples & Analogies never gets
+                  // one at all, by explicit product decision (direct click
+                  // only) — see SECTIONS_WITH_OPTIONS_MENU's own comment.
+                  const showOptionsMenu =
+                    Boolean(onItemClickWithOptions) &&
+                    !isCollapsed &&
+                    !isDone &&
+                    !isGenerating &&
+                    !isLocked &&
+                    SECTIONS_WITH_OPTIONS_MENU.has(section.id);
                   return (
-                    <button
-                      key={section.id}
-                      type="button"
-                      disabled={isGenerating || isLocked}
-                      onClick={() => onItemClick(section.id)}
-                      title={isLocked ? tStudio("lockedTooltip", language) : isCollapsed ? getSectionLabel(section.id, language) : undefined}
-                      aria-disabled={isLocked}
-                      className={cn(
-                        "group relative flex items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-sm",
-                        isGenerating && "disabled:cursor-wait",
-                        isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between p-2 text-left md:p-3",
-                        tint.bg
+                    <div key={section.id} className="relative">
+                      <button
+                        type="button"
+                        disabled={isGenerating || isLocked}
+                        onClick={() => onItemClick(section.id)}
+                        title={isLocked ? tStudio("lockedTooltip", language) : isCollapsed ? getSectionLabel(section.id, language) : undefined}
+                        aria-disabled={isLocked}
+                        className={cn(
+                          "group relative flex w-full items-center gap-2.5 rounded-xl border text-sm font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-base",
+                          isGenerating && "disabled:cursor-wait",
+                          isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between p-3 text-left md:p-4",
+                          tint.bg
+                        )}
+                      >
+                        {!isCollapsed && (
+                          <span className={cn("truncate", showOptionsMenu && "pr-5")}>{getSectionLabel(section.id, language)}</span>
+                        )}
+                        {isGenerating ? (
+                          <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                        ) : isLocked ? (
+                          <Lock className={cn("shrink-0 text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                        ) : (
+                          <Icon
+                            className={cn(
+                              "shrink-0 transition-transform duration-300 group-hover:scale-110",
+                              isCollapsed ? "h-6 w-6" : "h-5 w-5",
+                              tint.icon
+                            )}
+                          />
+                        )}
+                        {/* A quiet "already generated" tell (no separate label,
+                            no layout shift) so a returning student can tell
+                            apart a tile they already have content in from one
+                            they haven't opened yet at a glance, before even
+                            reading the "recent generations" list below. */}
+                        {isDone && !isGenerating && (
+                          <span
+                            aria-hidden
+                            className={cn("absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full", tint.dot)}
+                          />
+                        )}
+                      </button>
+                      {showOptionsMenu && (
+                        <button
+                          type="button"
+                          aria-label={tStudio("optionsMenuAria", language)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOptionsMenuFor((prev) => (prev === section.id ? null : section.id));
+                          }}
+                          className="absolute right-1.5 top-1.5 z-10 rounded-md p-0.5 text-foreground/50 transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
                       )}
-                    >
-                      {!isCollapsed && <span className="truncate">{getSectionLabel(section.id, language)}</span>}
-                      {isGenerating ? (
-                        <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
-                      ) : isLocked ? (
-                        <Lock className={cn("shrink-0 text-muted-foreground", isCollapsed ? "h-5 w-5" : "h-4 w-4")} />
-                      ) : (
-                        <Icon
-                          className={cn(
-                            "shrink-0 transition-transform duration-300 group-hover:scale-110",
-                            isCollapsed ? "h-5 w-5" : "h-4 w-4",
-                            tint.icon
-                          )}
+                      {optionsMenuFor === section.id && (
+                        <TileOptionsMenu
+                          sectionId={section.id}
+                          language={language}
+                          onClose={() => setOptionsMenuFor(null)}
+                          onGenerate={(options) => onItemClickWithOptions?.(section.id, options)}
                         />
                       )}
-                      {/* A quiet "already generated" tell (no separate label,
-                          no layout shift) so a returning student can tell
-                          apart a tile they already have content in from one
-                          they haven't opened yet at a glance, before even
-                          reading the "recent generations" list below. */}
-                      {isDone && !isGenerating && (
-                        <span
-                          aria-hidden
-                          className={cn("absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full", tint.dot)}
-                        />
-                      )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>

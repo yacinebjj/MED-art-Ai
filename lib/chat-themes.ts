@@ -14,9 +14,19 @@ export interface ChatTheme {
   swatch: string;
   /** Accent color (for the audio player's progress bar etc.) when rendered on MY OWN bubble. */
   accent: string;
+  /** True for a light/white bubble background (needs dark controls/text for contrast) — every other theme is a colored/dark gradient (needs white controls/text). Read by AudioPlayer via MessageBubble's onColoredBubble prop, since AudioPlayer itself never receives the theme object. Omitted (falsy) for every colored theme — only the light one needs to opt in. */
+  isLight?: boolean;
 }
 
 export const CHAT_THEMES: ChatTheme[] = [
+  {
+    id: "classic",
+    name: "Blanc Classique",
+    bubble: "border border-black/5 bg-white text-gray-900 shadow-sm",
+    swatch: "border border-gray-300 bg-white",
+    accent: "bg-primary-500",
+    isLight: true,
+  },
   {
     id: "medart",
     name: "MedArt Signature",

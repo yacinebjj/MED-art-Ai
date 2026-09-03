@@ -139,6 +139,43 @@
   }
 }
 
+/**
+ * Mobile-wide text-size bump (Point 7) — deliberately NOT a root `html {
+ * font-size }` change: Tailwind's spacing scale (p-4, gap-2, h-9, ...) is
+ * ALSO rem-based, so bumping the root would inflate padding/margins/icon
+ * boxes right along with text, overflowing the tightly-packed mobile chrome
+ * (bottom nav, compact cards) this app already has. Targets only the actual
+ * text-size utility classes instead, and deliberately sits OUTSIDE any
+ * `@layer` block — Tailwind's utilities (`@tailwind utilities` above) live
+ * inside the cascade layers system, and un-layered rules always win over
+ * layered ones regardless of selector order, so this reliably overrides
+ * `.text-xs`/`.text-sm`/etc. without needing `!important` or fighting
+ * specificity. Scoped to below Tailwind's own `md` breakpoint (768px) so
+ * desktop/tablet typography is completely untouched.
+ */
+@media (max-width: 767px) {
+  .text-xs {
+    font-size: 0.8125rem; /* 13px, up from 12px */
+    line-height: 1.25rem;
+  }
+  .text-sm {
+    font-size: 0.9375rem; /* 15px, up from 14px */
+    line-height: 1.4rem;
+  }
+  .text-base {
+    font-size: 1.0625rem; /* 17px, up from 16px */
+    line-height: 1.6rem;
+  }
+  .text-lg {
+    font-size: 1.1875rem; /* 19px, up from 18px */
+    line-height: 1.7rem;
+  }
+  .text-xl {
+    font-size: 1.3125rem; /* 21px, up from 20px */
+    line-height: 1.8rem;
+  }
+}
+
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;

@@ -37,6 +37,8 @@ export const STUDIO_TRANSLATIONS = {
   alreadyGeneratedCaption: { fr: "Déjà généré — appuie pour ouvrir", en: "Already generated — tap to open" },
   tapToGenerateCaption: { fr: "Appuie pour générer", en: "Tap to generate" },
   emptyState: { fr: "Les résultats de Studio seront enregistrés ici.", en: "Studio results will be saved here." },
+  generateAction: { fr: "Générer", en: "Generate" },
+  optionsMenuAria: { fr: "Options de génération", en: "Generation options" },
 } satisfies Record<string, Record<Language, string>>;
 
 export function tStudio(key: keyof typeof STUDIO_TRANSLATIONS, language: Language): string {

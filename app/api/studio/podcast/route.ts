@@ -6,12 +6,15 @@ import { errorMessage } from "@/lib/course-generation-shared";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { callOpenRouter, generateOpenRouterAudio, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import {
-  FALLBACK_PODCAST_SCRIPT,
+  DEFAULT_PODCAST_DIALECT,
   MAX_EXPLICATION_CHARS_FOR_PODCAST,
-  PODCAST_NARRATION_SYSTEM_PROMPT,
-  PODCAST_SCRIPT_SYSTEM_PROMPT,
+  buildPodcastNarrationSystemPrompt,
   buildPodcastNarrationUserMessage,
+  buildPodcastScriptSystemPrompt,
   buildPodcastScriptUserMessage,
+  getFallbackPodcastScript,
+  resolvePodcastDialect,
+  type PodcastDialect,
 } from "@/lib/ai/podcast-prompts";
 import { encodePcm16ToMp3 } from "@/lib/audio/mp3-encoder";
 import { lookupStudioPodcastCache, recordStudioPodcastCacheHit, storeStudioPodcastCache } from "@/lib/studio-podcast-cache";
@@ -60,19 +63,19 @@ async function ensurePodcastBucket(supabase: ReturnType<typeof getSupabaseAdmin>
  * app/api/studio/slides/route.ts's planSlideOutline exactly, minus the
  * JSON-schema step — the script IS the raw text, no parsing needed.
  */
-async function planPodcastScript(courseTitle: string, explicationExcerpt: string): Promise<string> {
+async function planPodcastScript(courseTitle: string, explicationExcerpt: string, dialect: PodcastDialect): Promise<string> {
   try {
     const script = await callOpenRouter(
       [
-        { role: "system", content: PODCAST_SCRIPT_SYSTEM_PROMPT },
+        { role: "system", content: buildPodcastScriptSystemPrompt(dialect) },
         { role: "user", content: buildPodcastScriptUserMessage(courseTitle, explicationExcerpt) },
       ],
       { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true }
     );
-    return script.trim().length > 100 ? script.trim() : FALLBACK_PODCAST_SCRIPT;
+    return script.trim().length > 100 ? script.trim() : getFallbackPodcastScript(dialect);
   } catch (error) {
     console.error("[studio/podcast] Échec écriture du script, repli sur le script par défaut:", errorMessage(error));
-    return FALLBACK_PODCAST_SCRIPT;
+    return getFallbackPodcastScript(dialect);
   }
 }
 
@@ -108,10 +111,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { courseId } = (body ?? {}) as { courseId?: unknown };
+  const { courseId, dialect: dialectRaw } = (body ?? {}) as { courseId?: unknown; dialect?: unknown };
   if (typeof courseId !== "number" || !Number.isFinite(courseId)) {
     return NextResponse.json({ success: false, error: "'courseId' est requis." }, { status: 400 });
   }
+  const dialect = resolvePodcastDialect(dialectRaw);
+  // Only the ORIGINAL default (fr-darija) is cross-student cached —
+  // studio_podcast_cache is keyed on content_hash alone, with no
+  // language/dialect dimension. Extending that key would need a schema
+  // migration this codebase has no confirmed-live tooling for (see this
+  // project's own history of unconfirmed manual migrations); bypassing the
+  // cache for the 3 new variants is the same safe pattern already
+  // established for /api/studio/regenerate (a personalized request that
+  // deliberately skips the shared cache).
+  const isDefaultVariant = dialect === DEFAULT_PODCAST_DIALECT;
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -142,10 +155,12 @@ export async function POST(request: NextRequest) {
   const contentHash = sha256(normalizeText(course.explication));
 
   try {
-    const cachedUrl = await lookupStudioPodcastCache(contentHash);
-    if (cachedUrl) {
-      await recordStudioPodcastCacheHit(contentHash);
-      return NextResponse.json({ success: true, audioUrl: cachedUrl, cached: true });
+    if (isDefaultVariant) {
+      const cachedUrl = await lookupStudioPodcastCache(contentHash);
+      if (cachedUrl) {
+        await recordStudioPodcastCacheHit(contentHash);
+        return NextResponse.json({ success: true, audioUrl: cachedUrl, cached: true });
+      }
     }
 
     const quotaGate = await reserveGeneration(user);
@@ -155,11 +170,11 @@ export async function POST(request: NextRequest) {
 
     try {
       const excerpt = course.explication.slice(0, MAX_EXPLICATION_CHARS_FOR_PODCAST);
-      const script = await planPodcastScript(course.title, excerpt);
+      const script = await planPodcastScript(course.title, excerpt, dialect);
 
       const { pcm16 } = await generateOpenRouterAudio(
         [
-          { role: "system", content: PODCAST_NARRATION_SYSTEM_PROMPT },
+          { role: "system", content: buildPodcastNarrationSystemPrompt(dialect) },
           { role: "user", content: buildPodcastNarrationUserMessage(script) },
         ],
         { maxTokens: AUDIO_MAX_TOKENS, timeoutMs: 280_000 }
@@ -168,7 +183,11 @@ export async function POST(request: NextRequest) {
       const mp3Buffer = await encodePcm16ToMp3(pcm16, 24_000, 1);
 
       await ensurePodcastBucket(supabase);
-      const path = `${contentHash}.mp3`;
+      // Non-default variants get their own path (dialect suffix) — never
+      // overwrite the shared default-variant file at `${contentHash}.mp3`,
+      // and never collide with each other (a student generating "en" then
+      // "en-darija" for the same course must get 2 distinct files).
+      const path = isDefaultVariant ? `${contentHash}.mp3` : `${contentHash}-${dialect}.mp3`;
       const { error: uploadError } = await supabase.storage
         .from(PODCAST_BUCKET)
         .upload(path, mp3Buffer, { contentType: "audio/mpeg", upsert: true });
@@ -180,8 +199,12 @@ export async function POST(request: NextRequest) {
       // Store BEFORE returning — the next student to hit this content_hash
       // benefits immediately. Fail-open: storeStudioPodcastCache logs its
       // own errors and never throws, so a caching hiccup can't block this
-      // student's own successful generation.
-      await storeStudioPodcastCache(contentHash, audioUrl);
+      // student's own successful generation. Only the default variant is
+      // ever written to the shared cross-student cache — see this route's
+      // own comment on `isDefaultVariant` above.
+      if (isDefaultVariant) {
+        await storeStudioPodcastCache(contentHash, audioUrl);
+      }
 
       return NextResponse.json({ success: true, audioUrl, cached: false });
     } catch (error) {

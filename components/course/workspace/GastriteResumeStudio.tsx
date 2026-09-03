@@ -451,8 +451,16 @@ function ExamSummaryContent({ mode }: { mode: GastriteResumeMode }) {
 
         <p className="text-sm md:text-base text-slate-600 dark:text-slate-400 leading-relaxed">{mode.ddx_table.intro}</p>
 
-        <div className="overflow-hidden rounded-2xl border border-orange-100 dark:border-orange-900/30 shadow-lg">
-          <table className="w-full text-left text-sm border-collapse">
+        {/* Mobile portrait fix (Point 6): `overflow-hidden` here used to clip
+            a multi-column DDx table clean off the edge of a narrow phone
+            screen instead of letting it scroll — the table's own `w-full`
+            forced it to the viewport's width with nowhere for excess
+            columns to go. `overflow-x-auto` on this INNER wrapper (the
+            outer one keeps the rounded corners/border fixed in place) lets
+            the table scroll horizontally at its natural width instead. */}
+        <div className="rounded-2xl border border-orange-100 dark:border-orange-900/30 shadow-lg">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px] text-left text-sm border-collapse">
             <thead>
               <tr className="bg-gradient-to-r from-orange-600 to-amber-600 dark:from-orange-800 dark:to-amber-800">
                 {mode.ddx_table.headers.map((h) => (
@@ -484,6 +492,7 @@ function ExamSummaryContent({ mode }: { mode: GastriteResumeMode }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </motion.section>
 

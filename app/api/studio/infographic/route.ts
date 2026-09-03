@@ -5,7 +5,16 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { generateOpenRouterImage, OpenRouterError } from "@/lib/ai/openrouter";
-import { INFOGRAPHIC_SYSTEM_PROMPT, MAX_EXPLICATION_CHARS_FOR_INFOGRAPHIC, buildInfographicUserMessage } from "@/lib/ai/infographic-prompts";
+import {
+  DEFAULT_INFOGRAPHIC_LANGUAGE,
+  DEFAULT_INFOGRAPHIC_MODEL_KEY,
+  INFOGRAPHIC_MODEL_OPTIONS,
+  MAX_EXPLICATION_CHARS_FOR_INFOGRAPHIC,
+  buildInfographicSystemPrompt,
+  buildInfographicUserMessage,
+  resolveInfographicLanguage,
+  resolveInfographicModelKey,
+} from "@/lib/ai/infographic-prompts";
 import {
   lookupStudioInfographicCache,
   recordStudioInfographicCacheHit,
@@ -84,10 +93,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { courseId } = (body ?? {}) as { courseId?: unknown };
+  const { courseId, language: languageRaw, model: modelKeyRaw } = (body ?? {}) as {
+    courseId?: unknown;
+    language?: unknown;
+    model?: unknown;
+  };
   if (typeof courseId !== "number" || !Number.isFinite(courseId)) {
     return NextResponse.json({ success: false, error: "'courseId' est requis." }, { status: 400 });
   }
+  const language = resolveInfographicLanguage(languageRaw);
+  const modelKey = resolveInfographicModelKey(modelKeyRaw);
+  // Only the ORIGINAL default (French, nano-banana-2) is cross-student
+  // cached — studio_infographic_cache is keyed on content_hash alone, with
+  // no language/model dimension. Same bypass-rather-than-migrate pattern as
+  // /api/studio/podcast — see that route's own comment.
+  const isDefaultVariant = language === DEFAULT_INFOGRAPHIC_LANGUAGE && modelKey === DEFAULT_INFOGRAPHIC_MODEL_KEY;
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -118,10 +138,12 @@ export async function POST(request: NextRequest) {
   const contentHash = sha256(normalizeText(course.explication));
 
   try {
-    const cachedUrl = await lookupStudioInfographicCache(contentHash);
-    if (cachedUrl) {
-      await recordStudioInfographicCacheHit(contentHash);
-      return NextResponse.json({ success: true, imageUrl: cachedUrl, cached: true });
+    if (isDefaultVariant) {
+      const cachedUrl = await lookupStudioInfographicCache(contentHash);
+      if (cachedUrl) {
+        await recordStudioInfographicCacheHit(contentHash);
+        return NextResponse.json({ success: true, imageUrl: cachedUrl, cached: true });
+      }
     }
 
     const quotaGate = await reserveGeneration(user);
@@ -131,16 +153,22 @@ export async function POST(request: NextRequest) {
 
     try {
       const excerpt = course.explication.slice(0, MAX_EXPLICATION_CHARS_FOR_INFOGRAPHIC);
-      const { imageDataUrl } = await generateOpenRouterImage([
-        { role: "system", content: INFOGRAPHIC_SYSTEM_PROMPT },
-        { role: "user", content: buildInfographicUserMessage(course.title, excerpt) },
-      ]);
+      const { imageDataUrl } = await generateOpenRouterImage(
+        [
+          { role: "system", content: buildInfographicSystemPrompt(language) },
+          { role: "user", content: buildInfographicUserMessage(course.title, excerpt) },
+        ],
+        { model: INFOGRAPHIC_MODEL_OPTIONS[modelKey].id }
+      );
 
       const { buffer, contentType } = decodeImageDataUrl(imageDataUrl);
 
       await ensureInfographicBucket(supabase);
       const extension = contentType.split("/")[1] ?? "png";
-      const path = `${contentHash}.${extension}`;
+      // Non-default variants get their own path (language+model suffix) —
+      // never overwrite the shared default-variant file, never collide with
+      // each other across variants of the same course.
+      const path = isDefaultVariant ? `${contentHash}.${extension}` : `${contentHash}-${language}-${modelKey}.${extension}`;
       const { error: uploadError } = await supabase.storage
         .from(INFOGRAPHIC_BUCKET)
         .upload(path, buffer, { contentType, upsert: true });
@@ -152,8 +180,12 @@ export async function POST(request: NextRequest) {
       // Store BEFORE returning — the next student to hit this content_hash
       // benefits immediately. Fail-open: storeStudioInfographicCache logs
       // its own errors and never throws, so a caching hiccup can't block
-      // this student's own successful generation.
-      await storeStudioInfographicCache(contentHash, imageUrl);
+      // this student's own successful generation. Only the default variant
+      // is ever written to the shared cross-student cache — see this
+      // route's own comment on `isDefaultVariant` above.
+      if (isDefaultVariant) {
+        await storeStudioInfographicCache(contentHash, imageUrl);
+      }
 
       return NextResponse.json({ success: true, imageUrl, cached: false });
     } catch (error) {

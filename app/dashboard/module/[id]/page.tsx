@@ -8,7 +8,7 @@ import { useTheme } from "next-themes";
 import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Camera, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, Plus, Search, Trash2, TrendingUp } from "lucide-react";
+import { ArrowLeft, Camera, Check, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2, TrendingUp } from "lucide-react";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tModulePage } from "@/lib/translations/modulePage";
 import { cn } from "@/lib/utils";
@@ -30,7 +30,7 @@ import { CourseStatsModal } from "@/components/dashboard/CourseStatsModal";
 import { UploadModal } from "@/components/dashboard/UploadModal";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { ChatDocumentPanel, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
-import { StudioPanel, type SectionStatus } from "@/components/course/workspace/StudioPanel";
+import { StudioPanel, type SectionStatus, type TileGenerationOptions } from "@/components/course/workspace/StudioPanel";
 import { FileViewerModal } from "@/components/course/workspace/FileViewerModal";
 import { StudioTileSkeleton } from "@/components/course/workspace/StudioTileSkeleton";
 import { MobileWorkspaceTabBar, type MobileWorkspaceTab } from "@/components/course/workspace/MobileWorkspaceTabBar";
@@ -45,9 +45,6 @@ import { PodcastGeneratingLabel } from "@/components/course/workspace/PodcastGen
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
-
-/** A stable (module-scope, allocated once ever) no-op — passed to ModuleSourcesPanel's mobile variant, which never renders the close button `onClosePanel` guards, so its identity never needs to matter, but a literal `() => {}` written inline would still needlessly recreate on every render and defeat memo comparisons on props next to it. */
-const NOOP = () => {};
 
 /**
  * Each of these 3 is a genuinely heavy render tree (multi-mode tabs,
@@ -174,9 +171,12 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   onSelectCourse,
   onShowCourseFile,
   onDeleteCourse,
-  onClosePanel,
   courseMasteryBySlug,
   variant = "desktop",
+  isCollapsed = false,
+  onToggleCollapse,
+  selectedSourceIds,
+  onToggleSource,
 }: {
   courses: StudioCourseSummary[];
   activeCourseId: number | null;
@@ -186,7 +186,6 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   onSelectCourse: (id: number) => void;
   onShowCourseFile: (id: number) => void;
   onDeleteCourse: (id: number) => Promise<void>;
-  onClosePanel: () => void;
   /** Real qcm_attempts-derived mastery, keyed by `studio-course-{id}` — see the `course_mastery` SQL function, which groups purely by course_slug with no join to any courses table, so it already covers this pipeline's synthetic slugs once real attempts exist (they do now that GastriteQcmsStudio here is no longer rendered with isPreview). */
   courseMasteryBySlug: Map<string, { qcmSuccessPct: number; srsMasteryPct: number }>;
   /**
@@ -199,6 +198,12 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
    * identical in both variants.
    */
   variant?: "desktop" | "mobile";
+  /** Desktop-only icon rail, mirroring StudioPanel's own collapse — see this page's isSourcesCollapsed. Ignored on the mobile variant (its own tab bar already IS the collapse). */
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  /** Multi-select chat-context sources (Point 2) — a course can be "open" (the Studio tile source) independently of being "checked" (included in the Chat's context). Optional: a caller that omits both simply renders no checkboxes at all. */
+  selectedSourceIds?: Set<number>;
+  onToggleSource?: (id: number) => void;
 }) {
   const { language } = useLanguage();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -225,24 +230,27 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
     }
   }
 
+  const isRail = variant === "desktop" && isCollapsed;
+
   return (
     <>
       {variant === "desktop" && (
-        <div className="flex items-center justify-between border-b border-border p-4">
-          <h2 className="text-sm font-semibold text-foreground">{tModulePage("sourcesHeading", language)}</h2>
+        <div className={cn("flex items-center border-b border-border p-2 md:p-4", isRail ? "justify-center" : "justify-between")}>
+          {!isRail && <h2 className="text-sm font-semibold text-foreground">{tModulePage("sourcesHeading", language)}</h2>}
           <button
             type="button"
-            onClick={onClosePanel}
-            aria-label={tModulePage("closePanelAriaLabel", language)}
+            onClick={onToggleCollapse}
+            aria-label={tModulePage(isRail ? "openPanelAriaLabel" : "collapsePanelAriaLabel", language)}
+            aria-pressed={isRail}
             className="rounded-xl p-2 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
           >
-            <PanelLeftClose className="h-4 w-4" />
+            {isRail ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </button>
         </div>
       )}
 
-      <div className="flex flex-1 flex-col space-y-4 overflow-y-auto p-4">
-        {variant === "desktop" && (
+      <div className={cn("flex flex-1 flex-col overflow-y-auto", isRail ? "items-center space-y-1.5 p-2" : "space-y-4 p-4")}>
+        {variant === "desktop" && !isRail && (
           <>
             {/* Always enabled — adding a 2nd, 3rd, ... course never disables this, per the multi-course mandate. */}
             <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => setUploadOpen(true)}>
@@ -263,7 +271,42 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
           </>
         )}
 
-        {courses.length === 0 ? (
+        {isRail ? (
+          // Icon-only rail — mirrors StudioPanel's own collapsed grid
+          // (aspect-square icon tiles, one per column): a tidy, aligned
+          // column of course icons a student can still click to switch
+          // sources without the panel eating a third of the screen.
+          <>
+            <button
+              type="button"
+              onClick={() => setUploadOpen(true)}
+              title={tModulePage("addSourceLabel", language)}
+              className="flex aspect-square w-full items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground transition-all duration-300 hover:border-primary-300 hover:text-primary-600"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+            {courses.map((course) => {
+              const isActive = course.id === activeCourseId;
+              return (
+                <button
+                  key={course.id}
+                  type="button"
+                  onClick={() => onSelectCourse(course.id)}
+                  disabled={isSwitchingCourse}
+                  title={course.title}
+                  className={cn(
+                    "flex aspect-square w-full items-center justify-center rounded-xl border transition-all duration-300 disabled:cursor-wait",
+                    isActive
+                      ? "border-primary-300 bg-primary-50 text-primary-600 shadow-glow dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-400"
+                      : "border-border bg-card text-muted-foreground hover:bg-accent"
+                  )}
+                >
+                  <FileText className="h-5 w-5" />
+                </button>
+              );
+            })}
+          </>
+        ) : courses.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-8 text-center">
             <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
               <FileText className="h-6 w-6 text-muted-foreground/50" />
@@ -279,6 +322,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
           <div className="space-y-2">
             {courses.map((course) => {
               const isActive = course.id === activeCourseId;
+              const isChecked = selectedSourceIds?.has(course.id) ?? false;
               return (
                 <div
                   key={course.id}
@@ -289,6 +333,26 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                       : "border-border bg-card hover:-translate-y-0.5 hover:bg-accent hover:shadow-soft"
                   )}
                 >
+                  {onToggleSource && (
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={isChecked}
+                      aria-label={tModulePage("selectSourceAriaLabel", language)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleSource(course.id);
+                      }}
+                      className={cn(
+                        "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                        isChecked
+                          ? "border-primary-500 bg-primary-500 text-white"
+                          : "border-muted-foreground/40 bg-transparent hover:border-primary-400"
+                      )}
+                    >
+                      {isChecked && <Check className="h-3 w-3" />}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onSelectCourse(course.id)}
@@ -473,6 +537,17 @@ export default function ModuleWorkspacePage() {
   // fixed-width <aside> wrapper (which StudioPanel doesn't own) can shrink in
   // lockstep — see StudioPanel's onCollapsedChange doc comment.
   const [isStudioCollapsed, setIsStudioCollapsed] = useState(false);
+  // Sources' own icon-rail collapse (Point 1) — same "shrink the fixed-width
+  // <aside> to w-20" mechanism Studio already had, so Chat's flex-1 middle
+  // section naturally reclaims the freed width with zero grid changes.
+  const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(false);
+  // Multi-select CHAT-CONTEXT sources (Point 2) — deliberately independent
+  // of `activeCourse` (which course's Studio tiles are showing): a student
+  // can check several sources into the Chat's context without "opening"
+  // every one of them in Studio. Seeded with the active course whenever it
+  // changes (see the effect below `handleSelectCourse`) so the pre-existing
+  // single-course behavior still feels continuous by default.
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Set<number>>(() => new Set());
   // Client-side cache of every full course row fetched this page visit,
   // keyed by id — switching back to a course you already opened is instant
   // (no network roundtrip), and every place that mutates `activeCourse`
@@ -522,6 +597,20 @@ export default function ModuleWorkspacePage() {
   // semantic cache, so a synthetic one works fine. Course context itself is
   // sent inline via sendChatMessage's `sourceText` option below instead of
   // relying on that (nonexistent) DB lookup.
+  // Whichever course is opened becomes part of the Chat's context by
+  // default — matches the single-source behavior this page always had,
+  // while never un-checking a source the student already added on top.
+  useEffect(() => {
+    if (!activeCourse) return;
+    setSelectedSourceIds((prev) => (prev.has(activeCourse.id) ? prev : new Set(prev).add(activeCourse.id)));
+    // Deliberately keyed on the id only — re-running on every activeCourse
+    // CONTENT update (a generation landing, a cache refresh) would be
+    // wasted work, since only a genuine course SWITCH should ever seed a
+    // new id into the selection. Same pattern as this file's other
+    // id-scoped effects (e.g. the generation-tracker reconciliation below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCourse?.id]);
+
   const courseChatSlug = activeCourse ? `studio-course-${activeCourse.id}` : undefined;
   const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, clearMessages } = useCourseChat(courseChatSlug);
 
@@ -724,7 +813,7 @@ export default function ModuleWorkspacePage() {
   // here, every unrelated parent re-render (a chat-input keystroke, a typing
   // indicator toggling) would recreate this function and force the memoized
   // card grid to re-render right along with it.
-  const handleStudioItemClick = useCallback(async (id: DemoSectionId) => {
+  const handleStudioItemClick = useCallback(async (id: DemoSectionId, options?: TileGenerationOptions) => {
     if (!activeCourse) {
       toast({
         variant: "info",
@@ -791,7 +880,7 @@ export default function ModuleWorkspacePage() {
           const res = await fetch("/api/studio/infographic", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ courseId }),
+            body: JSON.stringify({ courseId, language: options?.language, model: options?.model }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || !data.success) {
@@ -809,7 +898,7 @@ export default function ModuleWorkspacePage() {
           const res = await fetch("/api/studio/podcast", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ courseId }),
+            body: JSON.stringify({ courseId, dialect: options?.dialect }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || !data.success) {
@@ -832,7 +921,10 @@ export default function ModuleWorkspacePage() {
           // first open — Résumé's earlier lazy per-mode loading was reverted by
           // explicit product direction (single-shot, hyper-concise prompt
           // instead — see STUDIO_RESUME_SYSTEM_PROMPT's own comment).
-          const { res, data } = await postStudioGenerate(id, courseId);
+          const { res, data } = await postStudioGenerate(id, courseId, {
+            language: options?.language,
+            customPrompt: options?.customPrompt,
+          });
           if (!res.ok || !data.success) {
             throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
           }
@@ -887,7 +979,40 @@ export default function ModuleWorkspacePage() {
   }, [activeCourse, generatingSections, toast]);
 
   /** Stable reference so the desktop ModuleSourcesPanel instance's React.memo actually holds. */
-  const handleCloseSourcesPanel = useCallback(() => setIsSplitScreen(true), []);
+  const handleToggleSourcesCollapsed = useCallback(() => setIsSourcesCollapsed((prev) => !prev), []);
+
+  /**
+   * Stable reference so the desktop ModuleSourcesPanel instance's React.memo
+   * actually holds. Checking a source the student never "opened" (so it has
+   * no cached rawText yet — courseCacheRef only ever holds courses actually
+   * loaded via handleSelectCourse/applyCreatedCourse) fetches it in the
+   * background, same best-effort pattern as refreshCourseFromServer: no
+   * loading spinner, no error toast, since this isn't a direct "open this
+   * course" action — a transient failure here just means that source's text
+   * is silently missing from the NEXT chat message's context, not a broken
+   * experience worth interrupting the student over. Deliberately does NOT
+   * touch `activeCourse` — checking a source for chat context must never
+   * switch which course's Studio tiles are showing.
+   */
+  const handleToggleSelectedSource = useCallback((id: number) => {
+    setSelectedSourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        if (!courseCacheRef.current.has(id)) {
+          fetch(`/api/studio/courses/${id}`)
+            .then((res) => res.json())
+            .then((data) => {
+              if (data?.success) courseCacheRef.current.set(id, data.course);
+            })
+            .catch(() => {});
+        }
+      }
+      return next;
+    });
+  }, []);
 
   /** Stable reference so MobileWorkspaceTabBar's React.memo actually holds. */
   const handleMobileTabChange = useCallback((tab: MobileWorkspaceTab) => {
@@ -958,6 +1083,24 @@ export default function ModuleWorkspacePage() {
     return attempt;
   }
 
+  /**
+   * Joins every CHECKED source's raw text (Point 2 — multi-select chat
+   * context), not just the single active course. Falls back to the active
+   * course alone when nothing is explicitly checked yet (covers the brief
+   * window before the seeding effect above has run, and any caller that
+   * never touched selectedSourceIds) — never silently sends empty context.
+   * A course checked but not yet fetched (see handleToggleSelectedSource)
+   * simply contributes nothing yet, rather than blocking the send.
+   */
+  function buildSelectedSourceText(): string | undefined {
+    const ids = selectedSourceIds.size > 0 ? Array.from(selectedSourceIds) : activeCourse ? [activeCourse.id] : [];
+    const texts = ids
+      .map((id) => courseCacheRef.current.get(id))
+      .filter((c): c is StudioCourseFull => Boolean(c?.rawText))
+      .map((c) => (ids.length > 1 ? `### ${c.title}\n\n${c.rawText}` : c.rawText));
+    return texts.length > 0 ? texts.join("\n\n---\n\n") : undefined;
+  }
+
   function handleSend() {
     const text = chatInput.trim();
     if (!text && !quotedText) return;
@@ -970,7 +1113,7 @@ export default function ModuleWorkspacePage() {
     setQuotedText(null);
     setQuotedMode(null);
     sendChatMessage(fullMessage, {
-      sourceText: activeCourse?.rawText ?? undefined,
+      sourceText: buildSelectedSourceText(),
       // "Ask MedArt" and "Translate" are both quick actions staged the same
       // way (see handleAskSelection/handleTranslateSelection below) — short
       // answer for Ask MedArt (concise), the dedicated translator persona
@@ -1219,6 +1362,9 @@ export default function ModuleWorkspacePage() {
         setQuotedText(null);
         setQuotedMode(null);
       }}
+      sources={courses.map((c) => ({ id: c.id, title: c.title }))}
+      selectedSourceIds={selectedSourceIds}
+      onToggleSource={handleToggleSelectedSource}
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
       courseSlug={courseChatSlug}
@@ -1270,6 +1416,7 @@ export default function ModuleWorkspacePage() {
       openedSection={openedSection}
       openedLabel={openedSectionLabel}
       onItemClick={handleStudioItemClick}
+      onItemClickWithOptions={handleStudioItemClick}
       onCloseSection={() => setOpenedSection(null)}
       getSectionStatus={getSectionStatus}
       generatingSections={generatingSections}
@@ -1397,17 +1544,20 @@ export default function ModuleWorkspacePage() {
       {isDesktop && (
         <div className="flex flex-1 flex-row gap-4 overflow-hidden p-4">
           {!isSplitScreen && (
-            <aside className={cn(panelShellClasses, "w-72 shrink-0")}>
+            <aside className={cn(panelShellClasses, "shrink-0 transition-all duration-300", isSourcesCollapsed ? "w-20" : "w-72")}>
               <ModuleSourcesPanel
                 courses={courses}
                 activeCourseId={activeCourse?.id ?? null}
+                isCollapsed={isSourcesCollapsed}
+                onToggleCollapse={handleToggleSourcesCollapsed}
+                selectedSourceIds={selectedSourceIds}
+                onToggleSource={handleToggleSelectedSource}
                 isSwitchingCourse={isSwitchingCourse}
                 onSubmitFile={handleFileSelected}
                 onSubmitText={handleTextSubmitted}
                 onSelectCourse={handleSelectCourse}
                 onShowCourseFile={handleShowCourseFile}
                 onDeleteCourse={handleDeleteCourse}
-                onClosePanel={handleCloseSourcesPanel}
                 courseMasteryBySlug={courseMasteryBySlug}
               />
             </aside>
@@ -1463,7 +1613,6 @@ export default function ModuleWorkspacePage() {
                 onSelectCourse={handleSelectCourse}
                 onShowCourseFile={handleShowCourseFile}
                 onDeleteCourse={handleDeleteCourse}
-                onClosePanel={NOOP}
                 courseMasteryBySlug={courseMasteryBySlug}
               />
             )}

@@ -16,7 +16,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { reservePlatformCapacity } from "@/lib/platform-spend-guard";
-import { lookupStudioContentCache, recordStudioCacheHit, storeStudioContentCache } from "@/lib/studio-content-cache";
+import { lookupStudioContentCache, recordStudioCacheHit, storeStudioContentCache, type StudioCacheLookupResult } from "@/lib/studio-content-cache";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { runStudioExplicationDeltaPipeline, runStudioExplicationFreshGenerationWithTagging } from "@/lib/studio-explication-delta";
 import { EXPLICATION_CHUNK_TAGGING_ADDENDUM } from "@/lib/prompts/public-course-sections";
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { actionType, documentContext, courseId } = (body ?? {}) as {
+  const { actionType, documentContext, courseId, language: languageRaw, customPrompt: customPromptRaw } = (body ?? {}) as {
     actionType?: unknown;
     /**
      * OPTIONAL now — the server fetches this course's own raw_text from
@@ -167,6 +167,10 @@ export async function POST(request: NextRequest) {
      */
     documentContext?: unknown;
     courseId?: unknown;
+    /** Studio tile pre-generation menu (Point 4) — "fr" (default, omitted) or "en". */
+    language?: unknown;
+    /** Explication-only free-text addition from the tile's pre-generation menu — ignored for every other actionType. */
+    customPrompt?: unknown;
   };
 
   if (!isValidActionType(actionType)) {
@@ -178,6 +182,28 @@ export async function POST(request: NextRequest) {
   if (typeof courseId !== "number" || !Number.isFinite(courseId)) {
     return NextResponse.json({ success: false, error: "'courseId' est requis et doit être un nombre." }, { status: 400 });
   }
+
+  const language: "fr" | "en" = languageRaw === "en" ? "en" : "fr";
+  const customPrompt = actionType === "explication" && typeof customPromptRaw === "string" ? customPromptRaw.trim().slice(0, 2000) : "";
+  // A non-default language, or a custom prompt (explication only), makes
+  // this a PERSONALIZED request — never served from, nor written to, the
+  // cross-student studio_content_cache (keyed on content_hash alone, no
+  // language/prompt dimension — extending it would need a schema migration
+  // this codebase has no confirmed-live tooling for), and never routed
+  // through the cross-university Explication chunk-delta pipeline either
+  // (that pipeline reuses OTHER students' French, default-prompt chapters —
+  // wrong material to reuse for an English or custom-prompted request).
+  // Falls straight through to a full, fresh generation via the generic path
+  // below, exactly like /api/studio/regenerate already does for its own
+  // "student explicitly wants something different" case.
+  const isPersonalizedVariant = language !== "fr" || customPrompt.length > 0;
+  const languageInstruction =
+    language === "en"
+      ? "\n\nINSTRUCTION DE LANGUE OBLIGATOIRE (remplace toute langue de sortie précédemment implicite) : rédige l'INTÉGRALITÉ de ta réponse — tous les champs textuels du JSON, sans exception — en ANGLAIS, jamais en français, en conservant strictement le même niveau de rigueur médicale, la même structure JSON et le même format exact déjà exigés ci-dessus."
+      : "";
+  const customPromptInstruction = customPrompt
+    ? `\n\nCONSIGNE PERSONNALISÉE DE L'ÉTUDIANT (à respecter en plus de tout ce qui précède, sans jamais sacrifier la rigueur médicale ni le format JSON exact déjà exigé) : ${customPrompt}`
+    : "";
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -216,7 +242,9 @@ export async function POST(request: NextRequest) {
   let cacheRowId: string | undefined;
   let cacheMode: "exact" | "delta" | "cross-university-delta" | "miss" = "miss";
 
-  const cacheResult = await lookupStudioContentCache(actionType, truncatedContext);
+  const cacheResult: StudioCacheLookupResult = isPersonalizedVariant
+    ? { hit: false }
+    : await lookupStudioContentCache(actionType, truncatedContext);
 
   if (cacheResult.hit && cacheResult.matchType === "exact") {
     finalData = cacheResult.data;
@@ -263,7 +291,7 @@ export async function POST(request: NextRequest) {
     // below just falls through to full generation exactly as before this
     // feature existed.
     let crossUniversityMarkdown: string | null = null;
-    if (actionType === "explication" && !isFuzzyHit) {
+    if (actionType === "explication" && !isFuzzyHit && !isPersonalizedVariant) {
       try {
         crossUniversityMarkdown = await runStudioExplicationDeltaPipeline(courseId, truncatedContext, user.id);
       } catch (error) {
@@ -282,7 +310,7 @@ export async function POST(request: NextRequest) {
       // parseJsonResponse, sanitizeForPostgres, zod validation, error
       // handling, storeStudioContentCache — runs completely unchanged.
       raw = JSON.stringify({ explication: crossUniversityMarkdown });
-    } else if (actionType === "explication" && !isFuzzyHit) {
+    } else if (actionType === "explication" && !isFuzzyHit && !isPersonalizedVariant) {
       // True miss, no cross-university candidate at all (first course ever
       // on this topic, or this module opted out) — full generation, but
       // WITH chapter/chunk tagging so THIS course becomes a future
@@ -339,9 +367,24 @@ export async function POST(request: NextRequest) {
       // cache. The full-generation path below DOES have one: see
       // buildStudioSystemMessage's own comment for why the course-content
       // block must be split out and marked cache_control on its own.
+      // isFuzzyHit can never be true here when isPersonalizedVariant is —
+      // the cache lookup itself was skipped for a personalized request (see
+      // cacheResult above), so this always resolves to the fresh-generation
+      // branch for language/custom-prompt requests, carrying the extra
+      // instructions appended to the section's own base prompt (never
+      // REPLACING it — buildStudioSystemMessage's overrideBasePrompt hook is
+      // used exactly as designed: full override string in, full override
+      // string out, so every "SURCHARGE OBLIGATOIRE" quality mandate stays
+      // intact).
       const systemContent: string | ReturnType<typeof buildStudioSystemMessage> = isFuzzyHit
         ? buildStudioDeltaAdaptationPrompt(actionType, JSON.stringify(cacheResult.data), truncatedContext)
-        : buildStudioSystemMessage(actionType, truncatedContext);
+        : buildStudioSystemMessage(
+            actionType,
+            truncatedContext,
+            isPersonalizedVariant
+              ? `${STUDIO_PROMPT_CONFIG[actionType].systemPrompt}${languageInstruction}${customPromptInstruction}`
+              : undefined
+          );
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
@@ -419,8 +462,13 @@ export async function POST(request: NextRequest) {
     // errors and never throws, so a caching hiccup can't block this
     // student's own successful generation. No separate "record usage" call
     // here anymore — reserveGeneration() above already incremented
-    // atomically, before this call even ran.
-    await storeStudioContentCache(actionType, truncatedContext, finalData);
+    // atomically, before this call even ran. Skipped for a personalized
+    // (non-default language / custom prompt) request — see
+    // isPersonalizedVariant's own comment above for why this must never
+    // enter the shared cross-student cache.
+    if (!isPersonalizedVariant) {
+      await storeStudioContentCache(actionType, truncatedContext, finalData);
+    }
   }
 
   // Persist BEFORE returning success — see this route's header comment.

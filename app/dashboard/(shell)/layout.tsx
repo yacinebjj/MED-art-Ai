@@ -47,7 +47,15 @@ function resolvePageTitleKey(pathname: string): Parameters<typeof t>[0] | null {
 // treatment. Branching on pathname here, in the ONE shared layout every
 // (shell) page already goes through, avoids duplicating Sidebar/Topbar
 // wiring into a second layout just for this one route.
-const FULL_BLEED_ROUTES = ["/dashboard/assistant"];
+// Point 5 fix: /dashboard/audio-workspace declares its own self-contained
+// `h-[100dvh]` two-panel layout (its own internal overflow-y-auto scroll
+// regions), exactly like /dashboard/assistant — without full-bleed
+// treatment, the shell's normal wrapper (max-w-7xl, pb-6rem padding, its own
+// overflow-y-auto <main>) nested a SECOND, conflicting height/scroll system
+// around it, which is what let the "Sauvegarder" button at the bottom of
+// its results panel end up clipped behind the mobile bottom nav on real
+// devices instead of reachable by scrolling.
+const FULL_BLEED_ROUTES = ["/dashboard/assistant", "/dashboard/audio-workspace"];
 
 // Notes keeps the normal centered/padded treatment (unlike full-bleed) but
 // still needs a REAL `h-full` — its note editor manages its own internal

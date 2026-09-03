@@ -144,8 +144,12 @@ function MasterclassSummary() {
           Écoutez-moi bien, le mécanisme physiopathologique central ici, c'est tout bête : ça part toujours d'une <span className="text-indigo-600 dark:text-indigo-400 font-bold">obstruction de la lumière appendiculaire</span>. Une fois bouchée, la pression monte, la vascularisation trinque, et la maladie déroule sa cascade en quatre actes précis — je veux que vous puissiez les réciter les yeux fermés.
         </p>
 
-        <div className="overflow-hidden rounded-2xl border border-indigo-100 dark:border-indigo-900/30 bg-white dark:bg-slate-900 shadow-lg">
-          <table className="w-full text-left text-sm md:text-base border-collapse">
+        {/* Mobile portrait fix (Point 6) — see GastriteResumeStudio.tsx's
+            identical comment: overflow-hidden clipped this table instead of
+            letting it scroll horizontally on a narrow phone screen. */}
+        <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/30 bg-white dark:bg-slate-900 shadow-lg">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm md:text-base border-collapse">
             <thead>
               <tr className="bg-indigo-50 dark:bg-indigo-950/50">
                 <th className="p-4 font-black text-indigo-900 dark:text-indigo-300 border-b border-indigo-200 dark:border-indigo-800/50 w-1/4">Stade Lésionnel</th>
@@ -176,6 +180,7 @@ function MasterclassSummary() {
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
       </motion.section>
 
@@ -368,8 +373,12 @@ function ExamSummaryContent() {
           Retenez cette astuce en or avant même d'ouvrir le tableau : la douleur de l'appendicite <strong>migre</strong> parce qu'elle change de nature. Au début, c'est l'appendice enflammé qui tire sur son péritoine viscéral — un tissu peu innervé, incapable de localiser précisément la douleur, qui l'envoie donc en <em>vague et diffuse</em> autour de l'ombilic (le fameux territoire du nerf splanchnique, celui de tout l'intestin moyen embryonnaire). Puis, quand l'inflammation gagne le péritoine pariétal en regard — richement innervé, lui, par les nerfs somatiques de la paroi — la douleur devient brutalement <strong>précise, ponctuelle, en FID</strong>. C'est cette bascule viscéro-pariétale qui explique la fameuse migration décrite par toutes les études : elle n'est pas un détail anecdotique, elle est la <em>signature physiopathologique</em> de la maladie. Gardez ce mécanisme en tête pour chaque ligne du tableau ci-dessous : c'est lui qui distingue une urgence chirurgicale d'un simple mal de ventre.
         </p>
 
-        <div className="overflow-hidden rounded-2xl border border-orange-100 dark:border-orange-900/30 shadow-lg">
-          <table className="w-full text-left text-sm border-collapse">
+        {/* Mobile portrait fix (Point 6) — see GastriteResumeStudio.tsx's
+            identical comment: overflow-hidden clipped this table instead of
+            letting it scroll horizontally on a narrow phone screen. */}
+        <div className="rounded-2xl border border-orange-100 dark:border-orange-900/30 shadow-lg">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-left text-sm border-collapse">
             <thead>
               <tr className="bg-gradient-to-r from-orange-600 to-amber-600 dark:from-orange-800 dark:to-amber-800">
                 <th className="p-3 font-black text-white">Diagnostic</th>
@@ -435,6 +444,7 @@ function ExamSummaryContent() {
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
       </motion.section>
 

@@ -236,7 +236,14 @@ export default function AudioWorkspacePage() {
   const isBusy = status === "processing";
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-background">
+    // h-full (not a literal h-[100dvh]) — matches /dashboard/assistant's own
+    // full-bleed pattern exactly: this route is now registered in the
+    // shell's FULL_BLEED_ROUTES (see app/dashboard/(shell)/layout.tsx), so
+    // <main> already allocates exactly topbar-excluded viewport height for
+    // this div to fill. A literal 100dvh here would still overshoot that by
+    // the topbar's own height, which is what let the "Sauvegarder" button
+    // end up clipped past the visible area on real mobile devices.
+    <div className="flex h-full flex-col bg-background">
       <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
         <button
           type="button"
