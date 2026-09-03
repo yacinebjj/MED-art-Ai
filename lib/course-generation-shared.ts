@@ -146,7 +146,17 @@ function repairTruncatedJson(text: string): string | null {
   if (!inString && stack.length === 0) return null; // balanced already — not a truncation-shaped failure.
 
   let repaired = text;
-  if (inString) repaired += '"';
+  if (inString) {
+    // A response cut off immediately after a lone, unescaped backslash
+    // (e.g. mid-escape-sequence) ends this scan with `escaped === true` —
+    // blindly appending `"` in that state would be read by JSON.parse as
+    // an ESCAPED quote (`\"`), not a closing one, leaving the string still
+    // unterminated and the whole repair attempt silently useless. Drop
+    // that dangling backslash (it's already a broken, incomplete escape —
+    // nothing valid to preserve) before closing the string for real.
+    if (escaped) repaired = repaired.slice(0, -1);
+    repaired += '"';
+  }
   repaired = repaired.replace(/,\s*$/, ""); // a truncated array/object entry often leaves a dangling trailing comma.
   for (let i = stack.length - 1; i >= 0; i--) {
     repaired += stack[i] === "{" ? "}" : "]";

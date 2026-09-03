@@ -154,12 +154,18 @@ interface StudioPromptConfig {
   maxTokens: number;
 }
 
-// explication: deliberately reset to 32000 — kept as the ONE section with a
-// large ceiling even after the model-policy change below (every section,
-// Explication included, now runs on ECONOMY_MODEL — see this file's own
-// header comment) precisely because it's the longest, deepest-detail
-// section by design; the ceiling was never really about which model was
-// paying for it.
+// explication: raised 32000 -> 32768 (explicit product instruction, after
+// real "cours très long" production truncation reports) — kept as the ONE
+// section with a large ceiling even after the model-policy change below
+// (every section, Explication included, now runs on ECONOMY_MODEL — see
+// this file's own header comment) precisely because it's the longest,
+// deepest-detail section by design. Note this alone does not fully solve
+// truncation on a GENUINELY long course — `reasoning: { effort: "low" }`
+// (see app/api/studio/generate/route.ts and lib/studio-explication-delta.ts)
+// still reserves ~20% of this budget for hidden reasoning tokens, and
+// recoverExplicationOnly's unclosed-string recovery (same file) is the real
+// safety net when the visible explication text itself still runs past
+// whatever's left.
 //
 // The other 4 sections: checked against REAL past generations already
 // stored in studio_content_cache (a local, read-only Supabase query — zero
@@ -172,7 +178,7 @@ interface StudioPromptConfig {
 // than what's been generated so far. Re-check with more real data as
 // studio_content_cache accumulates more entries.
 export const STUDIO_PROMPT_CONFIG: Record<JsonSectionId, StudioPromptConfig> = {
-  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 32000 },
+  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 32768 },
   resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
   qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 20000 },

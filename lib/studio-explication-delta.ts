@@ -487,20 +487,61 @@ export async function runStudioExplicationDeltaPipeline(
  * SECOND field, the actual lesson content the student is waiting on is very
  * often already complete and sitting right there in the raw text, just
  * unreachable via a normal JSON.parse because the OVERALL document never
- * closed cleanly. This targeted, self-contained regex recovers ONLY that
- * one string value — not a general JSON repair — so it can never accidentally
- * "recover" a genuinely truncated explication (an unclosed string simply
- * won't match) or silently serve a suspiciously short fragment (rejected
- * below by the same 50-char floor StudioTextSchema itself enforces). If it
- * can't cleanly recover, this returns null and the caller's original error
- * surfaces exactly as it did before this recovery path existed.
+ * closed cleanly.
+ *
+ * TWO recovery attempts, in order:
+ *  1. STRICT — the explication string is already properly closed (the cut
+ *     happened later, e.g. mid-way through explicationChapterChunks). Exact
+ *     value, no guessing.
+ *  2. UNCLOSED-TAIL — explicitly requested (product direction, after a real
+ *     "cours très long" production failure): the far more common shape for
+ *     a genuinely LONG explication, since the token ceiling is much more
+ *     likely to land WHILE still writing that first, dominant field than
+ *     after it. Captures from `"explication":"` to the end of the raw text
+ *     and treats it as an unterminated string — i.e. everything the model
+ *     managed to write before being cut off, honestly incomplete but real.
+ *     A dangling, unescaped trailing backslash (truncated mid-escape-
+ *     sequence) is dropped before decoding, same reasoning as
+ *     repairTruncatedJson's own identical fix in course-generation-shared.ts
+ *     — appending a bare `"` after a lone `\` would escape it instead of
+ *     closing it and break the decode.
+ *
+ * Neither attempt ever fabricates content or silently serves a suspiciously
+ * short fragment — both are rejected by the same 50-char floor
+ * StudioTextSchema itself enforces. If neither can cleanly recover, this
+ * returns null and the caller's original error surfaces exactly as it did
+ * before this recovery path existed.
  */
 function recoverExplicationOnly(raw: string): string | null {
-  const match = raw.match(/"explication"\s*:\s*"((?:\\.|[^"\\])*)"/);
-  if (!match) return null;
+  const closed = raw.match(/"explication"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (closed) {
+    const decoded = tryDecodeJsonString(closed[1]);
+    if (decoded && decoded.trim().length >= 50) return decoded;
+  }
+
+  // Trailing `\\?` (on top of the `(?:\\.|[^"\\])*` repeat) — without it, a
+  // truncation landing EXACTLY on a lone trailing backslash (nothing left
+  // to pair it with) can't be captured by either alternative in the main
+  // group (`\\.` needs a following char, `[^"\\]` excludes backslash), so
+  // the whole match silently fails right when there's still real content
+  // to recover. Confirmed by a real test case before shipping this.
+  const unclosed = raw.match(/"explication"\s*:\s*"((?:\\.|[^"\\])*\\?)$/);
+  if (unclosed) {
+    let tail = unclosed[1];
+    let trailingBackslashes = 0;
+    while (tail.endsWith("\\".repeat(trailingBackslashes + 1))) trailingBackslashes++;
+    if (trailingBackslashes % 2 === 1) tail = tail.slice(0, -1); // dangling half of an escape sequence — drop it, nothing valid to preserve.
+    const decoded = tryDecodeJsonString(tail);
+    if (decoded && decoded.trim().length >= 50) return decoded;
+  }
+
+  return null;
+}
+
+/** `JSON.parse('"' + escaped + '"')` without throwing — returns null on any decode failure instead. */
+function tryDecodeJsonString(escaped: string): string | null {
   try {
-    const decoded = JSON.parse(`"${match[1]}"`) as string;
-    return decoded.trim().length >= 50 ? decoded : null;
+    return JSON.parse(`"${escaped}"`) as string;
   } catch {
     return null;
   }
