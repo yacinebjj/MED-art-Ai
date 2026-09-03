@@ -165,21 +165,37 @@ function repairTruncatedJson(text: string): string | null {
 }
 
 /**
- * Real, confirmed production failure — DISTINCT from truncation:
- * `SyntaxError: Unexpected token '\'` on an otherwise-COMPLETE response.
- * The model occasionally writes a literal backslash that isn't a valid
- * JSON escape target (confirmed case: right before a heading like
- * "Hiérarchie", almost certainly a stray LaTeX-ish or ad-hoc markdown
- * artifact) — `\H` is not `"`, `\`, `/`, `b`, `f`, `n`, `r`, `t`, or `u`,
- * so JSON.parse rejects it outright, no matter how well-formed and
- * complete the surrounding document is. repairTruncatedJson's bracket-
- * balancing can't fix this at all (nothing is actually unbalanced), so a
- * genuinely non-truncated response was being discarded as if it were one.
- * Doubles any such invalid backslash into a valid `\\` (the only sane
- * reading of "there was a literal backslash here") without touching any
- * other character — never removes or invents content.
+ * Two DISTINCT, confirmed real production failures — neither is a
+ * truncation, so repairTruncatedJson's bracket-balancing can't fix either
+ * (nothing is actually unbalanced in either case), and a genuinely complete
+ * response was being discarded as if it were cut off:
+ *
+ * 1. INVALID ESCAPE TARGET — `SyntaxError: Unexpected token '\'` (or, on
+ *    newer V8, "Bad escaped character in JSON") right before a heading like
+ *    "Hiérarchie": the model writes a literal backslash that isn't a valid
+ *    JSON escape target (`\H` is not `"`, `\`, `/`, `b`, `f`, `n`, `r`, `t`,
+ *    or `u`), almost certainly a stray LaTeX-ish artifact (e.g. an
+ *    abandoned `\hline`-style table command).
+ * 2. RAW CONTROL CHARACTER IN A STRING — same class of error (message
+ *    varies by Node/V8 version — "Bad control character in string
+ *    literal" on newer V8, the same generic "Unexpected token" on older
+ *    versions this app's production server was confirmed running),
+ *    context snippet showing something like a real linebreak followed by
+ *    an ASCII table divider (`+-------+`): the model draws a plain-text/
+ *    ASCII-art table (needs REAL line breaks between rows) instead of a
+ *    single-line Markdown table, and that raw newline/tab/CR byte ends up
+ *    sitting unescaped inside what's supposed to be one JSON string value
+ *    — valid JSON requires control characters to be written as `\n`/`\t`/
+ *    `\r`, never as a literal byte.
+ *
+ * Fixes both in one pass: doubles any invalid-target backslash into a
+ * valid `\\` (the only sane reading of "there was a literal backslash
+ * here"), and escapes any raw control character (code point < 0x20) found
+ * inside a string into its proper JSON escape. Never touches any other
+ * character — never removes or invents content.
  */
 const VALID_JSON_ESCAPE_TARGETS = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
+const CONTROL_CHAR_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
 
 /**
  * `startInString` — exported for lib/studio-explication-delta.ts's
@@ -211,6 +227,13 @@ export function fixInvalidJsonEscapes(text: string, startInString = false): stri
       } else {
         result += "\\\\"; // invalid escape target — treat the backslash as a literal character.
       }
+      continue;
+    }
+
+    if (inString && ch < " ") {
+      // Raw control character sitting unescaped inside a string — valid
+      // JSON forbids this outright, regardless of which character it is.
+      result += CONTROL_CHAR_ESCAPES[ch] ?? `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
       continue;
     }
 
