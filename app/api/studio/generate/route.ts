@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import {
-  STUDIO_MODEL,
   STUDIO_BYPASS_MOCK,
   STUDIO_PROMPT_CONFIG,
   STUDIO_SECTION_KEYS,
@@ -388,40 +387,35 @@ export async function POST(request: NextRequest) {
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
-      // ECONOMY_MODEL (Gemini 3.7 Flash) for exemples_analogies, résumé,
-      // cas_clinique and qcm — same real-test-then-decide basis as the
-      // explication swap above (see lib/studio-explication-delta.ts's own
-      // comment). Each of the 4 was tested independently against this exact
-      // prompt+schema on a real course (Hémolyse): exemples_analogies
-      // confirmed authentic Darija+français register at an acceptable volume;
-      // résumé/cas_clinique/qcm each passed a full structural re-validation
-      // (mirroring StudioResumeSchema/StudioCasCliniqueSchema/
-      // StudioQcmsSchema — exact mode/case/question counts, every nested key
-      // present, every QCM's reponsesCorrectes referencing a real option
-      // label) with zero errors, plus a manual medical-accuracy read finding
-      // no incorrect answer keys or fabricated facts. Real measured cost per
-      // call landed around $0.03-0.035 on all three — roughly an 80%+ cut
-      // from Sonnet's observed $0.21 for a single Studio QCM generation.
-      // Scoped to `!isFuzzyHit` only — buildStudioDeltaAdaptationPrompt (the
-      // fuzzy-hit branch just above) is a different, untested prompt, so it
-      // keeps the STUDIO_MODEL default regardless of actionType.
-      const generationModel = actionType !== "explication" && !isFuzzyHit ? ECONOMY_MODEL : STUDIO_MODEL;
+      // MODEL POLICY (definitive product decision): every Studio section —
+      // explication included, no exception — runs on ECONOMY_MODEL (Gemini
+      // 3.7 Flash). Explication/résumé/cas_clinique/qcm/exemples_analogies
+      // were each independently tested against this exact prompt+schema on
+      // a real course (Hémolyse): résumé/cas_clinique/qcm each passed a
+      // full structural re-validation (mirroring StudioResumeSchema/
+      // StudioCasCliniqueSchema/StudioQcmsSchema — exact mode/case/question
+      // counts, every nested key present, every QCM's reponsesCorrectes
+      // referencing a real option label) with zero errors, plus a manual
+      // medical-accuracy read finding no incorrect answer keys or
+      // fabricated facts; exemples_analogies confirmed authentic
+      // Darija+français register at an acceptable volume. There is no
+      // longer a Sonnet fallback anywhere in this route, including the
+      // fuzzy-hit delta-adaptation branch above.
+      const generationModel = ECONOMY_MODEL;
 
-      // Confirmed production root cause of "JSON.parse failed" on long
-      // courses: OpenRouter's `reasoning` tokens are billed as OUTPUT
-      // tokens but are NOT a separate budget from the visible completion
-      // (see callOpenRouter's own doc comment) — on google/gemini-3.7-flash
-      // specifically (ECONOMY_MODEL), an uncapped reasoning effort can
-      // silently burn most of `effectiveMaxTokens` on hidden "thinking"
-      // before the model writes a single character of the actual JSON,
-      // truncating it mid-structure regardless of how high the ceiling is
-      // set. `streamOpenRouter` (the chat path) already caps this with
-      // `{ effort: "low" }` for the exact same model — this generic Studio
-      // path never had the same cap, which is why raising maxTokens alone
-      // never fixed it. Applied only when ECONOMY_MODEL is actually the
-      // model in play; STUDIO_MODEL (Sonnet) doesn't have this failure mode.
-      const reasoningOption =
-        generationModel === ECONOMY_MODEL ? ({ effort: "low" } as const) : undefined;
+      // reasoning: { effort: "low" } — confirmed production root cause of
+      // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
+      // tokens are billed as OUTPUT tokens but are NOT a separate budget
+      // from the visible completion (see callOpenRouter's own doc comment)
+      // — on google/gemini-3.7-flash specifically, an uncapped reasoning
+      // effort can silently burn most of `effectiveMaxTokens` on hidden
+      // "thinking" before the model writes a single character of the
+      // actual JSON, truncating it mid-structure regardless of how high
+      // the ceiling is set. `streamOpenRouter` (the chat path) already caps
+      // this for the exact same model — every Studio call now gets the
+      // identical cap, unconditionally, since ECONOMY_MODEL is now the
+      // only model this route ever calls.
+      const reasoningOption = { effort: "low" } as const;
 
       const MAX_GENERIC_ATTEMPTS = 2;
       let correctiveNote: string | null = null;

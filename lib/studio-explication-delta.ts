@@ -21,6 +21,15 @@
  * (app/api/studio/generate/route.ts) falls straight through to a normal,
  * full-price Explication generation — exactly the same contract as every
  * other cache/clone layer already in this codebase.
+ *
+ * MODEL POLICY (definitive product decision): every OpenRouter call in this
+ * file — the delta-chapter/wrapper calls below AND
+ * runStudioExplicationFreshGenerationWithTagging — runs on ECONOMY_MODEL
+ * (google/gemini-3.7-flash) with `reasoning: { effort: "low" }` set
+ * explicitly. There is no Sonnet fallback anywhere in the Explication
+ * pipeline; the delta-chapter/wrapper calls used to omit `model` entirely
+ * (silently defaulting to callOpenRouter's own global Sonnet MODEL) — that
+ * default is no longer relied on here.
  */
 
 import { getSupabaseAdmin } from "@/lib/supabase/server";
@@ -377,13 +386,17 @@ export async function runStudioExplicationDeltaPipeline(
       // 16384 (was 8000) — a long course with many unmatched chunks can
       // genuinely need more room for the new-chapters delta than 8000
       // tokens allowed, which was truncating the JSON mid-structure on
-      // exactly the "cours longs" case reported in production.
+      // exactly the "cours longs" case reported in production. Model
+      // explicit (was defaulting to callOpenRouter's global Sonnet MODEL) —
+      // see this file's own header comment: every Studio Explication path,
+      // no exception, now runs on ECONOMY_MODEL with the matching
+      // reasoning cap.
       const rawDelta = await callOpenRouter(
         [
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { maxTokens: 16384, bypassMock: true }
+        { model: ECONOMY_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { effort: "low" } }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -414,7 +427,7 @@ export async function runStudioExplicationDeltaPipeline(
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      { maxTokens: 4000, bypassMock: true }
+      { model: ECONOMY_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { effort: "low" } }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -520,8 +533,9 @@ export async function runStudioExplicationFreshGenerationWithTagging(
   // that case specifically — the tagging metadata is still genuinely
   // disposable (parseChapterChunkNumbers's `?? []` fallback), but a broken
   // JSON around it is no longer allowed to take the explicationMarkdown down
-  // with it. Scoped to ONLY this call site: the cross-university delta-chapter/wrapper calls below use
-  // different, untested prompts and deliberately keep the Sonnet default.
+  // with it. The cross-university delta-chapter/wrapper calls above use
+  // different, untested prompts but now run on this SAME model+reasoning
+  // policy too — see this file's own header comment.
   // reasoning: { effort: "low" } — confirmed production root cause of
   // truncated/invalid JSON on long courses: OpenRouter's hidden reasoning
   // tokens are NOT a separate budget from the visible completion on

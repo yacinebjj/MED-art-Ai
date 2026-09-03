@@ -22,8 +22,7 @@
 
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
-import { STUDIO_MODEL } from "@/lib/ai/studio-prompts";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import {
   buildSummaryChunkPrompt,
   buildKeywordRowPrompt,
@@ -156,7 +155,9 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
     // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
     // This is the PERSONALIZED, per-student, uncached cross-course
     // combination step (never the cross-student-cached per-course chunk
-    // generation just above, which deliberately stays on STUDIO_MODEL).
+    // generation just above, which now runs on ECONOMY_MODEL — see that
+    // call's own comment; there is no Sonnet fallback anywhere in this
+    // file, or anywhere in the Studio pipeline it borrows from).
     // Tested with one real call: clean schema, medically accurate and
     // genuinely additive cross-course synthesis — a knowingly-accepted
     // tradeoff on a small sample, per the product owner's own explicit
@@ -262,7 +263,13 @@ export async function runModuleSynthesis(
           { role: "system", content: prompt },
           { role: "user", content: userPrompt },
         ],
-        { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true }
+        // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
+        // lib/ai/studio-prompts.ts's own header comment) + the matching
+        // reasoning cap: without it, this model's hidden reasoning tokens
+        // can silently consume the completion budget before writing any of
+        // the actual JSON, truncating it (see callOpenRouter's own doc
+        // comment).
+        { model: ECONOMY_MODEL, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
       );
 
       const parsed = parseJsonResponse(raw);

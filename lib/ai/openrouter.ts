@@ -36,14 +36,16 @@ export const ECONOMY_MODEL = "google/gemini-3.7-flash";
 // student (their own flashcards, their own weakness remediation plan, their
 // own study schedule, their own cross-course module synthesis) and therefore
 // can never benefit from the cross-student/cross-university pooling that
-// keeps STUDIO_MODEL's (Sonnet 5) real per-student cost near zero on
-// app/api/studio/generate. For these routes the model tier is the only
-// remaining cost lever, so they use this instead of STUDIO_MODEL.
-// Confirmed live, 2026-08-31, against GET https://openrouter.ai/api/v1/models:
-// $0.25/M input + $2/M output vs Sonnet 5's $2/M + $10/M — a 5x cut on
-// completion cost (the dominant cost on these long-output generations), at a
-// context window (400K) comfortably larger than any prompt these routes send.
-// Re-verify the same way if this ever 404s.
+// keeps ECONOMY_MODEL's real per-student cost near zero on
+// app/api/studio/generate (see lib/ai/studio-prompts.ts — every Studio
+// section runs on ECONOMY_MODEL, no Sonnet fallback anywhere). For these
+// routes the model tier is the only remaining cost lever, so they use this
+// instead. Confirmed live, 2026-08-31, against
+// GET https://openrouter.ai/api/v1/models: $0.25/M input + $2/M output vs
+// Sonnet 5's $2/M + $10/M — a 5x cut on completion cost (the dominant cost
+// on these long-output generations), at a context window (400K) comfortably
+// larger than any prompt these routes send. Re-verify the same way if this
+// ever 404s.
 export const MID_TIER_MODEL = "openai/gpt-5-mini";
 
 // TRIED AND REVERTED: "openai/gpt-5-nano" was adopted for

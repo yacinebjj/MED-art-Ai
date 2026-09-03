@@ -23,14 +23,19 @@ import {
  * which validates the model's JSON with zod (lib/ai/studio-schemas.ts) and
  * returns it straight to the frontend instead of persisting it.
  *
- * Model: SAME one the real "Golden Standard" Pleurésie pipeline uses. A
- * request to use "anthropic/claude-3.5-sonnet" was NOT followed literally,
- * because this exact codebase already proved that id dead (404s with "No
- * endpoints found") — re-verified live against
- * https://openrouter.ai/api/v1/models on 2026-08-09: "anthropic/claude-3.5-sonnet"
- * is absent from the catalog, "anthropic/claude-sonnet-5" is present.
+ * MODEL POLICY (explicit product decision, definitive): every Studio
+ * section — Explication Ultra-Détaillée included, no exception — now runs
+ * on ECONOMY_MODEL (google/gemini-3.7-flash, lib/ai/openrouter.ts). The
+ * `STUDIO_MODEL` constant that used to point every Explication/fuzzy-hit
+ * call at "anthropic/claude-sonnet-5" (a real, live model — never the
+ * genuinely dead "anthropic/claude-3.5-sonnet", already gone from this
+ * codebase) has been removed entirely: every call site that used to import
+ * it (app/api/studio/generate/route.ts, lib/studio-explication-delta.ts,
+ * lib/module-synthesis.ts) now imports ECONOMY_MODEL directly instead, with
+ * `reasoning: { effort: "low" }` set on each call — the same cap that
+ * already fixed this exact model's hidden-reasoning-tokens truncation bug
+ * elsewhere in this app (see callOpenRouter's own doc comment).
  */
-export const STUDIO_MODEL = "anthropic/claude-sonnet-5";
 
 /**
  * Every Studio call MUST bypass lib/ai/mock-data.ts's marker matching (see
@@ -149,11 +154,12 @@ interface StudioPromptConfig {
   maxTokens: number;
 }
 
-// explication: deliberately reset to 32000 — explicit product decision to
-// accept the higher one-time cost (~$0.21 on STUDIO_MODEL = Sonnet 5) for a
-// genuinely massive, zero-truncation-risk course explication. This is the
-// ONE section where a large, expensive ceiling is an intentional choice,
-// not an unmeasured default.
+// explication: deliberately reset to 32000 — kept as the ONE section with a
+// large ceiling even after the model-policy change below (every section,
+// Explication included, now runs on ECONOMY_MODEL — see this file's own
+// header comment) precisely because it's the longest, deepest-detail
+// section by design; the ceiling was never really about which model was
+// paying for it.
 //
 // The other 4 sections: checked against REAL past generations already
 // stored in studio_content_cache (a local, read-only Supabase query — zero
