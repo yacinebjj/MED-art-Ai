@@ -35,7 +35,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
 import { callOpenRouter, ECONOMY_MODEL } from "@/lib/ai/openrouter";
-import { parseJsonResponse } from "@/lib/course-generation-shared";
+import { parseJsonResponse, fixInvalidJsonEscapes } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
 import { buildExplicationDeltaChapterPrompt, buildExplicationWrapperPrompt } from "@/lib/prompts/public-course-sections";
@@ -515,7 +515,14 @@ export async function runStudioExplicationDeltaPipeline(
 function recoverExplicationOnly(raw: string): string | null {
   const closed = raw.match(/"explication"\s*:\s*"((?:\\.|[^"\\])*)"/);
   if (closed) {
-    const decoded = tryDecodeJsonString(closed[1]);
+    // fixInvalidJsonEscapes(..., true) — confirmed real production failure,
+    // distinct from truncation: the model can write a literal backslash
+    // that isn't a valid JSON escape target (e.g. right before a heading
+    // like "Hiérarchie"). The `\\.` alternative above still finds the TRUE
+    // closing quote regardless (regex `.` consumes any character, valid
+    // escape or not), but handing that raw capture straight to a strict
+    // JSON.parse fails on the same invalid sequence — fix it first.
+    const decoded = tryDecodeJsonString(fixInvalidJsonEscapes(closed[1], true));
     if (decoded && decoded.trim().length >= 50) return decoded;
   }
 
@@ -531,7 +538,7 @@ function recoverExplicationOnly(raw: string): string | null {
     let trailingBackslashes = 0;
     while (tail.endsWith("\\".repeat(trailingBackslashes + 1))) trailingBackslashes++;
     if (trailingBackslashes % 2 === 1) tail = tail.slice(0, -1); // dangling half of an escape sequence — drop it, nothing valid to preserve.
-    const decoded = tryDecodeJsonString(tail);
+    const decoded = tryDecodeJsonString(fixInvalidJsonEscapes(tail, true));
     if (decoded && decoded.trim().length >= 50) return decoded;
   }
 

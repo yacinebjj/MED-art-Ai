@@ -164,26 +164,97 @@ function repairTruncatedJson(text: string): string | null {
   return repaired;
 }
 
-/** Parses the model's raw output into a plain object, with a clear error on malformed/truncated JSON. Attempts repairTruncatedJson() as a fallback before giving up — see that function's own comment for exactly what it does and doesn't fix. */
+/**
+ * Real, confirmed production failure — DISTINCT from truncation:
+ * `SyntaxError: Unexpected token '\'` on an otherwise-COMPLETE response.
+ * The model occasionally writes a literal backslash that isn't a valid
+ * JSON escape target (confirmed case: right before a heading like
+ * "Hiérarchie", almost certainly a stray LaTeX-ish or ad-hoc markdown
+ * artifact) — `\H` is not `"`, `\`, `/`, `b`, `f`, `n`, `r`, `t`, or `u`,
+ * so JSON.parse rejects it outright, no matter how well-formed and
+ * complete the surrounding document is. repairTruncatedJson's bracket-
+ * balancing can't fix this at all (nothing is actually unbalanced), so a
+ * genuinely non-truncated response was being discarded as if it were one.
+ * Doubles any such invalid backslash into a valid `\\` (the only sane
+ * reading of "there was a literal backslash here") without touching any
+ * other character — never removes or invents content.
+ */
+const VALID_JSON_ESCAPE_TARGETS = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
+
+/**
+ * `startInString` — exported for lib/studio-explication-delta.ts's
+ * recoverExplicationOnly, which runs this over an ALREADY-EXTRACTED string
+ * BODY (the regex capture group between the outer quotes, never containing
+ * a bare unescaped `"` by construction) rather than a full `{...}`
+ * document — the whole input there IS string content from the start, so
+ * there's no opening `"` for the normal in/out toggle below to ever see.
+ */
+export function fixInvalidJsonEscapes(text: string, startInString = false): string {
+  let result = "";
+  let inString = startInString;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (inString && ch === "\\") {
+      const next = text[i + 1];
+      if (next !== undefined && VALID_JSON_ESCAPE_TARGETS.has(next)) {
+        result += ch;
+        escaped = true;
+      } else {
+        result += "\\\\"; // invalid escape target — treat the backslash as a literal character.
+      }
+      continue;
+    }
+
+    if (ch === '"') inString = !inString;
+    result += ch;
+  }
+
+  return result;
+}
+
+/** Parses the model's raw output into a plain object, with a clear error on malformed/truncated JSON. Tries fixInvalidJsonEscapes() and repairTruncatedJson() (independently, then combined) as fallbacks before giving up — see each function's own comment for exactly what it does and doesn't fix. */
 export function parseJsonResponse(raw: string): Record<string, unknown> {
   const cleaned = stripMarkdownFences(sanitizeForPostgres(raw));
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
   } catch (firstError) {
-    const repaired = repairTruncatedJson(cleaned);
-    if (repaired) {
+    // Try each candidate in order, from least to most invasive — an
+    // invalid-escape fix alone succeeds when the document was already
+    // complete; the truncation repair alone succeeds when escaping was
+    // already fine; both together cover a response that is BOTH cut off
+    // AND contains a stray backslash earlier on (confirmed to happen
+    // together in real production output).
+    const escapeFixed = fixInvalidJsonEscapes(cleaned);
+    const candidates = [escapeFixed, repairTruncatedJson(cleaned), repairTruncatedJson(escapeFixed)].filter(
+      (c): c is string => typeof c === "string" && c !== cleaned
+    );
+
+    let recovered = false;
+    for (const candidate of candidates) {
       try {
-        parsed = JSON.parse(repaired);
+        parsed = JSON.parse(candidate);
+        recovered = true;
         console.warn(
-          "[course-generation] JSON tronqué détecté et réparé automatiquement (résultat potentiellement incomplet — la validation de schéma en aval reste responsable de détecter un contenu insuffisant)."
+          "[course-generation] JSON invalide (échappement ou troncature) détecté et réparé automatiquement (résultat potentiellement incomplet — la validation de schéma en aval reste responsable de détecter un contenu insuffisant)."
         );
+        break;
       } catch {
-        console.error("[course-generation] JSON.parse failed (même après réparation):", firstError, "\nRaw output (first 1000 chars):", raw.slice(0, 1000));
-        throw new Error("L'IA a renvoyé un JSON invalide ou tronqué (limite de tokens atteinte). Réessaie.");
+        // try the next candidate
       }
-    } else {
-      console.error("[course-generation] JSON.parse failed:", firstError, "\nRaw output (first 1000 chars):", raw.slice(0, 1000));
+    }
+
+    if (!recovered) {
+      console.error("[course-generation] JSON.parse failed (même après réparation):", firstError, "\nRaw output (first 1000 chars):", raw.slice(0, 1000));
       throw new Error("L'IA a renvoyé un JSON invalide ou tronqué (limite de tokens atteinte). Réessaie.");
     }
   }
