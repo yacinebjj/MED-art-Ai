@@ -140,6 +140,22 @@ SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "q
  * words before moving on. This compounds with exhaustiveness above rather
  * than fighting it — step-by-step simple explanations are LONGER than
  * dense technical ones, never shorter.
+ *
+ * CHAÎNE DE "POURQUOI" SANS FIN (third layer, same product direction): for
+ * every sentence in the source, chase WHY it happens exactly that way —
+ * repeatedly, down through cellular/molecular/physiological causes, until
+ * no further "why" is possible — rather than just stating WHAT happens.
+ * Explicitly forbids stopping at a shallow, circular answer ("it happens
+ * because that's the disease"). This is the deepest layer of the same
+ * exhaustiveness goal, not a separate one.
+ *
+ * On maxTokens: NOT raised again alongside this change, deliberately —
+ * real production usage logs so far show completion_tokens landing around
+ * 9,700-10,000 tokens, well under even the PREVIOUS 32,000 ceiling, let
+ * alone the current 65,536. The bottleneck for "legendary" depth has never
+ * been the token ceiling; it's the model stopping early on its own. These
+ * three prompt layers are the actual lever — 65,536 already leaves ample
+ * headroom for whatever they unlock.
  */
 const STUDIO_EXPLICATION_SYSTEM_PROMPT = `${EXPLICATION_SYSTEM_PROMPT}
 
@@ -162,7 +178,20 @@ Concrètement :
 - Répète et reformule le point important d'une étape avec d'autres mots avant de passer à la suivante, pour être sûr que ça "rentre" vraiment — ne suppose JAMAIS que l'étudiant a compris du premier coup.
 - Utilise des phrases courtes et un vocabulaire de tous les jours. Remplace systématiquement un mot savant par son équivalent simple quand c'est possible ("provoque" plutôt que "engendre", "empêche" plutôt que "inhibe" — puis donne quand même le terme médical exact à connaître, mais seulement APRÈS l'avoir fait comprendre simplement).
 - Le but final de chaque paragraphe n'est jamais "avoir mentionné l'information" — c'est que l'idée soit vraiment arrivée jusqu'à l'étudiant, qu'il la comprenne dans sa tête avant de continuer.
-- Cette simplicité ne réduit EN RIEN la longueur ou la profondeur exigées plus haut — au contraire, expliquer étape par étape avec des mots simples prend PLUS de mots qu'une phrase technique condensée, jamais moins. Simple ne veut jamais dire court.`;
+- Cette simplicité ne réduit EN RIEN la longueur ou la profondeur exigées plus haut — au contraire, expliquer étape par étape avec des mots simples prend PLUS de mots qu'une phrase technique condensée, jamais moins. Simple ne veut jamais dire court.
+
+SURCHARGE OBLIGATOIRE — CHAÎNE DE "POURQUOI" SANS FIN (le niveau ultime d'exhaustivité, vient compléter tout ce qui précède) : pour CHAQUE phrase, CHAQUE fait, CHAQUE mécanisme du texte source, ne te contente JAMAIS de dire CE qui se passe — creuse systématiquement POURQUOI ça se passe exactement comme ça, encore, et encore, et encore, jusqu'à ce qu'il n'y ait plus aucun "pourquoi" possible à poser. Une seule affirmation isolée sans sa chaîne de "pourquoi" derrière elle est un échec, même si elle est techniquement correcte.
+
+Concrètement, pour chaque phrase importante du cours, pose-toi et réponds explicitement, les unes après les autres, à des questions comme :
+- Pourquoi est-ce que ça se produit exactement de cette façon-là, et pas autrement ?
+- Pourquoi le corps (ou la cellule, ou l'organe, ou le mécanisme) réagit-il précisément comme ça dans cette situation ?
+- Qu'est-ce qui, en amont — au niveau cellulaire, moléculaire, anatomique ou physiologique —, cause ce résultat précis ? Et pourquoi CE niveau-là cause-t-il exactement CE résultat-là ?
+- Pourquoi appelle-t-on ce phénomène ainsi ? Pourquoi utilise-t-on précisément ce mot ou cette formulation dans le cours pour le décrire ?
+- Et cette cause que tu viens de donner, pourquoi arrive-t-elle elle-même ? Continue à remonter la chaîne de "pourquoi" (le pourquoi du pourquoi du pourquoi) jusqu'à atteindre un mécanisme de base que l'étudiant peut vraiment comprendre, jamais en s'arrêtant à un premier "pourquoi" superficiel du type "parce que c'est comme ça".
+
+N'utilise jamais une explication vague ou circulaire ("ça arrive parce que c'est la maladie", "c'est le signe typique") comme fin de chaîne — chaque "pourquoi" doit recevoir une vraie réponse mécanistique, réelle et vérifiable à partir du contenu médical du cours, jamais inventée. Si le texte source ne donne pas explicitement le mécanisme profond, appuie-toi sur les connaissances médicales de base généralement enseignées à ce niveau pour compléter la chaîne de façon médicalement exacte — sans jamais inventer un fait qui contredirait le cours source.
+
+C'est cette chaîne ininterrompue de "pourquoi" — appliquée à CHAQUE phrase, sans exception, du début à la fin du cours — qui doit transformer cette explication en LA référence absolue et légendaire sur ce sujet, celle qu'un étudiant n'oubliera jamais parce qu'il a compris chaque rouage, jusqu'au bout, sans aucune zone d'ombre.`;
 
 /**
  * Same reasoning as STUDIO_EXPLICATION_SYSTEM_PROMPT above, lighter touch —
