@@ -407,6 +407,22 @@ export async function POST(request: NextRequest) {
       // keeps the STUDIO_MODEL default regardless of actionType.
       const generationModel = actionType !== "explication" && !isFuzzyHit ? ECONOMY_MODEL : STUDIO_MODEL;
 
+      // Confirmed production root cause of "JSON.parse failed" on long
+      // courses: OpenRouter's `reasoning` tokens are billed as OUTPUT
+      // tokens but are NOT a separate budget from the visible completion
+      // (see callOpenRouter's own doc comment) — on google/gemini-3.7-flash
+      // specifically (ECONOMY_MODEL), an uncapped reasoning effort can
+      // silently burn most of `effectiveMaxTokens` on hidden "thinking"
+      // before the model writes a single character of the actual JSON,
+      // truncating it mid-structure regardless of how high the ceiling is
+      // set. `streamOpenRouter` (the chat path) already caps this with
+      // `{ effort: "low" }` for the exact same model — this generic Studio
+      // path never had the same cap, which is why raising maxTokens alone
+      // never fixed it. Applied only when ECONOMY_MODEL is actually the
+      // model in play; STUDIO_MODEL (Sonnet) doesn't have this failure mode.
+      const reasoningOption =
+        generationModel === ECONOMY_MODEL ? ({ effort: "low" } as const) : undefined;
+
       const MAX_GENERIC_ATTEMPTS = 2;
       let correctiveNote: string | null = null;
       let succeeded = false;
@@ -426,7 +442,7 @@ export async function POST(request: NextRequest) {
               { role: "system", content: systemContent },
               { role: "user", content: userPrompt },
             ],
-            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: reasoningOption }
           );
         } catch (error) {
           await refundGeneration(user.id);

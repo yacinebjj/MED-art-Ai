@@ -374,12 +374,16 @@ export async function runStudioExplicationDeltaPipeline(
         reusableChapters.length + 1
       );
 
+      // 16384 (was 8000) — a long course with many unmatched chunks can
+      // genuinely need more room for the new-chapters delta than 8000
+      // tokens allowed, which was truncating the JSON mid-structure on
+      // exactly the "cours longs" case reported in production.
       const rawDelta = await callOpenRouter(
         [
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { maxTokens: 8000, bypassMock: true }
+        { maxTokens: 16384, bypassMock: true }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -518,6 +522,13 @@ export async function runStudioExplicationFreshGenerationWithTagging(
   // JSON around it is no longer allowed to take the explicationMarkdown down
   // with it. Scoped to ONLY this call site: the cross-university delta-chapter/wrapper calls below use
   // different, untested prompts and deliberately keep the Sonnet default.
+  // reasoning: { effort: "low" } — confirmed production root cause of
+  // truncated/invalid JSON on long courses: OpenRouter's hidden reasoning
+  // tokens are NOT a separate budget from the visible completion on
+  // google/gemini-3.7-flash (see callOpenRouter's own doc comment and
+  // app/api/studio/generate/route.ts's identical fix) — uncapped, they can
+  // silently consume most of `maxTokens` before a single character of the
+  // actual explication is written, no matter how generous the ceiling is.
   const raw = await callOpenRouter(
     [
       { role: "system", content: explicationSystemPrompt + explicationChunkTaggingAddendum },
@@ -526,7 +537,7 @@ export async function runStudioExplicationFreshGenerationWithTagging(
         content: `Voici le contenu source, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
       },
     ],
-    { model: ECONOMY_MODEL, maxTokens, bypassMock: true }
+    { model: ECONOMY_MODEL, maxTokens, bypassMock: true, reasoning: { effort: "low" } }
   );
 
   let parsed: Record<string, unknown>;
