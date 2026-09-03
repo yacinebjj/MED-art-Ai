@@ -1626,6 +1626,7 @@ export default function ModuleWorkspacePage() {
                   getSectionStatus={getSectionStatus}
                   generatingSections={generatingSections}
                   onItemClick={handleStudioItemClick}
+                  onItemClickWithOptions={handleStudioItemClick}
                 />
               ))}
           </div>

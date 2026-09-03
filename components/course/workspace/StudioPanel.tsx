@@ -63,8 +63,8 @@ export interface TileGenerationOptions {
   dialect?: PodcastDialect;
 }
 
-/** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. */
-const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
+/** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. Exported so MobileStudioCards.tsx (a completely separate component tree for the mobile browse view) gates its own equivalent menu identically instead of drifting out of sync. */
+export const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
   "explication",
   "resume",
   "cas_clinique",
@@ -288,7 +288,8 @@ const LANGUAGE_SELECT_CLASSES =
  * outside click — the same "click away to dismiss" behavior a Radix menu
  * gets for free.
  */
-function TileOptionsMenu({
+/** Exported so MobileStudioCards.tsx (mobile's own separate browse-view component, not this file's grid) can reuse the exact same pre-generation options popover instead of maintaining a second, divergent implementation. */
+export function TileOptionsMenu({
   sectionId,
   language,
   onClose,

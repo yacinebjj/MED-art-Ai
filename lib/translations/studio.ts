@@ -12,9 +12,14 @@ import type { DemoSectionId } from "@/lib/demo-content";
 export const STUDIO_TRANSLATIONS = {
   studioHeading: { fr: "Studio", en: "Studio" },
   recentlyGenerated: { fr: "Récemment généré", en: "Recently generated" },
+  // Point 4 fix — replaces the previous "Génère d'abord l'Explication
+  // Ultra-Détaillée" caption shown under locked cards (Résumé, Cas
+  // Clinique, ...) in both StudioPanel.tsx (desktop title= tooltip) and
+  // MobileStudioCards.tsx (mobile's own always-visible caption), per exact
+  // product instruction.
   lockedTooltip: {
-    fr: "Génère d'abord l'Explication Ultra-Détaillée",
-    en: "Generate the Ultra-Detailed Explanation first",
+    fr: "Généré AI",
+    en: "Généré AI",
   },
   regenerate: { fr: "Régénérer", en: "Regenerate" },
   delete: { fr: "Supprimer", en: "Delete" },

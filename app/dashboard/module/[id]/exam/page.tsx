@@ -381,7 +381,10 @@ export default function ExamGeneratorPage() {
   }, [answers, questions]);
 
   return (
-    <div className="aurora-canvas-bg relative flex h-dvh flex-col overflow-hidden">
+    // Point 2 fix — explicit w-full max-w-full alongside the existing
+    // overflow-hidden, matching the sibling workspace/module page's own
+    // identical root treatment.
+    <div className="aurora-canvas-bg relative flex h-dvh w-full max-w-full flex-col overflow-hidden">
       <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
       <WorkspaceTopbar title="Générateur d'Examen" />
 

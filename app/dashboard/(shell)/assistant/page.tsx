@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { Component, memo, useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -118,9 +118,61 @@ function TypingIndicator() {
   );
 }
 
+/**
+ * Point 7 fix — a real production crash: streaming a PARTIAL markdown chunk
+ * (an unclosed code fence, a half-written GFM table row, a lone
+ * `http://` autolink) into react-markdown/remark-gfm can, on rare
+ * malformed intermediate states, throw INSIDE the parser itself — not a
+ * null-access bug in this app's own code, so no amount of `?.` on our side
+ * prevents it. A class-based Error Boundary (React has no hook equivalent)
+ * is the correct, standard containment for "a third-party render library
+ * might throw on some input": it catches the render exception before it
+ * bubbles up and takes down the whole page ("Application error: a
+ * client-side exception has occurred"), and falls back to the message's
+ * RAW text instead — still readable, never a crash. Retries automatically
+ * on the NEXT chunk (see getDerivedStateFromProps): a parse failure on one
+ * partial frame is very often gone the instant more text streams in and
+ * the malformed construct completes or resolves itself.
+ */
+class MarkdownErrorBoundary extends Component<
+  { content: string; children: ReactNode },
+  { hasError: boolean; lastContent: string }
+> {
+  state = { hasError: false, lastContent: this.props.content };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  static getDerivedStateFromProps(props: { content: string }, state: { hasError: boolean; lastContent: string }) {
+    if (props.content !== state.lastContent) {
+      return { hasError: false, lastContent: props.content };
+    }
+    return null;
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[assistant] Rendu Markdown échoué sur ce chunk — repli sur texte brut (non bloquant) :", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <p className="whitespace-pre-wrap text-sm text-foreground/90 sm:text-base">{this.props.content}</p>;
+    }
+    return this.props.children;
+  }
+}
+
 function AssistantMarkdown({ content }: { content: string }) {
+  // Optional-chaining fallback (Point 7) — content is typed as a plain
+  // string end-to-end (see streamAssistantReply's own `content: ""` init),
+  // but this call site never assumes that holds; `?? ""` costs nothing and
+  // guarantees ReactMarkdown never receives undefined/null even if a future
+  // caller's contract drifts.
+  const safeContent = content ?? "";
   return (
-    <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:font-semibold prose-headings:text-foreground prose-p:my-2 prose-strong:text-foreground prose-ul:my-2 prose-li:my-0.5 prose-code:text-foreground prose-pre:bg-muted/60 prose-a:text-emerald-600 dark:prose-invert dark:prose-a:text-emerald-400 sm:prose-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    <MarkdownErrorBoundary content={safeContent}>
+      <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:font-semibold prose-headings:text-foreground prose-p:my-2 prose-strong:text-foreground prose-ul:my-2 prose-li:my-0.5 prose-code:text-foreground prose-pre:bg-muted/60 prose-a:text-emerald-600 dark:prose-invert dark:prose-a:text-emerald-400 sm:prose-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -151,9 +203,10 @@ function AssistantMarkdown({ content }: { content: string }) {
           tr: ({ children }) => <tr className="animate-in fade-in even:bg-muted/40 duration-500">{children}</tr>,
         }}
       >
-        {content}
+        {safeContent}
       </ReactMarkdown>
-    </div>
+      </div>
+    </MarkdownErrorBoundary>
   );
 }
 
@@ -347,13 +400,15 @@ const ChatBubble = memo(function ChatBubble({
     );
   }
 
-  const isPending = message.content.trim().length === 0;
+  // Point 7 hardening — optional chaining + fallback rather than assuming
+  // `content` is always a string, even though it's typed that way end-to-end.
+  const isPending = (message.content ?? "").trim().length === 0;
   // The stream reports failures by flushing a "⚠️ …" line into the same
   // content field (see streamAssistantReply) rather than a separate error
   // field — purely a rendering fork on that already-existing text, no new
   // state: a failed reply gets its own unmistakable look and a one-click
   // retry instead of silently reading like any other answer.
-  const isError = !isPending && message.content.trimStart().startsWith("⚠️");
+  const isError = !isPending && (message.content ?? "").trimStart().startsWith("⚠️");
 
   return (
     <motion.div
@@ -949,7 +1004,11 @@ export default function AssistantPage() {
 
   return (
     <div
-      className="flex h-full overflow-hidden bg-background"
+      // Point 6 — transition-[padding-bottom] so this reserved space grows
+      // in step with the on-screen keyboard's own slide animation instead
+      // of snapping instantly, which is what could read as a "big empty
+      // gap" flashing briefly before the keyboard visually catches up.
+      className="flex h-full overflow-hidden bg-background transition-[padding-bottom] duration-200 ease-out"
       style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
     >
       <ConversationSidebar

@@ -1,7 +1,7 @@
 "use client";
 
-import { memo } from "react";
-import { ChevronRight, Loader2, Lock, MoreVertical, RefreshCw } from "lucide-react";
+import { memo, useState } from "react";
+import { ChevronDown, ChevronRight, Loader2, Lock, MoreVertical, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
@@ -11,7 +11,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
-import { TILE_TINTS, type SectionStatus } from "@/components/course/workspace/StudioPanel";
+import {
+  SECTIONS_WITH_OPTIONS_MENU,
+  TILE_TINTS,
+  TileOptionsMenu,
+  type SectionStatus,
+  type TileGenerationOptions,
+} from "@/components/course/workspace/StudioPanel";
 import { GeneratingRotatingLabel } from "@/components/course/workspace/GeneratingRotatingLabel";
 import type { DemoSection, DemoSectionId } from "@/lib/demo-content";
 
@@ -21,6 +27,8 @@ interface MobileStudioCardsProps {
   /** A Set, not a single id — mirrors StudioPanelProps' own field: several sections can now generate concurrently, each card checks its OWN membership. */
   generatingSections: Set<DemoSectionId>;
   onItemClick: (id: DemoSectionId) => void;
+  /** Point 5 fix — mirrors StudioPanelProps' own field verbatim: fires from a not-yet-generated card's ChevronDown options menu with the student's chosen language/prompt/model/dialect, instead of the plain default-options onItemClick above. Optional: a caller that omits this simply never renders the ChevronDown (every card falls back to its previous plain-click-only behavior). */
+  onItemClickWithOptions?: (id: DemoSectionId, options: TileGenerationOptions) => void;
   /** Optional — mirrors StudioPanelProps' own field of the same name verbatim (see that file's doc comment): omitted entirely by pages backed by a data model "Régénérer" doesn't support yet, in which case an already-generated card simply never shows the "Régénération en cours..." busy state, it has no way to reach one. */
   regeneratingSections?: Set<DemoSectionId>;
   /** Optional — mirrors StudioPanelProps' own field of the same name verbatim. Omitted entirely by pages backed by a data model "Régénérer" doesn't support yet, in which case an already-generated card's "..." menu simply doesn't render a "Régénérer" item (falls back to just "Supprimer") — see StudioPanel.tsx's own identical gate. */
@@ -113,11 +121,15 @@ export const MobileStudioCards = memo(function MobileStudioCards({
   getSectionStatus,
   generatingSections,
   onItemClick,
+  onItemClickWithOptions,
   regeneratingSections,
   onRegenerateSection,
 }: MobileStudioCardsProps) {
   const { language } = useLanguage();
   const hasAnyResult = sections.some((section) => getSectionStatus(section.id) === "available");
+  // Point 5 fix — which not-yet-generated card's options popover is open,
+  // if any. Mirrors StudioPanel.tsx's own identical `optionsMenuFor` state.
+  const [optionsMenuFor, setOptionsMenuFor] = useState<DemoSectionId | null>(null);
 
   return (
     <div className="flex h-full flex-col gap-2 overflow-y-auto p-2">
@@ -163,6 +175,11 @@ export const MobileStudioCards = memo(function MobileStudioCards({
           // getSectionStatus("explication") reflects the current course
           // regardless of which section is being rendered here.
           const isLocked = section.id !== "explication" && getSectionStatus("explication") !== "available";
+          // Point 5 fix — same gate as StudioPanel.tsx's own showOptionsMenu:
+          // only a not-yet-generated, unlocked card offers the pre-generation
+          // language/prompt menu; Exemples & Analogies never gets one.
+          const showOptionsMenu =
+            Boolean(onItemClickWithOptions) && !isLocked && !isAvailable && SECTIONS_WITH_OPTIONS_MENU.has(section.id);
 
           return (
             <div
@@ -209,6 +226,25 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                   <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", tint.dot)} />
                   <CardOptionsMenu sectionId={section.id} onRegenerateSection={onRegenerateSection} />
                 </>
+              ) : showOptionsMenu ? (
+                <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    aria-label={tStudio("optionsMenuAria", language)}
+                    onClick={() => setOptionsMenuFor((prev) => (prev === section.id ? null : section.id))}
+                    className="rounded-full p-1.5 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                  {optionsMenuFor === section.id && (
+                    <TileOptionsMenu
+                      sectionId={section.id}
+                      language={language}
+                      onClose={() => setOptionsMenuFor(null)}
+                      onGenerate={(options) => onItemClickWithOptions?.(section.id, options)}
+                    />
+                  )}
+                </div>
               ) : (
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               )}

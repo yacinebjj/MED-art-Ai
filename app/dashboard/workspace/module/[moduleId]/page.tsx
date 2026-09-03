@@ -347,7 +347,15 @@ export default function ModuleWorkspacePage() {
   }
 
   return (
-    <div className="aurora-canvas-bg relative flex h-dvh w-full flex-col">
+    // Point 2 fix — w-full max-w-full overflow-hidden on this root: without
+    // it, any internal element that overflows horizontally (a wide table, a
+    // long unbroken word) could widen this whole flex column past the
+    // viewport, breaking the page's vertical layout on mobile instead of
+    // staying contained to a horizontal scroll on the ONE element that
+    // actually needs it (see the résumé view's own overflow-x-auto table
+    // wrappers). Matches app/dashboard/module/[id]/exam/page.tsx's own
+    // identical root treatment.
+    <div className="aurora-canvas-bg relative flex h-dvh w-full max-w-full flex-col overflow-hidden">
       <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
       <WorkspaceTopbar title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)} />
 

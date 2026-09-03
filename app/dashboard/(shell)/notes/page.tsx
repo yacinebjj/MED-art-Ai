@@ -522,7 +522,15 @@ function NotesPageContent() {
               {/* المكون الجديد: محرر يقبل الجداول والألوان مباشرة */}
               <HtmlEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
 
-              <div className="mt-4 flex shrink-0 flex-col sm:flex-row justify-between items-center gap-3">
+              {/* Point 1 fix — a direct, unconditional pb-28 on mobile (on
+                  top of the keyboardInset padding already applied to the
+                  fullscreen Card above): guarantees the Save button always
+                  clears the fixed bottom nav bar's real footprint, instead
+                  of relying only on the shell's generic page-level padding
+                  or the keyboard-open-only inset. sm:pb-0 — desktop has no
+                  bottom nav to clear, so this would just be dead space
+                  there. */}
+              <div className="mt-4 flex shrink-0 flex-col justify-between gap-3 pb-28 sm:flex-row sm:items-center sm:pb-0">
                 <Button
                   size="sm"
                   variant="outline"
