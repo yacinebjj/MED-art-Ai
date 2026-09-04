@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Mic, Search, Settings, Sparkles } from "lucide-react";
 import { DashboardHero } from "@/components/dashboard/DashboardHero";
+import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcons";
 import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { useAuth } from "@/providers/AuthProvider";
@@ -104,7 +105,12 @@ export default function DashboardPage() {
   const firstName = profile?.fullName?.split(" ")[0] || tDashboard("fallbackStudentName", language);
 
   return (
-    <div className="mx-auto max-w-7xl">
+    // relative — anchors FloatingMedicalIcons' absolute inset-0 layer to
+    // this page's own content height (not the shell layout, and not the
+    // viewport) — see that component's own comment for why it's scoped to
+    // this one page rather than every page under app/dashboard/(shell).
+    <div className="relative mx-auto max-w-7xl">
+      <FloatingMedicalIcons />
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <DashboardHero firstName={firstName} academicYearName={curriculumProfile?.academicYear?.name ?? null} />
