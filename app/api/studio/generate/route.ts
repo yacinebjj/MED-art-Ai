@@ -8,6 +8,7 @@ import {
   buildStudioDeltaAdaptationPrompt,
   studioDeltaMaxTokens,
   resolveCasCliniqueSystemPrompt,
+  resolveCasCliniqueMaxTokens,
 } from "@/lib/ai/studio-prompts";
 import { resolveStudioSchema } from "@/lib/ai/studio-schemas";
 import { errorMessage, MAX_SOURCE_CHARS, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
@@ -267,7 +268,11 @@ export async function POST(request: NextRequest) {
   }
 
   const truncatedContext = resolvedSourceText.slice(0, MAX_SOURCE_CHARS);
-  const { maxTokens } = STUDIO_PROMPT_CONFIG[actionType];
+  // resolveCasCliniqueMaxTokens — cas_clinique is the one section whose
+  // token ceiling also varies by year (année 1's "Utilité Clinique" now
+  // demands full-course coverage, proportionally as long as Explication);
+  // every other actionType keeps its flat STUDIO_PROMPT_CONFIG value.
+  const maxTokens = actionType === "cas_clinique" ? resolveCasCliniqueMaxTokens(studyYear) : STUDIO_PROMPT_CONFIG[actionType].maxTokens;
   const sectionKey = STUDIO_SECTION_KEYS[actionType];
   const contentHash = sha256(normalizeText(truncatedContext));
 
