@@ -38,7 +38,8 @@ export const ECONOMY_MODEL = "google/gemini-3.7-flash";
 // can never benefit from the cross-student/cross-university pooling that
 // keeps ECONOMY_MODEL's real per-student cost near zero on
 // app/api/studio/generate (see lib/ai/studio-prompts.ts — every Studio
-// section runs on ECONOMY_MODEL, no Sonnet fallback anywhere). For these
+// section runs on ECONOMY_MODEL except Explication Ultra-Détaillée, which
+// runs on CHEAP_MODEL below — no Sonnet fallback anywhere). For these
 // routes the model tier is the only remaining cost lever, so they use this
 // instead. Confirmed live, 2026-08-31, against
 // GET https://openrouter.ai/api/v1/models: $0.25/M input + $2/M output vs
@@ -98,6 +99,21 @@ export const MID_TIER_MODEL = "openai/gpt-5-mini";
 //   call sites carry a real, currently-unquantified version of the same
 //   kind of risk, accepted on the same "runway over accuracy margin" basis
 //   without the same amount of evidence behind it.
+// - app/api/studio/generate/route.ts's Explication Ultra-Détaillée (all 3
+//   generation shapes: the generic path, the fresh-generation-with-tagging
+//   path, and the cross-university delta-chapter/wrapper calls in
+//   lib/studio-explication-delta.ts) — explicit product decision to trade
+//   ECONOMY_MODEL's (Gemini 3.7 Flash) proven JSON-escaping reliability for
+//   CHEAP_MODEL's (DeepSeek V3.2) reputation for genuinely long, exhaustive
+//   long-form writing at a LOWER $/M-token cost than ECONOMY_MODEL, not a
+//   higher one. Not validated with a real test call before shipping (no
+//   test budget was authorized) — this is exactly the "small sample" risk
+//   pattern flagged above, on the single most rigor-critical content this
+//   app produces. No `reasoning` option is set here, matching every other
+//   CHEAP_MODEL call site in this file — if a truncation failure mode
+//   analogous to ECONOMY_MODEL's hidden-reasoning-tokens bug ever surfaces
+//   for this model, re-read this file's own `reasoning` option doc comment
+//   below before assuming the same fix transfers as-is.
 export const CHEAP_MODEL = "deepseek/deepseek-v3.2";
 
 // Shared free-tier (":free" suffix) fallback chain — genuinely zero

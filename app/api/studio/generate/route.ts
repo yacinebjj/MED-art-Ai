@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, ECONOMY_MODEL, CHEAP_MODEL } from "@/lib/ai/openrouter";
 import {
   STUDIO_BYPASS_MOCK,
   STUDIO_PROMPT_CONFIG,
@@ -423,21 +423,20 @@ export async function POST(request: NextRequest) {
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
-      // MODEL POLICY (definitive product decision): every Studio section —
-      // explication included, no exception — runs on ECONOMY_MODEL (Gemini
-      // 3.7 Flash). Explication/résumé/cas_clinique/qcm/exemples_analogies
-      // were each independently tested against this exact prompt+schema on
-      // a real course (Hémolyse): résumé/cas_clinique/qcm each passed a
-      // full structural re-validation (mirroring StudioResumeSchema/
-      // StudioCasCliniqueSchema/StudioQcmsSchema — exact mode/case/question
-      // counts, every nested key present, every QCM's reponsesCorrectes
-      // referencing a real option label) with zero errors, plus a manual
-      // medical-accuracy read finding no incorrect answer keys or
-      // fabricated facts; exemples_analogies confirmed authentic
-      // Darija+français register at an acceptable volume. There is no
-      // longer a Sonnet fallback anywhere in this route, including the
-      // fuzzy-hit delta-adaptation branch above.
-      const generationModel = ECONOMY_MODEL;
+      // MODEL POLICY: every Studio section runs on ECONOMY_MODEL (Gemini 3.7
+      // Flash) EXCEPT Explication Ultra-Détaillée, which runs on CHEAP_MODEL
+      // (DeepSeek V3.2) — explicit product decision to prioritize maximally
+      // long, exhaustive long-form writing on the app's single most
+      // rigor-critical section, at a $/M-token cost LOWER than ECONOMY_MODEL,
+      // not higher (see CHEAP_MODEL's own comment in lib/ai/openrouter.ts for
+      // the full tradeoff disclosure — not validated with a real test call
+      // before shipping). Résumé/cas_clinique/qcm/exemples_analogies keep the
+      // ECONOMY_MODEL policy exactly as tested (see this comment's own prior
+      // history: each was independently tested against this exact
+      // prompt+schema on a real course — Hémolyse — with a full structural
+      // re-validation and a manual medical-accuracy read finding no errors).
+      // There is no Sonnet fallback anywhere in this route, for either model.
+      const generationModel = actionType === "explication" ? CHEAP_MODEL : ECONOMY_MODEL;
 
       // reasoning: { effort: "low" } — confirmed production root cause of
       // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
@@ -448,10 +447,11 @@ export async function POST(request: NextRequest) {
       // "thinking" before the model writes a single character of the
       // actual JSON, truncating it mid-structure regardless of how high
       // the ceiling is set. `streamOpenRouter` (the chat path) already caps
-      // this for the exact same model — every Studio call now gets the
-      // identical cap, unconditionally, since ECONOMY_MODEL is now the
-      // only model this route ever calls.
-      const reasoningOption = { effort: "low" } as const;
+      // this for the exact same model — every ECONOMY_MODEL Studio call
+      // gets the identical cap. CHEAP_MODEL (explication) gets no
+      // `reasoning` option at all, matching every other CHEAP_MODEL call
+      // site in lib/ai/openrouter.ts — none of them set one either.
+      const reasoningOption = actionType === "explication" ? undefined : ({ effort: "low" } as const);
 
       const MAX_GENERIC_ATTEMPTS = 2;
       let correctiveNote: string | null = null;

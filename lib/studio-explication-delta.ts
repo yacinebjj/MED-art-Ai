@@ -22,19 +22,20 @@
  * full-price Explication generation — exactly the same contract as every
  * other cache/clone layer already in this codebase.
  *
- * MODEL POLICY (definitive product decision): every OpenRouter call in this
- * file — the delta-chapter/wrapper calls below AND
- * runStudioExplicationFreshGenerationWithTagging — runs on ECONOMY_MODEL
- * (google/gemini-3.7-flash) with `reasoning: { effort: "low" }` set
- * explicitly. There is no Sonnet fallback anywhere in the Explication
- * pipeline; the delta-chapter/wrapper calls used to omit `model` entirely
- * (silently defaulting to callOpenRouter's own global Sonnet MODEL) — that
- * default is no longer relied on here.
+ * MODEL POLICY: every OpenRouter call in this file — the delta-chapter/
+ * wrapper calls below AND runStudioExplicationFreshGenerationWithTagging —
+ * runs on CHEAP_MODEL (deepseek/deepseek-v3.2), no `reasoning` option set
+ * (matching every other CHEAP_MODEL call site in lib/ai/openrouter.ts — see
+ * that constant's own comment for the full tradeoff disclosure on this
+ * switch away from ECONOMY_MODEL). There is no Sonnet fallback anywhere in
+ * the Explication pipeline; the delta-chapter/wrapper calls used to omit
+ * `model` entirely (silently defaulting to callOpenRouter's own global
+ * Sonnet MODEL) — that default is not relied on here.
  */
 
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
-import { callOpenRouter, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, CHEAP_MODEL } from "@/lib/ai/openrouter";
 import { parseJsonResponse, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
@@ -389,14 +390,13 @@ export async function runStudioExplicationDeltaPipeline(
       // exactly the "cours longs" case reported in production. Model
       // explicit (was defaulting to callOpenRouter's global Sonnet MODEL) —
       // see this file's own header comment: every Studio Explication path,
-      // no exception, now runs on ECONOMY_MODEL with the matching
-      // reasoning cap.
+      // no exception, now runs on CHEAP_MODEL, no `reasoning` option.
       const rawDelta = await callOpenRouter(
         [
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { model: ECONOMY_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { effort: "low" } }
+        { model: CHEAP_MODEL, maxTokens: 16384, bypassMock: true }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -427,7 +427,7 @@ export async function runStudioExplicationDeltaPipeline(
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      { model: ECONOMY_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { effort: "low" } }
+      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -637,8 +637,8 @@ export async function runStudioExplicationFreshGenerationWithTagging(
   const chunks = buildSourceChunks(truncatedText);
   const numberedExtraits = chunks.map((content, i) => `Extrait ${i + 1}:\n${content}`).join("\n\n");
 
-  // ECONOMY_MODEL (Gemini 3.7 Flash) — swapped from the implicit Sonnet
-  // default after a real side-by-side test against this exact prompt
+  // HISTORY: ECONOMY_MODEL (Gemini 3.7 Flash) — swapped from the implicit
+  // Sonnet default after a real side-by-side test against this exact prompt
   // (explicationSystemPrompt, i.e. STUDIO_EXPLICATION_SYSTEM_PROMPT): equal
   // or greater word count, full medical accuracy, and (after two targeted
   // prompt fixes — a strict-tutoiement surcharge and a no-LaTeX-in-JSON
@@ -653,16 +653,18 @@ export async function runStudioExplicationFreshGenerationWithTagging(
   // that case specifically — the tagging metadata is still genuinely
   // disposable (parseChapterChunkNumbers's `?? []` fallback), but a broken
   // JSON around it is no longer allowed to take the explicationMarkdown down
-  // with it. The cross-university delta-chapter/wrapper calls above use
-  // different, untested prompts but now run on this SAME model+reasoning
-  // policy too — see this file's own header comment.
-  // reasoning: { effort: "low" } — confirmed production root cause of
-  // truncated/invalid JSON on long courses: OpenRouter's hidden reasoning
-  // tokens are NOT a separate budget from the visible completion on
-  // google/gemini-3.7-flash (see callOpenRouter's own doc comment and
-  // app/api/studio/generate/route.ts's identical fix) — uncapped, they can
-  // silently consume most of `maxTokens` before a single character of the
-  // actual explication is written, no matter how generous the ceiling is.
+  // with it.
+  //
+  // CURRENT: switched to CHEAP_MODEL (DeepSeek V3.2) — product decision to
+  // trade the above ECONOMY_MODEL validation (word count, register,
+  // JSON-escaping — all specific to Gemini) for DeepSeek's reputation for
+  // genuinely long, exhaustive long-form writing, at a LOWER cost than
+  // ECONOMY_MODEL. NOT re-validated against this exact prompt with a real
+  // test call — see CHEAP_MODEL's own comment in lib/ai/openrouter.ts for
+  // the full disclosure. recoverExplicationOnly's regex-based repair is
+  // model-agnostic (operates on the raw string, not on anything
+  // Gemini-specific), so it still applies here unchanged. No `reasoning`
+  // option is set, matching every other CHEAP_MODEL call site.
   const raw = await callOpenRouter(
     [
       { role: "system", content: explicationSystemPrompt + explicationChunkTaggingAddendum },
@@ -671,7 +673,7 @@ export async function runStudioExplicationFreshGenerationWithTagging(
         content: `Voici le contenu source, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
       },
     ],
-    { model: ECONOMY_MODEL, maxTokens, bypassMock: true, reasoning: { effort: "low" } }
+    { model: CHEAP_MODEL, maxTokens, bypassMock: true }
   );
 
   let parsed: Record<string, unknown>;
