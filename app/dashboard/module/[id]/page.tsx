@@ -1605,8 +1605,19 @@ export default function ModuleWorkspacePage() {
               isSplitScreen && !isStudioCollapsed ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
             )}
           >
-            <main className={panelShellClasses}>{chatPanel}</main>
-            {isSplitScreen && !isStudioCollapsed && <aside className={panelShellClasses}>{studioPanel}</aside>}
+            {/* min-w-0 on Chat's own cell — Tailwind's grid-cols-2 tracks
+                are `minmax(0, 1fr)` with no floor, so without an explicit
+                min-width somewhere, a genuinely wide chat message could
+                force this 50/50 split to squeeze the Studio cell arbitrarily
+                thin (overlapping text, deformed icons) instead of just
+                scrolling internally. min-w-0 here restores the normal
+                "this cell can shrink, its CONTENT scrolls instead of
+                pushing" grid behavior; the real floor is the min-w on
+                Studio's own aside below. */}
+            <main className={cn(panelShellClasses, "min-w-0")}>{chatPanel}</main>
+            {isSplitScreen && !isStudioCollapsed && (
+              <aside className={cn(panelShellClasses, "min-w-[260px]")}>{studioPanel}</aside>
+            )}
           </div>
 
           {isSplitScreen && isStudioCollapsed && (

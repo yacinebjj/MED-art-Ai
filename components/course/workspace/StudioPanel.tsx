@@ -19,7 +19,6 @@ import {
   PanelRightOpen,
   Redo2,
   RefreshCw,
-  SlidersHorizontal,
   Sparkles,
   SquarePen,
   Trash2,
@@ -609,14 +608,11 @@ export function StudioPanel({
             )}
           </button>
         ) : (
-          !isCollapsed && (
-            <div className="flex items-center gap-2">
-              <button type="button" aria-label={tStudio("filterAria", language)} className={TOOLBAR_BUTTON_CLASSES}>
-                <SlidersHorizontal className="h-4 w-4" />
-              </button>
-              <h2 className="text-sm font-semibold text-foreground">{tStudio("studioHeading", language)}</h2>
-            </div>
-          )
+          // Browse-grid header — per explicit product direction, this slot
+          // is deliberately left EMPTY now (was a filter/sliders button +
+          // "Studio" heading). The collapse/expand toggle on the right
+          // (below) is the only thing that remains in this header state.
+          <div />
         )}
 
         <div className="flex items-center gap-1">
@@ -729,9 +725,13 @@ export function StudioPanel({
                         title={isLocked ? tStudio("lockedTooltip", language) : getSectionLabel(section.id, language, studyYear)}
                         aria-disabled={isLocked}
                         className={cn(
-                          "group relative flex w-full items-center gap-2.5 rounded-xl border text-sm font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-base",
+                          // Compacted per explicit product direction — was
+                          // p-3/md:p-4 + text-sm/md:text-base, reading as
+                          // oversized blocks instead of an elegant, dense
+                          // tool list.
+                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-sm",
                           isGenerating && "disabled:cursor-wait",
-                          isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between p-3 text-left md:p-4",
+                          isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between px-3 py-2 text-left",
                           tint.bg
                         )}
                       >
@@ -748,14 +748,14 @@ export function StudioPanel({
                           </span>
                         )}
                         {isGenerating ? (
-                          <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                          <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-4 w-4")} />
                         ) : isLocked ? (
-                          <Lock className={cn("shrink-0 text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-5 w-5")} />
+                          <Lock className={cn("shrink-0 text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-4 w-4")} />
                         ) : (
                           <Icon
                             className={cn(
                               "shrink-0 transition-transform duration-300 group-hover:scale-110",
-                              isCollapsed ? "h-6 w-6" : "h-5 w-5",
+                              isCollapsed ? "h-6 w-6" : "h-4 w-4",
                               tint.icon
                             )}
                           />

@@ -72,12 +72,19 @@ export function DashboardHero({ firstName, academicYearName }: DashboardHeroProp
        * makes the model draw a literal checkerboard PATTERN as pixels (the
        * conventional editor placeholder for transparency, not real alpha),
        * and it only ever returns JPEG regardless of the requested format.
-       * A flat white background is the closest achievable result: it reads
-       * as seamless against this card in light mode, but still shows as a
-       * soft white square in dark mode. Fixing that for real would need
-       * either a dedicated background-removal step (outside this pipeline)
-       * or a hand-authored SVG (like the earlier, now-removed DoctorAIHero
-       * attempt) instead of an AI-generated raster image.
+       * The image's OWN background is a flat, uniform white (regenerated
+       * specifically for this) — CSS `mix-blend-multiply` is what actually
+       * removes the visible square: multiply's formula is `result =
+       * source * backdrop`, and a pure-white source pixel (1,1,1) always
+       * resolves to exactly `backdrop` unchanged, regardless of whether
+       * that backdrop is light OR dark — so this works in both themes, not
+       * light mode only, unlike a naive "white disappears on white" reading
+       * of the trick would suggest. Tradeoff: multiply also darkens the
+       * character's OWN colors somewhat (any non-white source pixel gets
+       * multiplied down), most visible on its darkest details (hair) — a
+       * real cost of this CSS-only fix, not eliminable without either a
+       * true alpha cutout or a hand-authored SVG (like the earlier,
+       * now-removed DoctorAIHero attempt).
        */}
       <div className="hidden shrink-0 md:block">
         <Image
@@ -86,7 +93,7 @@ export function DashboardHero({ firstName, academicYearName }: DashboardHeroProp
           role="presentation"
           width={112}
           height={112}
-          className="h-24 w-24 object-contain lg:h-28 lg:w-28"
+          className="h-24 w-24 object-contain mix-blend-multiply lg:h-28 lg:w-28"
           priority
         />
       </div>

@@ -1026,7 +1026,15 @@ export default function AssistantPage() {
       // in step with the on-screen keyboard's own slide animation instead
       // of snapping instantly, which is what could read as a "big empty
       // gap" flashing briefly before the keyboard visually catches up.
-      className="flex h-full overflow-hidden bg-background transition-[padding-bottom] duration-200 ease-out"
+      //
+      // Was a solid bg-background — the shell layout
+      // (app/dashboard/(shell)/layout.tsx) already paints its own
+      // aurora-canvas-bg/aurora-mesh-bg gradient behind every page in this
+      // route group, and this page's own opaque background fully occluded
+      // it. A subtle, very-low-opacity tint + blur (not bg-transparent
+      // outright) keeps text legible over the moving gradient while still
+      // letting it read through, per explicit product direction.
+      className="flex h-full overflow-hidden bg-white/5 backdrop-blur-sm transition-[padding-bottom] duration-200 ease-out dark:bg-black/20"
       style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
     >
       <ConversationSidebar
@@ -1039,7 +1047,11 @@ export default function AssistantPage() {
         onDelete={handleDeleteConversation}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      {/* Same fix as the root container above — was bg-background (opaque),
+          now a subtle tint + blur so the shell's own aurora gradient stays
+          visible through the main chat column, which is most of this
+          page's actual visible surface. */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white/5 backdrop-blur-sm dark:bg-black/20">
         <div className="flex shrink-0 items-center gap-1 px-4 pt-3 sm:px-6">
           <Tooltip>
             <TooltipTrigger asChild>

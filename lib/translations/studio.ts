@@ -26,7 +26,6 @@ export const STUDIO_TRANSLATIONS = {
   normal: { fr: "Normal", en: "Normal" },
   notePlaceholder: { fr: "Écris ta note ici...", en: "Write your note here..." },
   save: { fr: "Sauvegarder", en: "Save" },
-  filterAria: { fr: "Filtrer", en: "Filter" },
   deleteNoteAria: { fr: "Supprimer la note", en: "Delete note" },
   expandAria: { fr: "Agrandir", en: "Expand" },
   openPanelAria: { fr: "Ouvrir le panneau", en: "Open panel" },

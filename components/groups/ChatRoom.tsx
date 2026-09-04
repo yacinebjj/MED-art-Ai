@@ -107,11 +107,20 @@ function buildFeed(messages: LocalChatMessage[], language: Language): FeedItem[]
 }
 
 /**
- * "Système de Thèmes Médicaux Dynamiques" — decorative background SVG
- * patterns for the chat area, keyed by medical specialty. Declared at
- * module scope (not inside ChatRoom) so this literal array/object is never
- * reallocated on render. Zero external network requests: every pattern is
- * an inline data-URI SVG.
+ * "Système de Thèmes Médicaux Dynamiques" — decorative background for the
+ * chat area, keyed by medical specialty. Declared at module scope (not
+ * inside ChatRoom) so this literal array/object is never reallocated on
+ * render.
+ *
+ * `pattern` used to be an inline data-URI SVG (hand-drawn line art) — per
+ * explicit product direction this is now a real image generated via
+ * OpenRouter's google/gemini-3.1-flash-image-preview ("nano-banana-2", the
+ * same model used for the Dashboard illustrations and Studio's Infographie
+ * tab), one static file per specialty under public/illustrations/, each
+ * prompted for the SAME extremely pale/low-contrast "watermark, not a
+ * foreground illustration" register so chat bubbles stay legible on top —
+ * see this pattern's own comment on the rendering div below for why it's
+ * `cover`, not tiled.
  *
  * Distinct from, and independent of, the bubble-color ThemePicker above
  * (lib/chat-themes.ts / hooks/useChatTheme.ts) — that one recolors MY OWN
@@ -134,28 +143,28 @@ const medicalThemes: MedicalTheme[] = [
     nameKey: "cardiologyThemeName",
     color: "bg-rose-500",
     bgClass: "bg-rose-50/50 dark:bg-rose-950/20",
-    pattern: `url("data:image/svg+xml,%3Csvg width='100' height='100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 50 L20 50 L30 20 L50 90 L65 50 L100 50' stroke='rgba(225, 29, 72, 0.05)' stroke-width='2' fill='none'/%3E%3C/svg%3E")`,
+    pattern: `url("/illustrations/group-chat-bg-cardiologie.jpeg")`,
   },
   {
     id: "neurologie",
     nameKey: "neurologyThemeName",
     color: "bg-indigo-500",
     bgClass: "bg-indigo-50/50 dark:bg-indigo-950/20",
-    pattern: `url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='15' cy='15' r='2' fill='rgba(79, 70, 229, 0.05)'/%3E%3Ccircle cx='45' cy='45' r='2' fill='rgba(79, 70, 229, 0.05)'/%3E%3Cpath d='M15 15 L45 45 M15 45 L45 15' stroke='rgba(79, 70, 229, 0.03)' stroke-width='1'/%3E%3C/svg%3E")`,
+    pattern: `url("/illustrations/group-chat-bg-neurologie.jpeg")`,
   },
   {
     id: "pneumologie",
     nameKey: "pneumologyThemeName",
     color: "bg-cyan-500",
     bgClass: "bg-cyan-50/50 dark:bg-cyan-950/20",
-    pattern: `url("data:image/svg+xml,%3Csvg width='80' height='80' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='40' cy='40' r='20' fill='none' stroke='rgba(6, 182, 212, 0.05)' stroke-width='1.5'/%3E%3Ccircle cx='40' cy='40' r='30' fill='none' stroke='rgba(6, 182, 212, 0.03)' stroke-width='1'/%3E%3C/svg%3E")`,
+    pattern: `url("/illustrations/group-chat-bg-pneumologie.jpeg")`,
   },
   {
     id: "infectiologie",
     nameKey: "infectiologyThemeName",
     color: "bg-emerald-500",
     bgClass: "bg-emerald-50/50 dark:bg-emerald-950/20",
-    pattern: `url("data:image/svg+xml,%3Csvg width='50' height='86.6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M25 0 L50 14.4 L50 43.3 L25 57.7 L0 43.3 L0 14.4 Z' fill='none' stroke='rgba(16, 185, 129, 0.05)' stroke-width='1.5'/%3E%3C/svg%3E")`,
+    pattern: `url("/illustrations/group-chat-bg-infectiologie.jpeg")`,
   },
 ];
 
@@ -545,9 +554,14 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
 
       {/* Rounded, softly-tinted panel holding both the feed and the input card. `relative` anchors the absolutely-positioned SVG pattern layer below; bgClass/transition come from the active medical theme. */}
       <div className={cn("relative flex min-h-0 flex-1 flex-col gap-3 p-3 transition-colors duration-500", activeTheme.bgClass)}>
+        {/* cover/center/no-repeat, not a small tiled size — these are real
+            generated photos (1024x1024), not infinitely-tileable vector
+            SVGs; each one's pattern is dense/uniform enough across the
+            whole canvas that stretching it to cover reads as a rich full
+            background without ever risking a visible tile seam. */}
         <div
           className="absolute inset-0 z-0 pointer-events-none transition-all duration-500"
-          style={{ backgroundImage: activeTheme.pattern, backgroundSize: "100px 100px" }}
+          style={{ backgroundImage: activeTheme.pattern, backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat" }}
         />
 
         {/* z-10 relative is load-bearing here: without it, this scroll region would sit in the same stacking context as the absolutely-positioned pattern layer above and could end up behind it, breaking message legibility and audio-player clicks. */}
