@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { motion } from "framer-motion";
 import { AnimatedBrandMark } from "@/components/layout/AnimatedBrandMark";
 
@@ -10,15 +11,26 @@ interface DashboardHeroProps {
 }
 
 /**
- * Dashboard hero banner — text-only welcome card, no illustration/graphic
- * of any kind. This section has gone through several illustration
- * experiments (a hand-coded single-doctor SVG, a two-character SVG duo, a
- * real photo, a live Spline 3D scene, doctor-3d.png) — all removed; see git
- * history. `doctor-3d.png` briefly lived on the Auth page's marketing
- * panel (components/auth/AuthLayout.tsx) before that panel was removed
- * entirely — it's currently unused anywhere in the app. `doctor-report.png`
- * is still the Sidebar profile badge (components/layout/Sidebar.tsx) — this
- * component owns neither asset.
+ * Dashboard hero banner. This section went through several illustration
+ * experiments before (a hand-coded single-doctor SVG, a two-character SVG
+ * duo, a real photo, a live Spline 3D scene, doctor-3d.png) — all removed
+ * for not looking right stylistically, landing on text-only for a while;
+ * see git history. `doctor-3d.png` briefly lived on the Auth page's
+ * marketing panel (components/auth/AuthLayout.tsx) before that panel was
+ * removed entirely — it's currently unused anywhere in the app.
+ * `doctor-report.png` is still the Sidebar profile badge
+ * (components/layout/Sidebar.tsx) — this component owns neither asset.
+ *
+ * New attempt (chibi illustration set, public/illustrations/) — a flat
+ * vector chibi mascot generated via OpenRouter's
+ * google/gemini-3.1-flash-image-preview ("nano-banana-2", the same model
+ * already proven live for Studio's Infographie tab — see
+ * lib/ai/openrouter.ts's IMAGE_MODEL), color-matched to the app's own
+ * teal/violet brand gradient (AnimatedBrandMark's from-primary-500
+ * to-violet-600) rather than an arbitrary palette. Desktop-only
+ * (`hidden md:block`) — same reasoning as every prior illustration attempt
+ * here: a decorative image would push real above-the-fold priorities below
+ * the fold on a phone, contradicting the shell's no-scroll/compaction goal.
  */
 export function DashboardHero({ firstName, academicYearName }: DashboardHeroProps) {
   return (
@@ -28,7 +40,7 @@ export function DashboardHero({ firstName, academicYearName }: DashboardHeroProp
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className="glass-card shadow-glass dark:shadow-glass-dark mb-3 flex flex-col gap-3 rounded-3xl p-3 sm:mb-6 sm:flex-row sm:items-center sm:gap-5 sm:p-8 lg:mb-8"
     >
-      <div className="flex items-center gap-3 sm:gap-4">
+      <div className="flex flex-1 items-center gap-3 sm:gap-4">
         <AnimatedBrandMark size="sm" className="sm:hidden" />
         <AnimatedBrandMark size="md" className="hidden sm:flex" />
         <div className="min-w-0">
@@ -39,6 +51,17 @@ export function DashboardHero({ firstName, academicYearName }: DashboardHeroProp
               : "Choisis ta spécialité et ton année dans les Paramètres pour voir ton programme — en attendant, ajoute un cours indépendant."}
           </p>
         </div>
+      </div>
+      <div className="hidden shrink-0 overflow-hidden rounded-2xl shadow-md md:block">
+        <Image
+          src="/illustrations/dashboard-hero-mascot.jpeg"
+          alt=""
+          role="presentation"
+          width={112}
+          height={112}
+          className="h-24 w-24 object-cover lg:h-28 lg:w-28"
+          priority
+        />
       </div>
     </motion.div>
   );

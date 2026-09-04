@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Mic, Search, Settings, Sparkles } from "lucide-react";
@@ -189,17 +190,34 @@ export default function DashboardPage() {
         {curriculumProfile === null || curriculumLoading ? (
           <CurriculumViewSkeleton />
         ) : !curriculumProfile?.academicYear ? (
-          <div className="glass-card flex flex-col items-start gap-3 rounded-3xl border-dashed p-3 text-sm text-muted-foreground sm:p-6">
-            <p>
-              {tDashboard("chooseSpecialtyHelper", language)}
-            </p>
-            <Link
-              href="/dashboard/settings"
-              className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-300 active:scale-95"
-            >
-              <Settings className="h-3.5 w-3.5" />
-              {tDashboard("goToSettings", language)}
-            </Link>
+          <div className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed p-3 text-center sm:flex-row sm:items-center sm:gap-5 sm:text-left sm:p-6">
+            {/* Same chibi mascot set as DashboardHero (public/illustrations/),
+                a different pose — this empty state is the app's own "get
+                started" moment, exactly the kind of spot a friendly
+                illustration earns its keep. Shown on every breakpoint
+                (unlike the hero's desktop-only image): this card is the
+                ENTIRE above-the-fold content when it renders, so there's no
+                competing priority to protect on mobile. */}
+            <div className="shrink-0 overflow-hidden rounded-2xl shadow-md">
+              <Image
+                src="/illustrations/dashboard-empty-state-mascot.jpeg"
+                alt=""
+                role="presentation"
+                width={96}
+                height={96}
+                className="h-20 w-20 object-cover sm:h-24 sm:w-24"
+              />
+            </div>
+            <div className="flex flex-col items-center gap-3 sm:items-start">
+              <p className="text-sm text-muted-foreground">{tDashboard("chooseSpecialtyHelper", language)}</p>
+              <Link
+                href="/dashboard/settings"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-300 active:scale-95"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                {tDashboard("goToSettings", language)}
+              </Link>
+            </div>
           </div>
         ) : curriculumError ? (
           <p className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
