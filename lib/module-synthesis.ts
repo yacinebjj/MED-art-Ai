@@ -50,7 +50,7 @@ export const MIN_COURSES_REQUIRED = 5;
 const CACHE_GENERATION_TYPE: Record<ModuleSynthesisType, CourseWorkspaceGenerationType> = {
   global_summary: "summary_chunk",
   keywords_table: "keyword_row_v3",
-  medical_dictionary: "medical_dictionary_v1",
+  medical_dictionary: "medical_dictionary_v2",
 };
 
 const MAX_CATEGORIES_PER_COURSE = 6;

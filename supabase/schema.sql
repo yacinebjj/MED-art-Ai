@@ -1639,7 +1639,7 @@ drop table if exists module_synthesis_cache;
 
 create table if not exists course_workspace_cache (
   course_content_hash text not null,
-  generation_type text not null check (generation_type in ('summary_chunk', 'keyword_row_v3', 'medical_dictionary_v1')),
+  generation_type text not null check (generation_type in ('summary_chunk', 'keyword_row_v3', 'medical_dictionary_v2')),
   content jsonb not null,
   hit_count integer not null default 0,
   created_at timestamptz not null default now(),
@@ -1659,17 +1659,22 @@ create table if not exists course_workspace_cache (
 --                       of a bare term. Column set for the final table is the
 --                       UNION of every course's own keys, computed at stitch
 --                       time — see app/api/workspace/module-synthesis/route.ts.
---   'medical_dictionary_v1' -> NEW (Dictionnaire Médical tab). A self-
---                       contained Markdown string per course (title + a
---                       Terme/Explication table), same shape family as
---                       'summary_chunk' — see buildMedicalDictionaryPrompt in
+--   'medical_dictionary_v1' -> a self-contained Markdown string per course
+--                       (title + a 2-column Terme/Explication table, with an
+--                       occasional inline darja/arabe parenthetical), same
+--                       shape family as 'summary_chunk'.
+--   'medical_dictionary_v2' -> same shape family, but the table is now 3
+--                       columns (Terme | Explication clinique | الشرح
+--                       بالعربية) — a dedicated, ALWAYS-present Arabic
+--                       explanation column per term, never an occasional
+--                       parenthetical — see buildMedicalDictionaryPrompt in
 --                       lib/ai/module-synthesis-prompts.ts.
 -- This ALTER is what makes each bump safe on an already-existing production
 -- table (CREATE TABLE IF NOT EXISTS above is a no-op there) — same pattern
 -- as this file's other ALTER-based constraint fixes.
 alter table course_workspace_cache drop constraint if exists course_workspace_cache_generation_type_check;
 alter table course_workspace_cache add constraint course_workspace_cache_generation_type_check
-  check (generation_type in ('summary_chunk', 'keyword_row_v3', 'medical_dictionary_v1'));
+  check (generation_type in ('summary_chunk', 'keyword_row_v3', 'medical_dictionary_v2'));
 
 alter table course_workspace_cache enable row level security;
 drop policy if exists "Deny all client access" on course_workspace_cache;

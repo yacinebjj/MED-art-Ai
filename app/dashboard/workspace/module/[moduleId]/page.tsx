@@ -560,6 +560,19 @@ export default function ModuleWorkspacePage() {
                         <table {...props} />
                       </div>
                     ),
+                    // Dictionnaire Médical's 3rd column (الشرح بالعربية) is
+                    // genuine Arabic text sitting in an otherwise LTR table
+                    // — without an explicit direction, the browser's bidi
+                    // algorithm can misorder punctuation/parentheses inside
+                    // that cell. `dir="auto"` lets each cell resolve its own
+                    // direction from its own content (French/term cells
+                    // stay ltr, the Arabic cell renders rtl) — same
+                    // technique already used for Arabic text elsewhere in
+                    // the app (e.g. GastriteCasCliniqueStudio's dialogue
+                    // bubbles). Harmless for the other two tabs' tables,
+                    // which have no Arabic content to trigger it.
+                    td: ({ ...props }) => <td dir="auto" {...props} />,
+                    th: ({ ...props }) => <th dir="auto" {...props} />,
                   }}
                 >
                   {normalizeCallouts(output)}
