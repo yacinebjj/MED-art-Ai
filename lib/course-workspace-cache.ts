@@ -16,7 +16,17 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 // term). Bumped rather than reused so old-shaped cached rows are never read
 // back under the new shape — see course_workspace_cache's full migration
 // history in supabase/schema.sql.
-export type CourseWorkspaceGenerationType = "summary_chunk" | "keyword_row_v3";
+//
+// "medical_dictionary_v1" — new 3rd generation type (Dictionnaire Médical
+// tab). Same course-level, cross-student cached chunk shape as
+// "summary_chunk" (a self-contained Markdown string per course, stitched by
+// the caller) — see lib/ai/module-synthesis-prompts.ts's
+// buildMedicalDictionaryPrompt. REQUIRES a matching update to
+// course_workspace_cache's own CHECK constraint in supabase/schema.sql —
+// this TS union alone does not widen the live database's constraint (see
+// that file's own comment; no confirmed-live migration tooling in this
+// codebase — someone must run the ALTER statement by hand).
+export type CourseWorkspaceGenerationType = "summary_chunk" | "keyword_row_v3" | "medical_dictionary_v1";
 
 /**
  * One course's entire Keywords Table contribution — exactly ONE table row,

@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTheme } from "next-themes";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, BookOpenText, FileSpreadsheet, History, Layers, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, BookOpenText, FileSpreadsheet, History, Layers, Library, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -44,7 +44,7 @@ import { tWorkspaceSynthesis } from "@/lib/translations/workspaceSynthesis";
  */
 
 type SelectAllState = "checked" | "unchecked" | "indeterminate";
-type WorkspaceGenerationType = "global_summary" | "keywords_table";
+type WorkspaceGenerationType = "global_summary" | "keywords_table" | "medical_dictionary";
 
 // No per-student Supabase table exists yet for "this student's last
 // Workspace output" — course_workspace_cache (see schema.sql) is a GLOBAL,
@@ -115,6 +115,7 @@ export default function ModuleWorkspacePage() {
 
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
+  const [isGeneratingDictionary, setIsGeneratingDictionary] = useState(false);
   const [output, setOutput] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string[] | null>(null);
 
@@ -262,7 +263,7 @@ export default function ModuleWorkspacePage() {
   /** Mirrors lib/module-synthesis.ts's own MIN_COURSES_REQUIRED — duplicated as a plain constant rather than imported, since that module pulls in server-only dependencies (getSupabaseAdmin, OpenRouter calls) that have no place in a "use client" bundle. Enforced again server-side in that same route (never trust a client-only gate). */
   const MIN_COURSES_REQUIRED = 5;
   const hasSelection = selectedIds.size >= MIN_COURSES_REQUIRED;
-  const isGenerating = isGeneratingSummary || isGeneratingKeywords;
+  const isGenerating = isGeneratingSummary || isGeneratingKeywords || isGeneratingDictionary;
 
   async function generate(type: WorkspaceGenerationType) {
     if (selectedIds.size < MIN_COURSES_REQUIRED) {
@@ -272,7 +273,8 @@ export default function ModuleWorkspacePage() {
       });
       return;
     }
-    const setLoading = type === "global_summary" ? setIsGeneratingSummary : setIsGeneratingKeywords;
+    const setLoading =
+      type === "global_summary" ? setIsGeneratingSummary : type === "keywords_table" ? setIsGeneratingKeywords : setIsGeneratingDictionary;
     setLoading(true);
     setFallbackNotice(null);
     try {
@@ -338,6 +340,7 @@ export default function ModuleWorkspacePage() {
 
   const handleGenerateGlobalSummary = () => generate("global_summary");
   const handleGenerateKeywordTable = () => generate("keywords_table");
+  const handleGenerateMedicalDictionary = () => generate("medical_dictionary");
 
   /** Instant, no network call — just swaps which already-fetched result is on screen. */
   function viewHistoryEntry(entry: HistoryEntry) {
@@ -444,10 +447,18 @@ export default function ModuleWorkspacePage() {
                           : "text-gray-600 dark:text-gray-300"
                       )}
                     >
-                      {entry.type === "global_summary" ? <Sparkles className="h-3.5 w-3.5 shrink-0" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />}
+                      {entry.type === "global_summary" ? (
+                        <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                      ) : entry.type === "keywords_table" ? (
+                        <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <Library className="h-3.5 w-3.5 shrink-0" />
+                      )}
                       {entry.type === "global_summary"
                         ? tWorkspaceSynthesis("entryTypeSummary", language)
-                        : tWorkspaceSynthesis("entryTypeTable", language)}{" "}
+                        : entry.type === "keywords_table"
+                          ? tWorkspaceSynthesis("entryTypeTable", language)
+                          : tWorkspaceSynthesis("entryTypeDictionary", language)}{" "}
                       {entry.ordinal}
                     </button>
                   </li>
@@ -467,6 +478,10 @@ export default function ModuleWorkspacePage() {
             <Button onClick={handleGenerateKeywordTable} disabled={!hasSelection || isGenerating} variant="secondary" size="lg">
               {isGeneratingKeywords ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
               Générer Tableau des Mots-Clés
+            </Button>
+            <Button onClick={handleGenerateMedicalDictionary} disabled={!hasSelection || isGenerating} variant="secondary" size="lg">
+              {isGeneratingDictionary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Library className="h-4 w-4" />}
+              Générer Dictionnaire Médical
             </Button>
             {!hasSelection && (
               <span className="text-xs text-gray-400 dark:text-gray-500">
@@ -505,7 +520,11 @@ export default function ModuleWorkspacePage() {
                   <Sparkles className="relative h-8 w-8 text-teal-600 dark:text-teal-400" />
                 </div>
                 <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                  {isGeneratingSummary ? "Synthèse des cours en cours..." : "Extraction des mots-clés en cours..."}
+                  {isGeneratingSummary
+                    ? "Synthèse des cours en cours..."
+                    : isGeneratingKeywords
+                      ? "Extraction des mots-clés en cours..."
+                      : "Construction du dictionnaire médical en cours..."}
                 </p>
                 <p className="max-w-xs text-xs text-gray-400 dark:text-gray-500">
                   Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.

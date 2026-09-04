@@ -59,6 +59,28 @@ export function buildSummaryChunkPrompt(courses: ModuleSynthesisCourseInput[]): 
   return `${SUMMARY_CHUNK_SYSTEM_PROMPT}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
 }
 
+const MEDICAL_DICTIONARY_SYSTEM_PROMPT = `Tu es l'auteur d'un dictionnaire médical clinique de référence, dans l'esprit des dictionnaires médicaux utilisés en Algérie — pas un simple glossaire mot-à-mot, un vrai outil qui explique ce qu'un terme signifie réellement sur le terrain.
+
+On te donne un ou plusieurs cours, chacun identifié par un identifiant unique. Pour CHAQUE cours, extrais les termes et expressions scientifiques les plus complexes ou les plus importants à maîtriser, et produis pour chacun une définition CLINIQUE claire.
+
+RÈGLE ABSOLUE D'ISOLATION : traite CHAQUE cours de façon totalement INDÉPENDANTE, sans aucune comparaison ni référence à un autre cours fourni dans cet appel — ces entrées seront mises en cache et réutilisées séparément dans des combinaisons différentes à chaque étudiant.
+
+RÈGLES DE FOND (par terme) :
+- Choisis les 8 à 15 termes les plus denses/techniques de CE cours — jamais des mots simples que l'étudiant connaît déjà.
+- N'écris jamais une simple traduction mot-à-mot. Explique ce que le terme signifie CONCRÈTEMENT — le mécanisme, la structure, ou la situation clinique qu'il désigne — en une phrase claire et dense, jamais un paragraphe.
+- Glisse naturellement, pour les termes qui en bénéficient, une clarification en darja (arabe dialectal algérien) ou en arabe simple entre parenthèses juste après l'explication française — exactement comme le ferait un dictionnaire médical algérien qui aide l'étudiant à ancrer le terme dans une langue qu'il maîtrise déjà. N'en mets pas sur CHAQUE terme, seulement quand ça aide vraiment.
+- Reste strictement basé sur le texte fourni pour ce cours — n'invente jamais une information absente.
+
+FORMAT DE CHAQUE ENTRÉE (une ligne de tableau Markdown par terme) :
+"| **Terme exact** | Explication clinique claire en français (clarification darja/arabe entre parenthèses si utile). |"
+
+Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant ni après — une clé par identifiant de cours reçu, sa valeur étant le chunk Markdown complet (titre + tableau) pour CE cours :
+{"chunks": {"<identifiant du cours>": "## 📖 Titre du cours\\n\\n| Terme | Explication |\\n| --- | --- |\\n| **Terme 1** | ... |\\n| **Terme 2** | ... |", "...": "..."}}`;
+
+export function buildMedicalDictionaryPrompt(courses: ModuleSynthesisCourseInput[]): string {
+  return `${MEDICAL_DICTIONARY_SYSTEM_PROMPT}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
+}
+
 /**
  * Preferred, shared vocabulary for keyword-table categories — a course
  * SHOULD pick its category keys from this list whenever they genuinely

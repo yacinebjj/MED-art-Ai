@@ -26,6 +26,7 @@ export const WORKSPACE_SYNTHESIS_TRANSLATIONS = {
   resultsHeading: { fr: "Résultats", en: "Results" },
   entryTypeSummary: { fr: "Résumé", en: "Summary" },
   entryTypeTable: { fr: "Tableau", en: "Table" },
+  entryTypeDictionary: { fr: "Dictionnaire", en: "Dictionary" },
 
   // Minimum-selection gate (MIN_COURSES_REQUIRED) — shown both as an info
   // toast when generation is attempted too early, and as a persistent hint

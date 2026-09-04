@@ -26,6 +26,7 @@ import { callOpenRouter, OpenRouterError, CHEAP_MODEL, ECONOMY_MODEL } from "@/l
 import {
   buildSummaryChunkPrompt,
   buildKeywordRowPrompt,
+  buildMedicalDictionaryPrompt,
   buildCrossCourseSynthesisPrompt,
   CATEGORY_SUPERSET,
   type ModuleSynthesisCourseInput,
@@ -41,7 +42,7 @@ import {
 import { parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
-export type ModuleSynthesisType = "global_summary" | "keywords_table";
+export type ModuleSynthesisType = "global_summary" | "keywords_table" | "medical_dictionary";
 
 /** Product direction: a synthesis/table across fewer courses isn't what this feature is for — enforced identically for both callers (module-synthesis's own route, and global-summary, which only ever requests "global_summary"). */
 export const MIN_COURSES_REQUIRED = 5;
@@ -49,6 +50,7 @@ export const MIN_COURSES_REQUIRED = 5;
 const CACHE_GENERATION_TYPE: Record<ModuleSynthesisType, CourseWorkspaceGenerationType> = {
   global_summary: "summary_chunk",
   keywords_table: "keyword_row_v3",
+  medical_dictionary: "medical_dictionary_v1",
 };
 
 const MAX_CATEGORIES_PER_COURSE = 6;
@@ -235,7 +237,15 @@ export async function runModuleSynthesis(
   const cachedByHash = await lookupCourseWorkspaceChunks(allHashes, cacheType);
 
   const missingCourses = eligibleCourses.filter((course) => !cachedByHash.has(resolveContentHash(course)));
-  const needsCrossCourseSynthesis = eligibleCourses.length > 1;
+  // medical_dictionary is deliberately excluded — CROSS_COURSE_SYNTHESIS_
+  // SYSTEM_PROMPT (lib/ai/module-synthesis-prompts.ts) is written assuming
+  // keyword-table-shaped input ("fiches de mots-clés... catégories ->
+  // mots-clés") and asks for cross-course diagnostics/differentials, neither
+  // of which fits a per-course glossary — a dictionary's entries don't gain
+  // anything from being "synthesized" across courses the way a clinical
+  // summary or keyword table does. Skipping it here also means one fewer
+  // OpenRouter call per dictionary request, for free.
+  const needsCrossCourseSynthesis = type !== "medical_dictionary" && eligibleCourses.length > 1;
 
   let fallbackTitles: string[] = [];
   let crossCourseSection: string | null = null;
@@ -254,22 +264,45 @@ export async function runModuleSynthesis(
       const { inputs, fallbackTitles: missingFallbacks } = buildCourseInputs(missingCourses);
       fallbackTitles = missingFallbacks;
 
-      const prompt = type === "global_summary" ? buildSummaryChunkPrompt(inputs) : buildKeywordRowPrompt(inputs);
+      const prompt =
+        type === "global_summary"
+          ? buildSummaryChunkPrompt(inputs)
+          : type === "keywords_table"
+            ? buildKeywordRowPrompt(inputs)
+            : buildMedicalDictionaryPrompt(inputs);
       const userPrompt =
-        type === "global_summary" ? "Génère les chunks de résumé demandés." : "Génère les lignes de mots-clés demandées.";
+        type === "global_summary"
+          ? "Génère les chunks de résumé demandés."
+          : type === "keywords_table"
+            ? "Génère les lignes de mots-clés demandées."
+            : "Génère les entrées de dictionnaire médical demandées.";
 
+      // medical_dictionary is the ONE exception to the ECONOMY_MODEL policy
+      // below — explicit product request: use the cheapest available text
+      // model for this specific tab. CHEAP_MODEL (DeepSeek V3.2) is
+      // genuinely cheaper than ECONOMY_MODEL here (~$0.21/$0.31 vs
+      // $0.75/$3.75 per M tokens — see lib/ai/openrouter.ts), at the
+      // accepted tradeoff already disclosed on every other CHEAP_MODEL call
+      // site in this codebase (a real, measured medical-accuracy risk on a
+      // different, comparably rigor-sensitive task — exam QCM generation;
+      // never independently re-measured for a term-dictionary task
+      // specifically). No `reasoning` option, matching every other
+      // CHEAP_MODEL call site.
+      const model = type === "medical_dictionary" ? CHEAP_MODEL : ECONOMY_MODEL;
       const raw = await callOpenRouter(
         [
           { role: "system", content: prompt },
           { role: "user", content: userPrompt },
         ],
-        // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
-        // lib/ai/studio-prompts.ts's own header comment) + the matching
-        // reasoning cap: without it, this model's hidden reasoning tokens
-        // can silently consume the completion budget before writing any of
-        // the actual JSON, truncating it (see callOpenRouter's own doc
-        // comment).
-        { model: ECONOMY_MODEL, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
+        type === "medical_dictionary"
+          ? { model, maxTokens: 8000, bypassMock: true }
+          // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
+          // lib/ai/studio-prompts.ts's own header comment) + the matching
+          // reasoning cap: without it, this model's hidden reasoning tokens
+          // can silently consume the completion budget before writing any of
+          // the actual JSON, truncating it (see callOpenRouter's own doc
+          // comment).
+          : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
       );
 
       const parsed = parseJsonResponse(raw);
@@ -284,7 +317,10 @@ export async function runModuleSynthesis(
         if (chunk === undefined || chunk === null) {
           throw new Error(`La réponse de l'IA ne contient pas de chunk pour le cours "${input.title}".`);
         }
-        const sanitized = type === "global_summary" ? sanitizeForPostgres(String(chunk)) : normalizeKeywordCategories(chunk);
+        // keywords_table alone stores structured categories; global_summary
+        // and medical_dictionary are both a self-contained Markdown string
+        // per course.
+        const sanitized = type === "keywords_table" ? normalizeKeywordCategories(chunk) : sanitizeForPostgres(String(chunk));
         newChunks.push({ courseContentHash: input.contentHash, content: sanitized });
         cachedByHash.set(input.contentHash, sanitized);
       }
@@ -309,9 +345,9 @@ export async function runModuleSynthesis(
   if (hitHashes.length > 0) await recordCourseWorkspaceCacheHits(hitHashes, cacheType);
 
   const mainContent =
-    type === "global_summary"
-      ? stitchSummaryChunks(eligibleCourses, cachedByHash as Map<string, string>)
-      : stitchKeywordsTable(eligibleCourses, cachedByHash as Map<string, KeywordCategories>);
+    type === "keywords_table"
+      ? stitchKeywordsTable(eligibleCourses, cachedByHash as Map<string, KeywordCategories>)
+      : stitchSummaryChunks(eligibleCourses, cachedByHash as Map<string, string>);
 
   const content = crossCourseSection ? `${mainContent}\n\n---\n\n${crossCourseSection}` : mainContent;
 

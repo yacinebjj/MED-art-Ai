@@ -8,7 +8,7 @@ import { runModuleSynthesis, type ModuleSynthesisType } from "@/lib/module-synth
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const VALID_TYPES: ModuleSynthesisType[] = ["global_summary", "keywords_table"];
+const VALID_TYPES: ModuleSynthesisType[] = ["global_summary", "keywords_table", "medical_dictionary"];
 function isValidType(value: unknown): value is ModuleSynthesisType {
   return typeof value === "string" && (VALID_TYPES as string[]).includes(value);
 }
