@@ -206,6 +206,19 @@ export interface GastriteCasCliniqueData {
 }
 
 /**
+ * 1ère année variant of the "Cas Clinique" tile (see
+ * STUDIO_CAS_CLINIQUE_YEAR1_SYSTEM_PROMPT, lib/ai/studio-prompts.ts, and
+ * StudioClinicalRelevanceSchema, lib/ai/studio-schemas.ts) — a motivational
+ * essay, not a clinical case. Rendered by ClinicalRelevanceStudio.tsx, which
+ * never attempts to read `cases`/`interrogatoire`/`examen_physique`-shaped
+ * keys — this type has none.
+ */
+export interface StudioClinicalRelevanceData {
+  titre: string;
+  paragraphes: string[];
+}
+
+/**
  * Matches QCMS_SYSTEM_PROMPT's schema exactly (lib/prompts/public-course-sections.ts)
  * — this is the raw value stored in `courses.qcms`, nothing more. It never
  * contains a course slug (a prior version of this type incorrectly declared

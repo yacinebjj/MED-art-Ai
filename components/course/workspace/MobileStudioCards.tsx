@@ -33,6 +33,8 @@ interface MobileStudioCardsProps {
   regeneratingSections?: Set<DemoSectionId>;
   /** Optional — mirrors StudioPanelProps' own field of the same name verbatim. Omitted entirely by pages backed by a data model "Régénérer" doesn't support yet, in which case an already-generated card's "..." menu simply doesn't render a "Régénérer" item (falls back to just "Supprimer") — see StudioPanel.tsx's own identical gate. */
   onRegenerateSection?: (id: DemoSectionId) => void;
+  /** The student's own curriculum level (StudentCurriculumProfile.academicYear.level, types/academic.ts) — only ever changes the "Cas Clinique" tile's own label (getSectionLabel, lib/translations/studio.ts); every other tile ignores it. Mirrors StudioPanelProps' own field of the same name verbatim. */
+  studyYear?: number | null;
 }
 
 /**
@@ -124,6 +126,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
   onItemClickWithOptions,
   regeneratingSections,
   onRegenerateSection,
+  studyYear,
 }: MobileStudioCardsProps) {
   const { language } = useLanguage();
   const hasAnyResult = sections.some((section) => getSectionStatus(section.id) === "available");
@@ -160,7 +163,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                   <Loader2 className="h-5 w-5 animate-spin" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-foreground">{getSectionLabel(section.id, language)}</p>
+                  <p className="truncate text-sm font-semibold text-foreground">{getSectionLabel(section.id, language, studyYear)}</p>
                   <GeneratingRotatingLabel className="truncate text-xs text-muted-foreground" />
                 </div>
               </div>
@@ -204,7 +207,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                 <Icon className="h-5 w-5" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-foreground">{getSectionLabel(section.id, language)}</p>
+                <p className="truncate text-sm font-semibold text-foreground">{getSectionLabel(section.id, language, studyYear)}</p>
                 {isRegenerating ? (
                   <GeneratingRotatingLabel className="truncate text-xs text-muted-foreground" />
                 ) : (

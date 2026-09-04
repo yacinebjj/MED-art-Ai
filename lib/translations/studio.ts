@@ -65,13 +65,34 @@ export function tStudio(key: keyof typeof STUDIO_TRANSLATIONS, language: Languag
 const SECTION_LABELS: Record<DemoSectionId, Record<Language, string>> = {
   explication: { fr: "Explication Ultra-Détaillée", en: "Ultra-Detailed Explanation" },
   resume: { fr: "Résumé", en: "Summary" },
-  cas_clinique: { fr: "Cas Clinique", en: "Clinical Case" },
+  // "Cas Cliniques" (pluriel) — 3ème année et + génère réellement 3 cas
+  // distincts (STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, lib/ai/studio-prompts.ts),
+  // ce label est le "standard" par défaut (studyYear absent/inconnu/>=3) —
+  // voir getSectionLabel ci-dessous pour les variantes 1ère/2ème année.
+  cas_clinique: { fr: "Cas Cliniques", en: "Clinical Cases" },
   qcm: { fr: "Examen QCMs", en: "MCQ Exam" },
   exemples_analogies: { fr: "Exemples & Analogies", en: "Examples & Analogies" },
   infographic: { fr: "Infographie", en: "Infographic" },
   audio: { fr: "Podcast Audio", en: "Audio Podcast" },
 };
 
-export function getSectionLabel(id: DemoSectionId, language: Language): string {
+/** Cas Clinique's own year-dependent labels — see StudioPanel.tsx/MobileStudioCards.tsx's studyYear prop and app/api/studio/generate/route.ts's resolveCasCliniqueSystemPrompt for the matching backend behavior. Every OTHER section id ignores `studyYear` entirely. */
+const CAS_CLINIQUE_LABEL_BY_YEAR: Record<1 | 2, Record<Language, string>> = {
+  1: { fr: "Utilité Clinique", en: "Clinical Relevance" },
+  2: { fr: "Cas Clinique (Physiologique)", en: "Clinical Case (Physiological)" },
+};
+
+/**
+ * `studyYear` — the student's own curriculum level (StudentCurriculumProfile.
+ * academicYear.level, types/academic.ts). Optional and only ever consulted
+ * for `id === "cas_clinique"`; every other section's label is completely
+ * unaffected, and an omitted/unrecognized year (anything but exactly 1 or 2)
+ * falls through to the standard "Cas Cliniques" label — the same one this
+ * section has always shown.
+ */
+export function getSectionLabel(id: DemoSectionId, language: Language, studyYear?: number | null): string {
+  if (id === "cas_clinique" && (studyYear === 1 || studyYear === 2)) {
+    return CAS_CLINIQUE_LABEL_BY_YEAR[studyYear][language];
+  }
   return SECTION_LABELS[id][language];
 }

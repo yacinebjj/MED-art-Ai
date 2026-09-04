@@ -10,7 +10,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Camera, Check, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2, TrendingUp } from "lucide-react";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { useAuth } from "@/providers/AuthProvider";
 import { tModulePage } from "@/lib/translations/modulePage";
+import { getSectionLabel } from "@/lib/translations/studio";
 import { cn } from "@/lib/utils";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
@@ -63,6 +65,11 @@ const GastriteResumeStudio = dynamic(
 );
 const GastriteCasCliniqueStudio = dynamic(
   () => import("@/components/course/workspace/GastriteCasCliniqueStudio").then((m) => m.GastriteCasCliniqueStudio),
+  { ssr: false }
+);
+/** 1ère année's replacement for the cas_clinique tile — a motivational essay, never a fabricated patient. See its own file for why it's a separate component from GastriteCasCliniqueStudio above. */
+const ClinicalRelevanceStudio = dynamic(
+  () => import("@/components/course/workspace/ClinicalRelevanceStudio").then((m) => m.ClinicalRelevanceStudio),
   { ssr: false }
 );
 const GastriteQcmsStudio = dynamic(
@@ -472,6 +479,16 @@ export default function ModuleWorkspacePage() {
   const isDark = resolvedTheme === "dark";
   const { toast } = useToast();
   const supabase = useMemo(() => createClient(), []);
+  /**
+   * The Cas Clinique tile's own year-based adaptation (both its label and
+   * its AI prompt/schema, resolveCasCliniqueSystemPrompt/resolveStudioSchema
+   * in app/api/studio/generate/route.ts) keys off exactly this value — every
+   * other Studio tile ignores it entirely. `null` for a student with no
+   * curriculum profile yet, or whose year is neither 1 nor 2, falls through
+   * to the standard "Cas Cliniques" behavior.
+   */
+  const { curriculumProfile } = useAuth();
+  const studyYear = curriculumProfile?.academicYear?.level ?? null;
 
   const [module, setModule] = useState<CurriculumModule | null>(null);
   const [loading, setLoading] = useState(true);
@@ -660,7 +677,7 @@ export default function ModuleWorkspacePage() {
   }, [courseMastery]);
 
   const today = new Date().toLocaleDateString("fr-FR");
-  const openedSectionLabel = DEMO_SECTIONS.find((s) => s.id === openedSection)?.label ?? "";
+  const openedSectionLabel = openedSection ? getSectionLabel(openedSection, language, studyYear) : "";
   const moduleTitle = module?.title ?? "Module";
 
   /** Applies a newly-created course to sidebar/active state — shared by both the file and pasted-text creation paths below. useCallback with empty deps: only ever touches stable setState dispatchers and the stable courseCacheRef, so this reference never changes across the component's lifetime. */
@@ -1045,7 +1062,10 @@ export default function ModuleWorkspacePage() {
     const res = await fetch("/api/studio/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionType, courseId, ...extra }),
+      // studyYear is sent unconditionally (not folded into `extra`) — it
+      // must reach the backend for every cas_clinique generation regardless
+      // of whether the caller went through the ChevronDown options menu.
+      body: JSON.stringify({ actionType, courseId, studyYear, ...extra }),
     });
     const data = await res.json().catch(() => ({}));
     return { res, data };
@@ -1415,6 +1435,7 @@ export default function ModuleWorkspacePage() {
       sections={DEMO_SECTIONS}
       openedSection={openedSection}
       openedLabel={openedSectionLabel}
+      studyYear={studyYear}
       onItemClick={handleStudioItemClick}
       onItemClickWithOptions={handleStudioItemClick}
       onCloseSection={() => setOpenedSection(null)}
@@ -1498,10 +1519,18 @@ export default function ModuleWorkspacePage() {
               />
             )}
             {openedSection === "cas_clinique" && activeCourse.casClinique && (
-              <GastriteCasCliniqueStudio
-                key={activeCourse.id}
-                data={{ slug: `studio-course-${activeCourse.id}`, section: "cas_clinique", ...activeCourse.casClinique }}
-              />
+              // Shape-based, not studyYear-based: whichever shape was
+              // actually stored is what renders, since the student's CURRENT
+              // year may differ from the year this content was generated
+              // under (see StudioCourseFull.casClinique's own comment).
+              "paragraphes" in activeCourse.casClinique ? (
+                <ClinicalRelevanceStudio key={activeCourse.id} data={activeCourse.casClinique} />
+              ) : (
+                <GastriteCasCliniqueStudio
+                  key={activeCourse.id}
+                  data={{ slug: `studio-course-${activeCourse.id}`, section: "cas_clinique", ...activeCourse.casClinique }}
+                />
+              )
             )}
             {openedSection === "qcm" && activeCourse.qcms && (
               <GastriteQcmsStudio
@@ -1627,6 +1656,7 @@ export default function ModuleWorkspacePage() {
                   generatingSections={generatingSections}
                   onItemClick={handleStudioItemClick}
                   onItemClickWithOptions={handleStudioItemClick}
+                  studyYear={studyYear}
                 />
               ))}
           </div>

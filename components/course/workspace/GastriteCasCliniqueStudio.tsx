@@ -421,22 +421,27 @@ export function GastriteCasCliniqueStudio({ data }: { data: GastriteCasCliniqueD
           <Stethoscope className="w-5 h-5 text-teal-600 dark:text-teal-400" />
           <h2 className="text-sm font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{data.titre_section}</h2>
         </div>
-        {cases.map((c, i) => {
-          const isActive = i === activeIndex;
-          const pillStyle = CASE_PILL_STYLE[c.color];
-          return (
-            <button
-              key={c.id}
-              onClick={() => setActiveIndex(i)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-bold transition-all duration-200",
-                isActive ? pillStyle.active : pillStyle.idle
-              )}
-            >
-              Cas {c.numero} — {c.archetype}
-            </button>
-          );
-        })}
+        {/* 2ème année's "Cas Clinique (Physiologique)" always generates exactly
+            1 case (StudioCasCliniqueYear2Schema) — a selector row with a
+            single, always-active pill is pure noise, so it's skipped
+            entirely rather than rendered disabled. */}
+        {cases.length > 1 &&
+          cases.map((c, i) => {
+            const isActive = i === activeIndex;
+            const pillStyle = CASE_PILL_STYLE[c.color];
+            return (
+              <button
+                key={c.id}
+                onClick={() => setActiveIndex(i)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-bold transition-all duration-200",
+                  isActive ? pillStyle.active : pillStyle.idle
+                )}
+              >
+                Cas {c.numero} — {c.archetype}
+              </button>
+            );
+          })}
       </div>
 
       <CaseView key={activeCase.id} data={activeCase} />

@@ -131,11 +131,54 @@ export const GastriteRawCaseSchema = z.object({
   acte5_prise_en_charge: z.object({ items: z.array(RxItemSchema), surveillance: z.string() }),
 });
 
-/** Client mandate: exactement 3 cas cliniques, les plus importants/fréquents — see STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT's override in lib/ai/studio-prompts.ts. min(3) is a floor (guards against a genuine under-generation), the prompt itself controls the exact target. */
+/** Client mandate: exactement 3 cas cliniques, les plus importants/fréquents — see STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT's override in lib/ai/studio-prompts.ts. min(3) is a floor (guards against a genuine under-generation), the prompt itself controls the exact target. Used for 3ème année et + (or when study_year is unknown — the pre-existing, unconditional default). */
 export const StudioCasCliniqueSchema = z.object({
   titre_section: z.string(),
   cases: z.array(GastriteRawCaseSchema).min(3),
 });
+
+/**
+ * 2ème année variant — same GastriteRawCase shape (so GastriteCasCliniqueStudio,
+ * unmodified, renders it identically) but exactly ONE case, matching
+ * STUDIO_CAS_CLINIQUE_YEAR2_SYSTEM_PROMPT's mandate (lib/ai/studio-prompts.ts):
+ * a physiological or falsely-pathological scenario, never real pathology.
+ */
+export const StudioCasCliniqueYear2Schema = z.object({
+  titre_section: z.string(),
+  cases: z.array(GastriteRawCaseSchema).length(1),
+});
+
+/**
+ * 1ère année variant — no clinical case at all (product decision: année 1
+ * students get a motivational essay on why the course matters, not a
+ * fabricated patient). Deliberately NOT reusing GastriteRawCaseSchema's
+ * shape — ClinicalRelevanceStudio.tsx renders this as a plain title +
+ * paragraphs block, never attempting to map `interrogatoire`/`examen_physique`
+ * keys that don't exist here.
+ */
+export const StudioClinicalRelevanceSchema = z.object({
+  titre: z.string(),
+  paragraphes: z.array(z.string()).min(3),
+});
+
+/**
+ * study_year-aware schema resolver for the ONE section (cas_clinique) whose
+ * shape genuinely changes by year — every other section keeps its single,
+ * unconditional STUDIO_SCHEMAS[actionType] entry. `studyYear` is the
+ * student's own curriculum level (StudentCurriculumProfile.academicYear.level,
+ * types/academic.ts) as sent by the client; anything other than exactly 1 or
+ * 2 (including null/undefined/unknown) falls through to the unconditional
+ * default (StudioCasCliniqueSchema, 3ème année et + behavior) — the SAME
+ * schema this section has always used, so an unrecognized/missing year never
+ * breaks generation, it just gets the standard experience.
+ */
+export function resolveStudioSchema(actionType: JsonSectionId, studyYear: number | null | undefined): z.ZodTypeAny {
+  if (actionType === "cas_clinique") {
+    if (studyYear === 1) return StudioClinicalRelevanceSchema;
+    if (studyYear === 2) return StudioCasCliniqueYear2Schema;
+  }
+  return STUDIO_SCHEMAS[actionType];
+}
 
 const QcmOptionSchema = z.object({ label: z.string(), text: z.string() });
 const ExplicationQCMSchema = z.object({

@@ -1,4 +1,4 @@
-import type { GastriteCasCliniqueData, GastriteQcmsData, GastriteResumeData } from "@/lib/course-slug-content";
+import type { GastriteCasCliniqueData, GastriteQcmsData, GastriteResumeData, StudioClinicalRelevanceData } from "@/lib/course-slug-content";
 
 /** Lightweight row for the sidebar list — GET /api/studio/courses?moduleId=X. */
 export interface StudioCourseSummary {
@@ -21,7 +21,16 @@ export interface StudioCourseFull {
   rawText: string;
   explication: string | null;
   resume: Omit<GastriteResumeData, "slug" | "section"> | null;
-  casClinique: Omit<GastriteCasCliniqueData, "slug" | "section"> | null;
+  /**
+   * A union, not just the standard case shape — 1ère année stores a
+   * StudioClinicalRelevanceData essay instead (same jsonb column, no schema
+   * migration: see STUDIO_SECTION_KEYS/resolveStudioSchema). The rendering
+   * site (app/dashboard/module/[id]/page.tsx) tells them apart at runtime by
+   * checking which shape actually came back, never by trusting the
+   * student's CURRENT study year (which may have changed since this was
+   * generated).
+   */
+  casClinique: (Omit<GastriteCasCliniqueData, "slug" | "section"> | StudioClinicalRelevanceData) | null;
   qcms: GastriteQcmsData | null;
   exemplesAnalogies: string | null;
   /** Public Supabase Storage URL of the originally uploaded file (see app/api/upload/route.ts's uploadSourceFile) — null for courses created from pasted text, or uploaded before this column existed. Powers FileViewerModal's "Afficher le cours". */

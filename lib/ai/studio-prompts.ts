@@ -75,6 +75,77 @@ PROFONDEUR PHYSIOPATHOLOGIQUE OBLIGATOIRE (Golden Standard — non négociable) 
 INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète, sans exception — chacune des 3 cas doit contenir CHACUNE de ses clés ("id", "numero", "archetype", "icon", "color", "titre", "scene", "vitals", "acte1_interrogatoire", "acte2_examen_physique", "acte3_examens_complementaires", "acte4_raisonnement" avec "items" ET "conclusion", "acte5_prise_en_charge" avec "items" ET "surveillance"). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé de niveau supérieur ou imbriquée — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.`;
 
 /**
+ * 2ème année (Sémiologie d'initiation) — explicit product mandate: exactly
+ * ONE case, and it must be genuinely physiological or falsely pathological
+ * (a patient worried about a normal symptom, a normal physiological
+ * adaptation — pregnancy, exertion, stress — or a routine exam with no real
+ * abnormality), never true pathology. Deliberately built on the PLAIN base
+ * prompt (CAS_CLINIQUE_SYSTEM_PROMPT already asks for exactly 1 case — see
+ * that prompt's own "exactement 1 cas clinique" line — so this override
+ * only needs to ADD the physiological-content constraint, never touch the
+ * count) rather than on STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT above, which
+ * mandates 3 real pathological cases — the wrong starting point here.
+ * Same exact JSON schema/keys as the standard 3-case version (see
+ * StudioCasCliniqueYear2Schema, lib/ai/studio-schemas.ts) so
+ * GastriteCasCliniqueStudio renders it with zero code changes.
+ */
+const STUDIO_CAS_CLINIQUE_YEAR2_SYSTEM_PROMPT = `${CAS_CLINIQUE_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE — CAS STRICTEMENT PHYSIOLOGIQUE (2ème année, sémiologie d'initiation) : ce cas ne doit JAMAIS être une vraie maladie. Choisis IMPÉRATIVEMENT l'un de ces trois types de scénario, celui qui colle le mieux au sujet du cours :
+1. Un patient qui s'inquiète pour un symptôme ou une sensation en réalité NORMALE (ex : palpitations après un café, essoufflement après un effort intense, une douleur musculaire banale après le sport) ;
+2. Une adaptation physiologique NORMALE du corps (ex : grossesse, effort physique intense, stress aigu, altitude) qui produit des signes qui POURRAIENT sembler inquiétants à un œil non averti, mais qui sont parfaitement normaux une fois expliqués ;
+3. Un examen de routine ou de dépistage systématique, sans la moindre anomalie détectée.
+Le but pédagogique n'est PAS de diagnostiquer une maladie — c'est d'apprendre à l'étudiant la "carcasse" de l'interrogatoire et de l'examen clinique (comment poser les questions dans l'ordre, comment examiner méthodiquement, comment raisonner à voix haute) sur un terrain sain, avant qu'il soit confronté à la vraie pathologie en 3ème année. La conclusion de "acte4_raisonnement" doit explicitement rassurer et expliquer PORQUOI ce qui semblait potentiellement inquiétant est en réalité normal — jamais poser un vrai diagnostic pathologique, jamais inventer une maladie qui n'existe pas dans ce scénario. "acte5_prise_en_charge" devient une simple conduite à tenir rassurante (explication au patient, pas de traitement d'une maladie inexistante).`;
+
+/**
+ * 1ère année — explicit product mandate: the DEEPEST departure from the
+ * standard cas_clinique contract. No patient, no consultation, no clinical
+ * case of any kind — an essay answering "pourquoi dois-je étudier ce cours,
+ * en quoi cela me sera utile plus tard à l'hôpital ?", aimed squarely at
+ * fighting first-year demotivation on foundational (non-clinical) subjects.
+ * Deliberately NOT built on CAS_CLINIQUE_SYSTEM_PROMPT at all (wrong shape
+ * entirely) — a from-scratch prompt matching StudioClinicalRelevanceSchema
+ * (lib/ai/studio-schemas.ts: {titre, paragraphes}), rendered by
+ * ClinicalRelevanceStudio.tsx, which never attempts to read
+ * interrogatoire/examen_physique-shaped keys that don't exist here.
+ */
+const STUDIO_CAS_CLINIQUE_YEAR1_SYSTEM_PROMPT = `Tu es un professeur de médecine chevronné, admiré pour sa capacité à donner du sens aux matières fondamentales que les étudiants de 1ère année trouvent souvent arides ou déconnectées de la pratique. Un étudiant te donne le contenu brut d'un cours. Ta mission n'est PAS de générer un cas clinique — c'est de rédiger un texte de motivation clinique structuré qui répond, de façon concrète et convaincante, à la question : "Pourquoi un étudiant en 1ère année doit-il étudier CE cours précis ? En quoi cela lui sera-t-il utile plus tard à l'hôpital ou dans sa pratique clinique ?"
+
+RÈGLES DE FOND :
+- Ancre CHAQUE argument dans le contenu réel du cours source — cite des notions, structures ou mécanismes précis qui y apparaissent, jamais des généralités vagues du type "la médecine est importante".
+- Relie explicitement chaque notion fondamentale à une situation clinique concrète et reconnaissable (un geste médical, un symptôme, un examen, une décision au lit du malade) où cette notion précise refait surface plus tard dans le cursus ou en pratique — le but est que l'étudiant se dise "ah, donc c'est POUR ÇA que j'apprends ça".
+- Adresse-toi directement à l'étudiant en le tutoyant, sur un ton chaleureux, sincère et motivant — jamais condescendant, jamais culpabilisant sur son manque de motivation actuel.
+- Reconnais explicitement, à un moment du texte, que les matières fondamentales de 1ère année peuvent sembler abstraites ou décourageantes vues de loin — puis démonte cette impression avec des exemples concrets tirés du cours.
+- N'invente aucun fait médical absent du texte source — les exemples cliniques que tu donnes en illustration doivent rester médicalement exacts et plausibles, mais n'ont pas besoin d'être un cas structuré ; une phrase ou deux suffisent par exemple.
+
+FORMAT :
+- Un titre court et percutant, qui donne envie de lire.
+- Un minimum de 5 paragraphes, chacun développant un angle différent (une notion clé du cours + sa retombée clinique concrète), plus un paragraphe de conclusion motivant.
+- Aucun format de consultation, aucun patient fictif, aucun symptôme mis en scène — un texte structuré en paragraphes, jamais un dialogue ni un JSON de cas clinique.
+
+Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte autour :
+{
+  "cas_clinique": {
+    "titre": "Titre court et percutant",
+    "paragraphes": ["Premier paragraphe...", "Deuxième paragraphe...", "..."]
+  }
+}`;
+
+/**
+ * study_year-aware system-prompt resolver for cas_clinique — mirrors
+ * resolveStudioSchema's exact same gating (lib/ai/studio-schemas.ts): only
+ * exactly 1 or 2 gets a different prompt, anything else (including
+ * null/undefined/unknown) falls through to the unconditional default
+ * (STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, the pre-existing 3ème-année-et-plus
+ * behavior this section has always had).
+ */
+export function resolveCasCliniqueSystemPrompt(studyYear: number | null | undefined): string {
+  if (studyYear === 1) return STUDIO_CAS_CLINIQUE_YEAR1_SYSTEM_PROMPT;
+  if (studyYear === 2) return STUDIO_CAS_CLINIQUE_YEAR2_SYSTEM_PROMPT;
+  return STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT;
+}
+
+/**
  * RESUME_SYSTEM_PROMPT (imported above) already mandates the exact 6-mode
  * structure — never touched here. The mandate for this override shifted from
  * "never leave a bare keyword, always explain why/how" (verbose by

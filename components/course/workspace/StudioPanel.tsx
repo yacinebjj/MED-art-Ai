@@ -106,6 +106,8 @@ interface StudioPanelProps {
   courseSlug?: string;
   /** Notified whenever the internal collapse toggle fires — the panel's own root controls its ephemeral (w-20 vs w-full) width, but the page-level `<aside>` wrapping it may want to shrink/grow its own fixed width in lockstep (see app/dashboard/module/[id]/page.tsx). Optional: a caller that omits this still gets a fully working collapse, just without the outer wrapper reacting. */
   onCollapsedChange?: (collapsed: boolean) => void;
+  /** The student's own curriculum level (StudentCurriculumProfile.academicYear.level, types/academic.ts) — only ever changes the "Cas Clinique" tile's own label (see lib/translations/studio.ts's getSectionLabel); every other tile ignores it. Optional: a caller that omits this simply always gets the standard "Cas Cliniques" label. */
+  studyYear?: number | null;
   children: React.ReactNode;
 }
 
@@ -446,6 +448,7 @@ export function StudioPanel({
   courseTitle,
   courseSlug,
   onCollapsedChange,
+  studyYear,
   children,
 }: StudioPanelProps) {
   const { language } = useLanguage();
@@ -707,7 +710,7 @@ export function StudioPanel({
                         type="button"
                         disabled={isGenerating || isLocked}
                         onClick={() => onItemClick(section.id)}
-                        title={isLocked ? tStudio("lockedTooltip", language) : isCollapsed ? getSectionLabel(section.id, language) : undefined}
+                        title={isLocked ? tStudio("lockedTooltip", language) : isCollapsed ? getSectionLabel(section.id, language, studyYear) : undefined}
                         aria-disabled={isLocked}
                         className={cn(
                           "group relative flex w-full items-center gap-2.5 rounded-xl border text-sm font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-base",
@@ -717,7 +720,7 @@ export function StudioPanel({
                         )}
                       >
                         {!isCollapsed && (
-                          <span className={cn("truncate", showOptionsMenu && "pr-5")}>{getSectionLabel(section.id, language)}</span>
+                          <span className={cn("truncate", showOptionsMenu && "pr-5")}>{getSectionLabel(section.id, language, studyYear)}</span>
                         )}
                         {isGenerating ? (
                           <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-5 w-5")} />
@@ -817,7 +820,7 @@ export function StudioPanel({
                         <Icon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-foreground">
-                            {getSectionLabel(section.id, language)}
+                            {getSectionLabel(section.id, language, studyYear)}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             <RelativeTime timestamp={lastGeneratedAt} />

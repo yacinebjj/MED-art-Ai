@@ -7,8 +7,9 @@ import {
   buildStudioSystemMessage,
   buildStudioDeltaAdaptationPrompt,
   studioDeltaMaxTokens,
+  resolveCasCliniqueSystemPrompt,
 } from "@/lib/ai/studio-prompts";
-import { STUDIO_SCHEMAS } from "@/lib/ai/studio-schemas";
+import { resolveStudioSchema } from "@/lib/ai/studio-schemas";
 import { errorMessage, MAX_SOURCE_CHARS, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -49,7 +50,8 @@ function isValidActionType(value: unknown): value is JsonSectionId {
 function parseAndValidateStudioSection(
   raw: string,
   actionType: JsonSectionId,
-  sectionKey: string
+  sectionKey: string,
+  studyYear: number | null | undefined
 ): { success: true; data: unknown } | { success: false; correctiveNote: string } {
   let parsedValue: unknown;
   try {
@@ -66,7 +68,12 @@ function parseAndValidateStudioSection(
     };
   }
 
-  const result = STUDIO_SCHEMAS[actionType].safeParse(parsedValue);
+  // resolveStudioSchema — the ONE section whose schema genuinely varies by
+  // year (cas_clinique: année 1 = essai motivationnel, année 2 = 1 cas
+  // physiologique, année 3+/inconnue = le schéma standard inchangé). Every
+  // other actionType ignores `studyYear` entirely and gets its usual,
+  // unconditional schema.
+  const result = resolveStudioSchema(actionType, studyYear).safeParse(parsedValue);
   if (!result.success) {
     const fieldErrors = result.error.flatten().fieldErrors;
     console.error(`[studio/generate:${actionType}] Validation zod échouée :`, fieldErrors);
@@ -150,7 +157,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { actionType, documentContext, courseId, language: languageRaw, customPrompt: customPromptRaw } = (body ?? {}) as {
+  const {
+    actionType,
+    documentContext,
+    courseId,
+    language: languageRaw,
+    customPrompt: customPromptRaw,
+    studyYear: studyYearRaw,
+  } = (body ?? {}) as {
     actionType?: unknown;
     /**
      * OPTIONAL now — the server fetches this course's own raw_text from
@@ -170,6 +184,16 @@ export async function POST(request: NextRequest) {
     language?: unknown;
     /** Explication-only free-text addition from the tile's pre-generation menu — ignored for every other actionType. */
     customPrompt?: unknown;
+    /**
+     * The student's OWN curriculum level (StudentCurriculumProfile.
+     * academicYear.level, types/academic.ts — sent by the client, resolved
+     * from their profile, never trusted beyond "is this exactly 1 or 2").
+     * Only ever changes behavior for actionType === "cas_clinique" (see
+     * resolveCasCliniqueSystemPrompt/resolveStudioSchema) — every other
+     * section ignores it entirely, so an absent/malformed value here never
+     * affects them.
+     */
+    studyYear?: unknown;
   };
 
   if (!isValidActionType(actionType)) {
@@ -184,18 +208,29 @@ export async function POST(request: NextRequest) {
 
   const language: "fr" | "en" = languageRaw === "en" ? "en" : "fr";
   const customPrompt = actionType === "explication" && typeof customPromptRaw === "string" ? customPromptRaw.trim().slice(0, 2000) : "";
-  // A non-default language, or a custom prompt (explication only), makes
-  // this a PERSONALIZED request — never served from, nor written to, the
+  // Only exactly 1 or 2 is ever meaningful (see resolveCasCliniqueSystemPrompt/
+  // resolveStudioSchema's own identical gating) — anything else (a real
+  // number like 3-7, or a missing/malformed value) resolves to `null`,
+  // which both resolvers treat as "3ème année et +", the unconditional
+  // default this section has always had.
+  const studyYear = studyYearRaw === 1 || studyYearRaw === 2 ? studyYearRaw : null;
+  // A non-default language, a custom prompt (explication only), or a
+  // non-default study year on cas_clinique (année 1/2) makes this a
+  // PERSONALIZED request — never served from, nor written to, the
   // cross-student studio_content_cache (keyed on content_hash alone, no
-  // language/prompt dimension — extending it would need a schema migration
-  // this codebase has no confirmed-live tooling for), and never routed
-  // through the cross-university Explication chunk-delta pipeline either
-  // (that pipeline reuses OTHER students' French, default-prompt chapters —
-  // wrong material to reuse for an English or custom-prompted request).
-  // Falls straight through to a full, fresh generation via the generic path
+  // language/prompt/year dimension — extending it would need a schema
+  // migration this codebase has no confirmed-live tooling for), and never
+  // routed through the cross-university Explication chunk-delta pipeline
+  // either (that pipeline reuses OTHER students' French, default-prompt
+  // chapters — wrong material to reuse for a personalized request). Falls
+  // straight through to a full, fresh generation via the generic path
   // below, exactly like /api/studio/regenerate already does for its own
-  // "student explicitly wants something different" case.
-  const isPersonalizedVariant = language !== "fr" || customPrompt.length > 0;
+  // "student explicitly wants something different" case. Without this, a
+  // 1ère année and a 3ème année student uploading the SAME course text
+  // would silently share one cas_clinique cache entry — showing one of
+  // them the wrong shape/content entirely.
+  const isPersonalizedVariant =
+    language !== "fr" || customPrompt.length > 0 || (actionType === "cas_clinique" && studyYear !== null);
   const languageInstruction =
     language === "en"
       ? "\n\nINSTRUCTION DE LANGUE OBLIGATOIRE (remplace toute langue de sortie précédemment implicite) : rédige l'INTÉGRALITÉ de ta réponse — tous les champs textuels du JSON, sans exception — en ANGLAIS, jamais en français, en conservant strictement le même niveau de rigueur médicale, la même structure JSON et le même format exact déjà exigés ci-dessus."
@@ -337,7 +372,7 @@ export async function POST(request: NextRequest) {
       // Single-shot path (cross-university-delta or fresh-tagging) — both
       // explication-only, whose schema (StudioTextSchema = z.string().min(50))
       // essentially never fails validation, so no retry loop is needed here.
-      const outcome = parseAndValidateStudioSection(raw, actionType, sectionKey);
+      const outcome = parseAndValidateStudioSection(raw, actionType, sectionKey, studyYear);
       if (!outcome.success) {
         await refundGeneration(user.id);
         console.error(`[studio/generate:${actionType}] Parsing/validation échoué (${cacheMode}):`, outcome.correctiveNote);
@@ -369,21 +404,22 @@ export async function POST(request: NextRequest) {
       // isFuzzyHit can never be true here when isPersonalizedVariant is —
       // the cache lookup itself was skipped for a personalized request (see
       // cacheResult above), so this always resolves to the fresh-generation
-      // branch for language/custom-prompt requests, carrying the extra
-      // instructions appended to the section's own base prompt (never
-      // REPLACING it — buildStudioSystemMessage's overrideBasePrompt hook is
-      // used exactly as designed: full override string in, full override
-      // string out, so every "SURCHARGE OBLIGATOIRE" quality mandate stays
-      // intact).
+      // branch for language/custom-prompt/study-year requests, carrying the
+      // extra instructions appended to (or, for cas_clinique, swapped for
+      // the year-appropriate variant of) the section's own base prompt —
+      // never blindly REPLACING it for language/customPrompt — Explication's
+      // "SURCHARGE OBLIGATOIRE" quality mandates stay intact via the append
+      // pattern, while cas_clinique's year-1/year-2 variants are complete,
+      // self-contained prompts in their own right (see
+      // resolveCasCliniqueSystemPrompt's own comment for why they can't
+      // just be appended on top of the standard 3-case mandate).
+      const casCliniqueOverride = actionType === "cas_clinique" ? resolveCasCliniqueSystemPrompt(studyYear) : null;
+      const overrideBasePrompt =
+        casCliniqueOverride ??
+        (isPersonalizedVariant ? `${STUDIO_PROMPT_CONFIG[actionType].systemPrompt}${languageInstruction}${customPromptInstruction}` : undefined);
       const systemContent: string | ReturnType<typeof buildStudioSystemMessage> = isFuzzyHit
         ? buildStudioDeltaAdaptationPrompt(actionType, JSON.stringify(cacheResult.data), truncatedContext)
-        : buildStudioSystemMessage(
-            actionType,
-            truncatedContext,
-            isPersonalizedVariant
-              ? `${STUDIO_PROMPT_CONFIG[actionType].systemPrompt}${languageInstruction}${customPromptInstruction}`
-              : undefined
-          );
+        : buildStudioSystemMessage(actionType, truncatedContext, overrideBasePrompt);
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
@@ -447,7 +483,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
         }
 
-        const outcome = parseAndValidateStudioSection(attemptRaw, actionType, sectionKey);
+        const outcome = parseAndValidateStudioSection(attemptRaw, actionType, sectionKey, studyYear);
         if (outcome.success) {
           finalData = outcome.data;
           succeeded = true;
