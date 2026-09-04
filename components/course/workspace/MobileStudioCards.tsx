@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Lock, MoreVertical, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, MoreVertical, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
@@ -172,29 +172,21 @@ export const MobileStudioCards = memo(function MobileStudioCards({
 
           const isAvailable = status === "available";
           const isRegenerating = regeneratingSections?.has(section.id) ?? false;
-          // Enforced Studio Pipeline — mirrors StudioPanel's own desktop
-          // lock exactly: every section except Explication Ultra-Détaillée
-          // is locked until that one exists for this course.
-          // getSectionStatus("explication") reflects the current course
-          // regardless of which section is being rendered here.
-          const isLocked = section.id !== "explication" && getSectionStatus("explication") !== "available";
           // Point 5 fix — same gate as StudioPanel.tsx's own showOptionsMenu:
-          // only a not-yet-generated, unlocked card offers the pre-generation
+          // only a not-yet-generated card offers the pre-generation
           // language/prompt menu; Exemples & Analogies never gets one.
           const showOptionsMenu =
-            Boolean(onItemClickWithOptions) && !isLocked && !isAvailable && SECTIONS_WITH_OPTIONS_MENU.has(section.id);
+            Boolean(onItemClickWithOptions) && !isAvailable && SECTIONS_WITH_OPTIONS_MENU.has(section.id);
 
           return (
             <div
               key={section.id}
               role="button"
               tabIndex={0}
-              aria-disabled={isLocked}
               onClick={() => onItemClick(section.id)}
               onKeyDown={(e) => e.key === "Enter" && onItemClick(section.id)}
               className={cn(
                 "flex cursor-pointer items-center gap-3 rounded-2xl border p-2.5 text-left shadow-soft transition-all duration-300 active:scale-[0.98]",
-                isLocked && "opacity-60",
                 tint.bg
               )}
             >
@@ -217,17 +209,13 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                   <GeneratingRotatingLabel className="truncate text-xs text-muted-foreground" />
                 ) : (
                   <p className="truncate text-xs text-muted-foreground">
-                    {isLocked
-                      ? tStudio("lockedTooltip", language)
-                      : isAvailable
-                        ? tStudio("alreadyGeneratedCaption", language)
-                        : tStudio("tapToGenerateCaption", language)}
+                    {isAvailable
+                      ? tStudio("alreadyGeneratedCaption", language)
+                      : tStudio("tapToGenerateCaption", language)}
                   </p>
                 )}
               </div>
-              {isLocked ? (
-                <Lock aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
-              ) : isRegenerating ? (
+              {isRegenerating ? (
                 <RefreshCw aria-hidden className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
               ) : isAvailable ? (
                 <>

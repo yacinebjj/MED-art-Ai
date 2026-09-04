@@ -11,7 +11,6 @@ import {
   Italic,
   Link2,
   Loader2,
-  Lock,
   Maximize2,
   Minimize2,
   MoreVertical,
@@ -678,14 +677,6 @@ export function StudioPanel({
                   const isGenerating = generatingSections.has(section.id);
                   const tint = TILE_TINTS[section.id];
                   const isDone = getSectionStatus(section.id) === "available";
-                  // Enforced Studio Pipeline — every section except
-                  // Explication Ultra-Détaillée is locked until that one is
-                  // generated for this course. Product decision, explicitly
-                  // confirmed: does not reduce chat cost, forces a real
-                  // generation on every course. getSectionStatus("explication")
-                  // reflects the CURRENT course regardless of which section
-                  // is being rendered here — reused rather than re-derived.
-                  const isLocked = section.id !== "explication" && getSectionStatus("explication") !== "available";
                   // The arrow/options menu only makes sense BEFORE a section
                   // has ever been generated — once it exists, "Régénérer"
                   // (SectionOptionsMenu, on the opened detail view) is the
@@ -698,7 +689,6 @@ export function StudioPanel({
                     !isCollapsed &&
                     !isDone &&
                     !isGenerating &&
-                    !isLocked &&
                     SECTIONS_WITH_OPTIONS_MENU.has(section.id);
                   return (
                     // min-w-0 — grid items default to `min-width: auto`
@@ -714,7 +704,7 @@ export function StudioPanel({
                     <div key={section.id} className="relative min-w-0">
                       <button
                         type="button"
-                        disabled={isGenerating || isLocked}
+                        disabled={isGenerating}
                         onClick={() => onItemClick(section.id)}
                         // Always set (not just when collapsed) — a long
                         // label ("Ultra-Detailed Summary", "Examples &
@@ -722,8 +712,7 @@ export function StudioPanel({
                         // uncollapsed, and the native title tooltip is the
                         // one fallback that works at any width without
                         // guessing.
-                        title={isLocked ? tStudio("lockedTooltip", language) : getSectionLabel(section.id, language, studyYear)}
-                        aria-disabled={isLocked}
+                        title={getSectionLabel(section.id, language, studyYear)}
                         className={cn(
                           // Compacted per explicit product direction — was
                           // p-3/md:p-4 + text-sm/md:text-base, reading as
@@ -760,8 +749,6 @@ export function StudioPanel({
                         )}
                         {isGenerating ? (
                           <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-4 w-4")} />
-                        ) : isLocked ? (
-                          <Lock className={cn("shrink-0 text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-4 w-4")} />
                         ) : (
                           <Icon
                             className={cn(
