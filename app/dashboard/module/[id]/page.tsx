@@ -993,7 +993,7 @@ export default function ModuleWorkspacePage() {
     trackGeneration(courseId, id, generationPromise);
     await generationPromise;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCourse, generatingSections, toast]);
+  }, [activeCourse, generatingSections, toast, studyYear]);
 
   /** Stable reference so the desktop ModuleSourcesPanel instance's React.memo actually holds. */
   const handleToggleSourcesCollapsed = useCallback(() => setIsSourcesCollapsed((prev) => !prev), []);
