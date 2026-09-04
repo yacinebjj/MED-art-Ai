@@ -172,17 +172,23 @@ function AssistantMarkdown({ content }: { content: string }) {
   const safeContent = content ?? "";
   return (
     <MarkdownErrorBoundary content={safeContent}>
-      <div className="prose prose-sm max-w-none text-foreground/90 prose-headings:font-semibold prose-headings:text-foreground prose-p:my-2 prose-strong:text-foreground prose-ul:my-2 prose-li:my-0.5 prose-code:text-foreground prose-pre:bg-muted/60 prose-a:text-emerald-600 dark:prose-invert dark:prose-a:text-emerald-400 sm:prose-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      {/* dir="auto" here AND on every block-level element below — a single
+          reply commonly mixes French with an Arabic/Darija clarification
+          paragraph (this app's own established register elsewhere, e.g. the
+          Studio prompts), so each block must resolve its OWN direction from
+          its own content rather than inheriting one verdict for the whole
+          message. */}
+      <div dir="auto" className="prose prose-sm max-w-none text-foreground/90 prose-headings:font-semibold prose-headings:text-foreground prose-p:my-2 prose-strong:text-foreground prose-ul:my-2 prose-li:my-0.5 prose-code:text-foreground prose-pre:bg-muted/60 prose-a:text-emerald-600 dark:prose-invert dark:prose-a:text-emerald-400 sm:prose-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          p: ({ children }) => <p className="animate-in fade-in duration-500">{children}</p>,
-          li: ({ children }) => <li className="animate-in fade-in duration-500">{children}</li>,
-          h1: ({ children }) => <h1 className="animate-in fade-in duration-500">{children}</h1>,
-          h2: ({ children }) => <h2 className="animate-in fade-in duration-500">{children}</h2>,
-          h3: ({ children }) => <h3 className="animate-in fade-in duration-500">{children}</h3>,
+          p: ({ children }) => <p dir="auto" className="animate-in fade-in duration-500">{children}</p>,
+          li: ({ children }) => <li dir="auto" className="animate-in fade-in duration-500">{children}</li>,
+          h1: ({ children }) => <h1 dir="auto" className="animate-in fade-in duration-500">{children}</h1>,
+          h2: ({ children }) => <h2 dir="auto" className="animate-in fade-in duration-500">{children}</h2>,
+          h3: ({ children }) => <h3 dir="auto" className="animate-in fade-in duration-500">{children}</h3>,
           blockquote: ({ children }) => (
-            <blockquote className="animate-in fade-in border-l-emerald-400 duration-500 dark:border-l-emerald-500/60">{children}</blockquote>
+            <blockquote dir="auto" className="animate-in fade-in border-l-emerald-400 duration-500 dark:border-l-emerald-500/60">{children}</blockquote>
           ),
           table: ({ children }) => (
             <div className="my-3 animate-in fade-in overflow-x-auto rounded-lg border border-border duration-500">
@@ -191,12 +197,12 @@ function AssistantMarkdown({ content }: { content: string }) {
           ),
           thead: ({ children }) => <thead className="bg-emerald-50 dark:bg-emerald-950/40">{children}</thead>,
           th: ({ children }) => (
-            <th className="border-b border-border px-3 py-2 font-semibold text-foreground">
+            <th dir="auto" className="border-b border-border px-3 py-2 font-semibold text-foreground">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="border-b border-border/60 px-3 py-2 align-top text-muted-foreground last:border-b-0">
+            <td dir="auto" className="border-b border-border/60 px-3 py-2 align-top text-muted-foreground last:border-b-0">
               {children}
             </td>
           ),
@@ -391,7 +397,19 @@ const ChatBubble = memo(function ChatBubble({
             </div>
           )}
           {(!attachment || attachment.caption) && (
-            <div className="whitespace-pre-wrap rounded-2xl rounded-br-sm border border-black/5 bg-white px-4 py-3 text-sm leading-relaxed text-gray-900 shadow-sm sm:text-[15px]">
+            // Was bg-white/text-gray-900 — no dark: variant at all, so this
+            // rendered as a stark opaque white box in dark mode, breaking
+            // continuity with the rest of the page (which is already
+            // theme-token-driven throughout). bg-card/text-card-foreground/
+            // border-border match every other theme-aware surface in this
+            // file (e.g. the document-attachment chip and error bubble
+            // above already do this correctly). dir="auto" — a user message
+            // in Arabic/Darija must read right-to-left, not inherit the
+            // page's own LTR default.
+            <div
+              dir="auto"
+              className="whitespace-pre-wrap rounded-2xl rounded-br-sm border border-border bg-card px-4 py-3 text-sm leading-relaxed text-card-foreground shadow-sm sm:text-[15px]"
+            >
               {attachment ? attachment.caption : message.content}
             </div>
           )}

@@ -207,7 +207,12 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                 <Icon className="h-5 w-5" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-foreground">{getSectionLabel(section.id, language, studyYear)}</p>
+                {/* line-clamp-2, not truncate — a long label ("Ultra-
+                    Detailed Summary", "Examples & Analogies") used to
+                    hard-truncate to one illegible line on this card too. */}
+                <p className="line-clamp-2 break-words text-sm font-semibold text-foreground" title={getSectionLabel(section.id, language, studyYear)}>
+                  {getSectionLabel(section.id, language, studyYear)}
+                </p>
                 {isRegenerating ? (
                   <GeneratingRotatingLabel className="truncate text-xs text-muted-foreground" />
                 ) : (

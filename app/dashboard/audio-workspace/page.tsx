@@ -17,15 +17,28 @@
  * directly.
  */
 
-import { useCallback, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, CheckCircle2, FileAudio, Loader2, Mic, Save, Sparkles, Square, UploadCloud, X } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  FileAudio,
+  History,
+  Loader2,
+  Mic,
+  Save,
+  Sparkles,
+  Square,
+  UploadCloud,
+  X,
+} from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES } from "@/lib/markdown";
 import { LectureNotesGeneratingLabel } from "@/components/dashboard/LectureNotesGeneratingLabel";
+import { LectureNotesAudioPlayer } from "@/components/dashboard/LectureNotesAudioPlayer";
 import { decodeAndChunkAudioFile } from "@/lib/audio/browser-chunking";
 import { cn } from "@/lib/utils";
 
@@ -43,12 +56,148 @@ function formatDuration(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-export default function AudioWorkspacePage() {
+interface SavedJobSummary {
+  id: number;
+  title: string;
+  status: "processing" | "done" | "failed";
+  updatedAt: string;
+}
+
+interface SavedJobDetail {
+  id: number;
+  title: string;
+  audioUrls: string[];
+  transcript: string | null;
+  smartNotes: string | null;
+  status: "processing" | "done" | "failed";
+  updatedAt: string;
+}
+
+/**
+ * Reopening a saved note (?jobId=... on this same route) — a real 2-column
+ * layout (audio left, notes right on desktop; stacked on mobile), per
+ * explicit product direction. Kept as its own component (not inlined in the
+ * create-flow return below) so that flow's own JSX doesn't grow a second,
+ * unrelated branch — the two modes share nothing but the page chrome.
+ */
+function SavedNoteView({ jobId, onBack, isDark }: { jobId: string; onBack: () => void; isDark: boolean }) {
+  const [job, setJob] = useState<SavedJobDetail | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setLoadError(null);
+    setJob(null);
+
+    fetch(`/api/lecture-notes/${jobId}`)
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body?.success) throw new Error(body?.error ?? "Impossible de charger cette note.");
+        if (!cancelled) setJob(body.job as SavedJobDetail);
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Erreur inconnue.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
+          aria-label="Retour"
+        >
+          <ArrowLeft className="h-4.5 w-4.5" />
+        </button>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-950/40 dark:text-orange-400">
+          <FileAudio className="h-4.5 w-4.5" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-bold tracking-tight text-foreground">{job?.title ?? "Note audio"}</h1>
+          <p className="text-xs text-muted-foreground">Enregistrement et notes sauvegardés.</p>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        {isLoading ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-primary-600 dark:text-primary-400" />
+            <p className="text-sm text-muted-foreground">Chargement de la note...</p>
+          </div>
+        ) : loadError || !job ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <p className="text-sm font-semibold text-destructive">{loadError ?? "Note introuvable."}</p>
+            <button type="button" onClick={onBack} className="text-xs font-medium text-primary-600 underline-offset-2 hover:underline dark:text-primary-400">
+              Retour à l&apos;espace audio
+            </button>
+          </div>
+        ) : (
+          // 2 colonnes côte à côte sur desktop (lecteur audio à gauche,
+          // notes à droite), empilées verticalement sur mobile — exactement
+          // la mise en page demandée.
+          <div className="flex flex-col gap-6 lg:h-full lg:flex-row">
+            <div className="flex flex-col gap-3 lg:h-full lg:w-1/2 lg:overflow-y-auto lg:pr-3">
+              <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Enregistrement</h2>
+              <LectureNotesAudioPlayer audioUrls={job.audioUrls} title={job.title} />
+            </div>
+            <div className="flex flex-col gap-3 lg:h-full lg:w-1/2 lg:overflow-y-auto lg:pl-3 lg:border-l lg:border-border">
+              <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Notes structurées</h2>
+              <article
+                dir="auto"
+                className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none rounded-2xl border border-border bg-card p-6 shadow-sm")}
+              >
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
+                  {job.smartNotes ?? ""}
+                </ReactMarkdown>
+              </article>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AudioWorkspaceContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewJobId = searchParams.get("jobId");
   const { toast } = useToast();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [recentJobs, setRecentJobs] = useState<SavedJobSummary[] | null>(null);
+
+  const refreshRecentJobs = useCallback(() => {
+    fetch("/api/lecture-notes")
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && body?.success) setRecentJobs(body.jobs as SavedJobSummary[]);
+      })
+      .catch(() => {
+        /* Non-fatal — the create flow works fine with no history list. */
+      });
+  }, []);
+
+  useEffect(() => {
+    // Only fetched for the create-flow view — reopening a saved note
+    // (viewJobId set) never needs this list. handleSave below calls
+    // refreshRecentJobs() again on a successful save, so a just-saved note
+    // shows up here without leaving/re-entering the page.
+    if (!viewJobId) refreshRecentJobs();
+  }, [viewJobId, refreshRecentJobs]);
 
   const [status, setStatus] = useState<Status>("idle");
   const [file, setFile] = useState<File | null>(null);
@@ -221,6 +370,7 @@ export default function AudioWorkspacePage() {
         throw new Error(data?.error ?? "La sauvegarde a échoué.");
       }
       setIsSaved(true);
+      refreshRecentJobs();
       toast({ variant: "success", title: "Enregistré", description: "Tes Smart Notes sont dans tes révisions." });
     } catch (error) {
       toast({
@@ -234,6 +384,10 @@ export default function AudioWorkspacePage() {
   }
 
   const isBusy = status === "processing";
+
+  if (viewJobId) {
+    return <SavedNoteView jobId={viewJobId} isDark={isDark} onBack={() => router.push("/dashboard/audio-workspace")} />;
+  }
 
   return (
     // h-full (not a literal h-[100dvh]) — matches /dashboard/assistant's own
@@ -324,6 +478,33 @@ export default function AudioWorkspacePage() {
                 <Mic className="h-4 w-4 text-red-600 dark:text-red-400" />
                 Enregistrer le prof en direct
               </button>
+
+              {/* "Notes récentes" — the missing piece that let a saved note
+                  ever be reopened. Only rendered once the fetch resolves
+                  with at least one entry; a null/empty list just means one
+                  fewer section, never an error state here. */}
+              {recentJobs && recentJobs.length > 0 && (
+                <div className="flex flex-col gap-2 pt-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    <History className="h-3.5 w-3.5" />
+                    Notes récentes
+                  </div>
+                  <ul className="flex flex-col gap-1.5">
+                    {recentJobs.map((recent) => (
+                      <li key={recent.id}>
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/dashboard/audio-workspace?jobId=${recent.id}`)}
+                          className="flex w-full items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-sm"
+                        >
+                          <FileAudio className="h-4 w-4 shrink-0 text-orange-600 dark:text-orange-400" />
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{recent.title}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-4">
@@ -426,5 +607,20 @@ export default function AudioWorkspacePage() {
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * useSearchParams() (AudioWorkspaceContent's ?jobId= read) requires a
+ * Suspense boundary in the App Router, or Next.js de-opts this whole
+ * otherwise-static (`○`) route to fully dynamic at build time. The fallback
+ * is never visible in practice — client-side navigation to this route
+ * already has the search params synchronously available.
+ */
+export default function AudioWorkspacePage() {
+  return (
+    <Suspense fallback={<div className="flex h-full items-center justify-center bg-background" />}>
+      <AudioWorkspaceContent />
+    </Suspense>
   );
 }

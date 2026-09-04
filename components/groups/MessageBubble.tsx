@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTheme } from "next-themes";
 import { motion } from "framer-motion";
 import { Check, Clock, Copy, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,8 @@ function initial(name: string | null): string {
  */
 export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry }: MessageBubbleProps) {
   const { toast } = useToast();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   const [hovered, setHovered] = useState(false);
 
   function copyText() {
@@ -107,7 +110,13 @@ export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry 
             {message.type === "image" && message.mediaUrl && <ChatImage src={message.mediaUrl} />}
             {message.type === "video" && message.mediaUrl && <video src={message.mediaUrl} controls className="max-h-64 max-w-full rounded-lg" />}
             {message.type === "audio" && message.mediaUrl && (
-              <AudioPlayer src={message.mediaUrl} onColoredBubble={isMine && !theme.isLight} />
+              // theme.isLight ("classic") now tracks bg-card/text-card-
+              // foreground (see lib/chat-themes.ts) instead of a hardcoded
+              // white — in dark mode that bubble is dark too, so it needs
+              // AudioPlayer's "on a colored bubble" (light) controls just
+              // like every other theme does, not the dark controls a truly
+              // light bubble would need.
+              <AudioPlayer src={message.mediaUrl} onColoredBubble={isMine && (!theme.isLight || isDark)} />
             )}
           </div>
         </div>

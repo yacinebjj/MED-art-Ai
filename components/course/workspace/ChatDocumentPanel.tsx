@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowUp, Check, Columns2, Copy, Info, MoreVertical, Pin, Quote, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/providers/LanguageProvider";
 import {
   PROSE_CLASSES,
   DARK_PROSE_CLASSES,
@@ -28,6 +29,15 @@ import type { ChatMessage } from "@/lib/types";
 export interface ChatDocumentPanelHandle {
   focusInput: () => void;
 }
+
+// This file otherwise has no i18n at all (every other string here is
+// hardcoded French, unlike most of the app) — kept minimal and local rather
+// than pulling in a whole new lib/translations/*.ts file, since only this
+// one string was actually reported as needing to switch with the language.
+const EMPTY_CHAT_PLACEHOLDER = {
+  fr: "Pose une question sur ce cours pour commencer la discussion.",
+  en: "Ask a question about this course to start the discussion.",
+} as const;
 
 interface ChatDocumentPanelProps {
   title: string;
@@ -116,6 +126,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
+  const { language } = useLanguage();
 
   // Per-message reaction/pin/copy state for the action row below each
   // assistant reply. Keyed by message.id (not a flat boolean) so a new
@@ -261,9 +272,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
         )}
 
         {messages.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            Pose une question sur ce cours pour commencer la discussion.
-          </p>
+          <p className="text-sm text-muted-foreground">{EMPTY_CHAT_PLACEHOLDER[language]}</p>
         )}
 
         {messages.map((message, index) =>

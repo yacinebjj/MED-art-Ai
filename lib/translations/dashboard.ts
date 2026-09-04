@@ -6,6 +6,23 @@ import type { Language } from "@/providers/LanguageProvider";
  * kept in its own file to avoid touching the nav-chrome dictionary.
  */
 export const DASHBOARD_TRANSLATIONS = {
+  // DashboardHero.tsx — {name} interpolated by the caller (String.replace),
+  // same pattern as lib/translations/workspaceSynthesis.ts's own {n}/{cached}.
+  heroGreeting: { fr: "Bonjour Dr. {name} 👋", en: "Hello Dr. {name} 👋" },
+  heroWelcomeWithYear: {
+    fr: "Bienvenue dans ton espace de {year} — choisis une unité, un module indépendant, ou ajoute un cours indépendant.",
+    en: "Welcome to your {year} workspace — choose a teaching unit, an independent module, or add an independent course.",
+  },
+  heroWelcomeNoYear: {
+    fr: "Choisis ta spécialité et ton année dans les Paramètres pour voir ton programme — en attendant, ajoute un cours indépendant.",
+    en: "Choose your specialty and year in Settings to see your curriculum — in the meantime, add an independent course.",
+  },
+  // "Audio to Smart Notes" quick-action tile (app/dashboard/(shell)/page.tsx).
+  audioNotesTitle: { fr: "Audio to Smart Notes", en: "Audio to Smart Notes" },
+  audioNotesSubtitle: {
+    fr: "Enregistre ou importe un cours audio — l'IA en sort des notes structurées.",
+    en: "Record or import an audio lesson — AI extracts structured notes.",
+  },
   addCourseHeading: { fr: "Ajouter un cours indépendant", en: "Add an independent course" },
   addCourseHelper: {
     fr: "Importe un PDF ou un document sans l'associer à un module.",

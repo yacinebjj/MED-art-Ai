@@ -3,6 +3,8 @@
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { AnimatedBrandMark } from "@/components/layout/AnimatedBrandMark";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tDashboard } from "@/lib/translations/dashboard";
 
 interface DashboardHeroProps {
   firstName: string;
@@ -33,6 +35,7 @@ interface DashboardHeroProps {
  * the fold on a phone, contradicting the shell's no-scroll/compaction goal.
  */
 export function DashboardHero({ firstName, academicYearName }: DashboardHeroProps) {
+  const { language } = useLanguage();
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -44,22 +47,46 @@ export function DashboardHero({ firstName, academicYearName }: DashboardHeroProp
         <AnimatedBrandMark size="sm" className="sm:hidden" />
         <AnimatedBrandMark size="md" className="hidden sm:flex" />
         <div className="min-w-0">
-          <h1 className="break-words text-base font-bold tracking-tight text-foreground sm:text-xl lg:text-2xl">Bonjour Dr. {firstName} 👋</h1>
+          <h1 className="break-words text-base font-bold tracking-tight text-foreground sm:text-xl lg:text-2xl">
+            {tDashboard("heroGreeting", language).replace("{name}", firstName)}
+          </h1>
           <p className="mt-0.5 hidden text-sm text-muted-foreground sm:block">
             {academicYearName
-              ? `Bienvenue dans ton espace de ${academicYearName} — choisis une unité, un module indépendant, ou ajoute un cours indépendant.`
-              : "Choisis ta spécialité et ton année dans les Paramètres pour voir ton programme — en attendant, ajoute un cours indépendant."}
+              ? tDashboard("heroWelcomeWithYear", language).replace("{year}", academicYearName)
+              : tDashboard("heroWelcomeNoYear", language)}
           </p>
         </div>
       </div>
-      <div className="hidden shrink-0 overflow-hidden rounded-2xl shadow-md md:block">
+      {/*
+       * No card/frame/rounded-corner wrapper or drop shadow around the
+       * mascot anymore — that container (rounded-2xl, shadow-md) is what
+       * changed here, per explicit product direction ("aucune carte, cadre
+       * ou fond carré derrière elle"). The image itself was also
+       * regenerated (nano-banana-2) — the original had a teal/violet
+       * gradient square baked into the picture; this one is a plain,
+       * uniform white background instead.
+       *
+       * HONEST LIMITATION: true alpha-channel transparency (a real PNG
+       * cutout) was attempted twice and is NOT achievable through this
+       * image-generation pipeline — explicitly asking for "transparent"
+       * makes the model draw a literal checkerboard PATTERN as pixels (the
+       * conventional editor placeholder for transparency, not real alpha),
+       * and it only ever returns JPEG regardless of the requested format.
+       * A flat white background is the closest achievable result: it reads
+       * as seamless against this card in light mode, but still shows as a
+       * soft white square in dark mode. Fixing that for real would need
+       * either a dedicated background-removal step (outside this pipeline)
+       * or a hand-authored SVG (like the earlier, now-removed DoctorAIHero
+       * attempt) instead of an AI-generated raster image.
+       */}
+      <div className="hidden shrink-0 md:block">
         <Image
           src="/illustrations/dashboard-hero-mascot.jpeg"
           alt=""
           role="presentation"
           width={112}
           height={112}
-          className="h-24 w-24 object-cover lg:h-28 lg:w-28"
+          className="h-24 w-24 object-contain lg:h-28 lg:w-28"
           priority
         />
       </div>

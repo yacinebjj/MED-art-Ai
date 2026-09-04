@@ -133,9 +133,9 @@ export default function DashboardPage() {
             <Mic className="h-5 w-5 sm:h-7 sm:w-7" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-foreground sm:text-lg">Audio to Smart Notes</p>
+            <p className="text-sm font-bold text-foreground sm:text-lg">{tDashboard("audioNotesTitle", language)}</p>
             <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block sm:text-sm">
-              Enregistre ou importe un cours audio — l&apos;IA en sort des notes structurées.
+              {tDashboard("audioNotesSubtitle", language)}
             </p>
           </div>
           <span className="hidden shrink-0 items-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-all duration-300 active:scale-95 sm:flex">

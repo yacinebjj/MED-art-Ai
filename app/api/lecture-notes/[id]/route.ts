@@ -11,6 +11,71 @@ function parseJobId(rawId: string): number | null {
   return Number.isFinite(id) ? id : null;
 }
 
+interface LectureNotesJobRow {
+  id: number;
+  title: string;
+  audio_urls: string[];
+  transcript: string | null;
+  smart_notes: string | null;
+  status: "processing" | "done" | "failed";
+  updated_at: string;
+}
+
+/**
+ * Powers reopening a saved note (app/dashboard/audio-workspace/page.tsx's
+ * "Notes récentes" list -> ?jobId=... view mode) — the job's `audio_urls`/
+ * `smart_notes` were already written by app/api/lecture-notes/process; this
+ * is simply the first read-back this feature has ever had (previously
+ * nothing in the codebase ever queried `lecture_notes_jobs` after creation,
+ * which is the whole reason a saved note appeared to "disappear").
+ */
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const id = parseJobId(params.id);
+  if (id === null) {
+    return NextResponse.json({ success: false, error: "Identifiant invalide." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  // .eq("user_id", ...) — same isolation as PATCH below: a student can only
+  // ever read back their OWN job by id, never another student's by guessing.
+  const { data: job, error } = await supabase
+    .from("lecture_notes_jobs")
+    .select("id, title, audio_urls, transcript, smart_notes, status, updated_at")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle<LectureNotesJobRow>();
+
+  if (error) {
+    console.error("[lecture-notes/[id]:get] Échec lecture Supabase:", error);
+    return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
+  }
+  if (!job) {
+    return NextResponse.json({ success: false, error: "Note introuvable." }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    success: true,
+    job: {
+      id: job.id,
+      title: job.title,
+      audioUrls: job.audio_urls,
+      transcript: job.transcript,
+      smartNotes: job.smart_notes,
+      status: job.status,
+      updatedAt: job.updated_at,
+    },
+  });
+}
+
 /**
  * Powers the "Sauvegarder" button on the Audio to Smart Notes workspace
  * (app/dashboard/audio-workspace/page.tsx). The note is already persisted

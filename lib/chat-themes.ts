@@ -22,7 +22,15 @@ export const CHAT_THEMES: ChatTheme[] = [
   {
     id: "classic",
     name: "Blanc Classique",
-    bubble: "border border-black/5 bg-white text-gray-900 shadow-sm",
+    // Was bg-white/text-gray-900 with zero dark: variant — same bug already
+    // fixed on the MedArt Assistant's own user bubble (see
+    // app/dashboard/(shell)/assistant/page.tsx): a stark opaque white box in
+    // dark mode instead of blending with the rest of the app's theme-token
+    // surfaces. bg-card/text-card-foreground track light/dark automatically
+    // (app/globals.css's CSS vars); `isLight` below still governs
+    // AudioPlayer's own dark-controls-on-light-bubble contrast logic,
+    // unrelated to this fix.
+    bubble: "border border-border bg-card text-card-foreground shadow-sm",
     swatch: "border border-gray-300 bg-white",
     accent: "bg-primary-500",
     isLight: true,

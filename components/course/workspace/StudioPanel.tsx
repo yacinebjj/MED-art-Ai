@@ -705,12 +705,28 @@ export function StudioPanel({
                     !isLocked &&
                     SECTIONS_WITH_OPTIONS_MENU.has(section.id);
                   return (
-                    <div key={section.id} className="relative">
+                    // min-w-0 — grid items default to `min-width: auto`
+                    // (unlike flex, which already resolves this for its own
+                    // children elsewhere in this file), so without it this
+                    // tile refuses to shrink below its label's intrinsic
+                    // width. That's exactly what let a long label overlap/
+                    // deform its neighbors whenever the panel itself
+                    // narrows — during the collapse transition (grid-cols-2
+                    // -> grid-cols-1 lands at the same moment as the width
+                    // animation, briefly mismatched) or simply at an
+                    // in-between desktop width.
+                    <div key={section.id} className="relative min-w-0">
                       <button
                         type="button"
                         disabled={isGenerating || isLocked}
                         onClick={() => onItemClick(section.id)}
-                        title={isLocked ? tStudio("lockedTooltip", language) : isCollapsed ? getSectionLabel(section.id, language, studyYear) : undefined}
+                        // Always set (not just when collapsed) — a long
+                        // label ("Ultra-Detailed Summary", "Examples &
+                        // Analogies...") can still overflow this row even
+                        // uncollapsed, and the native title tooltip is the
+                        // one fallback that works at any width without
+                        // guessing.
+                        title={isLocked ? tStudio("lockedTooltip", language) : getSectionLabel(section.id, language, studyYear)}
                         aria-disabled={isLocked}
                         className={cn(
                           "group relative flex w-full items-center gap-2.5 rounded-xl border text-sm font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-base",
@@ -720,7 +736,16 @@ export function StudioPanel({
                         )}
                       >
                         {!isCollapsed && (
-                          <span className={cn("truncate", showOptionsMenu && "pr-5")}>{getSectionLabel(section.id, language, studyYear)}</span>
+                          // line-clamp-2 (not truncate/whitespace-nowrap) —
+                          // a long label ("Ultra-Detailed Summary",
+                          // "Examples & Analogies") used to hard-truncate to
+                          // one illegible line; now it wraps onto a 2nd line
+                          // first, only ellipsizing past that. min-w-0 lets
+                          // this span actually shrink inside the flex row
+                          // (it wouldn't wrap at all otherwise).
+                          <span className={cn("min-w-0 line-clamp-2 break-words", showOptionsMenu && "pr-5")}>
+                            {getSectionLabel(section.id, language, studyYear)}
+                          </span>
                         )}
                         {isGenerating ? (
                           <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-5 w-5")} />
