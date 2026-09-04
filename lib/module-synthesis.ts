@@ -289,13 +289,40 @@ export async function runModuleSynthesis(
       // specifically). No `reasoning` option, matching every other
       // CHEAP_MODEL call site.
       const model = type === "medical_dictionary" ? CHEAP_MODEL : ECONOMY_MODEL;
+
+      // medical_dictionary's 3-column format (Terme | Explication clinique |
+      // الشرح بالعربية) produces meaningfully more output per course than
+      // global_summary/keywords_table's own chunks, AND this one call can
+      // cover MANY missing courses at once — this feature's whole premise
+      // is selecting "généralement tout le module" (≥ MIN_COURSES_REQUIRED,
+      // often far more), so a flat 8000-token cap that happened to be
+      // enough for 1-2 courses' worth of chunks silently stopped being
+      // enough as soon as a real batch got large — confirmed in production
+      // (cours "Traumatismes du coude", 8000/8000 completion_tokens hit,
+      // unrecoverable even by parseJsonResponse's own repair layer — a
+      // genuine truncation, not a fixable escaping quirk). Scales with how
+      // many courses are ACTUALLY missing in THIS call instead of one flat
+      // number, capped at CHEAP_MODEL's real ceiling (65,536 — see
+      // lib/ai/openrouter.ts's own CHEAP_MODEL comment; confirmed live
+      // elsewhere in this app, e.g. app/api/notes/organize/route.ts).
+      // Floor raised to 16000 (double the old flat cap), not kept at 8000 —
+      // the reported failure named only ONE course, so a single dense
+      // course's own chunk (up to 15 terms × 3 columns, plus JSON escaping
+      // overhead) may already have been what exceeded 8000 tokens alone,
+      // independent of how many OTHER courses shared the same call.
+      const MEDICAL_DICTIONARY_TOKENS_PER_COURSE = 3000;
+      const medicalDictionaryMaxTokens = Math.min(
+        65536,
+        Math.max(16000, missingCourses.length * MEDICAL_DICTIONARY_TOKENS_PER_COURSE)
+      );
+
       const raw = await callOpenRouter(
         [
           { role: "system", content: prompt },
           { role: "user", content: userPrompt },
         ],
         type === "medical_dictionary"
-          ? { model, maxTokens: 8000, bypassMock: true }
+          ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true }
           // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
           // lib/ai/studio-prompts.ts's own header comment) + the matching
           // reasoning cap: without it, this model's hidden reasoning tokens
