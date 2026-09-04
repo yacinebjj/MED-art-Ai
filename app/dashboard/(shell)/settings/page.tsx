@@ -31,8 +31,8 @@ const EMPTY_FORM: StudentProfile = {
   academicYear: "",
 };
 
-// Shared visual treatment for the 4 permanently-locked fields (Email, Nom
-// complet, Spécialité, Année) — a dashed muted-tint surface instead of a
+// Shared visual treatment for the permanently-locked fields (Email, Nom
+// complet, Spécialité) — a dashed muted-tint surface instead of a
 // flat opacity-50 fade, so the saved value stays legible while the locked
 // state stays unambiguous (see task brief: "clairs... sans être moches").
 // `disabled:opacity-100` cancels Select's own baked-in `disabled:opacity-60`
@@ -105,17 +105,17 @@ export default function SettingsPage() {
   const [specialtyId, setSpecialtyId] = useState<number | null>(null);
   const [academicYearId, setAcademicYearId] = useState<number | null>(null);
   const [yearsLoading, setYearsLoading] = useState(false);
-  // Once a student has registered with a year, it's permanent — set from the
-  // bootstrap fetch below the moment a saved academicYearId is found, never
-  // cleared afterward (even if academicYearId itself later changes for some
-  // other reason, this stays true — the rule is "was it EVER set", not "is
-  // it currently set").
-  const [yearLocked, setYearLocked] = useState(false);
-  // Same "was it EVER set" permanence rule as yearLocked, applied to
-  // Spécialité — locking it unconditionally from the start would strand
-  // every new student with no way to ever choose one (registration doesn't
-  // collect it; this settings page is the only place that does), so it can
-  // only lock in AFTER a first real choice, exactly like Année already does.
+  // Spécialité stays permanently locked once ever set — locking it
+  // unconditionally from the start would strand every new student with no
+  // way to ever choose one (registration doesn't collect it; this settings
+  // page is the only place that does), so it can only lock in AFTER a first
+  // real choice. Année used to follow the identical "was it EVER set, then
+  // permanent" rule, but that meant literally every account (registration
+  // itself requires choosing a year) had it locked from day one, with zero
+  // way for a student to correct or update it — Année is deliberately left
+  // freely editable below (no lock state at all); only the specific
+  // (specialty, year) combinations isLockedInternYear itself disables stay
+  // gated, per-option, in the picker.
   const [specialtyLocked, setSpecialtyLocked] = useState(false);
 
   // Set by the bootstrap effect right after it fetches years for the saved
@@ -161,7 +161,6 @@ export default function SettingsPage() {
       }
 
       if (savedSpecialtyId != null) setSpecialtyLocked(true);
-      if (savedAcademicYearId != null) setYearLocked(true);
       setReady(true);
     }
 
@@ -349,9 +348,7 @@ export default function SettingsPage() {
                   )}
                 </div>
                 <div>
-                  <FieldLabelRow htmlFor="academicYear" locked={yearLocked}>
-                    Année
-                  </FieldLabelRow>
+                  <FieldLabelRow htmlFor="academicYear">Année</FieldLabelRow>
                   <Select
                     name="academicYear"
                     placeholder={
@@ -364,15 +361,9 @@ export default function SettingsPage() {
                     options={yearOptions}
                     value={academicYearId != null ? String(academicYearId) : ""}
                     onValueChange={handleYearChange}
-                    disabled={specialtyId == null || yearsLoading || yearLocked}
+                    disabled={specialtyId == null || yearsLoading}
                     onDisabledOptionClick={handleDisabledYearClick}
-                    className={yearLocked ? LOCKED_SELECT_CLASS : undefined}
                   />
-                  {yearLocked && (
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      L&apos;année d&apos;étude ne peut pas être modifiée après l&apos;inscription.
-                    </p>
-                  )}
                 </div>
               </div>
 
