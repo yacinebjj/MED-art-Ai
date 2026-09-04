@@ -26,6 +26,8 @@ RÈGLES DE STRUCTURE NON NÉGOCIABLES :
 - Chaque tableau d'objets doit avoir des objets avec exactement les mêmes clés à chaque item (même si certaines valeurs sont vides).
 - Sois rigoureux médicalement, mais reste CONCIS par champ (quelques phrases, pas des pavés).
 - N'utilise JAMAIS de notation mathématique LaTeX (ex: $\\alpha$, \\beta, \\times) dans une valeur JSON — un backslash non échappé casse le parsing JSON. Écris les lettres grecques et symboles scientifiques en toutes lettres (alpha, bêta, delta) ou en caractère Unicode simple (α, β, δ, ×), jamais en syntaxe LaTeX/backslash.
+- N'utilise JAMAIS le guillemet droit " comme ponctuation ou pour citer un mot/terme à l'intérieur d'une valeur JSON (ex: la protéine "flippase") — un guillemet droit non échappé casse le parsing JSON exactement comme un backslash mal formé. Utilise TOUJOURS les guillemets français « et » (ex : la protéine « flippase ») pour toute citation, emphase ou terme mis en avant.
+- Ne dessine JAMAIS un schéma en mode texte/ASCII étalé sur plusieurs lignes (boîtes, crochets empilés, flèches verticales, tableaux dessinés à la main) à l'intérieur d'une valeur JSON — les sauts de ligne réels y sont une source fréquente de JSON invalide. Décris toujours une structure spatiale ou une relation (couches, hiérarchie, avant/après) en prose fluide ou en une liste Markdown à puces, jamais en dessin multi-lignes.
 - Rédige tout en français.`;
 
 const ICON_TONE_NOTES = `- "icon" doit être une valeur parmi : shield, bug, pill, flame, stethoscope, activity, alert-triangle, bar-chart-3, check-circle-2, wind, zap, heart-pulse.

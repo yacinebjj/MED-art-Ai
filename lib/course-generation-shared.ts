@@ -194,8 +194,14 @@ function repairTruncatedJson(text: string): string | null {
  * inside a string into its proper JSON escape. Never touches any other
  * character — never removes or invents content.
  */
-const VALID_JSON_ESCAPE_TARGETS = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
-const CONTROL_CHAR_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
+// Exported — lib/studio-explication-delta.ts's own escapeKnownStringBody
+// reuses these exact two tables for a structurally-anchored recovery that
+// (unlike fixInvalidJsonEscapes below) never toggles in/out of "string
+// mode" on a bare quote, so it can't share fixInvalidJsonEscapes' own
+// per-call logic directly, but must stay byte-for-byte consistent with what
+// counts as a valid JSON escape target / control-character encoding.
+export const VALID_JSON_ESCAPE_TARGETS = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
+export const CONTROL_CHAR_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
 
 /**
  * `startInString` — exported for lib/studio-explication-delta.ts's

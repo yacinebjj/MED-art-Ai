@@ -35,7 +35,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
 import { callOpenRouter, ECONOMY_MODEL } from "@/lib/ai/openrouter";
-import { parseJsonResponse, fixInvalidJsonEscapes } from "@/lib/course-generation-shared";
+import { parseJsonResponse, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
 import { buildExplicationDeltaChapterPrompt, buildExplicationWrapperPrompt } from "@/lib/prompts/public-course-sections";
@@ -476,71 +476,143 @@ export async function runStudioExplicationDeltaPipeline(
  * can delta against it.
  */
 /**
+ * Escapes a span KNOWN to sit entirely inside one JSON string value — its
+ * true start/end already located STRUCTURALLY by recoverExplicationOnly
+ * below (via the surrounding, known key names), never by counting quotes
+ * within this span itself. Unlike fixInvalidJsonEscapes, this NEVER toggles
+ * in/out of "string mode" on a bare `"` — there is no legitimate string
+ * boundary inside this span at all, so every raw `"` here is content (the
+ * model quoting a term with a straight quote instead of the instructed
+ * French guillemets — confirmed real production failure, e.g. `la protéine
+ * "flippase"`), never JSON structure, and must always be escaped rather
+ * than mistaken for a closing quote. This is exactly the failure
+ * fixInvalidJsonEscapes' own toggle-based scan cannot recover from: once an
+ * unescaped content quote flips its `inString` state, every character after
+ * it (including a real trailing bracket-diagram newline, a real trailing
+ * backslash, anything) is scanned in the wrong mode for the rest of the
+ * document.
+ */
+function escapeKnownStringBody(text: string): string {
+  let result = "";
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      const next = text[i + 1];
+      if (next !== undefined && VALID_JSON_ESCAPE_TARGETS.has(next)) {
+        result += ch;
+        escaped = true;
+      } else {
+        result += "\\\\";
+      }
+      continue;
+    }
+    if (ch < " ") {
+      result += CONTROL_CHAR_ESCAPES[ch] ?? `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      continue;
+    }
+    if (ch === '"') {
+      result += '\\"'; // ALWAYS escape — this span never legitimately closes here.
+      continue;
+    }
+    result += ch;
+  }
+  return result;
+}
+
+const EXPLICATION_KEY_RE = /"explication"\s*:\s*"/;
+// Anchors on the ONLY other key this response ever has — its presence pins
+// down exactly where the explication string's closing quote sits,
+// regardless of any unescaped quote/backslash/control character earlier in
+// the body. Global + "last match wins" below: nothing legitimate can ever
+// follow "explicationChapterChunks" except its own value and the closing
+// brace, so the LAST occurrence of this exact key pattern in the remaining
+// text is always the real one, even in the astronomically unlikely case
+// the explication prose itself mentions this key name.
+const NEXT_KEY_RE = /"\s*,\s*"explicationChapterChunks"/g;
+
+/**
  * Last-resort recovery for a genuinely broken/truncated JSON response from
  * runStudioExplicationFreshGenerationWithTagging specifically: "explication"
  * is the FIRST key the model writes, "explicationChapterChunks" (a
  * disposable cache-optimization hint — see this function's own header
  * comment on why a wrong/missing value there is harmless) is the SECOND and
- * LAST. Confirmed live (real production failure, then reproduced): when the
- * combined explication+chunk-tagging response hits a JSON defect — token
- * ceiling, an escaping quirk, anything — while writing that disposable
- * SECOND field, the actual lesson content the student is waiting on is very
- * often already complete and sitting right there in the raw text, just
+ * LAST. Confirmed live (real production failures, then reproduced — TWO
+ * distinct root causes so far): when the combined explication+chunk-tagging
+ * response hits a JSON defect — token ceiling, an escaping quirk, an
+ * unescaped content quote, anything — while writing that disposable SECOND
+ * field, the actual lesson content the student is waiting on is very often
+ * already complete and sitting right there in the raw text, just
  * unreachable via a normal JSON.parse because the OVERALL document never
  * closed cleanly.
  *
- * TWO recovery attempts, in order:
- *  1. STRICT — the explication string is already properly closed (the cut
- *     happened later, e.g. mid-way through explicationChapterChunks). Exact
- *     value, no guessing.
- *  2. UNCLOSED-TAIL — explicitly requested (product direction, after a real
- *     "cours très long" production failure): the far more common shape for
- *     a genuinely LONG explication, since the token ceiling is much more
- *     likely to land WHILE still writing that first, dominant field than
- *     after it. Captures from `"explication":"` to the end of the raw text
- *     and treats it as an unterminated string — i.e. everything the model
- *     managed to write before being cut off, honestly incomplete but real.
- *     A dangling, unescaped trailing backslash (truncated mid-escape-
- *     sequence) is dropped before decoding, same reasoning as
- *     repairTruncatedJson's own identical fix in course-generation-shared.ts
- *     — appending a bare `"` after a lone `\` would escape it instead of
- *     closing it and break the decode.
+ * Locates the explication string's body STRUCTURALLY (via EXPLICATION_KEY_RE
+ * / NEXT_KEY_RE above) rather than by counting quotes character-by-character
+ * within it — the previous quote-counting implementation (a `(?:\\.|[^"\\])*`
+ * regex) silently mis-recovered, or outright failed to recover, the instant
+ * the model's prose contained EVEN ONE unescaped straight quote used as
+ * ordinary punctuation (e.g. quoting a technical term) anywhere before the
+ * true end: that regex necessarily stops at the FIRST unescaped `"` it
+ * meets, mistaking real content for the closing quote — a real, reproduced
+ * production failure distinct from (and not fixed by) the invalid-escape-
+ * target / raw-control-character cases fixInvalidJsonEscapes already
+ * handles. Anchoring on the surrounding known key names instead sidesteps
+ * this entirely: the true boundary comes from JSON structure that's
+ * external to the body, never from characters inside a body we don't yet
+ * trust.
  *
- * Neither attempt ever fabricates content or silently serves a suspiciously
+ * Two shapes, in order:
+ *  1. ANCHORED — "explicationChapterChunks" is found somewhere after
+ *     "explication"'s opening quote: the body is everything between them,
+ *     regardless of what it contains (unescaped quotes, raw newlines,
+ *     invalid escape targets — escapeKnownStringBody above fixes all three
+ *     in one pass, unconditionally, since we already know this whole span
+ *     is content).
+ *  2. UNCLOSED-TO-END — the second key was never written at all (the
+ *     response was cut off before ever reaching it, e.g. genuine token-
+ *     ceiling truncation while still writing "explication" itself, the far
+ *     more common shape for a very long response): the body is everything
+ *     from the opening quote to the end of the raw text. A dangling,
+ *     unescaped trailing backslash (truncated mid-escape-sequence) is
+ *     dropped before decoding — appending a bare `"` after a lone `\` would
+ *     be read as an ESCAPED quote, not a closing one, and break the decode.
+ *
+ * Neither shape ever fabricates content or silently serves a suspiciously
  * short fragment — both are rejected by the same 50-char floor
- * StudioTextSchema itself enforces. If neither can cleanly recover, this
- * returns null and the caller's original error surfaces exactly as it did
- * before this recovery path existed.
+ * StudioTextSchema itself enforces. If recovery still fails, this returns
+ * null and the caller's original error surfaces exactly as it did before
+ * this recovery path existed.
  */
 function recoverExplicationOnly(raw: string): string | null {
-  const closed = raw.match(/"explication"\s*:\s*"((?:\\.|[^"\\])*)"/);
-  if (closed) {
-    // fixInvalidJsonEscapes(..., true) — confirmed real production failure,
-    // distinct from truncation: the model can write a literal backslash
-    // that isn't a valid JSON escape target (e.g. right before a heading
-    // like "Hiérarchie"). The `\\.` alternative above still finds the TRUE
-    // closing quote regardless (regex `.` consumes any character, valid
-    // escape or not), but handing that raw capture straight to a strict
-    // JSON.parse fails on the same invalid sequence — fix it first.
-    const decoded = tryDecodeJsonString(fixInvalidJsonEscapes(closed[1], true));
-    if (decoded && decoded.trim().length >= 50) return decoded;
+  const startMatch = raw.match(EXPLICATION_KEY_RE);
+  if (!startMatch) return null;
+  const bodyStart = (startMatch.index ?? 0) + startMatch[0].length;
+  const rest = raw.slice(bodyStart);
+
+  let nextKeyMatch: RegExpExecArray | null = null;
+  for (const m of rest.matchAll(NEXT_KEY_RE)) nextKeyMatch = m;
+
+  let body: string;
+  const isUnclosedToEnd = nextKeyMatch === null;
+  if (nextKeyMatch) {
+    body = rest.slice(0, nextKeyMatch.index);
+  } else {
+    body = rest;
   }
 
-  // Trailing `\\?` (on top of the `(?:\\.|[^"\\])*` repeat) — without it, a
-  // truncation landing EXACTLY on a lone trailing backslash (nothing left
-  // to pair it with) can't be captured by either alternative in the main
-  // group (`\\.` needs a following char, `[^"\\]` excludes backslash), so
-  // the whole match silently fails right when there's still real content
-  // to recover. Confirmed by a real test case before shipping this.
-  const unclosed = raw.match(/"explication"\s*:\s*"((?:\\.|[^"\\])*\\?)$/);
-  if (unclosed) {
-    let tail = unclosed[1];
+  if (isUnclosedToEnd) {
     let trailingBackslashes = 0;
-    while (tail.endsWith("\\".repeat(trailingBackslashes + 1))) trailingBackslashes++;
-    if (trailingBackslashes % 2 === 1) tail = tail.slice(0, -1); // dangling half of an escape sequence — drop it, nothing valid to preserve.
-    const decoded = tryDecodeJsonString(fixInvalidJsonEscapes(tail, true));
-    if (decoded && decoded.trim().length >= 50) return decoded;
+    while (body.endsWith("\\".repeat(trailingBackslashes + 1))) trailingBackslashes++;
+    if (trailingBackslashes % 2 === 1) body = body.slice(0, -1); // dangling half of an escape sequence — drop it, nothing valid to preserve.
   }
+
+  const decoded = tryDecodeJsonString(escapeKnownStringBody(body));
+  if (decoded && decoded.trim().length >= 50) return decoded;
 
   return null;
 }
