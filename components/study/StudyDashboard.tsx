@@ -11,8 +11,6 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { usePomodoro } from "@/providers/PomodoroProvider";
 
-type TimerMode = "study" | "break";
-
 const DEFAULT_STUDY_MINUTES = 50;
 const DEFAULT_BREAK_MINUTES = 10;
 const DEFAULT_CYCLES = 4;
@@ -96,13 +94,26 @@ export function StudyDashboard() {
   const { toast } = useToast();
 
   // 👈 ربط العداد مباشرة مع الـ Context العالمي لتتم المزامنة تلقائياً مع الـ Topbar
-  const { seconds, isActive: isRunning, toggleActive, resetTimer: globalReset } = usePomodoro();
+  // currentCycle/currentMode also live in the Provider now (not local state
+  // here) — see PomodoroProvider.tsx's own comment on PomodoroContextType:
+  // this is what makes the Topbar widget's and PomodoroStudyBanner's own
+  // "Réinitialiser" buttons reset the SAME cycle/mode this page displays,
+  // instead of only resetting seconds/isActive and silently leaving
+  // "Cycle 3 / 4" behind.
+  const {
+    seconds,
+    isActive: isRunning,
+    toggleActive,
+    resetTimer: globalReset,
+    currentCycle,
+    currentMode,
+    setCurrentCycle,
+    setCurrentMode,
+  } = usePomodoro();
 
   const [studyDuration, setStudyDuration] = useState(DEFAULT_STUDY_MINUTES);
   const [breakDuration, setBreakDuration] = useState(DEFAULT_BREAK_MINUTES);
   const [cycles, setCycles] = useState(DEFAULT_CYCLES);
-  const [currentCycle, setCurrentCycle] = useState(1);
-  const [currentMode, setCurrentMode] = useState<TimerMode>("study");
   const [cheatWarningVisible, setCheatWarningVisible] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -159,8 +170,10 @@ export function StudyDashboard() {
 
   function handleReset() {
     setCheatWarningVisible(false);
-    setCurrentMode("study");
-    setCurrentCycle(1);
+    // globalReset() now resets currentCycle/currentMode too (see
+    // PomodoroProvider.tsx) — no need to set them here separately, and
+    // doing so here as well would be redundant, not incorrect, but this
+    // keeps a single source of truth for what "reset" actually means.
     globalReset();
   }
 

@@ -731,7 +731,18 @@ export function StudioPanel({
                           // tool list.
                           "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-sm",
                           isGenerating && "disabled:cursor-wait",
-                          isCollapsed ? "aspect-square flex-col justify-center p-2" : "justify-between px-3 py-2 text-left",
+                          // Fixed h-14 (uncollapsed) — CSS Grid rows stretch
+                          // items WITHIN one row to match automatically, but
+                          // each ROW still auto-sizes to ITS OWN tallest
+                          // tile (a 2-line-label row vs. an all-1-line-label
+                          // row), which is exactly what made tiles in
+                          // different rows visibly different sizes. A fixed
+                          // height on every tile removes that row-to-row
+                          // variance entirely — line-clamp-2 above still
+                          // wraps a long label onto 2 lines, just centered
+                          // (items-center) within the same fixed box a
+                          // short 1-line label also fills.
+                          isCollapsed ? "aspect-square flex-col justify-center p-2" : "h-14 justify-between px-3 py-2 text-left",
                           tint.bg
                         )}
                       >

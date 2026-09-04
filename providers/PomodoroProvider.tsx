@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
+export type PomodoroMode = "study" | "break";
+
 interface PomodoroContextType {
   seconds: number;
   isActive: boolean;
@@ -11,6 +13,23 @@ interface PomodoroContextType {
   resetTimer: () => void;
   /** Called once the real signed-in user is known (see PomodoroAuthSync in providers/PomodoroAuthSync.tsx) — this Provider is mounted ABOVE AuthProvider in app/layout.tsx, so it has no way to read the current user itself. */
   setUserId: (userId: string | null) => void;
+  /**
+   * Cycle/mode were previously local state INSIDE StudyDashboard.tsx (the
+   * Study Space page's own "Cycle X / Y" display) — meaning the Topbar
+   * widget's and PomodoroStudyBanner's own "Réinitialiser" buttons, which
+   * only ever called this Provider's resetTimer() directly, had no way to
+   * reach StudyDashboard's local state at all. Clicking either of those
+   * (both are simultaneously visible alongside StudyDashboard on the Study
+   * page) reset `seconds`/`isActive` but silently left "Cycle 3 / 4" (or
+   * "Pause" mode) exactly where it was — a real, reported bug: reset felt
+   * like it "didn't do anything" depending on which of the 3 reset buttons
+   * was clicked. Moved here so EVERY reset button shares one true state and
+   * resetTimer() below can reset all of it in one place.
+   */
+  currentCycle: number;
+  currentMode: PomodoroMode;
+  setCurrentCycle: (cycle: number) => void;
+  setCurrentMode: (mode: PomodoroMode) => void;
 }
 
 const PomodoroContext = createContext<PomodoroContextType | undefined>(undefined);
@@ -41,6 +60,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
+  const [currentCycle, setCurrentCycle] = useState(1);
+  const [currentMode, setCurrentMode] = useState<PomodoroMode>("study");
 
   // استرجاع الحالة الحقيقية من localStorage عند تحميل التطبيق — يعاد أيضاً
   // في كل مرة يتغيّر فيها bucket (تبديل حساب على نفس الجهاز، أو تحديد هوية
@@ -90,6 +111,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const resetTimer = () => {
     setSeconds(0);
     setIsActive(false);
+    setCurrentCycle(1);
+    setCurrentMode("study");
     const keys = keysFor(bucket);
     localStorage.setItem(keys.seconds, "0");
     localStorage.setItem(keys.active, "false");
@@ -101,7 +124,19 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
 
   return (
     <PomodoroContext.Provider
-      value={{ seconds, isActive, isVisible, toggleActive, toggleVisible, resetTimer, setUserId }}
+      value={{
+        seconds,
+        isActive,
+        isVisible,
+        toggleActive,
+        toggleVisible,
+        resetTimer,
+        setUserId,
+        currentCycle,
+        currentMode,
+        setCurrentCycle,
+        setCurrentMode,
+      }}
     >
       {children}
     </PomodoroContext.Provider>
