@@ -28,6 +28,15 @@ export const WORKSPACE_SYNTHESIS_TRANSLATIONS = {
   entryTypeTable: { fr: "Tableau", en: "Table" },
   entryTypeDictionary: { fr: "Dictionnaire", en: "Dictionary" },
 
+  // Mobile-only "Sources" / "Résultats" tab switch — short labels for the
+  // tab bar itself (sourcesHeading above is too long: "Sources du module").
+  mobileSourcesTab: { fr: "Sources", en: "Sources" },
+  mobileResultsTab: { fr: "Résultats", en: "Results" },
+  noResultsYetHint: {
+    fr: "Aucun résultat pour l'instant — choisis tes sources puis lance une génération.",
+    en: "No results yet — pick your sources, then start a generation.",
+  },
+
   // Minimum-selection gate (MIN_COURSES_REQUIRED) — shown both as an info
   // toast when generation is attempted too early, and as a persistent hint
   // next to the generation buttons.

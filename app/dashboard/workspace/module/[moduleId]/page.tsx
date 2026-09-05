@@ -19,6 +19,9 @@ import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tWorkspaceSynthesis } from "@/lib/translations/workspaceSynthesis";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
+import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 
 /**
  * PHASE 2 — real generation calls wired to
@@ -121,6 +124,19 @@ export default function ModuleWorkspacePage() {
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+
+  // Mobile-first UX rework — below `md`, the aside (sources) and main
+  // (results) panels never render side by side any more; a "Sources" /
+  // "Résultats" tab switch (SourcesResultsTabs) decides which one shows.
+  // Desktop keeps the original permanent split (both always visible),
+  // driven off the same isDesktopOrTablet check the Notes page already
+  // uses for its own analogous mobile/desktop branch.
+  const isDesktopOrTablet = useMediaQuery("(min-width: 768px)");
+  const [mobileTab, setMobileTab] = useState<SourcesResultsTab>("sources");
+  // Lets any single generated result (Résumé/Tableau/Dictionnaire) expand to
+  // fill the whole screen for comfortable reading — mirrors the note
+  // editor's own proven `isFullscreen` pattern.
+  const [isOutputFullscreen, setIsOutputFullscreen] = useState(false);
 
   // Resolved once on mount — see workspaceHistoryStorageKey's own comment
   // for why every localStorage read/write below is gated on this being
@@ -304,6 +320,10 @@ export default function ModuleWorkspacePage() {
       };
       setHistory((prev) => [entry, ...prev]);
       setActiveHistoryId(entry.id);
+      // Dès qu'un résultat est généré, on bascule automatiquement sur l'onglet
+      // "Résultats" (mobile uniquement — no-op on desktop, both panels
+      // already visible there) pour que l'étudiant le voie sans manipulation.
+      setMobileTab("results");
 
       if (Array.isArray(body.coursesUsingRawTextFallback) && body.coursesUsingRawTextFallback.length > 0) {
         setFallbackNotice(body.coursesUsingRawTextFallback as string[]);
@@ -347,7 +367,294 @@ export default function ModuleWorkspacePage() {
     setOutput(entry.content);
     setActiveHistoryId(entry.id);
     setFallbackNotice(null);
+    setMobileTab("results");
   }
+
+  // Escape closes the fullscreen result viewer — mirrors the note editor's
+  // own identical Escape handler for its fullscreen Card.
+  useEffect(() => {
+    if (!isOutputFullscreen) return;
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") setIsOutputFullscreen(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOutputFullscreen]);
+
+  const sourcesHeader = (
+    <div className="flex items-center gap-2 border-b border-white/30 px-4 py-4 dark:border-white/10">
+      <Layers className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+      <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("sourcesHeading", language)}</h2>
+    </div>
+  );
+
+  const selectAllRow = courses && courses.length > 0 && (
+    <label className="flex cursor-pointer items-center gap-3 border-b border-white/30 px-4 py-3 transition-colors hover:bg-white/50 dark:border-white/10 dark:hover:bg-white/5">
+      <Checkbox
+        checked={selectAllState === "indeterminate" ? "indeterminate" : selectAllState === "checked"}
+        onCheckedChange={toggleAll}
+      />
+      <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+        Sélectionner tout {selectedIds.size > 0 && `(${selectedIds.size}/${courses.length})`}
+      </span>
+    </label>
+  );
+
+  // min-h-0 — a flex child with overflow-y-auto silently refuses to actually
+  // clip/scroll without it (flex items default to min-height: auto, so they
+  // grow to fit content instead of shrinking to the parent's bound and
+  // letting overflow-y-auto do its job).
+  const courseListPanel = (
+    <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      {coursesLoading ? (
+        <div className="space-y-2 p-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-11 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-800" />
+          ))}
+        </div>
+      ) : coursesError ? (
+        <div className="p-2">
+          <ErrorState message="Échec du chargement des cours de ce module." onRetry={() => setRetryToken((t) => t + 1)} />
+        </div>
+      ) : !courses || courses.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+          <BookOpenText className="h-7 w-7 text-gray-300 dark:text-neutral-700" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">Aucun cours généré dans ce module pour l'instant.</p>
+        </div>
+      ) : (
+        <ul className="space-y-1">
+          {courses.map((course) => (
+            <li key={course.id}>
+              <label
+                className={cn(
+                  "flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 transition-all duration-300 hover:bg-white/50 dark:hover:bg-white/5",
+                  selectedIds.has(course.id) && "bg-teal-50 dark:bg-teal-500/10"
+                )}
+              >
+                <Checkbox checked={selectedIds.has(course.id)} onCheckedChange={() => toggleOne(course.id)} className="mt-0.5" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700 dark:text-gray-200">{course.title}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
+  const generateButtonsRow = (
+    <div className="flex flex-col gap-2 border-b border-white/30 px-4 py-4 dark:border-white/10 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:px-6">
+      <Button onClick={handleGenerateGlobalSummary} disabled={!hasSelection || isGenerating} size="lg" className="w-full sm:w-auto">
+        {isGeneratingSummary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+        Générer un Résumé Global
+      </Button>
+      <Button
+        onClick={handleGenerateKeywordTable}
+        disabled={!hasSelection || isGenerating}
+        variant="secondary"
+        size="lg"
+        className="w-full sm:w-auto"
+      >
+        {isGeneratingKeywords ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+        Générer Tableau des Mots-Clés
+      </Button>
+      <Button
+        onClick={handleGenerateMedicalDictionary}
+        disabled={!hasSelection || isGenerating}
+        variant="secondary"
+        size="lg"
+        className="w-full sm:w-auto"
+      >
+        {isGeneratingDictionary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Library className="h-4 w-4" />}
+        Générer Dictionnaire Médical
+      </Button>
+      {!hasSelection && (
+        <span className="text-xs text-gray-400 dark:text-gray-500">
+          {tWorkspaceSynthesis("minSelectionHint", language).replace("{n}", String(MIN_COURSES_REQUIRED))} (
+          {selectedIds.size}/{MIN_COURSES_REQUIRED}).
+        </span>
+      )}
+    </div>
+  );
+
+  const historySection = history.length > 0 && (
+    <>
+      <hr className="mx-4 my-2 border-white/30 dark:border-white/10" />
+      <div className="flex items-center gap-2 px-4 py-2">
+        <History className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+        <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("resultsHeading", language)}</h2>
+      </div>
+      <ul className="max-h-56 space-y-1 overflow-y-auto px-2 pb-3 md:max-h-56">
+        {history.map((entry) => (
+          <li key={entry.id}>
+            <button
+              type="button"
+              onClick={() => viewHistoryEntry(entry)}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition-all duration-300 active:scale-[0.98] hover:bg-white/50 dark:hover:bg-white/5",
+                activeHistoryId === entry.id
+                  ? "bg-teal-50 text-teal-700 shadow-soft dark:bg-teal-500/10 dark:text-teal-300"
+                  : "text-gray-600 dark:text-gray-300"
+              )}
+            >
+              {entry.type === "global_summary" ? (
+                <Sparkles className="h-3.5 w-3.5 shrink-0" />
+              ) : entry.type === "keywords_table" ? (
+                <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <Library className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {entry.type === "global_summary"
+                ? tWorkspaceSynthesis("entryTypeSummary", language)
+                : entry.type === "keywords_table"
+                  ? tWorkspaceSynthesis("entryTypeTable", language)
+                  : tWorkspaceSynthesis("entryTypeDictionary", language)}{" "}
+              {entry.ordinal}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+
+  // Point critique de l'UX mobile — un bouton plein écran sur CHAQUE contenu
+  // affiché (Résumé, Tableau, Dictionnaire) : le petit bandeau shrink-0
+  // ci-dessous (juste le bouton, aligné à droite) reste dans le flux normal
+  // tant que isOutputFullscreen est false ; dès qu'il passe à true, TOUT ce
+  // wrapper devient `fixed inset-0` et occupe 100% de l'écran, exactement le
+  // même mécanisme déjà éprouvé sur l'éditeur de notes.
+  const outputPanel = (
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col",
+        isOutputFullscreen && "fixed inset-0 z-50 h-dvh w-screen bg-background"
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-end px-2 pt-2 sm:px-3">
+        <FullscreenToggleButton isFullscreen={isOutputFullscreen} onToggle={() => setIsOutputFullscreen((v) => !v)} />
+      </div>
+
+      {/* min-h-0 is the real fix here — WITHOUT it, this panel (the one
+          actually holding the generated Résumé/Tableau/Dictionnaire) never
+          shrinks to its parent's bounded box; it grows to its full content
+          height instead, and the parent's own overflow-hidden hard-clips
+          anything taller than the visible space with NO scrollbar and NO
+          way to reach it — this is the real reason results were reported as
+          invisible on mobile, not a missing bottom-nav offset. pb bumped to
+          a safe-area-aware ~9rem (well above the previous py-6/py-8) so
+          every result and its trailing content is reachable with room to
+          spare, not just barely fit. */}
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto px-4 sm:px-6 md:px-10",
+          isOutputFullscreen ? "pt-0 pb-4 sm:pb-8" : "pt-2 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:pt-2"
+        )}
+      >
+        {fallbackNotice && fallbackNotice.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="not-prose mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              {fallbackNotice.length} cours sans Explication générée ont utilisé leur texte source brut à la place, pour une
+              qualité de synthèse potentiellement moindre : <strong>{fallbackNotice.join(", ")}</strong>.
+            </span>
+          </motion.div>
+        )}
+
+        <AnimatePresence mode="wait">
+          {isGenerating ? (
+            <motion.div
+              key="generating"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center gap-4 py-16 text-center sm:py-24"
+            >
+              <div className="relative flex h-16 w-16 items-center justify-center">
+                <span className="absolute inset-0 animate-ping rounded-full bg-teal-400/30" />
+                <Sparkles className="relative h-8 w-8 text-teal-600 dark:text-teal-400" />
+              </div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                {isGeneratingSummary
+                  ? "Synthèse des cours en cours..."
+                  : isGeneratingKeywords
+                    ? "Extraction des mots-clés en cours..."
+                    : "Construction du dictionnaire médical en cours..."}
+              </p>
+              <p className="max-w-xs text-xs text-gray-400 dark:text-gray-500">
+                Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.
+              </p>
+            </motion.div>
+          ) : output ? (
+            // Was previously rendered with NO prose wrapper at all — every
+            // heading/table/blockquote style this whole page exists to
+            // showcase was silently inert. Fixed alongside the requested
+            // border overrides (TABLE_BORDER_OVERRIDES_*) rather than as a
+            // separate change, since both land on this same element.
+            <motion.div
+              key="output"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}
+            >
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  ...(isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS),
+                  // Wraps ONLY the <table> in a horizontal-scroll container —
+                  // now that column count is dynamic (per selected courses),
+                  // a wide table must scroll internally instead of forcing
+                  // the whole page to overflow. Scoped here, not added to
+                  // the shared MARKDOWN_COMPONENTS in lib/markdown.tsx,
+                  // which every other Markdown surface in the app (chat,
+                  // demo pages, quizzes) also renders through.
+                  table: ({ ...props }) => (
+                    <div className="overflow-x-auto">
+                      <table {...props} />
+                    </div>
+                  ),
+                  // Dictionnaire Médical's 3rd column (الشرح بالعربية) is
+                  // genuine Arabic text sitting in an otherwise LTR table —
+                  // without an explicit direction, the browser's bidi
+                  // algorithm can misorder punctuation/parentheses inside
+                  // that cell. `dir="auto"` lets each cell resolve its own
+                  // direction from its own content (French/term cells stay
+                  // ltr, the Arabic cell renders rtl) — same technique
+                  // already used for Arabic text elsewhere in the app (e.g.
+                  // GastriteCasCliniqueStudio's dialogue bubbles). Harmless
+                  // for the other two tabs' tables, which have no Arabic
+                  // content to trigger it.
+                  td: ({ ...props }) => <td dir="auto" {...props} />,
+                  th: ({ ...props }) => <th dir="auto" {...props} />,
+                }}
+              >
+                {normalizeCallouts(output)}
+              </ReactMarkdown>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "flex flex-col items-center gap-3 py-16 text-center opacity-60 sm:py-24")}
+            >
+              <span className="flex h-14 w-14 animate-float items-center justify-center rounded-2xl bg-teal-50 not-prose dark:bg-teal-500/10">
+                <Sparkles className="h-7 w-7 text-teal-500" />
+              </span>
+              <p className="!my-0 text-base font-medium not-prose text-gray-500 dark:text-gray-400">
+                Choisis tes sources puis lance une génération pour voir le résultat ici.
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
 
   return (
     // Point 2 fix — w-full max-w-full overflow-hidden on this root: without
@@ -364,257 +671,60 @@ export default function ModuleWorkspacePage() {
 
       <PomodoroStudyBanner />
 
-      {/* Stacks vertically below md (a fixed w-80 sidebar next to flex-1 main
-          — the previous unconditional `flex` row — left almost no room for
-          the main panel on phones, sometimes none at all; this mirrors the
-          flex-col/md:flex-row + floating glass-card panel treatment already
-          used by the sibling exam generator workspace). Sidebar gets a
-          bounded height on mobile so both the source list and the
-          generation area stay reachable without one eating the whole
-          viewport. */}
+      {/* Mobile-first UX rework — below `md`, aside/main never render side
+          by side any more (there was too little room for either once one
+          held a real generated result). A "Sources" / "Résultats" tab
+          switch decides which single panel shows: "Sources" groups course
+          selection + the 3 generation buttons; "Résultats" groups the
+          history list + whichever result is open (with its own fullscreen
+          toggle). Desktop (md:+) keeps the original permanent side-by-side
+          split, both panels always visible, completely unchanged. */}
+      {!isDesktopOrTablet && (
+        <div className="px-3 pt-3">
+          <SourcesResultsTabs
+            active={mobileTab}
+            onChange={setMobileTab}
+            sourcesLabel={tWorkspaceSynthesis("mobileSourcesTab", language)}
+            resultsLabel={tWorkspaceSynthesis("mobileResultsTab", language)}
+            resultsCount={history.length}
+          />
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4">
-        {/* ── Sources sidebar ─────────────────────────────────────────── */}
-        <aside className="glass-card flex max-h-[40vh] w-full shrink-0 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark md:h-auto md:max-h-none md:w-80">
-          <div className="flex items-center gap-2 border-b border-white/30 px-4 py-4 dark:border-white/10">
-            <Layers className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("sourcesHeading", language)}</h2>
+        {isDesktopOrTablet ? (
+          <>
+            {/* ── Sources sidebar (desktop) ───────────────────────────── */}
+            <aside className="glass-card flex max-h-[40vh] w-full shrink-0 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark md:h-auto md:max-h-none md:w-80">
+              {sourcesHeader}
+              {selectAllRow}
+              {courseListPanel}
+              {historySection}
+            </aside>
+
+            {/* ── Results / generation main area (desktop) ────────────── */}
+            <main className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
+              {generateButtonsRow}
+              {outputPanel}
+            </main>
+          </>
+        ) : mobileTab === "sources" ? (
+          <div className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
+            {sourcesHeader}
+            {selectAllRow}
+            {courseListPanel}
+            {generateButtonsRow}
           </div>
-
-          {courses && courses.length > 0 && (
-            <label className="flex cursor-pointer items-center gap-3 border-b border-white/30 px-4 py-3 transition-colors hover:bg-white/50 dark:border-white/10 dark:hover:bg-white/5">
-              <Checkbox
-                checked={selectAllState === "indeterminate" ? "indeterminate" : selectAllState === "checked"}
-                onCheckedChange={toggleAll}
-              />
-              <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Sélectionner tout {selectedIds.size > 0 && `(${selectedIds.size}/${courses.length})`}
-              </span>
-            </label>
-          )}
-
-          {/* min-h-0 — a flex child with overflow-y-auto silently refuses to
-              actually clip/scroll without it (flex items default to
-              min-height: auto, so they grow to fit content instead of
-              shrinking to the parent's bound and letting overflow-y-auto do
-              its job). */}
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-            {coursesLoading ? (
-              <div className="space-y-2 p-2">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-11 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-800" />
-                ))}
-              </div>
-            ) : coursesError ? (
-              <div className="p-2">
-                <ErrorState message="Échec du chargement des cours de ce module." onRetry={() => setRetryToken((t) => t + 1)} />
-              </div>
-            ) : !courses || courses.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-                <BookOpenText className="h-7 w-7 text-gray-300 dark:text-neutral-700" />
-                <p className="text-sm text-gray-500 dark:text-gray-400">Aucun cours généré dans ce module pour l'instant.</p>
-              </div>
+        ) : (
+          <div className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
+            {history.length > 0 ? (
+              historySection
             ) : (
-              <ul className="space-y-1">
-                {courses.map((course) => (
-                  <li key={course.id}>
-                    <label
-                      className={cn(
-                        "flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 transition-all duration-300 hover:bg-white/50 dark:hover:bg-white/5",
-                        selectedIds.has(course.id) && "bg-teal-50 dark:bg-teal-500/10"
-                      )}
-                    >
-                      <Checkbox checked={selectedIds.has(course.id)} onCheckedChange={() => toggleOne(course.id)} className="mt-0.5" />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700 dark:text-gray-200">{course.title}</span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
+              <p className="px-4 py-6 text-center text-xs text-muted-foreground">{tWorkspaceSynthesis("noResultsYetHint", language)}</p>
             )}
+            {outputPanel}
           </div>
-
-          {history.length > 0 && (
-            <>
-              <hr className="mx-4 my-2 border-white/30 dark:border-white/10" />
-              <div className="flex items-center gap-2 px-4 py-2">
-                <History className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-                <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("resultsHeading", language)}</h2>
-              </div>
-              <ul className="max-h-56 space-y-1 overflow-y-auto px-2 pb-3">
-                {history.map((entry) => (
-                  <li key={entry.id}>
-                    <button
-                      type="button"
-                      onClick={() => viewHistoryEntry(entry)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition-all duration-300 active:scale-[0.98] hover:bg-white/50 dark:hover:bg-white/5",
-                        activeHistoryId === entry.id
-                          ? "bg-teal-50 text-teal-700 shadow-soft dark:bg-teal-500/10 dark:text-teal-300"
-                          : "text-gray-600 dark:text-gray-300"
-                      )}
-                    >
-                      {entry.type === "global_summary" ? (
-                        <Sparkles className="h-3.5 w-3.5 shrink-0" />
-                      ) : entry.type === "keywords_table" ? (
-                        <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <Library className="h-3.5 w-3.5 shrink-0" />
-                      )}
-                      {entry.type === "global_summary"
-                        ? tWorkspaceSynthesis("entryTypeSummary", language)
-                        : entry.type === "keywords_table"
-                          ? tWorkspaceSynthesis("entryTypeTable", language)
-                          : tWorkspaceSynthesis("entryTypeDictionary", language)}{" "}
-                      {entry.ordinal}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </aside>
-
-        {/* ── Generation main area ────────────────────────────────────── */}
-        <main className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
-          <div className="flex flex-wrap items-center gap-3 border-b border-white/30 px-4 py-4 dark:border-white/10 sm:px-6">
-            <Button onClick={handleGenerateGlobalSummary} disabled={!hasSelection || isGenerating} size="lg">
-              {isGeneratingSummary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Générer un Résumé Global
-            </Button>
-            <Button onClick={handleGenerateKeywordTable} disabled={!hasSelection || isGenerating} variant="secondary" size="lg">
-              {isGeneratingKeywords ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-              Générer Tableau des Mots-Clés
-            </Button>
-            <Button onClick={handleGenerateMedicalDictionary} disabled={!hasSelection || isGenerating} variant="secondary" size="lg">
-              {isGeneratingDictionary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Library className="h-4 w-4" />}
-              Générer Dictionnaire Médical
-            </Button>
-            {!hasSelection && (
-              <span className="text-xs text-gray-400 dark:text-gray-500">
-                {tWorkspaceSynthesis("minSelectionHint", language).replace("{n}", String(MIN_COURSES_REQUIRED))} (
-                {selectedIds.size}/{MIN_COURSES_REQUIRED}).
-              </span>
-            )}
-          </div>
-
-          {/* min-h-0 is the real fix here — WITHOUT it, this panel (the one
-              actually holding the generated Résumé/Tableau/Dictionnaire)
-              never shrinks to main's bounded box; it grows to its full
-              content height instead, and since `main` above is
-              `overflow-hidden`, any content taller than the visible space
-              gets hard-clipped at main's edge with NO scrollbar and NO way
-              to reach it — this is the real reason results were reported as
-              invisible on mobile, not a missing bottom-nav offset. min-h-0
-              lets this div actually shrink to fit, so its own
-              overflow-y-auto can do its job. pb bumped to a safe-area-aware
-              ~9rem (well above the previous py-6/py-8) per explicit product
-              direction: every result and its trailing content must be
-              reachable by scroll with room to spare, not just barely fit. */}
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 md:px-10">
-            {fallbackNotice && fallbackNotice.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="not-prose mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
-              >
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  {fallbackNotice.length} cours sans Explication générée ont utilisé leur texte source brut à la place, pour une
-                  qualité de synthèse potentiellement moindre : <strong>{fallbackNotice.join(", ")}</strong>.
-                </span>
-              </motion.div>
-            )}
-
-            <AnimatePresence mode="wait">
-            {isGenerating ? (
-              <motion.div
-                key="generating"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex flex-col items-center gap-4 py-16 text-center sm:py-24"
-              >
-                <div className="relative flex h-16 w-16 items-center justify-center">
-                  <span className="absolute inset-0 animate-ping rounded-full bg-teal-400/30" />
-                  <Sparkles className="relative h-8 w-8 text-teal-600 dark:text-teal-400" />
-                </div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                  {isGeneratingSummary
-                    ? "Synthèse des cours en cours..."
-                    : isGeneratingKeywords
-                      ? "Extraction des mots-clés en cours..."
-                      : "Construction du dictionnaire médical en cours..."}
-                </p>
-                <p className="max-w-xs text-xs text-gray-400 dark:text-gray-500">
-                  Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.
-                </p>
-              </motion.div>
-            ) : output ? (
-              // Was previously rendered with NO prose wrapper at all — every
-              // heading/table/blockquote style this whole page exists to
-              // showcase was silently inert. Fixed alongside the requested
-              // border overrides (TABLE_BORDER_OVERRIDES_*) rather than as a
-              // separate change, since both land on this same element.
-              <motion.div
-                key="output"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3 }}
-                className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}
-              >
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    ...(isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS),
-                    // Wraps ONLY the <table> in a horizontal-scroll container —
-                    // now that column count is dynamic (per selected courses),
-                    // a wide table must scroll internally instead of forcing
-                    // the whole page to overflow. Scoped here, not added to
-                    // the shared MARKDOWN_COMPONENTS in lib/markdown.tsx,
-                    // which every other Markdown surface in the app (chat,
-                    // demo pages, quizzes) also renders through.
-                    table: ({ ...props }) => (
-                      <div className="overflow-x-auto">
-                        <table {...props} />
-                      </div>
-                    ),
-                    // Dictionnaire Médical's 3rd column (الشرح بالعربية) is
-                    // genuine Arabic text sitting in an otherwise LTR table
-                    // — without an explicit direction, the browser's bidi
-                    // algorithm can misorder punctuation/parentheses inside
-                    // that cell. `dir="auto"` lets each cell resolve its own
-                    // direction from its own content (French/term cells
-                    // stay ltr, the Arabic cell renders rtl) — same
-                    // technique already used for Arabic text elsewhere in
-                    // the app (e.g. GastriteCasCliniqueStudio's dialogue
-                    // bubbles). Harmless for the other two tabs' tables,
-                    // which have no Arabic content to trigger it.
-                    td: ({ ...props }) => <td dir="auto" {...props} />,
-                    th: ({ ...props }) => <th dir="auto" {...props} />,
-                  }}
-                >
-                  {normalizeCallouts(output)}
-                </ReactMarkdown>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="empty"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "flex flex-col items-center gap-3 py-16 text-center opacity-60 sm:py-24")}
-              >
-                <span className="flex h-14 w-14 animate-float items-center justify-center rounded-2xl bg-teal-50 not-prose dark:bg-teal-500/10">
-                  <Sparkles className="h-7 w-7 text-teal-500" />
-                </span>
-                <p className="!my-0 text-base font-medium not-prose text-gray-500 dark:text-gray-400">
-                  Choisis tes sources puis lance une génération pour voir le résultat ici.
-                </p>
-              </motion.div>
-            )}
-            </AnimatePresence>
-          </div>
-        </main>
+        )}
       </div>
     </div>
   );

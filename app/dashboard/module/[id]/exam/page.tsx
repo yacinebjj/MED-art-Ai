@@ -41,6 +41,9 @@ import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import type { StudioCourseSummary } from "@/types/studio-course";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tExam } from "@/lib/translations/exam";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
+import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 
@@ -119,6 +122,30 @@ export default function ExamGeneratorPage() {
 
   const activeExam = useMemo(() => savedExams.find((e) => e.id === activeExamId) ?? null, [savedExams, activeExamId]);
   const questions = useMemo(() => activeExam?.content.questions ?? [], [activeExam]);
+
+  // Mobile-first UX rework — below `md`, aside/main never render side by
+  // side (there was too little room for either once one held a real
+  // generated exam). A "Sources" / "Résultats" tab switch decides which
+  // single panel shows: "Sources" groups course selection + the generate
+  // button; "Résultats" groups "Mes Examens" + whichever exam is open (with
+  // its own fullscreen toggle). Desktop (md:+) keeps the original permanent
+  // side-by-side split, both panels always visible, unchanged.
+  const isDesktopOrTablet = useMediaQuery("(min-width: 768px)");
+  const [mobileTab, setMobileTab] = useState<SourcesResultsTab>("sources");
+  // Lets the open exam (testing or results view) expand to fill the whole
+  // screen — mirrors the note editor's own proven isFullscreen pattern.
+  // Shared between desktop's `main` and mobile's "Résultats" tab (only one
+  // of the two ever mounts at a time).
+  const [isExamFullscreen, setIsExamFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!isExamFullscreen) return;
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") setIsExamFullscreen(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isExamFullscreen]);
 
   const allSelected = courses !== null && courses.length > 0 && selectedCourseIds.size === courses.length;
   const someSelected = selectedCourseIds.size > 0 && !allSelected;
@@ -211,6 +238,7 @@ export default function ExamGeneratorPage() {
             } else {
               setExamState("testing");
             }
+            setMobileTab("results");
           }
         }
       )
@@ -272,6 +300,10 @@ export default function ExamGeneratorPage() {
       setSavedExams((prev) => [...prev, exam]);
       setActiveExamId(exam.id);
       setExamState("testing");
+      // Dès qu'un examen est généré, bascule automatiquement sur l'onglet
+      // "Résultats" (mobile uniquement — no-op on desktop, both panels
+      // already visible there).
+      setMobileTab("results");
     } catch {
       toast({
         variant: "error",
@@ -318,6 +350,7 @@ export default function ExamGeneratorPage() {
       setAnswers({});
       setExamState("testing");
     }
+    setMobileTab("results");
   }
 
   /** "Afficher la correction" — saves the attempt server-side (recomputes score from the exam's own canonical content, see app/api/exam/attempts/route.ts) BEFORE switching to the results view. A save failure never blocks the student from seeing their own already-computed local correction — it just means the attempt won't be there if they come back later, surfaced via a toast rather than a silent loss. */
@@ -380,6 +413,335 @@ export default function ExamGeneratorPage() {
     return Array.from(new Set(tags));
   }, [answers, questions]);
 
+  const courseHeaderBlock = (
+    <div className="border-b border-white/40 p-4 dark:border-white/10">
+      <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tExam("coursesOfModule", language)}</h2>
+      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+        {selectedCourseIds.size} / {courses?.length ?? 0} sélectionné{selectedCourseIds.size > 1 ? "s" : ""}
+      </p>
+      <label className="mt-3 flex cursor-pointer items-center gap-2.5 rounded-lg border border-gray-200/70 bg-white/50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors dark:border-neutral-700/70 dark:bg-neutral-800/50 dark:text-gray-200">
+        <Checkbox checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={toggleAll} />
+        Sélectionner tout
+      </label>
+    </div>
+  );
+
+  const courseListContent = coursesLoading ? (
+    <div className="space-y-2 p-2">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="h-11 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-800" />
+      ))}
+    </div>
+  ) : coursesError ? (
+    <div className="p-2">
+      <ErrorState message="Échec du chargement des cours de ce module." onRetry={() => setRetryToken((t) => t + 1)} />
+    </div>
+  ) : !courses || courses.length === 0 ? (
+    <p className="px-3 py-6 text-center text-xs text-gray-400 dark:text-gray-500">Aucun cours dans ce module pour l&apos;instant.</p>
+  ) : (
+    courses.map((course) => (
+      <label
+        key={course.id}
+        className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
+      >
+        <Checkbox checked={selectedCourseIds.has(course.id)} onCheckedChange={() => toggleCourse(course.id)} />
+        {course.title}
+      </label>
+    ))
+  );
+
+  const savedExamsContent = savedExams.length > 0 && (
+    <>
+      <h3 className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">Mes Examens</h3>
+      {savedExams.map((exam, index) => (
+        <button
+          key={exam.id}
+          type="button"
+          onClick={() => handleViewExam(exam)}
+          className={cn(
+            "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-300 active:scale-[0.98]",
+            activeExamId === exam.id
+              ? "bg-primary-50 font-semibold text-primary-700 shadow-soft dark:bg-primary-950/40 dark:text-primary-300"
+              : "text-gray-700 hover:translate-x-0.5 hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
+          )}
+        >
+          <span>Examen {index + 1}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">{exam.content.questions.length} QCM</span>
+        </button>
+      ))}
+    </>
+  );
+
+  // Compact course-list + button combo used ONLY by the mobile "Sources"
+  // tab — desktop keeps its own bigger, decorative idleContent card below
+  // instead (unchanged), since desktop already has the room to spare.
+  const generateButtonBlock = (
+    <div className="shrink-0 border-t border-white/40 p-4 dark:border-white/10">
+      <Button
+        size="lg"
+        disabled={selectedCourseIds.size === 0 || isGenerating}
+        onClick={handleGenerate}
+        className="w-full whitespace-normal text-center leading-snug"
+      >
+        {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+        Générer l&apos;examen
+      </Button>
+      <p className="mt-2 text-center text-xs text-gray-400 dark:text-gray-500">40 à 60 QCM générés par l&apos;IA</p>
+      {selectedCourseIds.size === 0 && (
+        <p className="mt-1 text-center text-xs text-gray-400 dark:text-gray-500">Sélectionne au moins un cours pour continuer.</p>
+      )}
+    </div>
+  );
+
+  const idleContent = (
+    <motion.div
+      key="idle"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center sm:p-8"
+    >
+      <div className="flex h-16 w-16 shrink-0 animate-float items-center justify-center rounded-2xl bg-primary-50 shadow-glow dark:bg-primary-950/40">
+        <FileQuestion className="h-8 w-8 text-primary-600 dark:text-primary-400" />
+      </div>
+      <div>
+        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Prêt à te tester ?</h3>
+        <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">
+          Sélectionne les cours à couvrir dans le panneau de gauche, puis génère un examen clinique complet.
+        </p>
+      </div>
+      <div className="flex flex-col items-center gap-1.5">
+        <Button
+          size="lg"
+          disabled={selectedCourseIds.size === 0 || isGenerating}
+          onClick={handleGenerate}
+          className="max-w-full whitespace-normal text-center leading-snug"
+        >
+          Générer l&apos;examen
+        </Button>
+        <p className="text-xs text-gray-400 dark:text-gray-500">40 à 60 QCM générés par l&apos;IA</p>
+      </div>
+      {selectedCourseIds.size === 0 && <p className="text-xs text-gray-400 dark:text-gray-500">Sélectionne au moins un cours pour continuer.</p>}
+    </motion.div>
+  );
+
+  const generatingContent = (
+    <motion.div
+      key="generating"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+      className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto p-6 sm:p-8"
+    >
+      <div className="relative flex h-16 w-16 items-center justify-center">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-30" />
+        <Sparkles className="relative h-7 w-7 text-primary-600 dark:text-primary-400" />
+      </div>
+      <p className="max-w-sm text-center text-sm font-semibold text-gray-700 dark:text-gray-200">
+        Création d&apos;un examen clinique type Faculté de Médecine Saad Dahlab (Blida)...
+      </p>
+      <div className="w-full max-w-md space-y-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="space-y-2 rounded-xl border border-gray-200/70 bg-white/40 p-4 dark:border-neutral-800/70 dark:bg-white/5">
+            <div className="h-3 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
+            <div className="h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
+            <div className="h-3 w-5/6 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+
+  const testingContent = (
+    <motion.div
+      key="testing"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
+    >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Épreuve Clinique</h2>
+        <Badge variant="outline">
+          {answeredCount} / {questions.length} répondues
+        </Badge>
+      </div>
+      <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
+        {questions.map((q, index) => (
+          <motion.div
+            key={q.id}
+            variants={RESULT_CARD_VARIANTS}
+            className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
+          >
+            <p className="mb-4 text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
+              <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
+              {q.vignette}
+            </p>
+            <div className="space-y-2" role="radiogroup" aria-label={`Options question ${index + 1}`}>
+              {q.options.map((opt) => {
+                const selected = answers[q.id] === opt.label;
+                return (
+                  <label
+                    key={opt.label}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-all duration-300 active:scale-[0.99]",
+                      selected
+                        ? "border-primary-500 bg-primary-50 shadow-soft dark:border-primary-500 dark:bg-primary-950/30"
+                        : "border-gray-200 hover:bg-gray-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name={q.id}
+                      className="sr-only"
+                      checked={selected}
+                      onChange={() => handleSelectAnswer(q.id, opt.label)}
+                    />
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                      {opt.label}
+                    </span>
+                    <span className="text-gray-700 dark:text-gray-200">{opt.text}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </motion.div>
+        ))}
+      </motion.div>
+    </motion.div>
+  );
+
+  const resultsContent = (
+    <motion.div
+      key="results"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
+    >
+      <div className="mb-6 rounded-2xl border-2 border-primary-200 bg-primary-50 p-5 text-center shadow-glow dark:border-primary-900/50 dark:bg-primary-950/20">
+        <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-400">{tExam("finalScore", language)}</p>
+        <p className="mt-1 text-4xl font-black text-gray-900 dark:text-white">
+          {score} / {questions.length}
+        </p>
+      </div>
+
+      <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
+        {questions.map((q, index) => {
+          const userAnswer = answers[q.id];
+          const correctOption = q.options.find((o) => o.isCorrect);
+          const isCorrect = !!correctOption && userAnswer === correctOption.label;
+          return (
+            <motion.div
+              key={q.id}
+              variants={RESULT_CARD_VARIANTS}
+              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <p className="text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
+                  <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
+                  {q.vignette}
+                </p>
+                {isCorrect ? (
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                ) : (
+                  <XCircle className="h-5 w-5 shrink-0 text-rose-500" />
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {q.options.map((opt) => {
+                  const isUserChoice = userAnswer === opt.label;
+                  return (
+                    <div
+                      key={opt.label}
+                      className={cn(
+                        "flex items-start gap-3 rounded-xl border p-3 text-sm",
+                        isUserChoice && opt.isCorrect && "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30",
+                        isUserChoice && !opt.isCorrect && "border-rose-500 bg-rose-50 dark:border-rose-600 dark:bg-rose-950/30",
+                        !isUserChoice && opt.isCorrect && "border-dashed border-emerald-400 bg-white dark:bg-neutral-900",
+                        !isUserChoice && !opt.isCorrect && "border-gray-200 dark:border-neutral-800"
+                      )}
+                    >
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                        {opt.label}
+                      </span>
+                      <span className="flex-1 text-gray-700 dark:text-gray-200">{opt.text}</span>
+                      {isUserChoice && opt.isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
+                      {isUserChoice && !opt.isCorrect && <XCircle className="h-4 w-4 shrink-0 text-rose-600" />}
+                      {!isUserChoice && opt.isCorrect && (
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          Bonne réponse
+                        </Badge>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-400">
+                  <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
+                </p>
+                <ul className="space-y-1.5 text-sm text-gray-700 dark:text-gray-300">
+                  {q.options.map((opt) => (
+                    <li key={opt.label}>
+                      <span className="font-semibold">{opt.label}.</span> {opt.explanation}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </motion.div>
+          );
+        })}
+      </motion.div>
+
+      {weakPoints.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
+          <p className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-4 w-4" /> Points Faibles Identifiés
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900 dark:text-amber-200">
+            {weakPoints.map((point) => (
+              <li key={point}>{point}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-6 flex flex-col gap-2.5">
+        <Button variant="secondary" className="w-full whitespace-normal text-center leading-snug" onClick={handleStartOver}>
+          <FilePlus2 className="h-4 w-4 shrink-0" />
+          {tExam("generateNewExam", language)}
+        </Button>
+        <Button
+          variant="outline"
+          className="w-full whitespace-normal text-center leading-snug"
+          onClick={handleRegenerate}
+          disabled={attempts <= 0 || isGenerating}
+        >
+          {isGenerating ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCcw className="h-4 w-4 shrink-0" />}
+          {attempts > 0
+            ? tExam(attempts > 1 ? "regenerateCountPlural" : "regenerateCountSingular", language).replace("{n}", String(attempts))
+            : tExam("noRegenerationsLeft", language)}
+        </Button>
+      </div>
+    </motion.div>
+  );
+
+  // The maximize/minimize toggle for the open exam (testing or results) —
+  // shared between desktop's `main` and mobile's "Résultats" tab (only one
+  // of the two ever mounts at a time, per isDesktopOrTablet below).
+  const fullscreenToggleRow = (
+    <div className="flex shrink-0 items-center justify-end px-2 pt-2">
+      <FullscreenToggleButton isFullscreen={isExamFullscreen} onToggle={() => setIsExamFullscreen((v) => !v)} />
+    </div>
+  );
+
   return (
     // Point 2 fix — explicit w-full max-w-full alongside the existing
     // overflow-hidden, matching the sibling workspace/module page's own
@@ -388,352 +750,109 @@ export default function ExamGeneratorPage() {
       <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
       <WorkspaceTopbar title="Générateur d'Examen" />
 
-      {/*
-        Mobile-first rework — was previously "overflow-y-auto" on THIS row
-        with aside/main each pinned to a static "h-[70vh]": that meant TWO
-        independent scroll regions nested inside each other on mobile (this
-        row, AND main's own per-state overflow-y-auto below), which is
-        exactly the kind of double-scroll that iOS Safari handles
-        unreliably (a touch gesture started on the inner list can get
-        captured by the outer row instead). "h-[70vh]" is also a STATIC vh
-        unit sized against Safari's *largest* possible viewport (address bar
-        hidden) while the root above is the dynamic "h-dvh" — when the
-        address bar is showing, 70vh can compute taller than what's actually
-        visible, pushing content out from under any scroll affordance.
-        Mirrors the sibling app/dashboard/workspace/module/[moduleId]/page.tsx,
-        which already gets this right: the row itself never scrolls
-        (overflow-hidden), aside is bounded by max-h/shrink-0 and scrolls
-        ONLY its own course list, and main is min-h-0 flex-1 so it's the one
-        real content area, each of its own per-state views scrolling
-        independently as a single, unambiguous region.
-      */}
+      {/* Mobile-first UX rework — below `md`, aside/main never render side
+          by side any more (there was too little room for either once one
+          held a real generated exam). A "Sources" / "Résultats" tab switch
+          decides which single panel shows. Desktop (md:+) keeps the
+          original permanent side-by-side split, both panels always
+          visible, completely unchanged. */}
+      {!isDesktopOrTablet && (
+        <div className="px-3 pt-3 sm:px-4">
+          <SourcesResultsTabs
+            active={mobileTab}
+            onChange={setMobileTab}
+            sourcesLabel="Sources"
+            resultsLabel="Résultats"
+            resultsCount={savedExams.length}
+          />
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-3 sm:p-4 md:flex-row">
-        {/* Panneau Gauche — Sources + Historique */}
-        <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-80")}>
-          <div className="border-b border-white/40 p-4 dark:border-white/10">
-            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tExam("coursesOfModule", language)}</h2>
-            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              {selectedCourseIds.size} / {courses?.length ?? 0} sélectionné{selectedCourseIds.size > 1 ? "s" : ""}
-            </p>
-            <label className="mt-3 flex cursor-pointer items-center gap-2.5 rounded-lg border border-gray-200/70 bg-white/50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors dark:border-neutral-700/70 dark:bg-neutral-800/50 dark:text-gray-200">
-              <Checkbox
-                checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                onCheckedChange={toggleAll}
-              />
-              Sélectionner tout
-            </label>
-          </div>
-          {/* min-h-0 — a flex child with overflow-y-auto silently refuses to
-              actually clip/scroll without it (flex items default to
-              min-height: auto, so they grow to fit content instead of
-              shrinking to the parent's bound). Same load-bearing fix already
-              documented on the shell layout's own scrolling <main>. */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            {coursesLoading ? (
-              <div className="space-y-2 p-2">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-11 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-800" />
-                ))}
+        {isDesktopOrTablet ? (
+          <>
+            {/* Panneau Gauche — Sources + Historique (desktop) */}
+            <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-80")}>
+              {courseHeaderBlock}
+              {/* min-h-0 — a flex child with overflow-y-auto silently
+                  refuses to actually clip/scroll without it (flex items
+                  default to min-height: auto, so they grow to fit content
+                  instead of shrinking to the parent's bound). */}
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                {courseListContent}
+                {savedExams.length > 0 && (
+                  <div className="mt-2 border-t border-white/40 pt-2 dark:border-white/10">{savedExamsContent}</div>
+                )}
               </div>
-            ) : coursesError ? (
-              <div className="p-2">
-                <ErrorState message="Échec du chargement des cours de ce module." onRetry={() => setRetryToken((t) => t + 1)} />
-              </div>
-            ) : !courses || courses.length === 0 ? (
-              <p className="px-3 py-6 text-center text-xs text-gray-400 dark:text-gray-500">Aucun cours dans ce module pour l&apos;instant.</p>
+            </aside>
+
+            {/* Panneau Droit — Exam Arena (desktop) */}
+            <main
+              className={cn(
+                panelShellClasses,
+                "min-h-0 w-full flex-1",
+                isExamFullscreen && "fixed inset-0 z-50 h-dvh w-screen rounded-none"
+              )}
+            >
+              {(examState === "testing" || examState === "results") && fullscreenToggleRow}
+              <AnimatePresence mode="wait">
+                {examState === "idle" && idleContent}
+                {examState === "generating" && generatingContent}
+                {examState === "testing" && testingContent}
+                {examState === "results" && resultsContent}
+              </AnimatePresence>
+            </main>
+          </>
+        ) : mobileTab === "sources" ? (
+          <div className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
+            {examState === "generating" ? (
+              <AnimatePresence mode="wait">{generatingContent}</AnimatePresence>
             ) : (
-              courses.map((course) => (
-                <label
-                  key={course.id}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
-                >
-                  <Checkbox checked={selectedCourseIds.has(course.id)} onCheckedChange={() => toggleCourse(course.id)} />
-                  {course.title}
-                </label>
-              ))
-            )}
-
-            {savedExams.length > 0 && (
-              <div className="mt-2 border-t border-white/40 pt-2 dark:border-white/10">
-                <h3 className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">Mes Examens</h3>
-                {savedExams.map((exam, index) => (
-                  <button
-                    key={exam.id}
-                    type="button"
-                    onClick={() => handleViewExam(exam)}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-300 active:scale-[0.98]",
-                      activeExamId === exam.id
-                        ? "bg-primary-50 font-semibold text-primary-700 shadow-soft dark:bg-primary-950/40 dark:text-primary-300"
-                        : "text-gray-700 hover:translate-x-0.5 hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
-                    )}
-                  >
-                    <span>Examen {index + 1}</span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">{exam.content.questions.length} QCM</span>
-                  </button>
-                ))}
-              </div>
+              <>
+                {courseHeaderBlock}
+                <div className="min-h-0 flex-1 overflow-y-auto p-2">{courseListContent}</div>
+                {generateButtonBlock}
+              </>
             )}
           </div>
-        </aside>
-
-        {/* Panneau Droit — Exam Arena */}
-        <main className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
-          <AnimatePresence mode="wait">
-          {examState === "idle" && (
-            <motion.div
-              key="idle"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-              className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center sm:p-8"
-            >
-              <div className="flex h-16 w-16 shrink-0 animate-float items-center justify-center rounded-2xl bg-primary-50 shadow-glow dark:bg-primary-950/40">
-                <FileQuestion className="h-8 w-8 text-primary-600 dark:text-primary-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Prêt à te tester ?</h3>
-                <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">
-                  Sélectionne les cours à couvrir dans le panneau de gauche, puis génère un examen clinique complet.
-                </p>
-              </div>
-              <div className="flex flex-col items-center gap-1.5">
-                <Button
-                  size="lg"
-                  disabled={selectedCourseIds.size === 0 || isGenerating}
-                  onClick={handleGenerate}
-                  className="max-w-full whitespace-normal text-center leading-snug"
-                >
-                  Générer l&apos;examen
-                </Button>
-                <p className="text-xs text-gray-400 dark:text-gray-500">40 à 60 QCM générés par l&apos;IA</p>
-              </div>
-              {selectedCourseIds.size === 0 && (
-                <p className="text-xs text-gray-400 dark:text-gray-500">Sélectionne au moins un cours pour continuer.</p>
-              )}
-            </motion.div>
-          )}
-
-          {examState === "generating" && (
-            <motion.div
-              key="generating"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto p-6 sm:p-8"
-            >
-              <div className="relative flex h-16 w-16 items-center justify-center">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-30" />
-                <Sparkles className="relative h-7 w-7 text-primary-600 dark:text-primary-400" />
-              </div>
-              <p className="max-w-sm text-center text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Création d&apos;un examen clinique type Faculté de Médecine Saad Dahlab (Blida)...
+        ) : (
+          <div
+            className={cn(
+              panelShellClasses,
+              "min-h-0 w-full flex-1",
+              isExamFullscreen && "fixed inset-0 z-50 h-dvh w-screen rounded-none"
+            )}
+          >
+            {savedExams.length > 0 && (
+              <div className="max-h-40 shrink-0 overflow-y-auto border-b border-white/40 p-2 dark:border-white/10">{savedExamsContent}</div>
+            )}
+            {examState === "testing" || examState === "results" ? (
+              <>
+                {fullscreenToggleRow}
+                <AnimatePresence mode="wait">
+                  {examState === "testing" && testingContent}
+                  {examState === "results" && resultsContent}
+                </AnimatePresence>
+              </>
+            ) : (
+              <p className="flex-1 px-4 py-10 text-center text-xs text-muted-foreground">
+                Aucun examen généré pour l&apos;instant — choisis tes cours dans l&apos;onglet « Sources », puis lance une génération.
               </p>
-              <div className="w-full max-w-md space-y-3">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="space-y-2 rounded-xl border border-gray-200/70 bg-white/40 p-4 dark:border-neutral-800/70 dark:bg-white/5">
-                    <div className="h-3 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
-                    <div className="h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
-                    <div className="h-3 w-5/6 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-
-          {examState === "testing" && (
-            <motion.div
-              key="testing"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
-            >
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Épreuve Clinique</h2>
-                <Badge variant="outline">
-                  {answeredCount} / {questions.length} répondues
-                </Badge>
-              </div>
-              <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
-                {questions.map((q, index) => (
-                  <motion.div
-                    key={q.id}
-                    variants={RESULT_CARD_VARIANTS}
-                    className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
-                  >
-                    <p className="mb-4 text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
-                      <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
-                      {q.vignette}
-                    </p>
-                    <div className="space-y-2" role="radiogroup" aria-label={`Options question ${index + 1}`}>
-                      {q.options.map((opt) => {
-                        const selected = answers[q.id] === opt.label;
-                        return (
-                          <label
-                            key={opt.label}
-                            className={cn(
-                              "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-all duration-300 active:scale-[0.99]",
-                              selected
-                                ? "border-primary-500 bg-primary-50 shadow-soft dark:border-primary-500 dark:bg-primary-950/30"
-                                : "border-gray-200 hover:bg-gray-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-                            )}
-                          >
-                            <input
-                              type="radio"
-                              name={q.id}
-                              className="sr-only"
-                              checked={selected}
-                              onChange={() => handleSelectAnswer(q.id, opt.label)}
-                            />
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-[11px] font-bold text-gray-500 dark:text-gray-400">
-                              {opt.label}
-                            </span>
-                            <span className="text-gray-700 dark:text-gray-200">{opt.text}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                ))}
-              </motion.div>
-            </motion.div>
-          )}
-
-          {examState === "results" && (
-            <motion.div
-              key="results"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-              className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
-            >
-              <div className="mb-6 rounded-2xl border-2 border-primary-200 bg-primary-50 p-5 text-center shadow-glow dark:border-primary-900/50 dark:bg-primary-950/20">
-                <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-400">{tExam("finalScore", language)}</p>
-                <p className="mt-1 text-4xl font-black text-gray-900 dark:text-white">
-                  {score} / {questions.length}
-                </p>
-              </div>
-
-              <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
-                {questions.map((q, index) => {
-                  const userAnswer = answers[q.id];
-                  const correctOption = q.options.find((o) => o.isCorrect);
-                  const isCorrect = !!correctOption && userAnswer === correctOption.label;
-                  return (
-                    <motion.div
-                      key={q.id}
-                      variants={RESULT_CARD_VARIANTS}
-                      className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
-                    >
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <p className="text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
-                          <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
-                          {q.vignette}
-                        </p>
-                        {isCorrect ? (
-                          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
-                        ) : (
-                          <XCircle className="h-5 w-5 shrink-0 text-rose-500" />
-                        )}
-                      </div>
-
-                      <div className="space-y-2">
-                        {q.options.map((opt) => {
-                          const isUserChoice = userAnswer === opt.label;
-                          return (
-                            <div
-                              key={opt.label}
-                              className={cn(
-                                "flex items-start gap-3 rounded-xl border p-3 text-sm",
-                                isUserChoice && opt.isCorrect && "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30",
-                                isUserChoice && !opt.isCorrect && "border-rose-500 bg-rose-50 dark:border-rose-600 dark:bg-rose-950/30",
-                                !isUserChoice && opt.isCorrect && "border-dashed border-emerald-400 bg-white dark:bg-neutral-900",
-                                !isUserChoice && !opt.isCorrect && "border-gray-200 dark:border-neutral-800"
-                              )}
-                            >
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-[11px] font-bold text-gray-500 dark:text-gray-400">
-                                {opt.label}
-                              </span>
-                              <span className="flex-1 text-gray-700 dark:text-gray-200">{opt.text}</span>
-                              {isUserChoice && opt.isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
-                              {isUserChoice && !opt.isCorrect && <XCircle className="h-4 w-4 shrink-0 text-rose-600" />}
-                              {!isUserChoice && opt.isCorrect && (
-                                <Badge variant="outline" className="shrink-0 text-[10px]">
-                                  Bonne réponse
-                                </Badge>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
-                        <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-400">
-                          <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
-                        </p>
-                        <ul className="space-y-1.5 text-sm text-gray-700 dark:text-gray-300">
-                          {q.options.map((opt) => (
-                            <li key={opt.label}>
-                              <span className="font-semibold">{opt.label}.</span> {opt.explanation}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </motion.div>
-
-              {weakPoints.length > 0 && (
-                <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
-                  <p className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300">
-                    <AlertTriangle className="h-4 w-4" /> Points Faibles Identifiés
-                  </p>
-                  <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900 dark:text-amber-200">
-                    {weakPoints.map((point) => (
-                      <li key={point}>{point}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="mt-6 flex flex-col gap-2.5">
-                <Button
-                  variant="secondary"
-                  className="w-full whitespace-normal text-center leading-snug"
-                  onClick={handleStartOver}
-                >
-                  <FilePlus2 className="h-4 w-4 shrink-0" />
-                  {tExam("generateNewExam", language)}
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full whitespace-normal text-center leading-snug"
-                  onClick={handleRegenerate}
-                  disabled={attempts <= 0 || isGenerating}
-                >
-                  {isGenerating ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCcw className="h-4 w-4 shrink-0" />}
-                  {attempts > 0
-                    ? tExam(attempts > 1 ? "regenerateCountPlural" : "regenerateCountSingular", language).replace(
-                        "{n}",
-                        String(attempts)
-                      )
-                    : tExam("noRegenerationsLeft", language)}
-                </Button>
-              </div>
-            </motion.div>
-          )}
-          </AnimatePresence>
-        </main>
+            )}
+          </div>
+        )}
       </div>
 
-      {examState === "testing" && (
-        <div className="glass-panel fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-4 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
+      {/* Shown whenever the "testing" state is actually the visible panel:
+          always on desktop (both panels visible), only in the mobile
+          "Résultats" tab (the "Sources" tab shows the source-selection
+          panel instead, where this progress bar would be meaningless).
+          z-[60] — ABOVE the fullscreen exam viewer's own z-50: without
+          that, toggling fullscreen while testing would visually bury this
+          progress bar (and the only way to submit the exam) behind the
+          fullscreen overlay it's meant to float on top of. */}
+      {examState === "testing" && (isDesktopOrTablet || mobileTab === "results") && (
+        <div className="glass-panel fixed inset-x-0 bottom-0 z-[60] flex items-center justify-between gap-4 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
           <p className="hidden text-sm text-gray-500 dark:text-gray-400 sm:block">
             <ListChecks className="mr-1.5 inline h-4 w-4" />
             {answeredCount} / {questions.length} questions répondues
