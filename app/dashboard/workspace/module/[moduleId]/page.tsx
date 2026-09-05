@@ -22,6 +22,7 @@ import { tWorkspaceSynthesis } from "@/lib/translations/workspaceSynthesis";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
+import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 
 /**
  * PHASE 2 — real generation calls wired to
@@ -370,17 +371,6 @@ export default function ModuleWorkspacePage() {
     setMobileTab("results");
   }
 
-  // Escape closes the fullscreen result viewer — mirrors the note editor's
-  // own identical Escape handler for its fullscreen Card.
-  useEffect(() => {
-    if (!isOutputFullscreen) return;
-    function handleKeyDown(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape") setIsOutputFullscreen(false);
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOutputFullscreen]);
-
   const sourcesHeader = (
     <div className="flex items-center gap-2 border-b border-white/30 px-4 py-4 dark:border-white/10">
       <Layers className="h-4 w-4 text-teal-600 dark:text-teal-400" />
@@ -516,21 +506,139 @@ export default function ModuleWorkspacePage() {
     </>
   );
 
-  // Point critique de l'UX mobile — un bouton plein écran sur CHAQUE contenu
-  // affiché (Résumé, Tableau, Dictionnaire) : le petit bandeau shrink-0
-  // ci-dessous (juste le bouton, aligné à droite) reste dans le flux normal
-  // tant que isOutputFullscreen est false ; dès qu'il passe à true, TOUT ce
-  // wrapper devient `fixed inset-0` et occupe 100% de l'écran, exactement le
-  // même mécanisme déjà éprouvé sur l'éditeur de notes.
-  const outputPanel = (
-    <div
-      className={cn(
-        "flex min-h-0 flex-1 flex-col",
-        isOutputFullscreen && "fixed inset-0 z-50 h-dvh w-screen bg-background"
+  // Shared between the inline (non-fullscreen) panel and the portaled
+  // FullscreenViewerModal below — same content, two different wrappers.
+  const outputBody = (
+    <>
+      {fallbackNotice && fallbackNotice.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="not-prose mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {fallbackNotice.length} cours sans Explication générée ont utilisé leur texte source brut à la place, pour une
+            qualité de synthèse potentiellement moindre : <strong>{fallbackNotice.join(", ")}</strong>.
+          </span>
+        </motion.div>
       )}
-    >
+
+      <AnimatePresence mode="wait">
+        {isGenerating ? (
+          <motion.div
+            key="generating"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex flex-col items-center gap-4 py-16 text-center sm:py-24"
+          >
+            <div className="relative flex h-16 w-16 items-center justify-center">
+              <span className="absolute inset-0 animate-ping rounded-full bg-teal-400/30" />
+              <Sparkles className="relative h-8 w-8 text-teal-600 dark:text-teal-400" />
+            </div>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+              {isGeneratingSummary
+                ? "Synthèse des cours en cours..."
+                : isGeneratingKeywords
+                  ? "Extraction des mots-clés en cours..."
+                  : "Construction du dictionnaire médical en cours..."}
+            </p>
+            <p className="max-w-xs text-xs text-gray-400 dark:text-gray-500">
+              Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.
+            </p>
+          </motion.div>
+        ) : output ? (
+          // Was previously rendered with NO prose wrapper at all — every
+          // heading/table/blockquote style this whole page exists to
+          // showcase was silently inert. Fixed alongside the requested
+          // border overrides (TABLE_BORDER_OVERRIDES_*) rather than as a
+          // separate change, since both land on this same element.
+          <motion.div
+            key="output"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}
+          >
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                ...(isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS),
+                // Wraps ONLY the <table> in a horizontal-scroll container —
+                // now that column count is dynamic (per selected courses),
+                // a wide table must scroll internally instead of forcing
+                // the whole page to overflow. Scoped here, not added to
+                // the shared MARKDOWN_COMPONENTS in lib/markdown.tsx,
+                // which every other Markdown surface in the app (chat,
+                // demo pages, quizzes) also renders through.
+                table: ({ ...props }) => (
+                  <div className="overflow-x-auto">
+                    <table {...props} />
+                  </div>
+                ),
+                // Dictionnaire Médical's 3rd column (الشرح بالعربية) is
+                // genuine Arabic text sitting in an otherwise LTR table —
+                // without an explicit direction, the browser's bidi
+                // algorithm can misorder punctuation/parentheses inside
+                // that cell. `dir="auto"` lets each cell resolve its own
+                // direction from its own content (French/term cells stay
+                // ltr, the Arabic cell renders rtl) — same technique
+                // already used for Arabic text elsewhere in the app (e.g.
+                // GastriteCasCliniqueStudio's dialogue bubbles). Harmless
+                // for the other two tabs' tables, which have no Arabic
+                // content to trigger it.
+                td: ({ ...props }) => <td dir="auto" {...props} />,
+                th: ({ ...props }) => <th dir="auto" {...props} />,
+              }}
+            >
+              {normalizeCallouts(output)}
+            </ReactMarkdown>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "flex flex-col items-center gap-3 py-16 text-center opacity-60 sm:py-24")}
+          >
+            <span className="flex h-14 w-14 animate-float items-center justify-center rounded-2xl bg-teal-50 not-prose dark:bg-teal-500/10">
+              <Sparkles className="h-7 w-7 text-teal-500" />
+            </span>
+            <p className="!my-0 text-base font-medium not-prose text-gray-500 dark:text-gray-400">
+              Choisis tes sources puis lance une génération pour voir le résultat ici.
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+
+  const activeHistoryType = history.find((h) => h.id === activeHistoryId)?.type;
+  const outputTitle =
+    activeHistoryType === "global_summary"
+      ? tWorkspaceSynthesis("entryTypeSummary", language)
+      : activeHistoryType === "keywords_table"
+        ? tWorkspaceSynthesis("entryTypeTable", language)
+        : activeHistoryType === "medical_dictionary"
+          ? tWorkspaceSynthesis("entryTypeDictionary", language)
+          : moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language);
+
+  // Inline (non-fullscreen) panel — the maximize button just OPENS the
+  // separate, portaled FullscreenViewerModal below; it no longer toggles
+  // this panel's own classes to `fixed inset-0` (that approach silently
+  // failed: this panel sits inside a `.glass-card` ancestor, and
+  // `backdrop-filter` makes that ancestor the CONTAINING BLOCK for any
+  // `position: fixed` descendant per the CSS spec — the "fullscreen" div
+  // was only ever filling that card's own box, not the true screen, which
+  // is why the mobile tab bar and "Mes Examens"-style history list stayed
+  // visible underneath it. A portal sidesteps this entirely.
+  const outputPanel = (
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center justify-end px-2 pt-2 sm:px-3">
-        <FullscreenToggleButton isFullscreen={isOutputFullscreen} onToggle={() => setIsOutputFullscreen((v) => !v)} />
+        <FullscreenToggleButton isFullscreen={false} onToggle={() => setIsOutputFullscreen(true)} />
       </div>
 
       {/* min-h-0 is the real fix here — WITHOUT it, this panel (the one
@@ -543,115 +651,8 @@ export default function ModuleWorkspacePage() {
           a safe-area-aware ~9rem (well above the previous py-6/py-8) so
           every result and its trailing content is reachable with room to
           spare, not just barely fit. */}
-      <div
-        className={cn(
-          "min-h-0 flex-1 overflow-y-auto px-4 sm:px-6 md:px-10",
-          isOutputFullscreen ? "pt-0 pb-4 sm:pb-8" : "pt-2 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:pt-2"
-        )}
-      >
-        {fallbackNotice && fallbackNotice.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="not-prose mb-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
-          >
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              {fallbackNotice.length} cours sans Explication générée ont utilisé leur texte source brut à la place, pour une
-              qualité de synthèse potentiellement moindre : <strong>{fallbackNotice.join(", ")}</strong>.
-            </span>
-          </motion.div>
-        )}
-
-        <AnimatePresence mode="wait">
-          {isGenerating ? (
-            <motion.div
-              key="generating"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex flex-col items-center gap-4 py-16 text-center sm:py-24"
-            >
-              <div className="relative flex h-16 w-16 items-center justify-center">
-                <span className="absolute inset-0 animate-ping rounded-full bg-teal-400/30" />
-                <Sparkles className="relative h-8 w-8 text-teal-600 dark:text-teal-400" />
-              </div>
-              <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                {isGeneratingSummary
-                  ? "Synthèse des cours en cours..."
-                  : isGeneratingKeywords
-                    ? "Extraction des mots-clés en cours..."
-                    : "Construction du dictionnaire médical en cours..."}
-              </p>
-              <p className="max-w-xs text-xs text-gray-400 dark:text-gray-500">
-                Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.
-              </p>
-            </motion.div>
-          ) : output ? (
-            // Was previously rendered with NO prose wrapper at all — every
-            // heading/table/blockquote style this whole page exists to
-            // showcase was silently inert. Fixed alongside the requested
-            // border overrides (TABLE_BORDER_OVERRIDES_*) rather than as a
-            // separate change, since both land on this same element.
-            <motion.div
-              key="output"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  ...(isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS),
-                  // Wraps ONLY the <table> in a horizontal-scroll container —
-                  // now that column count is dynamic (per selected courses),
-                  // a wide table must scroll internally instead of forcing
-                  // the whole page to overflow. Scoped here, not added to
-                  // the shared MARKDOWN_COMPONENTS in lib/markdown.tsx,
-                  // which every other Markdown surface in the app (chat,
-                  // demo pages, quizzes) also renders through.
-                  table: ({ ...props }) => (
-                    <div className="overflow-x-auto">
-                      <table {...props} />
-                    </div>
-                  ),
-                  // Dictionnaire Médical's 3rd column (الشرح بالعربية) is
-                  // genuine Arabic text sitting in an otherwise LTR table —
-                  // without an explicit direction, the browser's bidi
-                  // algorithm can misorder punctuation/parentheses inside
-                  // that cell. `dir="auto"` lets each cell resolve its own
-                  // direction from its own content (French/term cells stay
-                  // ltr, the Arabic cell renders rtl) — same technique
-                  // already used for Arabic text elsewhere in the app (e.g.
-                  // GastriteCasCliniqueStudio's dialogue bubbles). Harmless
-                  // for the other two tabs' tables, which have no Arabic
-                  // content to trigger it.
-                  td: ({ ...props }) => <td dir="auto" {...props} />,
-                  th: ({ ...props }) => <th dir="auto" {...props} />,
-                }}
-              >
-                {normalizeCallouts(output)}
-              </ReactMarkdown>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "flex flex-col items-center gap-3 py-16 text-center opacity-60 sm:py-24")}
-            >
-              <span className="flex h-14 w-14 animate-float items-center justify-center rounded-2xl bg-teal-50 not-prose dark:bg-teal-500/10">
-                <Sparkles className="h-7 w-7 text-teal-500" />
-              </span>
-              <p className="!my-0 text-base font-medium not-prose text-gray-500 dark:text-gray-400">
-                Choisis tes sources puis lance une génération pour voir le résultat ici.
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pt-2 md:px-10">
+        {outputBody}
       </div>
     </div>
   );
@@ -726,6 +727,10 @@ export default function ModuleWorkspacePage() {
           </div>
         )}
       </div>
+
+      <FullscreenViewerModal open={isOutputFullscreen} onClose={() => setIsOutputFullscreen(false)} title={outputTitle}>
+        <div className="px-4 pt-4 sm:px-6 md:px-10">{outputBody}</div>
+      </FullscreenViewerModal>
     </div>
   );
 }

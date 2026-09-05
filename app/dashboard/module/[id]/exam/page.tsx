@@ -44,6 +44,7 @@ import { tExam } from "@/lib/translations/exam";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
+import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 
@@ -132,20 +133,11 @@ export default function ExamGeneratorPage() {
   // side-by-side split, both panels always visible, unchanged.
   const isDesktopOrTablet = useMediaQuery("(min-width: 768px)");
   const [mobileTab, setMobileTab] = useState<SourcesResultsTab>("sources");
-  // Lets the open exam (testing or results view) expand to fill the whole
-  // screen — mirrors the note editor's own proven isFullscreen pattern.
-  // Shared between desktop's `main` and mobile's "Résultats" tab (only one
-  // of the two ever mounts at a time).
+  // Lets the open exam (testing or results view) expand into the portaled
+  // FullscreenViewerModal below — shared between desktop's `main` and
+  // mobile's "Résultats" tab triggers (only one of the two ever mounts at a
+  // time), with a single modal instance actually rendering the content.
   const [isExamFullscreen, setIsExamFullscreen] = useState(false);
-
-  useEffect(() => {
-    if (!isExamFullscreen) return;
-    function handleKeyDown(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape") setIsExamFullscreen(false);
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isExamFullscreen]);
 
   const allSelected = courses !== null && courses.length > 0 && selectedCourseIds.size === courses.length;
   const someSelected = selectedCourseIds.size > 0 && !allSelected;
@@ -554,15 +546,12 @@ export default function ExamGeneratorPage() {
     </motion.div>
   );
 
-  const testingContent = (
-    <motion.div
-      key="testing"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
-    >
+  // Split into "inner content" (reused, unwrapped, inside the portaled
+  // FullscreenViewerModal) + the wrapping motion.div (used only for the
+  // normal, non-fullscreen panel, which needs its own bounded height/scroll
+  // — the modal provides its own single scroll region instead).
+  const testingInnerContent = (
+    <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Épreuve Clinique</h2>
         <Badge variant="outline">
@@ -611,18 +600,24 @@ export default function ExamGeneratorPage() {
           </motion.div>
         ))}
       </motion.div>
+    </>
+  );
+
+  const testingContent = (
+    <motion.div
+      key="testing"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
+    >
+      {testingInnerContent}
     </motion.div>
   );
 
-  const resultsContent = (
-    <motion.div
-      key="results"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
-    >
+  const resultsInnerContent = (
+    <>
       <div className="mb-6 rounded-2xl border-2 border-primary-200 bg-primary-50 p-5 text-center shadow-glow dark:border-primary-900/50 dark:bg-primary-950/20">
         <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-400">{tExam("finalScore", language)}</p>
         <p className="mt-1 text-4xl font-black text-gray-900 dark:text-white">
@@ -730,15 +725,34 @@ export default function ExamGeneratorPage() {
             : tExam("noRegenerationsLeft", language)}
         </Button>
       </div>
+    </>
+  );
+
+  const resultsContent = (
+    <motion.div
+      key="results"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
+    >
+      {resultsInnerContent}
     </motion.div>
   );
 
-  // The maximize/minimize toggle for the open exam (testing or results) —
-  // shared between desktop's `main` and mobile's "Résultats" tab (only one
-  // of the two ever mounts at a time, per isDesktopOrTablet below).
+  // Opens the portaled FullscreenViewerModal — no longer toggles this
+  // panel's own classes to `fixed inset-0` (that silently failed: this
+  // panel sits inside a `.glass-card`/panelShellClasses ancestor, and
+  // `backdrop-filter` makes that ancestor the CONTAINING BLOCK for any
+  // `position: fixed` descendant per the CSS spec, so the old "fullscreen"
+  // div only ever filled that card's own box — the mobile tab bar and "Mes
+  // Examens" list stayed visible underneath it. A portal sidesteps this
+  // entirely). Shared between desktop's `main` and mobile's "Résultats" tab
+  // (only one of the two ever mounts at a time).
   const fullscreenToggleRow = (
     <div className="flex shrink-0 items-center justify-end px-2 pt-2">
-      <FullscreenToggleButton isFullscreen={isExamFullscreen} onToggle={() => setIsExamFullscreen((v) => !v)} />
+      <FullscreenToggleButton isFullscreen={false} onToggle={() => setIsExamFullscreen(true)} />
     </div>
   );
 
@@ -787,13 +801,7 @@ export default function ExamGeneratorPage() {
             </aside>
 
             {/* Panneau Droit — Exam Arena (desktop) */}
-            <main
-              className={cn(
-                panelShellClasses,
-                "min-h-0 w-full flex-1",
-                isExamFullscreen && "fixed inset-0 z-50 h-dvh w-screen rounded-none"
-              )}
-            >
+            <main className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
               {(examState === "testing" || examState === "results") && fullscreenToggleRow}
               <AnimatePresence mode="wait">
                 {examState === "idle" && idleContent}
@@ -816,13 +824,7 @@ export default function ExamGeneratorPage() {
             )}
           </div>
         ) : (
-          <div
-            className={cn(
-              panelShellClasses,
-              "min-h-0 w-full flex-1",
-              isExamFullscreen && "fixed inset-0 z-50 h-dvh w-screen rounded-none"
-            )}
-          >
+          <div className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
             {savedExams.length > 0 && (
               <div className="max-h-40 shrink-0 overflow-y-auto border-b border-white/40 p-2 dark:border-white/10">{savedExamsContent}</div>
             )}
@@ -847,12 +849,16 @@ export default function ExamGeneratorPage() {
           always on desktop (both panels visible), only in the mobile
           "Résultats" tab (the "Sources" tab shows the source-selection
           panel instead, where this progress bar would be meaningless).
-          z-[60] — ABOVE the fullscreen exam viewer's own z-50: without
-          that, toggling fullscreen while testing would visually bury this
-          progress bar (and the only way to submit the exam) behind the
-          fullscreen overlay it's meant to float on top of. */}
+          z-[110] — ABOVE FullscreenViewerModal's own z-[100]: without that,
+          taking the exam in fullscreen would visually bury this progress
+          bar (and the only way to submit the exam) behind the modal it's
+          meant to float on top of. This bar is its own independent `fixed`
+          element directly under the page root (no `.glass-card` ancestor
+          in between), so unlike the old per-panel fullscreen div it never
+          had the backdrop-filter containing-block problem — only its
+          z-index needed to move. */}
       {examState === "testing" && (isDesktopOrTablet || mobileTab === "results") && (
-        <div className="glass-panel fixed inset-x-0 bottom-0 z-[60] flex items-center justify-between gap-4 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
+        <div className="glass-panel fixed inset-x-0 bottom-0 z-[110] flex items-center justify-between gap-4 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
           <p className="hidden text-sm text-gray-500 dark:text-gray-400 sm:block">
             <ListChecks className="mr-1.5 inline h-4 w-4" />
             {answeredCount} / {questions.length} questions répondues
@@ -862,6 +868,14 @@ export default function ExamGeneratorPage() {
           </Button>
         </div>
       )}
+
+      <FullscreenViewerModal
+        open={isExamFullscreen}
+        onClose={() => setIsExamFullscreen(false)}
+        title={examState === "results" ? "Résultats de l'examen" : "Épreuve Clinique"}
+      >
+        <div className="p-4 sm:p-6">{examState === "testing" ? testingInnerContent : examState === "results" ? resultsInnerContent : null}</div>
+      </FullscreenViewerModal>
     </div>
   );
 }
