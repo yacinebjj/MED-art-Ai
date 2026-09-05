@@ -122,7 +122,7 @@ export function GlobalSummaryModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-2xl"
+        className="max-w-2xl pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
         onClick={(e) => e.stopPropagation()}
         onOverlayClick={() => onOpenChange(false)}
       >

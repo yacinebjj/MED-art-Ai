@@ -408,7 +408,7 @@ function NotesPageContent() {
             "min-h-0 min-w-0 flex-col",
             !selectedId && "hidden md:flex",
             selectedId && "flex",
-            isFullscreen ? "fixed inset-0 z-50 h-dvh w-screen overflow-y-auto rounded-none bg-background p-4 sm:p-8" : "h-full p-5"
+            isFullscreen ? "fixed inset-0 z-50 h-dvh w-screen overflow-y-auto rounded-none bg-background p-4 sm:p-8" : "h-full overflow-y-auto p-5"
           )}
           // The fullscreen note editor is `fixed inset-0` — it fully escapes
           // this page's own outer keyboardInset-aware wrapper (see that

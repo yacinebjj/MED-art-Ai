@@ -709,7 +709,7 @@ export default function ExamGeneratorPage() {
       </div>
 
       {examState === "testing" && (
-        <div className="glass-panel fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-4 p-4 shadow-glass dark:shadow-glass-dark">
+        <div className="glass-panel fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-4 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
           <p className="hidden text-sm text-gray-500 dark:text-gray-400 sm:block">
             <ListChecks className="mr-1.5 inline h-4 w-4" />
             {answeredCount} / {questions.length} questions répondues
