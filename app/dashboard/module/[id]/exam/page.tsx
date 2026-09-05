@@ -388,9 +388,28 @@ export default function ExamGeneratorPage() {
       <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
       <WorkspaceTopbar title="Générateur d'Examen" />
 
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3 sm:p-4 md:flex-row md:overflow-hidden">
+      {/*
+        Mobile-first rework — was previously "overflow-y-auto" on THIS row
+        with aside/main each pinned to a static "h-[70vh]": that meant TWO
+        independent scroll regions nested inside each other on mobile (this
+        row, AND main's own per-state overflow-y-auto below), which is
+        exactly the kind of double-scroll that iOS Safari handles
+        unreliably (a touch gesture started on the inner list can get
+        captured by the outer row instead). "h-[70vh]" is also a STATIC vh
+        unit sized against Safari's *largest* possible viewport (address bar
+        hidden) while the root above is the dynamic "h-dvh" — when the
+        address bar is showing, 70vh can compute taller than what's actually
+        visible, pushing content out from under any scroll affordance.
+        Mirrors the sibling app/dashboard/workspace/module/[moduleId]/page.tsx,
+        which already gets this right: the row itself never scrolls
+        (overflow-hidden), aside is bounded by max-h/shrink-0 and scrolls
+        ONLY its own course list, and main is min-h-0 flex-1 so it's the one
+        real content area, each of its own per-state views scrolling
+        independently as a single, unambiguous region.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-3 sm:p-4 md:flex-row">
         {/* Panneau Gauche — Sources + Historique */}
-        <aside className={cn(panelShellClasses, "h-[70vh] w-full shrink-0 md:h-auto md:w-80")}>
+        <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-80")}>
           <div className="border-b border-white/40 p-4 dark:border-white/10">
             <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tExam("coursesOfModule", language)}</h2>
             <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -404,7 +423,12 @@ export default function ExamGeneratorPage() {
               Sélectionner tout
             </label>
           </div>
-          <div className="flex-1 overflow-y-auto p-2">
+          {/* min-h-0 — a flex child with overflow-y-auto silently refuses to
+              actually clip/scroll without it (flex items default to
+              min-height: auto, so they grow to fit content instead of
+              shrinking to the parent's bound). Same load-bearing fix already
+              documented on the shell layout's own scrolling <main>. */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {coursesLoading ? (
               <div className="space-y-2 p-2">
                 {[0, 1, 2, 3].map((i) => (
@@ -454,7 +478,7 @@ export default function ExamGeneratorPage() {
         </aside>
 
         {/* Panneau Droit — Exam Arena */}
-        <main className={cn(panelShellClasses, "h-[70vh] w-full flex-1 md:h-auto")}>
+        <main className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
           <AnimatePresence mode="wait">
           {examState === "idle" && (
             <motion.div
@@ -463,7 +487,7 @@ export default function ExamGeneratorPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-              className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center sm:p-8"
+              className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center sm:p-8"
             >
               <div className="flex h-16 w-16 shrink-0 animate-float items-center justify-center rounded-2xl bg-primary-50 shadow-glow dark:bg-primary-950/40">
                 <FileQuestion className="h-8 w-8 text-primary-600 dark:text-primary-400" />
@@ -498,7 +522,7 @@ export default function ExamGeneratorPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
-              className="flex h-full flex-col items-center justify-center gap-6 p-6 sm:p-8"
+              className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto p-6 sm:p-8"
             >
               <div className="relative flex h-16 w-16 items-center justify-center">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-30" />
@@ -526,7 +550,7 @@ export default function ExamGeneratorPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
-              className="flex h-full flex-col overflow-y-auto p-4 pb-28 sm:p-6"
+              className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
             >
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Épreuve Clinique</h2>
@@ -586,7 +610,7 @@ export default function ExamGeneratorPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-              className="flex h-full flex-col overflow-y-auto p-4 sm:p-6"
+              className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
             >
               <div className="mb-6 rounded-2xl border-2 border-primary-200 bg-primary-50 p-5 text-center shadow-glow dark:border-primary-900/50 dark:bg-primary-950/20">
                 <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-400">{tExam("finalScore", language)}</p>

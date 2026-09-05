@@ -392,7 +392,12 @@ export default function ModuleWorkspacePage() {
             </label>
           )}
 
-          <div className="flex-1 overflow-y-auto px-2 py-2">
+          {/* min-h-0 — a flex child with overflow-y-auto silently refuses to
+              actually clip/scroll without it (flex items default to
+              min-height: auto, so they grow to fit content instead of
+              shrinking to the parent's bound and letting overflow-y-auto do
+              its job). */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
             {coursesLoading ? (
               <div className="space-y-2 p-2">
                 {[0, 1, 2, 3].map((i) => (
@@ -491,7 +496,20 @@ export default function ModuleWorkspacePage() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 md:px-10">
+          {/* min-h-0 is the real fix here — WITHOUT it, this panel (the one
+              actually holding the generated Résumé/Tableau/Dictionnaire)
+              never shrinks to main's bounded box; it grows to its full
+              content height instead, and since `main` above is
+              `overflow-hidden`, any content taller than the visible space
+              gets hard-clipped at main's edge with NO scrollbar and NO way
+              to reach it — this is the real reason results were reported as
+              invisible on mobile, not a missing bottom-nav offset. min-h-0
+              lets this div actually shrink to fit, so its own
+              overflow-y-auto can do its job. pb bumped to a safe-area-aware
+              ~9rem (well above the previous py-6/py-8) per explicit product
+              direction: every result and its trailing content must be
+              reachable by scroll with room to spare, not just barely fit. */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 md:px-10">
             {fallbackNotice && fallbackNotice.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: -6 }}
