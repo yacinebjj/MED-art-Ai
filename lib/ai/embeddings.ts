@@ -1,6 +1,13 @@
-import { USE_MOCK_AI } from "@/lib/ai/openrouter";
+import { USE_MOCK_AI, fetchOpenRouterWithRetry } from "@/lib/ai/openrouter";
 
 const EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
+// Previously had NO timeout at all (no AbortController, no signal) — a
+// stalled connection would have hung this call forever, not just for 10s.
+// 30s is generous for a single small (one string, capped at
+// EMBEDDING_MAX_INPUT_CHARS below) embedding request — no reason to reuse
+// lib/ai/openrouter.ts's 240s DEFAULT_TIMEOUT_MS (sized for long generation
+// completions) for a call this light.
+const EMBEDDING_TIMEOUT_MS = 30_000;
 // 1536-dimension embeddings — confirmed live against OpenRouter tonight
 // (real 200 response, real vector returned). Must match the `vector(1536)`
 // column width in the semantic_cache table SQL exactly, or every insert
@@ -71,14 +78,33 @@ export async function getEmbedding(text: string): Promise<number[]> {
     throw new Error("OPENROUTER_API_KEY n'est pas configurée sur le serveur.");
   }
 
-  const res = await fetch(EMBEDDINGS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text.slice(0, EMBEDDING_MAX_INPUT_CHARS) }),
-  });
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), EMBEDDING_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    // fetchOpenRouterWithRetry (lib/ai/openrouter.ts) — same dispatcher (a
+    // 60s undici connect-phase timeout, not this file's own 30s overall
+    // AbortController below) and same bounded network-error retry as every
+    // OpenRouter call in this app now uses, instead of the bare `fetch` this
+    // call used to make with neither.
+    res = await fetchOpenRouterWithRetry(EMBEDDINGS_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: EMBEDDING_MODEL, input: text.slice(0, EMBEDDING_MAX_INPUT_CHARS) }),
+      signal: timeoutController.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Échec génération d'embedding : délai dépassé après ${EMBEDDING_TIMEOUT_MS}ms.`);
+    }
+    throw new Error(`Échec génération d'embedding : ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");

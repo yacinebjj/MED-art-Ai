@@ -49,3 +49,23 @@ export const ExamGenerationSchema = z.object({
 export const ExamBatchSchema = z.object({
   questions: z.array(ExamQuestionSchema).length(8),
 });
+
+/**
+ * Extracted "ADN de style" of a student-uploaded reference exam (Examen
+ * Guidé par le Style Prof — app/api/exam/analyze-reference/route.ts). Pure
+ * descriptive text/array fields, never medical content itself — this is
+ * folded into buildExamStyleAdaptedSystemPrompt (lib/ai/exam-prompts.ts) as
+ * prompt text, never persisted alongside a generated question (ExamQuestionSchema
+ * stays .strict() with no style metadata on individual questions).
+ */
+export const ExamStyleProfileSchema = z
+  .object({
+    questionTypeDistribution: z.string().min(10),
+    trapPatterns: z.array(z.string().min(5)).min(1).max(8),
+    optionFormatConventions: z.string().min(5),
+    difficultyAndVocabulary: z.string().min(10),
+    summary: z.string().min(10).max(1000),
+  })
+  .strict();
+
+export type ExamStyleProfile = z.infer<typeof ExamStyleProfileSchema>;

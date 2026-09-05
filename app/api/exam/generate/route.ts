@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
-import { buildExamBatchInstruction, buildExamStaticSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
-import { ExamGenerationSchema, ExamQuestionSchema } from "@/lib/ai/exam-schemas";
+import { buildExamBatchInstruction, buildExamStaticSystemPrompt, buildExamStyleAdaptedSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
+import { ExamGenerationSchema, ExamQuestionSchema, ExamStyleProfileSchema, type ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
@@ -139,9 +139,14 @@ async function generateExamBatch(
   totalBatches: number,
   questionsInThisBatch: number,
   isVariation: boolean,
-  previousTopics: string[]
+  previousTopics: string[],
+  // Style-mimicry override (Examen Guidé par le Style Prof) — when set,
+  // replaces the default persona/style prompt with
+  // buildExamStyleAdaptedSystemPrompt's output. See generateShortfallQuestions
+  // and this route's POST handler for the one call path that sets this.
+  systemPromptOverride?: string
 ): Promise<ExamQuestion[]> {
-  const staticSystemPrompt = buildExamStaticSystemPrompt(inputs);
+  const staticSystemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
   const batchSchema = z.object({ questions: z.array(ExamQuestionSchema).length(questionsInThisBatch) });
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_BATCH_ATTEMPTS; attempt++) {
@@ -229,7 +234,8 @@ async function generateShortfallQuestions(
   inputs: ExamCourseInput[],
   totalNeeded: number,
   isVariation: boolean,
-  poolTopics: string[]
+  poolTopics: string[],
+  systemPromptOverride?: string
 ): Promise<ExamQuestion[]> {
   const generated: ExamQuestion[] = [];
   const topics = [...poolTopics];
@@ -254,7 +260,7 @@ async function generateShortfallQuestions(
     // the `count` this chunk still needs and discarding the (tiny,
     // ~fraction-of-a-cent) surplus, is more robust
     // than trying to make the model reliably hit an arbitrary exact number.
-    const batchQuestions = await generateExamBatch(inputs, ALL_STANDARD_BATCH_INDEX, ALL_STANDARD_BATCH_INDEX, QUESTIONS_PER_BATCH, isVariation, topics);
+    const batchQuestions = await generateExamBatch(inputs, ALL_STANDARD_BATCH_INDEX, ALL_STANDARD_BATCH_INDEX, QUESTIONS_PER_BATCH, isVariation, topics, systemPromptOverride);
     const taken = batchQuestions.slice(0, count);
     generated.push(...taken);
     topics.push(...taken.map((q) => q.weakPointTag));
@@ -375,7 +381,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { moduleId, courseIds, variation } = (body ?? {}) as { moduleId?: unknown; courseIds?: unknown; variation?: unknown };
+  const { moduleId, courseIds, variation, styleProfile: rawStyleProfile } = (body ?? {}) as {
+    moduleId?: unknown;
+    courseIds?: unknown;
+    variation?: unknown;
+    styleProfile?: unknown;
+  };
 
   if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) {
     return NextResponse.json({ success: false, error: "'moduleId' est requis et doit être un nombre." }, { status: 400 });
@@ -384,6 +395,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "'courseIds' est requis (tableau d'identifiants non vide)." }, { status: 400 });
   }
   const isVariation = variation === true;
+
+  // Examen Guidé par le Style Prof — optional style profile extracted by
+  // POST /api/exam/analyze-reference from a student-uploaded reference exam.
+  // Kept entirely ephemeral (never persisted server-side): the client holds
+  // it in React state and resends it verbatim with each generate/regenerate
+  // call. Validated strictly here since it directly becomes prompt text.
+  let styleProfile: ExamStyleProfile | undefined;
+  if (rawStyleProfile !== undefined) {
+    const styleParse = ExamStyleProfileSchema.safeParse(rawStyleProfile);
+    if (!styleParse.success) {
+      return NextResponse.json({ success: false, error: "'styleProfile' est invalide." }, { status: 400 });
+    }
+    styleProfile = styleParse.data;
+  }
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -469,7 +494,11 @@ export async function POST(request: NextRequest) {
   // can still land on $0 once that pool fills up.
   const contentHash = computeExamContentHash(eligibleCourses);
   let cachedContent: unknown | null = null;
-  if (!isVariation) {
+  // A style-mimicry exam is inherently per-student (it clones THEIR uploaded
+  // reference exam) — never served from, or written to, the cross-student
+  // cache that assumes any two students selecting the same course set want
+  // the identical canonical exam.
+  if (!isVariation && !styleProfile) {
     cachedContent = await lookupExamCache(contentHash);
     if (cachedContent) void recordExamCacheHit(contentHash);
   }
@@ -479,7 +508,7 @@ export async function POST(request: NextRequest) {
   // below at $0, shared across every student who regenerates this same set.
   let variationContent: unknown | null = null;
   let existingVariations: { id: string; content: unknown; variation_index: number }[] = [];
-  if (isVariation) {
+  if (isVariation && !styleProfile) {
     const { existing } = await lookupExamVariations(contentHash);
     existingVariations = existing;
     if (existing.length >= MAX_EXAM_VARIATIONS) {
@@ -506,96 +535,122 @@ export async function POST(request: NextRequest) {
     reservedGeneration = true;
 
     try {
-      // Previously-harvested QCMs (see lib/exam-harvested-qcms.ts) — each
-      // one started life as a shortfall question generated for SOME past
-      // exam, on SOME course-set combination, and is now reusable pool
-      // material for THIS exam too, regardless of which courses it's
-      // combined with this time. Fetched once for every selected course;
-      // fail-open (a lookup error just yields an empty map, same as no
-      // harvested supply existing yet).
-      const harvestedByCourseId = await lookupHarvestedQcms(eligibleCourses.map((c) => c.id));
+      if (styleProfile) {
+        // STYLE-MIMICRY BRANCH (Examen Guidé par le Style Prof): pooling and
+        // harvesting are bypassed entirely — reusing an already-generated
+        // Studio QCM would silently dilute the "clone chirurgical" the
+        // student asked for, since that pooled question was never written in
+        // the uploaded reference exam's style. Every question is freshly
+        // generated against buildExamStyleAdaptedSystemPrompt, treating the
+        // whole EXAM_TARGET_TOTAL as one big "shortfall" so the existing
+        // batching/retry machinery (generateShortfallQuestions) can be reused
+        // unchanged rather than duplicated. This does mean a style-mimicry
+        // exam costs meaningfully more real generation calls than a normal
+        // one — accepted per product direction (v1 has no separate quota for
+        // this, it's gated by the same reserveGeneration check above).
+        const courseInputs = buildCourseInputs(eligibleCourses, eligibleCourses.length);
+        const styleSystemPrompt = buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile);
+        const generatedQuestions = await generateShortfallQuestions(courseInputs, EXAM_TARGET_TOTAL, isVariation, [], styleSystemPrompt);
+        const allQuestions = generatedQuestions.slice(0, 60);
 
-      // SMART AGGREGATION (see lib/exam-pooling.ts's own header comment for
-      // the exact compatibility rules) — pool each course's own already-
-      // generated, exam-compatible QCMs (from its Studio QCM tile AND its
-      // harvested supply) FIRST, ceiling-divided so the target total lands
-      // at/above EXAM_TARGET_TOTAL regardless of course count. Applied
-      // identically on a first-ever generation AND on `variation: true`
-      // (Régénérer) — a regeneration naturally draws a different random
-      // subset whenever a course's compatible pool is larger than its
-      // target (see poolExamQuestions' own shuffle comment), satisfying
-      // "shuffle and pull a different subset" without any separate
-      // "already shown" tracking.
-      const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / eligibleCourses.length));
-      const { pooled, shortfallByCourse } = poolExamQuestions(
-        eligibleCourses.map((c) => ({ id: c.id, title: c.title, qcms: c.qcms, harvestedQcms: harvestedByCourseId.get(c.id) })),
-        targetPerCourse
-      );
-      if (shortfallByCourse.length > 0) {
-        console.log(`[exam/generate] Pool insuffisant pour ${shortfallByCourse.length} cours (fallback génération) :`, shortfallByCourse);
-      }
-
-      // The AI is invoked ONLY for the shortfall, and PER COURSE (not one
-      // combined multi-course call like before) — this is what makes
-      // per-course harvesting possible at all: a combined call has no way
-      // to know which generated question was "about" which course, so
-      // nothing from it could ever be attributed back to a course's own
-      // harvested pool. Each course's own shortfall is still generated in
-      // batches of up to QUESTIONS_PER_BATCH internally (generateShortfallQuestions
-      // is unchanged, just called once per under-covered course instead of
-      // once for all of them combined) — budgetCourseCount is passed
-      // explicitly as the FULL eligible-course count (not the narrowed
-      // 1-course array's own length) so this loop keeps sharing
-      // MAX_TOTAL_EXAM_CHARS the same way the old combined call did, instead
-      // of silently handing every course the full ceiling.
-      //
-      // previousTopics accumulates ACROSS courses in this loop (seeded with
-      // every pooled question's weakPointTag, then growing with each
-      // course's own freshly-generated tags before the NEXT course's call)
-      // so "ensure new QCMs are completely distinct and non-overlapping"
-      // still holds cross-course, not just within one course's own batches —
-      // a combined single call used to get this for free from one shared,
-      // continuously-growing topics array; the per-course split needs it
-      // threaded through explicitly instead.
-      const generatedQuestions: ExamQuestion[] = [];
-      const allTopicsSoFar = pooled.map((q) => q.weakPointTag);
-      for (const shortfall of shortfallByCourse) {
-        const course = eligibleCourses.find((c) => c.id === shortfall.id);
-        if (!course) continue; // unreachable — shortfallByCourse is derived from eligibleCourses itself
-        const courseInputs = buildCourseInputs([course], eligibleCourses.length);
-        const courseQuestions = await generateShortfallQuestions(courseInputs, shortfall.shortfall, isVariation, allTopicsSoFar);
-        generatedQuestions.push(...courseQuestions);
-        for (const question of courseQuestions) {
-          allTopicsSoFar.push(question.weakPointTag);
-          // Sanitized the same way the exam's own canonical save is below —
-          // a stray control character in raw LLM output would otherwise fail
-          // this jsonb insert silently (caught by storeHarvestedQcm's own
-          // fail-open catch), permanently losing an already-paid-for
-          // generation that should have become poolable.
-          void storeHarvestedQcm(shortfall.id, sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
+        const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
+        if (!result.success) {
+          console.error("[exam/generate] Examen style-adapté invalide malgré des lots valides:", result.error.flatten());
+          throw new Error("L'IA n'a pas produit un examen valide (nombre de questions ou format incorrect). Réessaie.");
         }
-      }
+        validated = result.data;
+      } else {
+        // Previously-harvested QCMs (see lib/exam-harvested-qcms.ts) — each
+        // one started life as a shortfall question generated for SOME past
+        // exam, on SOME course-set combination, and is now reusable pool
+        // material for THIS exam too, regardless of which courses it's
+        // combined with this time. Fetched once for every selected course;
+        // fail-open (a lookup error just yields an empty map, same as no
+        // harvested supply existing yet).
+        const harvestedByCourseId = await lookupHarvestedQcms(eligibleCourses.map((c) => c.id));
 
-      // Upper-bound safety net: targetPerCourse is ceiling-divided, so for an
-      // unusually large course count the combined total could land just
-      // above ExamGenerationSchema's own max(60) — trimmed here rather than
-      // failing the whole request over an edge case that never loses the
-      // required 40-question floor (targetPerCourse*courses.length is
-      // always >= EXAM_TARGET_TOTAL by construction).
-      const allQuestions = [...pooled, ...generatedQuestions].slice(0, 60);
+        // SMART AGGREGATION (see lib/exam-pooling.ts's own header comment for
+        // the exact compatibility rules) — pool each course's own already-
+        // generated, exam-compatible QCMs (from its Studio QCM tile AND its
+        // harvested supply) FIRST, ceiling-divided so the target total lands
+        // at/above EXAM_TARGET_TOTAL regardless of course count. Applied
+        // identically on a first-ever generation AND on `variation: true`
+        // (Régénérer) — a regeneration naturally draws a different random
+        // subset whenever a course's compatible pool is larger than its
+        // target (see poolExamQuestions' own shuffle comment), satisfying
+        // "shuffle and pull a different subset" without any separate
+        // "already shown" tracking.
+        const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / eligibleCourses.length));
+        const { pooled, shortfallByCourse } = poolExamQuestions(
+          eligibleCourses.map((c) => ({ id: c.id, title: c.title, qcms: c.qcms, harvestedQcms: harvestedByCourseId.get(c.id) })),
+          targetPerCourse
+        );
+        if (shortfallByCourse.length > 0) {
+          console.log(`[exam/generate] Pool insuffisant pour ${shortfallByCourse.length} cours (fallback génération) :`, shortfallByCourse);
+        }
 
-      const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
-      if (!result.success) {
-        // Should be unreachable in practice — pooled questions are already
-        // validated by poolExamQuestions, generated ones by
-        // generateShortfallQuestions, and the combined count is
-        // constructed to satisfy ExamGenerationSchema's min(40).max(60).
-        // Kept as a final backstop rather than trusting the arithmetic
-        // blindly.
-        console.error("[exam/generate] Examen final invalide malgré des lots valides:", result.error.flatten());
-        throw new Error("L'IA n'a pas produit un examen valide (nombre de questions ou format incorrect). Réessaie.");
+        // The AI is invoked ONLY for the shortfall, and PER COURSE (not one
+        // combined multi-course call like before) — this is what makes
+        // per-course harvesting possible at all: a combined call has no way
+        // to know which generated question was "about" which course, so
+        // nothing from it could ever be attributed back to a course's own
+        // harvested pool. Each course's own shortfall is still generated in
+        // batches of up to QUESTIONS_PER_BATCH internally (generateShortfallQuestions
+        // is unchanged, just called once per under-covered course instead of
+        // once for all of them combined) — budgetCourseCount is passed
+        // explicitly as the FULL eligible-course count (not the narrowed
+        // 1-course array's own length) so this loop keeps sharing
+        // MAX_TOTAL_EXAM_CHARS the same way the old combined call did, instead
+        // of silently handing every course the full ceiling.
+        //
+        // previousTopics accumulates ACROSS courses in this loop (seeded with
+        // every pooled question's weakPointTag, then growing with each
+        // course's own freshly-generated tags before the NEXT course's call)
+        // so "ensure new QCMs are completely distinct and non-overlapping"
+        // still holds cross-course, not just within one course's own batches —
+        // a combined single call used to get this for free from one shared,
+        // continuously-growing topics array; the per-course split needs it
+        // threaded through explicitly instead.
+        const generatedQuestions: ExamQuestion[] = [];
+        const allTopicsSoFar = pooled.map((q) => q.weakPointTag);
+        for (const shortfall of shortfallByCourse) {
+          const course = eligibleCourses.find((c) => c.id === shortfall.id);
+          if (!course) continue; // unreachable — shortfallByCourse is derived from eligibleCourses itself
+          const courseInputs = buildCourseInputs([course], eligibleCourses.length);
+          const courseQuestions = await generateShortfallQuestions(courseInputs, shortfall.shortfall, isVariation, allTopicsSoFar);
+          generatedQuestions.push(...courseQuestions);
+          for (const question of courseQuestions) {
+            allTopicsSoFar.push(question.weakPointTag);
+            // Sanitized the same way the exam's own canonical save is below —
+            // a stray control character in raw LLM output would otherwise fail
+            // this jsonb insert silently (caught by storeHarvestedQcm's own
+            // fail-open catch), permanently losing an already-paid-for
+            // generation that should have become poolable.
+            void storeHarvestedQcm(shortfall.id, sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
+          }
+        }
+
+        // Upper-bound safety net: targetPerCourse is ceiling-divided, so for an
+        // unusually large course count the combined total could land just
+        // above ExamGenerationSchema's own max(60) — trimmed here rather than
+        // failing the whole request over an edge case that never loses the
+        // required 40-question floor (targetPerCourse*courses.length is
+        // always >= EXAM_TARGET_TOTAL by construction).
+        const allQuestions = [...pooled, ...generatedQuestions].slice(0, 60);
+
+        const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
+        if (!result.success) {
+          // Should be unreachable in practice — pooled questions are already
+          // validated by poolExamQuestions, generated ones by
+          // generateShortfallQuestions, and the combined count is
+          // constructed to satisfy ExamGenerationSchema's min(40).max(60).
+          // Kept as a final backstop rather than trusting the arithmetic
+          // blindly.
+          console.error("[exam/generate] Examen final invalide malgré des lots valides:", result.error.flatten());
+          throw new Error("L'IA n'a pas produit un examen valide (nombre de questions ou format incorrect). Réessaie.");
+        }
+        validated = result.data;
       }
-      validated = result.data;
     } catch (error) {
       await refundGeneration(user.id);
       await refundModuleExamRegenerateIfNeeded();
@@ -616,7 +671,7 @@ export async function POST(request: NextRequest) {
         });
   const selectedCourses = eligibleCourses.map((course) => ({ id: course.id, title: course.title }));
 
-  if (!cachedContent && !isVariation) {
+  if (!cachedContent && !isVariation && !styleProfile) {
     void storeExamCache(contentHash, content, selectedCourses);
   }
   if (isVariation && !servedFromVariationPool) {

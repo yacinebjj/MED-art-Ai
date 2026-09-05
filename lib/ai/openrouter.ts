@@ -1,3 +1,4 @@
+import { Agent } from "undici";
 import { detectMockPayload } from "@/lib/ai/mock-data";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -18,6 +19,48 @@ const MODEL = "anthropic/claude-sonnet-5";
 // is present. Re-verify the same way if this ever 404s again — OpenRouter
 // does retire/rename slugs.
 export const HAIKU_MODEL = "anthropic/claude-haiku-4.5";
+
+// Ultra-cheap VISION tier — for a pure structured-extraction task (read a
+// document/image, emit a JSON profile) that needs multimodal input but not
+// deep medical reasoning, HAIKU_MODEL's $1/M+$5/M is overkill.
+//
+// SECOND PASS, 2026-09-05 — pushed further below "google/gemini-3.5-flash-
+// lite" ($0.30/M+$2.50/M, this constant's first pick) after an explicit
+// "cheapest possible without sacrificing accuracy" ask. Surveyed OpenRouter's
+// full vision-capable catalog (two independent fetches: one full-catalog
+// price sort, one exact-id lookup on the shortlist below, to guard against a
+// single hallucinated/misparsed entry given this endpoint's huge JSON body —
+// the full-catalog scan alone is NOT trustworthy on its own: it repeatedly
+// mis-tagged text-only models as vision-capable and vice versa). Real,
+// confirmed-live vision candidates cheaper than Gemini 3.5 Flash Lite, from
+// cheapest to most expensive:
+//   - "qwen/qwen3.7-flash"              $0.03/M  + $0.13/M  (absolute floor)
+//   - "z-ai/glm-5.3-flash"              $0.075/M + $0.25/M
+//   - "meta/muse-spark-1.2-contributor" $0.10/M  + $0.20/M
+//   - "qwen/qwen3.8-flash"              $0.15/M  + $0.47/M  <- chosen
+// Deliberately did NOT pick the absolute floor (qwen3.7-flash): its own
+// OpenRouter description leans "object recognition, spatial understanding,
+// real-world [interaction]" — a general vision-language model, not
+// specifically a document-reading one — and the real dollar gap to the pick
+// below is negligible (a single analysis call here is a few thousand tokens
+// total, so the difference between the floor and the pick below is well
+// under $0.001 per upload — not a real optimization either way). Also
+// deliberately skipped the "-contributor" variant despite its price: that
+// naming pattern on OpenRouter denotes a discounted tier traded for the
+// provider logging/training on your prompts, which is a real, unacceptable
+// privacy trade-off for a student's own uploaded exam document.
+// "qwen/qwen3.8-flash" is the pick: still ~2x cheaper on input and >5x
+// cheaper on output than the previous choice, genuinely multimodal
+// (architecture.input_modalities: text/image/video, 1M context), and its own
+// description explicitly names "document and codebase analysis, chart
+// analysis" — the closest capability match to this call site's actual job
+// (reading a scanned/photographed exam and extracting its structural DNA)
+// among the cheaper candidates. NOT yet validated with a real test call
+// (same "no live paid call without explicit go-ahead" discipline as every
+// other model choice in this app) — re-verify the same way if this ever
+// 404s, or revert to google/gemini-3.5-flash-lite (see git history) if a
+// real test call surfaces an accuracy problem this survey couldn't catch.
+export const CHEAP_VISION_MODEL = "qwen/qwen3.8-flash";
 
 // "Economy" tier for the course chat's hybrid model router (see
 // lib/chat-model-routing.ts) — a standard, single-excerpt explanation is
@@ -261,6 +304,106 @@ export interface ChatMessageInput {
 const DEFAULT_TIMEOUT_MS = 240_000;
 
 /**
+ * REAL BUG, not a misconfiguration of the timeout right above: Node's global
+ * `fetch` (undici) enforces its OWN connect-PHASE timeout — 10 SECONDS BY
+ * DEFAULT — completely independent of the AbortController/timeoutMs pair
+ * every function below already sets up. A slow TCP/TLS handshake to
+ * OpenRouter (a brief network hiccup, slow DNS, a congested link) fails with
+ * `UND_ERR_CONNECT_TIMEOUT` well before DEFAULT_TIMEOUT_MS's own 240s abort
+ * would ever fire — raising THAT timeout (the obvious first guess reading
+ * this file) does nothing for this failure mode, since it bounds the whole
+ * request including response streaming, not the initial connect. Fixed by
+ * handing every fetch() call in this file (via fetchOpenRouterWithRetry
+ * below) a custom undici Agent with a much longer connect timeout instead of
+ * undici's global default. Scoped to this file's OWN dispatcher instance
+ * (never `setGlobalDispatcher`) so this fix can't silently change
+ * connect-timeout behavior for any other fetch call elsewhere in the app
+ * (Supabase, web-push, etc.) — matching the actual ask (fix OpenRouter
+ * calls), not a process-wide default.
+ */
+const OPENROUTER_CONNECT_TIMEOUT_MS = 60_000;
+const OPENROUTER_DISPATCHER = new Agent({
+  connect: { timeout: OPENROUTER_CONNECT_TIMEOUT_MS },
+  // headersTimeout/bodyTimeout are undici's OTHER two built-in timeouts —
+  // time-to-first-response-byte and max-gap-between-body-chunks,
+  // respectively, both also defaulting to values this app never explicitly
+  // chose. Matched to DEFAULT_TIMEOUT_MS so neither becomes a NEW, tighter,
+  // undocumented ceiling underneath the one this file's callers already
+  // reason about.
+  headersTimeout: DEFAULT_TIMEOUT_MS,
+  bodyTimeout: DEFAULT_TIMEOUT_MS,
+});
+
+// Bounded — a persistently broken network still fails (not an infinite
+// retry loop), just after a couple of quick, cheap extra attempts instead of
+// none. 1s flat backoff, not exponential: these are connect-phase hiccups
+// expected to clear in well under a second, not rate-limit-style backpressure
+// that would call for a longer/growing delay.
+const OPENROUTER_MAX_NETWORK_RETRIES = 2;
+const OPENROUTER_NETWORK_RETRY_DELAY_MS = 1000;
+
+/**
+ * True only for a genuine transient NETWORK failure (never reached the
+ * server, or the connection itself dropped) — never for our own
+ * AbortController firing (that already waited the full timeoutMs; retrying
+ * it would just double the wait for no benefit) and never for an HTTP error
+ * response (4xx/5xx), which every caller's own `res.ok` handling already
+ * deals with on its own terms (e.g. 429 rate-limit surfaced to the student,
+ * not silently retried here).
+ */
+function isTransientNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === "AbortError") return false;
+  const code = (error as NodeJS.ErrnoException).code ?? (error.cause as NodeJS.ErrnoException | undefined)?.code;
+  return (
+    code === "UND_ERR_CONNECT_TIMEOUT" ||
+    code === "UND_ERR_SOCKET" ||
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === "EAI_AGAIN" ||
+    error.message.includes("fetch failed")
+  );
+}
+
+/**
+ * Shared low-level fetch used by every OpenRouter call site in this file
+ * (different URLs — chat completions vs. the transcription endpoint — and
+ * different body shapes — JSON vs. multipart — so this only owns the two
+ * infra concerns that are IDENTICAL across all of them and were previously
+ * duplicated 5 times: attaching OPENROUTER_DISPATCHER above, and retrying a
+ * genuine transient network failure a couple of times before giving up. Each
+ * caller keeps building its own `init` (headers/body/signal) exactly as
+ * before and still owns its own res.ok/response-shape handling untouched.
+ *
+ * `dispatcher` is a real, Node-fetch-supported RequestInit option that
+ * lib.dom.d.ts's bundled RequestInit type (which @types/node's fetch typing
+ * reuses) doesn't declare — same "runtime accepts a shape our stricter local
+ * type doesn't" situation as this file's ContentBlock/ChatMessageInput casts
+ * elsewhere, same fix (a type assertion at the one call site, not a wider
+ * type change).
+ *
+ * Exported so any OTHER file that talks to an OpenRouter endpoint directly
+ * (currently: lib/ai/embeddings.ts's getEmbedding, a different endpoint —
+ * /embeddings, not /chat/completions or /audio/transcriptions — that used to
+ * bypass this entirely with a bare, unguarded `fetch`) shares the exact same
+ * fix instead of re-implementing (or worse, half-implementing) it.
+ */
+export async function fetchOpenRouterWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const initWithDispatcher = { ...init, dispatcher: OPENROUTER_DISPATCHER } as RequestInit;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, initWithDispatcher);
+    } catch (error) {
+      if (!isTransientNetworkError(error) || attempt >= OPENROUTER_MAX_NETWORK_RETRIES) throw error;
+      console.warn(
+        `[openrouter] Échec réseau transitoire (tentative ${attempt + 1}/${OPENROUTER_MAX_NETWORK_RETRIES + 1}), nouvel essai dans ${OPENROUTER_NETWORK_RETRY_DELAY_MS}ms:`,
+        error
+      );
+      await delay(OPENROUTER_NETWORK_RETRY_DELAY_MS);
+    }
+  }
+}
+
+/**
  * Thin wrapper around OpenRouter's OpenAI-compatible chat completions API.
  * Every real AI call in this app goes through here — never call Anthropic
  * (or any other provider) directly.
@@ -315,7 +458,7 @@ export async function callOpenRouter(
 
   let res: Response;
   try {
-    res = await fetch(OPENROUTER_URL, {
+    res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -412,7 +555,7 @@ export async function generateOpenRouterImage(
 
   let res: Response;
   try {
-    res = await fetch(OPENROUTER_URL, {
+    res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -505,7 +648,7 @@ export async function generateOpenRouterAudio(
 
   let res: Response;
   try {
-    res = await fetch(OPENROUTER_URL, {
+    res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -703,7 +846,7 @@ export async function transcribeAudioViaOpenRouter(
       if (options?.language) form.append("language", options.language);
       form.append("temperature", String(options?.temperature ?? 0));
 
-      res = await fetch(OPENROUTER_TRANSCRIPTION_URL, {
+      res = await fetchOpenRouterWithRetry(OPENROUTER_TRANSCRIPTION_URL, {
         method: "POST",
         // No Content-Type here — fetch sets the correct multipart boundary
         // itself from the FormData instance; setting it manually breaks it.
@@ -712,7 +855,7 @@ export async function transcribeAudioViaOpenRouter(
         signal: timeoutController.signal,
       });
     } else {
-      res = await fetch(OPENROUTER_TRANSCRIPTION_URL, {
+      res = await fetchOpenRouterWithRetry(OPENROUTER_TRANSCRIPTION_URL, {
         method: "POST",
         headers: { ...baseHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -816,7 +959,7 @@ export async function streamOpenRouter(
 
   let res: Response;
   try {
-    res = await fetch(OPENROUTER_URL, {
+    res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,

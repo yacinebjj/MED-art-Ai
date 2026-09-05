@@ -41,6 +41,7 @@
     "recharts": "^2.15.4",
     "remark-gfm": "^4.0.0",
     "tailwind-merge": "^2.4.0",
+    "undici": "^7.29.1",
     "web-push": "^3.6.7",
     "zod": "^3.25.76"
   },

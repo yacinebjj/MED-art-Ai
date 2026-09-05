@@ -1,3 +1,5 @@
+import type { ExamStyleProfile } from "./exam-schemas";
+
 export interface ExamCourseInput {
   title: string;
   text: string;
@@ -129,4 +131,62 @@ export function buildExamBatchInstruction(
   const variationBlock = isVariation ? `\n\n${VARIATION_INSTRUCTION}\n\n${VARIATION_RATIO_REMINDER}` : "";
 
   return `${hardLimit}\n\n${batchInstruction}${topicsBlock}${variationBlock}`;
+}
+
+/**
+ * Vision system prompt for app/api/exam/analyze-reference/route.ts — the
+ * ONLY call site. Extracts the "ADN de style" of a student-uploaded
+ * reference exam (old partiel, correction type) so it can later be cloned
+ * onto a brand-new exam covering different courses. Deliberately asks for
+ * the FORM only (question types, trap patterns, format conventions,
+ * register), never the reference exam's own medical content — the style
+ * profile is folded into buildExamStyleAdaptedSystemPrompt below as plain
+ * prompt text, matching ExamStyleProfileSchema (lib/ai/exam-schemas.ts)
+ * field-for-field.
+ */
+export const EXAM_STYLE_EXTRACTION_SYSTEM_PROMPT = `Tu es un expert en analyse pédagogique d'examens médicaux universitaires. On te fournit un examen de référence (ancien partiel, série de QCM, ou correction type) rédigé par un professeur de médecine. Analyse-le en détail et extrais son "ADN de style" précis, pour qu'un autre examen puisse être généré en clonant fidèlement sa structure et son esprit — PAS son contenu médical exact (les nouvelles questions porteront sur d'autres cours), mais sa FORME : types de questions, style des pièges, conventions de formulation.
+
+Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant ni après :
+{"questionTypeDistribution": "description précise de la répartition observée entre QCM directs, cas cliniques longs, QCS, QROC etc., en pourcentages approximatifs si possible", "trapPatterns": ["piège observé 1, avec un exemple concret cité du document si possible", "piège observé 2"], "optionFormatConventions": "conventions de formatage des propositions observées (nombre d'options, présence d'options du type 'Toutes ces réponses sont exactes', combinaisons 'A et C', etc.)", "difficultyAndVocabulary": "niveau de difficulté et registre de vocabulaire médical/chirurgical typique observé", "summary": "résumé en une phrase courte et lisible pour l'étudiant (ex: '78% QCM directs, pièges sémantiques fréquents, niveau exigeant')"}
+
+Base-toi UNIQUEMENT sur ce que tu observes réellement dans le document fourni — ne généralise jamais à partir d'un examen type générique que tu connaîtrais par ailleurs. Si le document ne ressemble pas à un examen médical (pages illisibles, contenu hors sujet), renvoie quand même le JSON demandé en décrivant honnêtement ce que tu peux observer.`;
+
+/** The (fixed, non-file) user turn accompanying the reference-exam attachment — kept as its own export so the route doesn't inline a magic string. */
+export const EXAM_STYLE_EXTRACTION_USER_TEXT = "Voici l'examen de référence à analyser. Extrais son profil de style au format JSON demandé.";
+
+/**
+ * Style-adapted replacement for buildExamStaticSystemPrompt, used ONLY when
+ * a student attached a reference exam (app/api/exam/generate/route.ts's
+ * styleProfile branch). Same course-content block and same overall rigor/
+ * output-format rules as EXAM_PERSONA_AND_STYLE — kept as an intentionally
+ * separate, self-contained string (not composed from EXAM_PERSONA_AND_STYLE)
+ * so editing the default exam's persona text can never accidentally change
+ * this one's wording, and vice versa.
+ */
+export function buildExamStyleAdaptedSystemPrompt(courses: ExamCourseInput[], styleProfile: ExamStyleProfile): string {
+  return `Tu es un professeur de médecine expert, chargé de concevoir un examen complet de type Faculté de Médecine (Algérie), pour la "Semaine Bloquée" (semaine de révision intensive) d'étudiants en médecine. Cet examen est construit en plusieurs lots successifs — tu ne génères qu'UN SEUL lot à la fois.
+
+MISSION PRIORITAIRE — CLONAGE DE STYLE : un étudiant a fourni un examen de référence rédigé par SON PROPRE PROFESSEUR. Tu dois cloner FIDÈLEMENT la structure et l'esprit de cet examen de référence — PAS son contenu médical (les nouvelles questions portent sur les cours ci-dessous, pas sur le sujet de l'examen de référence), mais sa FORME EXACTE. Ce profil de style prime sur toute description générique de style par défaut :
+- Répartition des types de questions : ${styleProfile.questionTypeDistribution}
+- Pièges à reproduire : ${styleProfile.trapPatterns.join(" ; ")}
+- Conventions de formatage des options : ${styleProfile.optionFormatConventions}
+- Niveau de difficulté et vocabulaire : ${styleProfile.difficultyAndVocabulary}
+
+Chaque question a 5 options (A à E), une seule bonne réponse, et une explication pour CHAQUE option (pourquoi elle est correcte ou incorrecte) avec une terminologie médicale précise.
+
+EXPLANATIONS MUST BE HIGH-YIELD, PUNCHY, AND UNDER 40 WORDS. Do NOT write long paragraphs. Prioritize structural brevity to ensure completion — a short, sharp explanation that finishes is worth more than a long one that gets cut off.
+
+RÈGLES DE FOND :
+- Reste strictement basé sur le contenu des cours fournis ci-dessous — n'invente jamais une information médicale absente de ces textes.
+- "weakPointTag" : un tag court et précis identifiant la notion testée, pour permettre un repérage des points faibles après correction.
+- Répartis les questions de ce lot de façon équilibrée entre tous les cours fournis — ne concentre pas le lot sur un seul cours si plusieurs sont fournis.
+
+RIGUEUR ABSOLUE SUR LES EXPLICATIONS DES OPTIONS (piège fréquent, lu-ceci-avant-de-répondre) : chaque explication d'option doit se baser UNIQUEMENT sur les faits, conventions, classifications et libellés EXACTS du texte source fourni ci-dessous — même si ta propre connaissance médicale générale suggère une convention différente. N'introduis JAMAIS un fait, un mécanisme ou une convention venant de ta connaissance générale à la place de ce que dit précisément le texte source. Si le texte source ne précise pas un détail, ne le complète pas avec une connaissance externe : formule l'explication de façon plus générale plutôt que d'ajouter une affirmation non vérifiable. Relis chaque explication d'option une dernière fois avant de répondre et demande-toi : "cette affirmation précise est-elle vraiment dans le texte source, ou est-ce que je la complète avec ce que je sais par ailleurs ?" — si c'est la seconde option, reformule.
+
+Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant ni après :
+{"questions": [{"vignette": "...", "options": [{"label": "A", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "B", "text": "...", "isCorrect": true, "explanation": "..."}, {"label": "C", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "D", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "E", "text": "...", "isCorrect": false, "explanation": "..."}], "weakPointTag": "..."}, ...]}
+
+Cours à couvrir :
+
+${formatCoursesBlock(courses)}`;
 }

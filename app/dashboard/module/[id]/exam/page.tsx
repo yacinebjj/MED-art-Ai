@@ -45,6 +45,8 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
+import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
+import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 
@@ -98,6 +100,12 @@ export default function ExamGeneratorPage() {
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [retryToken, setRetryToken] = useState(0);
   const [selectedCourseIds, setSelectedCourseIds] = useState<Set<number>>(new Set());
+  // "Examen Guidé par le Style Prof" — extracted from an optional
+  // student-uploaded reference exam (ReferenceExamUploader), threaded
+  // verbatim into generateExam's POST body below. Never persisted here
+  // beyond this component's own state — a page refresh simply forgets it,
+  // same as every other in-progress selection on this page.
+  const [styleProfile, setStyleProfile] = useState<ExamStyleProfile | null>(null);
 
   const [savedExams, setSavedExams] = useState<SavedExam[]>([]);
   const [activeExamId, setActiveExamId] = useState<string | null>(null);
@@ -265,7 +273,7 @@ export default function ExamGeneratorPage() {
       const res = await fetch("/api/exam/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleId, courseIds, variation }),
+        body: JSON.stringify({ moduleId, courseIds, variation, ...(styleProfile ? { styleProfile } : {}) }),
       });
       const body = await res.json().catch(() => null);
       // Server truth for the "Régénérer" quota, synced whenever the API
@@ -788,6 +796,7 @@ export default function ExamGeneratorPage() {
             {/* Panneau Gauche — Sources + Historique (desktop) */}
             <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-80")}>
               {courseHeaderBlock}
+              <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={setStyleProfile} disabled={isGenerating} />
               {/* min-h-0 — a flex child with overflow-y-auto silently
                   refuses to actually clip/scroll without it (flex items
                   default to min-height: auto, so they grow to fit content
@@ -818,6 +827,7 @@ export default function ExamGeneratorPage() {
             ) : (
               <>
                 {courseHeaderBlock}
+                <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={setStyleProfile} disabled={isGenerating} />
                 <div className="min-h-0 flex-1 overflow-y-auto p-2">{courseListContent}</div>
                 {generateButtonBlock}
               </>
