@@ -139,7 +139,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const { data: inserted, error: insertError } = await supabase
     .from("chat_messages")
     .insert({ group_id: groupId, user_id: user.id, type: messageType, media_url: mediaUrl, sender_name: senderName })
-    .select("id, group_id, user_id, type, content_text, media_url, sender_name, created_at")
+    .select("id, group_id, user_id, type, content_text, media_url, sender_name, created_at, reactions")
     .single();
 
   if (insertError || !inserted) {
@@ -159,6 +159,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     mediaUrl: inserted.media_url,
     senderName: inserted.sender_name,
     createdAt: inserted.created_at,
+    reactions: inserted.reactions ?? {},
   };
 
   return NextResponse.json({ success: true, message });

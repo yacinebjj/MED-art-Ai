@@ -24,7 +24,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
   const { data: group, error: groupError } = await supabase
     .from("chat_groups")
-    .select("id, name, admin_id, join_code, created_at")
+    .select("id, name, admin_id, join_code, created_at, pinned_message_id")
     .eq("id", groupId)
     .maybeSingle();
 
@@ -51,7 +51,14 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
   return NextResponse.json({
     success: true,
-    group: { id: group.id, name: group.name, adminId: group.admin_id, joinCode: group.join_code, createdAt: group.created_at },
+    group: {
+      id: group.id,
+      name: group.name,
+      adminId: group.admin_id,
+      joinCode: group.join_code,
+      createdAt: group.created_at,
+      pinnedMessageId: group.pinned_message_id ?? null,
+    },
     myStatus: membership.status,
   });
 }

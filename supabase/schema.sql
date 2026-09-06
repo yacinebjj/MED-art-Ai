@@ -2818,6 +2818,49 @@ begin
   end if;
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- Migration: quick reactions + one pinned message per group (World-Class
+-- Study Group redesign). Both are purely ADDITIVE — no existing column,
+-- policy, or realtime registration above is touched.
+--
+-- reactions: a plain jsonb map of emoji -> array of user ids (e.g.
+-- {"👍": ["uuid1","uuid2"], "⚠️": ["uuid3"]}) rather than a normalized
+-- reactions table — this app's own realtime feed already re-fetches/patches
+-- the WHOLE message row on change (see ChatRoom.tsx), so a small embedded map
+-- needs no join and stays trivially readable under the EXISTING
+-- "Accepted members can read group messages" SELECT policy (new columns on
+-- an already-readable row need no new policy). Writes never go through the
+-- client directly — POST /api/groups/[id]/messages/[messageId]/reactions
+-- (service-role) is the only writer, checking accepted-membership itself —
+-- same "defense-in-depth, real writes via server routes" pattern already
+-- used for message sends and chat_members status updates above, so no new
+-- UPDATE policy is added here either.
+--
+-- pinned_message_id: one pin per group (not a list) — deliberately simple
+-- for a first version. Any ACCEPTED member can pin/unpin (matches the
+-- message-send permission model, not admin-only — a shared cas clinique/QCM
+-- anchor is a collaborative revision tool, not moderation), enforced by
+-- PATCH /api/groups/[id]/pin (service-role). `on delete set null` so a
+-- deleted message never leaves a dangling pin.
+--
+-- chat_groups joins supabase_realtime here too (previously only
+-- chat_messages was registered) so a pin/unpin is pushed live to every
+-- member's open ChatRoom instead of only appearing after a manual refresh —
+-- same idempotent guard pattern as the chat_messages registration above.
+-- ---------------------------------------------------------------------------
+alter table chat_messages add column if not exists reactions jsonb not null default '{}'::jsonb;
+alter table chat_groups add column if not exists pinned_message_id uuid references chat_messages (id) on delete set null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'chat_groups'
+  ) then
+    alter publication supabase_realtime add table chat_groups;
+  end if;
+end $$;
+
 -- ===========================================================================
 -- Point 13 — Avatar de profil, photo affichée dans Sidebar/Topbar/
 -- Paramètres. `profiles` n'avait jusqu'ici aucune colonne dédiée à ça.

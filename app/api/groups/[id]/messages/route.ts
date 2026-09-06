@@ -20,6 +20,7 @@ interface ChatMessageRow {
   media_url: string | null;
   sender_name: string | null;
   created_at: string;
+  reactions: ChatMessage["reactions"] | null;
 }
 
 function toMessage(row: ChatMessageRow): ChatMessage {
@@ -32,6 +33,10 @@ function toMessage(row: ChatMessageRow): ChatMessage {
     mediaUrl: row.media_url,
     senderName: row.sender_name,
     createdAt: row.created_at,
+    // Fails open to an empty map rather than crashing the whole feed on a
+    // row from before this column existed, or before the migration in
+    // supabase/schema.sql has actually been run against this database.
+    reactions: row.reactions ?? {},
   };
 }
 
@@ -62,7 +67,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("id, group_id, user_id, type, content_text, media_url, sender_name, created_at")
+    .select("id, group_id, user_id, type, content_text, media_url, sender_name, created_at, reactions")
     .eq("group_id", groupId)
     .order("created_at", { ascending: false })
     .limit(MESSAGE_HISTORY_LIMIT);
@@ -129,7 +134,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       content_text: sanitizeForPostgres(contentText.trim()),
       sender_name: senderName,
     })
-    .select("id, group_id, user_id, type, content_text, media_url, sender_name, created_at")
+    .select("id, group_id, user_id, type, content_text, media_url, sender_name, created_at, reactions")
     .single();
 
   if (error || !data) {

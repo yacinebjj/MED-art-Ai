@@ -36,6 +36,20 @@ export const GROUPS_TRANSLATIONS = {
   },
   sendButton: { fr: "Envoyer", en: "Send" },
 
+  // components/groups/ChatRoom.tsx — real presence/typing status line + member drawer + pin bar (World-Class Study Group pass)
+  membersOnline: { fr: "en ligne", en: "online" },
+  onlyYouOnline: { fr: "Seulement toi es en ligne", en: "Only you're online" },
+  typingIndicator: { fr: "{name} est en train d'écrire...", en: "{name} is typing..." },
+  someoneTyping: { fr: "Quelqu'un", en: "Someone" },
+  openMembersAriaLabel: { fr: "Voir les membres", en: "View members" },
+  closeMembersAriaLabel: { fr: "Fermer", en: "Close" },
+  membersDrawerTitle: { fr: "Membres du groupe", en: "Group members" },
+  loadingMembers: { fr: "Chargement des membres...", en: "Loading members..." },
+  unnamedMember: { fr: "Étudiant(e)", en: "Student" },
+  adminBadge: { fr: "Admin", en: "Admin" },
+  pinnedMessageFallback: { fr: "Message épinglé", en: "Pinned message" },
+  unpinAriaLabel: { fr: "Désépingler", en: "Unpin" },
+
   // components/groups/ChatRoom.tsx — medicalThemes[].name (display labels only, see file header note)
   cardiologyThemeName: { fr: "Cardiologie", en: "Cardiology" },
   neurologyThemeName: { fr: "Neurologie", en: "Neurology" },

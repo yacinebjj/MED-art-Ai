@@ -3,10 +3,11 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Check, ImageIcon, Mic, Send, Square, Stethoscope, Video } from "lucide-react";
+import { ArrowLeft, Check, ImageIcon, Mic, Pin, Send, Square, Stethoscope, Users, Video, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { generateId } from "@/lib/generate-id";
 import { createClient } from "@/lib/supabase/client";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useAuth } from "@/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
 import { useSmartPaste } from "@/hooks/useBlockPaste";
@@ -17,8 +18,9 @@ import type { Language } from "@/providers/LanguageProvider";
 import { tGroups } from "@/lib/translations/groups";
 import { ThemePicker } from "./ThemePicker";
 import { DayDivider } from "./DayDivider";
+import { MemberDrawer } from "./MemberDrawer";
 import { MessageBubble, type LocalChatMessage } from "./MessageBubble";
-import type { ChatMessage } from "@/types/group-chat";
+import type { ChatMessage, MessageReactions } from "@/types/group-chat";
 
 interface ChatRoomProps {
   groupId: string;
@@ -33,6 +35,7 @@ interface RawMessageRow {
   media_url: string | null;
   sender_name: string | null;
   created_at: string;
+  reactions: MessageReactions | null;
 }
 
 function fromRow(row: RawMessageRow): LocalChatMessage {
@@ -45,9 +48,15 @@ function fromRow(row: RawMessageRow): LocalChatMessage {
     mediaUrl: row.media_url,
     senderName: row.sender_name,
     createdAt: row.created_at,
+    reactions: row.reactions ?? {},
     status: "sent",
   };
 }
+
+/** How long a "typing" broadcast stays valid before this client treats that student as having stopped — see the presence/typing effect below. Broadcasts, unlike postgres_changes, never persist, so a client that goes away mid-typing (closed tab, lost connection) would otherwise leave a stale "en train d'écrire" forever without this. */
+const TYPING_TIMEOUT_MS = 4000;
+/** Minimum gap between two "I'm typing" broadcasts from this client — every keystroke would otherwise flood the channel. */
+const TYPING_BROADCAST_THROTTLE_MS = 2000;
 
 const GROUP_GAP_MS = 5 * 60 * 1000; // consecutive same-sender messages within 5 minutes visually merge into one block.
 
@@ -190,6 +199,8 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const { theme, themeId, selectTheme } = useChatTheme();
 
   const [groupName, setGroupName] = useState<string | null>(null);
+  const [groupAdminId, setGroupAdminId] = useState<string | null>(null);
+  const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [messages, setMessages] = useState<LocalChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -197,6 +208,20 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [isMemberDrawerOpen, setIsMemberDrawerOpen] = useState(false);
+
+  // Real presence — who's actually connected right now (Supabase Realtime
+  // Presence, an in-memory channel feature with no table/column of its own,
+  // see supabase/schema.sql's migration comment for why reactions/pin DID
+  // need a schema change and this deliberately doesn't). Never fabricated:
+  // if the presence channel hasn't synced yet, this is just empty rather
+  // than showing everyone as "hors ligne".
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
+  // Real typing signal — Supabase Realtime Broadcast (also no persistence),
+  // pruned by the interval in the effect below. Keyed by userId so the same
+  // student re-broadcasting just refreshes their own timestamp.
+  const [typingUsers, setTypingUsers] = useState<Record<string, { displayName: string | null; at: number }>>({});
+  const lastTypingBroadcastAtRef = useRef(0);
 
   // "Système de Thèmes Médicaux Dynamiques" state — background pattern only,
   // independent of the bubble-color theme above.
@@ -209,6 +234,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingChannelRef = useRef<RealtimeChannel | null>(null);
 
   const feed = useMemo(() => buildFeed(messages, language), [messages, language]);
 
@@ -261,6 +287,8 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         return;
       }
       setGroupName(groupRes.group.name);
+      setGroupAdminId(groupRes.group.adminId);
+      setPinnedMessageId(groupRes.group.pinnedMessageId ?? null);
     }
 
     // Mobile-specific gap this closes: Realtime's `postgres_changes` only
@@ -297,12 +325,104 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
           setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, fromRow(row)]));
         }
       )
+      // Additive to the INSERT handling above — a reaction toggle (see
+      // handleReact) is a plain UPDATE on an existing row, not a new
+      // message, so it needs its own event type rather than replacing
+      // anything here. Patches the existing message in place by id; a
+      // message this client hasn't loaded yet (shouldn't happen in
+      // practice — you can't react to a message you can't see) is a no-op.
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "chat_messages", filter: `group_id=eq.${groupId}` },
+        (payload) => {
+          const row = payload.new as RawMessageRow;
+          setMessages((prev) => prev.map((m) => (m.id === row.id ? { ...m, reactions: row.reactions ?? {} } : m)));
+        }
+      )
+      .subscribe();
+
+    // A pin/unpin (see handleTogglePin) updates chat_groups, not
+    // chat_messages — its own channel/subscription rather than overloading
+    // the message one above, since it's a structurally different table and
+    // payload shape.
+    const groupChannel = supabase
+      .channel(`group-meta-${groupId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "chat_groups", filter: `id=eq.${groupId}` },
+        (payload) => {
+          const row = payload.new as { pinned_message_id: string | null };
+          setPinnedMessageId(row.pinned_message_id ?? null);
+        }
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(groupChannel);
     };
   }, [groupId]);
+
+  // Real presence (who's actually connected) + real typing broadcast — both
+  // Supabase Realtime features that need no table/column of their own (see
+  // this file's own state comments above). One effect since both are
+  // ephemeral, per-connection channels scoped to this same groupId/user and
+  // torn down together.
+  useEffect(() => {
+    if (!user) return;
+    const supabase = createClient();
+    const displayName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
+
+    const presenceChannel = supabase.channel(`presence-group-${groupId}`, { config: { presence: { key: user.id } } });
+    presenceChannel
+      .on("presence", { event: "sync" }, () => {
+        setOnlineUserIds(new Set(Object.keys(presenceChannel.presenceState())));
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") void presenceChannel.track({ userId: user.id, displayName });
+      });
+
+    const typingChannel = supabase.channel(`typing-group-${groupId}`);
+    typingChannel
+      .on("broadcast", { event: "typing" }, ({ payload }) => {
+        const typingUserId = payload?.userId;
+        if (!typingUserId || typingUserId === user.id) return; // never show yourself as "typing"
+        setTypingUsers((prev) => ({ ...prev, [typingUserId]: { displayName: payload?.displayName ?? null, at: Date.now() } }));
+      })
+      .subscribe();
+
+    // Prunes any typing entry older than TYPING_TIMEOUT_MS every second —
+    // the only way this client learns a typing student went quiet, since a
+    // broadcast channel has no "they disconnected" signal of its own (unlike
+    // presence, which fsyncs on disconnect).
+    const pruneInterval = setInterval(() => {
+      setTypingUsers((prev) => {
+        const now = Date.now();
+        const next = Object.fromEntries(Object.entries(prev).filter(([, v]) => now - v.at < TYPING_TIMEOUT_MS));
+        return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+      });
+    }, 1000);
+
+    typingChannelRef.current = typingChannel;
+
+    return () => {
+      clearInterval(pruneInterval);
+      typingChannelRef.current = null;
+      supabase.removeChannel(presenceChannel);
+      supabase.removeChannel(typingChannel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId, user?.id]);
+
+  /** Broadcasts "I'm typing" at most once per TYPING_BROADCAST_THROTTLE_MS — called from the text input's onChange below. */
+  function notifyTyping() {
+    if (!user || !typingChannelRef.current) return;
+    const now = Date.now();
+    if (now - lastTypingBroadcastAtRef.current < TYPING_BROADCAST_THROTTLE_MS) return;
+    lastTypingBroadcastAtRef.current = now;
+    const displayName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
+    void typingChannelRef.current.send({ type: "broadcast", event: "typing", payload: { userId: user.id, displayName } });
+  }
 
   /** Sends (or re-sends, on retry) a text message. `existing` is set only when retrying an already-optimistic, failed message — reuses its id instead of minting a new temp one. */
   async function sendText(text: string, existing?: LocalChatMessage) {
@@ -320,6 +440,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         mediaUrl: null,
         senderName: typeof user?.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null,
         createdAt: new Date().toISOString(),
+        reactions: {},
         status: "sending",
       };
       setMessages((prev) => [...prev, optimistic]);
@@ -360,6 +481,59 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   function handleRetry(message: LocalChatMessage) {
     if (message.type === "text" && message.contentText) {
       sendText(message.contentText, message);
+    }
+  }
+
+  /** Optimistic toggle — flips the reaction locally right away (matches this file's own sendText pattern), then reconciles with the server's real map. The realtime UPDATE listener above will also deliver this same change to every OTHER open tab/member; this optimistic update is purely to avoid a visible round-trip delay for the person who just tapped it. */
+  async function handleReact(messageId: string, emoji: string) {
+    if (!user) return;
+    const userId = user.id;
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const current = m.reactions[emoji] ?? [];
+        const already = current.includes(userId);
+        const nextForEmoji = already ? current.filter((id) => id !== userId) : [...current, userId];
+        const nextReactions = { ...m.reactions };
+        if (nextForEmoji.length > 0) nextReactions[emoji] = nextForEmoji;
+        else delete nextReactions[emoji];
+        return { ...m, reactions: nextReactions };
+      })
+    );
+
+    try {
+      const res = await fetch(`/api/groups/${groupId}/messages/${messageId}/reactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? "La réaction a échoué.");
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions ?? {} } : m)));
+    } catch (err) {
+      toast({ variant: "error", title: err instanceof Error ? err.message : "La réaction a échoué." });
+      // Best-effort rollback isn't attempted here — the next realtime UPDATE
+      // (from the server's own unchanged row) or the periodic visibility
+      // refetch will self-correct if this optimistic flip was wrong, same
+      // fail-open philosophy as the rest of this file's realtime handling.
+    }
+  }
+
+  async function handleTogglePin(messageId: string | null) {
+    const previous = pinnedMessageId;
+    setPinnedMessageId(messageId);
+    try {
+      const res = await fetch(`/api/groups/${groupId}/pin`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? "L'épinglage a échoué.");
+    } catch (err) {
+      setPinnedMessageId(previous);
+      toast({ variant: "error", title: err instanceof Error ? err.message : "L'épinglage a échoué." });
     }
   }
 
@@ -500,7 +674,35 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <p className="flex-1 truncate text-sm font-bold tracking-tight text-foreground">{groupName ?? "..."}</p>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold tracking-tight text-foreground">{groupName ?? "..."}</p>
+          {/* Real, derived status — never a fabricated "Session QCM en
+              cours"-style claim with no data behind it. Presence-based
+              online count when there's anyone besides me online; the
+              typing indicator (real, from the broadcast channel) takes
+              over this same line the instant someone starts typing, since
+              it's more immediately relevant. */}
+          <p className="truncate text-[11px] font-medium text-muted-foreground">
+            {Object.keys(typingUsers).length > 0
+              ? tGroups("typingIndicator", language).replace(
+                  "{name}",
+                  Object.values(typingUsers)[0]?.displayName ?? tGroups("someoneTyping", language)
+                )
+              : onlineUserIds.size > 1
+                ? `🟢 ${onlineUserIds.size} ${tGroups("membersOnline", language)}`
+                : tGroups("onlyYouOnline", language)}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsMemberDrawerOpen(true)}
+          className="flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-foreground shadow-sm backdrop-blur-md transition-all duration-200 hover:bg-white/20 active:scale-90"
+          aria-label={tGroups("openMembersAriaLabel", language)}
+          title={tGroups("openMembersAriaLabel", language)}
+        >
+          <Users className="h-3.5 w-3.5" />
+        </button>
 
         <ThemePicker themeId={themeId} onSelect={selectTheme} />
 
@@ -564,6 +766,35 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
           style={{ backgroundImage: activeTheme.pattern, backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat" }}
         />
 
+        {/* Pinned message bar — a real anchor for a shared cas clinique/QCM/
+            résumé (see handleTogglePin), not a decorative placeholder. Looks
+            the pinned message up in already-loaded `messages` rather than a
+            separate fetch; on the rare miss (a very old message pinned
+            before this client loaded that far back) it still shows the pin
+            control with a neutral fallback label instead of hiding the bar. */}
+        {pinnedMessageId && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="relative z-10 flex items-center gap-2 rounded-2xl border border-amber-300/60 bg-amber-50/90 px-3 py-2 text-xs shadow-soft backdrop-blur-md dark:border-amber-800/50 dark:bg-amber-950/40"
+          >
+            <Pin className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="min-w-0 flex-1 truncate font-medium text-amber-900 dark:text-amber-200">
+              {messages.find((m) => m.id === pinnedMessageId)?.contentText ?? tGroups("pinnedMessageFallback", language)}
+            </span>
+            <button
+              type="button"
+              onClick={() => handleTogglePin(null)}
+              className="shrink-0 rounded-full p-1 text-amber-700 transition-colors hover:bg-amber-200/60 dark:text-amber-300 dark:hover:bg-amber-900/60"
+              aria-label={tGroups("unpinAriaLabel", language)}
+              title={tGroups("unpinAriaLabel", language)}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </motion.div>
+        )}
+
         {/* z-10 relative is load-bearing here: without it, this scroll region would sit in the same stacking context as the absolutely-positioned pattern layer above and could end up behind it, breaking message legibility and audio-player clicks. */}
         <div className="relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
           <AnimatePresence initial={false}>
@@ -578,6 +809,9 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
                   isFirstInGroup={item.isFirstInGroup}
                   theme={theme}
                   onRetry={handleRetry}
+                  onReact={handleReact}
+                  isPinned={item.message.id === pinnedMessageId}
+                  onTogglePin={handleTogglePin}
                 />
               )
             )}
@@ -632,7 +866,10 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
           ) : (
             <input
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                notifyTyping();
+              }}
               onPaste={handlePaste}
               placeholder={tGroups("messagePlaceholder", language)}
               className="h-10 flex-1 rounded-xl border border-input bg-transparent px-3.5 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
@@ -649,6 +886,14 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
           </button>
         </form>
       </div>
+
+      <MemberDrawer
+        groupId={groupId}
+        isOpen={isMemberDrawerOpen}
+        onClose={() => setIsMemberDrawerOpen(false)}
+        onlineUserIds={onlineUserIds}
+        adminId={groupAdminId}
+      />
     </div>
   );
 }

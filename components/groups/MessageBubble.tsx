@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { useTheme } from "next-themes";
-import { motion } from "framer-motion";
-import { Check, Clock, Copy, RotateCcw } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Check, Clock, Copy, Pin, PinOff, RotateCcw, SmilePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
+import { useAuth } from "@/providers/AuthProvider";
 import { AudioPlayer } from "./AudioPlayer";
 import { ChatImage } from "./ChatImage";
+import { QUICK_REACTIONS } from "@/lib/group-chat-reactions";
 import type { ChatTheme } from "@/lib/chat-themes";
 import type { ChatMessage } from "@/types/group-chat";
 
@@ -26,6 +28,9 @@ interface MessageBubbleProps {
   isFirstInGroup: boolean;
   theme: ChatTheme;
   onRetry: (message: LocalChatMessage) => void;
+  onReact: (messageId: string, emoji: string) => void;
+  isPinned: boolean;
+  onTogglePin: (messageId: string | null) => void;
 }
 
 function initial(name: string | null): string {
@@ -39,16 +44,25 @@ function initial(name: string | null): string {
  * No "Seen" read-receipt — deliberately omitted, this app has no per-
  * recipient read tracking, and fabricating one would be a fake UI signal.
  */
-export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry }: MessageBubbleProps) {
+export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry, onReact, isPinned, onTogglePin }: MessageBubbleProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const [hovered, setHovered] = useState(false);
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
 
   function copyText() {
     if (!message.contentText) return;
     navigator.clipboard.writeText(message.contentText).then(() => toast({ variant: "success", title: "Message copié." }));
   }
+
+  function handlePickReaction(emoji: string) {
+    onReact(message.id, emoji);
+    setReactionPickerOpen(false);
+  }
+
+  const reactionEntries = Object.entries(message.reactions).filter(([, userIds]) => userIds.length > 0);
 
   return (
     <motion.div
@@ -73,22 +87,83 @@ export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry 
         {!isMine && isFirstInGroup && <p className="mb-1 px-1 text-xs font-semibold text-muted-foreground">{message.senderName ?? "Étudiant(e)"}</p>}
 
         <div className="flex items-center gap-1.5">
-          {/* Hover-revealed quick action — a real, working "copy" utility rather than a decorative placeholder. */}
-          {message.type === "text" && (
+          {/* Hover-revealed quick actions — reaction picker and pin toggle
+              are real, working utilities (see ChatRoom.tsx's handleReact/
+              handleTogglePin), same "no decorative placeholder" standard
+              this file's own comment already holds the copy button to. */}
+          <div
+            className={cn(
+              "relative order-first flex items-center gap-0.5 transition-opacity",
+              isMine && "order-last",
+              hovered || reactionPickerOpen ? "opacity-100" : "pointer-events-none opacity-0"
+            )}
+          >
             <button
               type="button"
-              onClick={copyText}
-              className={cn(
-                "order-first rounded-full p-1.5 text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground",
-                isMine && "order-last",
-                hovered ? "opacity-100" : "pointer-events-none opacity-0"
-              )}
-              aria-label="Copier le message"
-              title="Copier"
+              onClick={() => setReactionPickerOpen((v) => !v)}
+              className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              aria-label="Réagir"
+              title="Réagir"
             >
-              <Copy className="h-3.5 w-3.5" />
+              <SmilePlus className="h-3.5 w-3.5" />
             </button>
-          )}
+
+            <AnimatePresence>
+              {reactionPickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setReactionPickerOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: 4, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                    transition={{ duration: 0.12 }}
+                    className={cn(
+                      "absolute bottom-full z-50 mb-1.5 flex items-center gap-0.5 rounded-full border border-border/60 bg-card/95 p-1 shadow-glass backdrop-blur-xl dark:shadow-glass-dark",
+                      isMine ? "right-0" : "left-0"
+                    )}
+                  >
+                    {QUICK_REACTIONS.map((reaction) => (
+                      <button
+                        key={reaction.emoji}
+                        type="button"
+                        onClick={() => handlePickReaction(reaction.emoji)}
+                        className="rounded-full p-1.5 text-base leading-none transition-transform duration-150 hover:scale-125"
+                        aria-label={reaction.label}
+                        title={reaction.label}
+                      >
+                        {reaction.emoji}
+                      </button>
+                    ))}
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+
+            <button
+              type="button"
+              onClick={() => onTogglePin(isPinned ? null : message.id)}
+              className={cn(
+                "rounded-full p-1.5 transition-colors hover:bg-accent",
+                isPinned ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-label={isPinned ? "Désépingler" : "Épingler"}
+              title={isPinned ? "Désépingler" : "Épingler"}
+            >
+              {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+            </button>
+
+            {message.type === "text" && (
+              <button
+                type="button"
+                onClick={copyText}
+                className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="Copier le message"
+                title="Copier"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
 
           <div
             className={cn(
@@ -120,6 +195,30 @@ export function MessageBubble({ message, isMine, isFirstInGroup, theme, onRetry 
             )}
           </div>
         </div>
+
+        {reactionEntries.length > 0 && (
+          <div className={cn("mt-1 flex flex-wrap gap-1", isMine && "justify-end")}>
+            {reactionEntries.map(([emoji, userIds]) => {
+              const mine = !!user && userIds.includes(user.id);
+              return (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => onReact(message.id, emoji)}
+                  className={cn(
+                    "flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold shadow-sm transition-transform duration-150 hover:scale-105",
+                    mine
+                      ? "border-primary-300 bg-primary-50 text-primary-700 dark:border-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+                      : "border-border/60 bg-card text-muted-foreground"
+                  )}
+                >
+                  <span>{emoji}</span>
+                  <span>{userIds.length}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <p className="mt-1 flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
           {TIME_FORMAT.format(new Date(message.createdAt))}

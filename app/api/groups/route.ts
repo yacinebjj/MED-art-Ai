@@ -27,6 +27,7 @@ interface ChatGroupRow {
   admin_id: string;
   join_code: string;
   created_at: string;
+  pinned_message_id: string | null;
 }
 
 interface MemberWithGroupRow {
@@ -48,7 +49,7 @@ export async function GET() {
   const supabase = getSupabaseAdmin();
   const { data: memberRows, error } = await supabase
     .from("chat_members")
-    .select("status, chat_groups(id, name, admin_id, join_code, created_at)")
+    .select("status, chat_groups(id, name, admin_id, join_code, created_at, pinned_message_id)")
     .eq("user_id", user.id);
 
   if (error) {
@@ -87,6 +88,7 @@ export async function GET() {
       myStatus: r.status,
       isAdmin: r.chat_groups.admin_id === user.id,
       pendingCount: pendingCounts.get(r.chat_groups.id) ?? 0,
+      pinnedMessageId: r.chat_groups.pinned_message_id ?? null,
     }));
 
   return NextResponse.json({ success: true, groups });
@@ -131,7 +133,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase
       .from("chat_groups")
       .insert({ name: sanitizeForPostgres(name.trim()), admin_id: user.id, join_code: generateJoinCode() })
-      .select("id, name, admin_id, join_code, created_at")
+      .select("id, name, admin_id, join_code, created_at, pinned_message_id")
       .single();
 
     if (!error) {
@@ -173,6 +175,7 @@ export async function POST(request: NextRequest) {
       myStatus: "accepted" as const,
       isAdmin: true,
       pendingCount: 0,
+      pinnedMessageId: null,
     } satisfies MyChatGroup,
   });
 }

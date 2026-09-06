@@ -19,6 +19,8 @@ export interface ChatGroup {
   adminId: string;
   joinCode: string;
   createdAt: string;
+  /** One pin per group — see supabase/schema.sql's own migration comment. Null when nothing is pinned. */
+  pinnedMessageId: string | null;
 }
 
 export interface ChatMember {
@@ -33,6 +35,9 @@ export interface ChatMember {
 
 export type ChatMessageType = "text" | "image" | "video" | "audio";
 
+/** Emoji -> array of user ids who reacted with it — see supabase/schema.sql's own migration comment on chat_messages.reactions. */
+export type MessageReactions = Record<string, string[]>;
+
 export interface ChatMessage {
   id: string;
   groupId: string;
@@ -43,6 +48,7 @@ export interface ChatMessage {
   /** Snapshotted display name — see chat_messages.sender_name's own schema comment. */
   senderName: string | null;
   createdAt: string;
+  reactions: MessageReactions;
 }
 
 /** One row of "my groups" — the group plus MY OWN membership status/role in it, for the lobby list. */
