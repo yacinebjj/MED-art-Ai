@@ -2,15 +2,16 @@
 
 import { Suspense, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Apple, BrainCircuit, Layers, Play, Pause, RotateCcw, Timer } from "lucide-react";
+import { Apple, BrainCircuit, Layers, Play, Pause, RotateCcw, Sparkles, Timer } from "lucide-react";
 import { StudyDashboard } from "@/components/study/StudyDashboard";
 import { WeaknessRemediationPlan } from "@/components/study/WeaknessRemediationPlan";
 import { ActiveFlashcardsDeck } from "@/components/study/ActiveFlashcardsDeck";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { PushOptInButton } from "@/components/push/PushOptInButton";
-import { usePomodoro } from "@/providers/PomodoroProvider"; // 👈 استيراد المخ العالمي للبومودورو
+import { usePomodoro } from "@/providers/PomodoroProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudy } from "@/lib/translations/study";
+import { cn } from "@/lib/utils";
 
 // Moved here from the old app/study/page.tsx (outside the (shell) route
 // group, so Sidebar/Topbar/MobileBottomNav never rendered on it at all —
@@ -30,7 +31,9 @@ function StudyPageContent() {
   const [isPending, startTransition] = useTransition();
   const { language } = useLanguage();
 
-  // 👈 جلب حالة العداد العالمي لكي يصبح متزامناً مع الـ Topbar والتطبيق كامل
+  // Global Pomodoro state (see providers/PomodoroProvider.tsx) — kept in
+  // sync with the Topbar's own mini-widget automatically since both read
+  // the same context.
   const { seconds, isActive, toggleActive, resetTimer } = usePomodoro();
 
   const minutes = Math.floor(seconds / 60);
@@ -45,26 +48,47 @@ function StudyPageContent() {
   }
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-end gap-2">
-        {/* 👈 شريط تحكم سريع للبومودورو هنا في صفحة الدراسة متزامن مع الـ Topbar */}
-        <div className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-1.5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-          <Timer className="h-4 w-4 text-emerald-500 animate-pulse" />
-          <span className="font-mono text-sm font-bold text-gray-800 dark:text-gray-100">
-            {formattedTime}
+    <div className="mx-auto max-w-4xl">
+      {/* Page header — this space had none before; every other page in the
+          shell (billing, exam, ...) opens with an icon + title + subtitle,
+          this one jumped straight to controls. */}
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-secondary-600 text-white shadow-[0_0_20px_rgba(20,184,166,0.4)]">
+            <Sparkles className="h-5 w-5" />
           </span>
+          <div>
+            <h1 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
+              {tStudy("pageTitle", language)}
+            </h1>
+            <p className="text-xs text-muted-foreground sm:text-sm">{tStudy("pageSubtitle", language)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Pomodoro control — mirrors the Topbar's own mini-widget, same
+          global state (see usePomodoro's own comment above), just reachable
+          without leaving this page. */}
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <div className="glass-card flex items-center gap-2.5 rounded-2xl px-3.5 py-2 shadow-soft">
+          <span className={cn("relative flex h-2 w-2 shrink-0 rounded-full", isActive ? "bg-emerald-500" : "bg-muted-foreground/40")}>
+            {isActive && <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500" />}
+          </span>
+          <Timer className="h-4 w-4 text-primary-600 dark:text-primary-400" />
+          <span className="font-mono text-sm font-bold tabular-nums text-foreground">{formattedTime}</span>
           <button
             onClick={toggleActive}
-            className={`rounded-lg p-1 text-white transition-colors ${
-              isActive ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700"
-            }`}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-full text-white shadow-sm transition-all duration-200 active:scale-90",
+              isActive ? "bg-amber-500 hover:bg-amber-600" : "bg-primary-600 hover:bg-primary-700"
+            )}
             title={isActive ? tStudy("pause", language) : tStudy("start", language)}
           >
             {isActive ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
           </button>
           <button
             onClick={resetTimer}
-            className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground active:scale-90"
             title={tStudy("reset", language)}
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -78,19 +102,25 @@ function StudyPageContent() {
         <TabsList>
           <TabsTrigger value="revision">
             <BrainCircuit className="h-4 w-4" />
-            {tStudy("weakPoints", language)}
+            <span className="hidden sm:inline">{tStudy("weakPoints", language)}</span>
           </TabsTrigger>
           <TabsTrigger value="flashcards">
             <Layers className="h-4 w-4" />
-            {tStudy("flashcards", language)}
+            <span className="hidden sm:inline">{tStudy("flashcards", language)}</span>
           </TabsTrigger>
           <TabsTrigger value="session">
             <Apple className="h-4 w-4" />
-            {tStudy("pomodoro", language)}
+            <span className="hidden sm:inline">{tStudy("pomodoro", language)}</span>
           </TabsTrigger>
         </TabsList>
 
-        <div className={isPending ? "opacity-60 transition-opacity" : "transition-opacity"}>
+        <div className={cn("transition-opacity duration-200", isPending && "opacity-60")}>
+          {/* Each panel gets its own entrance animation via data-state
+              (tailwindcss-animate), not an AnimatePresence+key remount —
+              Radix keeps all 3 panels mounted simultaneously (only toggling
+              which is visible), and StudyDashboard/ActiveFlashcardsDeck both
+              hold real local/session state that must survive switching away
+              and back, so a remount-on-switch would silently reset it. */}
           <TabsContent value="revision" className="space-y-6">
             <WeaknessRemediationPlan />
           </TabsContent>

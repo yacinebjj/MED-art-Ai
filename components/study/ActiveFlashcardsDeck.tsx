@@ -451,7 +451,7 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "loading") {
     return (
-      <Card className="animate-in fade-in-0 duration-300">
+      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
         <CardContent className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span className="text-sm">{tStudyTools("preparingFlashcards", language)}</span>
@@ -462,7 +462,7 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "needs-auth") {
     return (
-      <Card className="animate-in fade-in-0 duration-300">
+      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
           <LogIn className="h-6 w-6" />
           <p className="text-sm">{tStudyTools("signInForFlashcards", language)}</p>
@@ -473,7 +473,7 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "error") {
     return (
-      <Card className="animate-in fade-in-0 duration-300">
+      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
           <AlertTriangle className="h-6 w-6 text-amber-500" />
           <p className="text-sm">{error}</p>
@@ -484,7 +484,7 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "no-modules-active") {
     return (
-      <Card className="animate-in fade-in-0 duration-300">
+      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           <Layers className="h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm font-semibold text-foreground">{tStudyTools("noActiveModulesTitle", language)}</p>
@@ -499,7 +499,7 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "empty-pool") {
     return (
-      <Card className="animate-in fade-in-0 duration-300">
+      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           <Layers className="h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm font-semibold text-foreground">{tStudyTools("emptyPoolTitle", language)}</p>
@@ -513,7 +513,7 @@ export function ActiveFlashcardsDeck() {
 
   if (status === "quota-exceeded") {
     return (
-      <Card className="animate-in fade-in-0 duration-300">
+      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           <Lock className="h-8 w-8 text-amber-500" />
           <p className="text-sm font-semibold text-foreground">{tStudyTools("flashcardQuotaTitle", language)}</p>
@@ -530,7 +530,7 @@ export function ActiveFlashcardsDeck() {
     // blitzed through faster than the background top-up could keep up, or
     // the session hit SESSION_CAP.
     return (
-      <Card className="animate-in fade-in-0 duration-300">
+      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
         <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
           {isGeneratingMore ? (
             <>
@@ -579,7 +579,7 @@ export function ActiveFlashcardsDeck() {
   }
 
   return (
-    <Card className="animate-in fade-in-0 duration-300">
+    <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
       <CardHeader className="flex flex-row items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
           <Layers className="h-5 w-5" />

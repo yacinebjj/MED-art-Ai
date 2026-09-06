@@ -19,16 +19,23 @@ const MAX_DURATION_MINUTES = 120;
 const MIN_CYCLES = 1;
 const MAX_CYCLES = 12;
 
-const MOCK_STATS = [
-  { label: "Aujourd'hui", value: "2h 15m" },
-  { label: "Cette semaine", value: "14h 30m" },
-  { label: "Ce mois", value: "48h 00m" },
-];
-
 function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+/** "2h 15" / "45min" — used for the two REAL stat tiles below (total elapsed
+ * since last reset, and completed cycles), never the 3 fabricated period
+ * breakdowns ("Aujourd'hui"/"Cette semaine"/"Ce mois") this replaced — no
+ * backend tracks a per-day/week/month history, only the provider's own
+ * running total since the last reset (see PomodoroProvider.tsx), so that's
+ * the only real number available to show here. */
+function formatHoursMinutes(totalSeconds: number): string {
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${String(minutes).padStart(2, "0")}` : `${minutes}min`;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -57,7 +64,7 @@ function DurationStepper({
   onChange: (next: number) => void;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center gap-2 rounded-2xl border border-border bg-muted/40 p-4">
+    <div className="glass-card flex flex-1 flex-col items-center gap-2 rounded-2xl p-4 shadow-soft">
       <div className="flex items-center gap-1.5 text-muted-foreground">
         <Icon className="h-3.5 w-3.5" />
         <span className="text-[11px] font-semibold uppercase tracking-wide">{label}</span>
@@ -68,7 +75,7 @@ function DurationStepper({
           onClick={() => onChange(clamp(value - step, min, max))}
           disabled={disabled || value <= min}
           aria-label={`Diminuer ${label}`}
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-card text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-accent-foreground active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
         >
           <Minus className="h-4 w-4" />
         </button>
@@ -81,7 +88,7 @@ function DurationStepper({
           onClick={() => onChange(clamp(value + step, min, max))}
           disabled={disabled || value >= max}
           aria-label={`Augmenter ${label}`}
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-card text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-accent-foreground active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -93,7 +100,6 @@ function DurationStepper({
 export function StudyDashboard() {
   const { toast } = useToast();
 
-  // 👈 ربط العداد مباشرة مع الـ Context العالمي لتتم المزامنة تلقائياً مع الـ Topbar
   // currentCycle/currentMode also live in the Provider now (not local state
   // here) — see PomodoroProvider.tsx's own comment on PomodoroContextType:
   // this is what makes the Topbar widget's and PomodoroStudyBanner's own
@@ -191,7 +197,6 @@ export function StudyDashboard() {
   }
 
   const totalPhaseSeconds = (currentMode === "study" ? studyDuration : breakDuration) * 60;
-  // استخدام الـ seconds القادم من الـ Provider العالمي
   const progress = totalPhaseSeconds > 0 ? 1 - (seconds % totalPhaseSeconds) / totalPhaseSeconds : 0;
 
   const radius = 92;
@@ -209,9 +214,19 @@ export function StudyDashboard() {
         </div>
       )}
 
-      {/* Centralized Pomodoro Timer */}
-      <Card className="p-6 sm:p-10">
-        <div className="flex flex-col items-center gap-6">
+      {/* Centralized Pomodoro Timer — glass chrome, ambient glow that shifts
+          hue with study/break mode, a breathing ring-pulse behind the timer
+          while actively running (reuses tailwind.config.ts's own
+          ring-pulse keyframe, already used for the animated brand mark). */}
+      <Card className="glass-card relative overflow-hidden p-6 shadow-glass dark:shadow-glass-dark sm:p-10">
+        <div
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl transition-colors duration-700",
+            isStudyMode ? "bg-primary-400/20" : "bg-amber-400/25"
+          )}
+        />
+        <div className="relative flex flex-col items-center gap-6">
           <div
             className={cn(
               "inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition-colors duration-300",
@@ -226,7 +241,16 @@ export function StudyDashboard() {
 
           {/* Circular progress ring */}
           <div className="relative flex w-[220px] max-w-full items-center justify-center">
-            <svg width="100%" height="100%" viewBox="0 0 220 220" className="-rotate-90">
+            {isRunning && (
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute inset-0 -m-4 animate-ring-pulse rounded-full",
+                  isStudyMode ? "bg-primary-400/20" : "bg-amber-400/20"
+                )}
+              />
+            )}
+            <svg width="100%" height="100%" viewBox="0 0 220 220" className="relative -rotate-90">
               <circle cx={110} cy={110} r={radius} fill="none" strokeWidth={12} className="stroke-muted" />
               <circle
                 cx={110}
@@ -255,8 +279,11 @@ export function StudyDashboard() {
               type="button"
               onClick={handleToggleRunning}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white shadow-sm transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                isRunning ? "bg-amber-500 hover:bg-amber-600" : "bg-primary-600 hover:bg-primary-700"
+                "flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-bold text-white shadow-md transition-all duration-200 active:scale-95",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                isRunning
+                  ? "bg-amber-500 hover:bg-amber-600 hover:shadow-[0_0_25px_rgba(245,158,11,0.45)]"
+                  : "bg-primary-600 hover:bg-primary-700 hover:shadow-[0_0_25px_rgba(20,184,166,0.45)]"
               )}
             >
               {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
@@ -266,7 +293,7 @@ export function StudyDashboard() {
             <button
               type="button"
               onClick={handleReset}
-              className="flex items-center gap-2 rounded-xl bg-muted px-6 py-3 text-sm font-bold text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-accent-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="flex items-center gap-2 rounded-full bg-muted px-6 py-3.5 text-sm font-bold text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-accent-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <RotateCcw className="h-4 w-4" />
               Réinitialiser
@@ -275,7 +302,7 @@ export function StudyDashboard() {
         </div>
 
         {/* Duration / cycles settings */}
-        <div className="mt-8 flex flex-col gap-3 border-t border-border pt-6 sm:flex-row">
+        <div className="relative mt-8 flex flex-col gap-3 border-t border-border/60 pt-6 sm:flex-row">
           <DurationStepper
             label="Étude"
             icon={BookOpenCheck}
@@ -311,17 +338,23 @@ export function StudyDashboard() {
         </div>
       </Card>
 
-      {/* Mocked time-tracking stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {MOCK_STATS.map((stat) => (
-          <Card key={stat.label} className="p-5 text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Temps d&apos;étude — {stat.label}
-            </p>
-            <p className="mt-1 text-2xl font-black text-foreground">{stat.value}</p>
-          </Card>
-        ))}
-      </div>
+      {/* Real, honest stat — replaces the previous 3-card fake "Aujourd'hui
+          / Cette semaine / Ce mois" breakdown: no backend tracks a per-day/
+          week/month history, only this running total since the last reset
+          (see PomodoroProvider.tsx). Showing a fabricated period split would
+          have been actively misleading, so this shows the one number that's
+          actually real instead. */}
+      <Card className="glass-card flex items-center gap-4 p-5 shadow-soft">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+          <Timer className="h-5 w-5" />
+        </span>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Temps de concentration — depuis la dernière réinitialisation
+          </p>
+          <p className="mt-0.5 text-2xl font-black text-foreground">{formatHoursMinutes(seconds)}</p>
+        </div>
+      </Card>
     </div>
   );
 }

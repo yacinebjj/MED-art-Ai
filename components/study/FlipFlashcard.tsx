@@ -244,14 +244,14 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
             )}
           >
             {/* Front — Question */}
-            <div className="[grid-area:1/1] flex flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-card p-6 text-center text-card-foreground shadow-sm [backface-visibility:hidden]">
+            <div className="glass-card [grid-area:1/1] flex flex-col items-center justify-center gap-3 rounded-2xl p-6 text-center text-card-foreground shadow-glass dark:shadow-glass-dark [backface-visibility:hidden]">
               <span className="text-[10px] font-black uppercase tracking-wide text-muted-foreground">{tStudyTools("questionLabel", language)}</span>
               <p className="text-base font-semibold leading-relaxed">{item.question}</p>
               <span className="mt-2 text-[10px] text-muted-foreground/70">{tStudyTools("frontHint", language)}</span>
             </div>
 
             {/* Back — Answer */}
-            <div className="[grid-area:1/1] flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-primary bg-card p-6 text-center text-card-foreground shadow-sm [backface-visibility:hidden] [transform:rotateY(180deg)]">
+            <div className="glass-card [grid-area:1/1] flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-primary/60 p-6 text-center text-card-foreground shadow-glass dark:shadow-glass-dark [backface-visibility:hidden] [transform:rotateY(180deg)]">
               <span className="text-[10px] font-black uppercase tracking-wide text-primary-700 dark:text-primary-300">{tStudyTools("answerLabel", language)}</span>
               <p className="text-base font-medium leading-relaxed">{item.answer}</p>
               <span className="mt-2 text-[10px] text-muted-foreground/70">{tStudyTools("backHint", language)}</span>
