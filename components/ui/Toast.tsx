@@ -6,16 +6,22 @@ import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 
 type ToastVariant = "success" | "error" | "info";
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastItem {
   id: number;
   variant: ToastVariant;
   title: string;
   description?: string;
   duration: number;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  toast: (input: { variant?: ToastVariant; title: string; description?: string }) => void;
+  toast: (input: { variant?: ToastVariant; title: string; description?: string; action?: ToastAction }) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -61,10 +67,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toast = useCallback<ToastContextValue["toast"]>(
-    ({ variant = "info", title, description }) => {
+    ({ variant = "info", title, description, action }) => {
       const id = nextId++;
       const duration = VARIANT_CONFIG[variant].duration;
-      setToasts((current) => [...current, { id, variant, title, description, duration }]);
+      setToasts((current) => [...current, { id, variant, title, description, duration, action }]);
       setTimeout(() => dismiss(id), duration);
     },
     [dismiss]
@@ -100,6 +106,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   <p className="text-sm font-semibold text-foreground">{item.title}</p>
                   {item.description && (
                     <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{item.description}</p>
+                  )}
+                  {item.action && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        item.action?.onClick();
+                        dismiss(item.id);
+                      }}
+                      className="mt-1.5 text-xs font-bold uppercase tracking-wide text-primary hover:underline"
+                    >
+                      {item.action.label}
+                    </button>
                   )}
                 </div>
                 <button
