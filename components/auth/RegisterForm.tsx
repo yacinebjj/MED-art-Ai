@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { MailCheck } from "lucide-react";
+import { ArrowRight, GraduationCap, Lock, Mail, MailCheck, User } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
@@ -227,88 +227,129 @@ export function RegisterForm() {
     toast({ variant: "info", title: INTERN_YEAR_LOCKED_MESSAGE });
   }
 
+  // Purely cosmetic grouping/stagger — no step logic, every field still
+  // submits together in one handleSubmit call above. Splits the previously
+  // flat 6-field list into two labeled sections ("Tes informations" / "Ton
+  // cursus") so the form reads as structured progress rather than one long
+  // undifferentiated stack.
+  const sectionVariants = {
+    hidden: { opacity: 0, y: 12 },
+    visible: { opacity: 1, y: 0 },
+  };
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <motion.form
+      onSubmit={handleSubmit}
+      className="space-y-6"
+      initial="hidden"
+      animate="visible"
+      variants={{ visible: { transition: { staggerChildren: 0.08 } } }}
+    >
       {error && (
         <div className="animate-in fade-in-0 slide-in-from-top-1 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive duration-200">
           {error}
         </div>
       )}
 
-      <Input
-        label={tAuth("fullNameLabel", language)}
-        name="fullName"
-        placeholder={tAuth("fullNamePlaceholder", language)}
-        required
-        value={form.fullName}
-        onChange={(e) => update("fullName", e.target.value)}
-      />
+      <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="space-y-4">
+        <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+          <User className="h-3.5 w-3.5" />
+          {language === "fr" ? "Tes informations" : "Your information"}
+        </p>
 
-      <Input
-        label="Adresse e-mail"
-        name="email"
-        type="email"
-        placeholder="prenom.nom@etu.univ-dz.org"
-        required
-        value={form.email}
-        onChange={(e) => update("email", e.target.value)}
-      />
-
-      <Input
-        label={tAuth("passwordLabel", language)}
-        name="password"
-        type="password"
-        placeholder="8 caractères minimum"
-        required
-        minLength={8}
-        value={form.password}
-        onChange={(e) => update("password", e.target.value)}
-      />
-
-      <Select
-        label="Faculté (Algérie)"
-        name="university"
-        placeholder={tAuth("facultyPlaceholder", language)}
-        options={FACULTY_OPTIONS}
-        required
-        value={form.university}
-        onValueChange={(value) => update("university", value)}
-      />
-
-      <div className="grid grid-cols-2 gap-4">
-        <Select
-          label={tAuth("specialtyLabel", language)}
-          name="specialty"
-          placeholder="Choisis"
-          options={specialtyOptions}
+        <Input
+          icon={<User className="h-4 w-4" />}
+          label={tAuth("fullNameLabel", language)}
+          name="fullName"
+          placeholder={tAuth("fullNamePlaceholder", language)}
           required
-          value={specialtyId != null ? String(specialtyId) : ""}
-          onValueChange={handleSpecialtyChange}
+          value={form.fullName}
+          onChange={(e) => update("fullName", e.target.value)}
         />
 
-        <Select
-          label={tAuth("yearLabel", language)}
-          name="academicYear"
-          placeholder="Choisis"
-          options={yearOptions}
+        <Input
+          icon={<Mail className="h-4 w-4" />}
+          label="Adresse e-mail"
+          name="email"
+          type="email"
+          placeholder="prenom.nom@etu.univ-dz.org"
           required
-          disabled={specialtyId == null || yearsLoading}
-          value={academicYearId != null ? String(academicYearId) : ""}
-          onValueChange={handleYearChange}
-          onDisabledOptionClick={handleDisabledYearClick}
+          value={form.email}
+          onChange={(e) => update("email", e.target.value)}
         />
-      </div>
 
-      <Button type="submit" className="w-full" size="lg" isLoading={isLoading}>
-        Créer mon compte
-      </Button>
+        <Input
+          icon={<Lock className="h-4 w-4" />}
+          label={tAuth("passwordLabel", language)}
+          name="password"
+          type="password"
+          placeholder="8 caractères minimum"
+          required
+          minLength={8}
+          value={form.password}
+          onChange={(e) => update("password", e.target.value)}
+        />
+      </motion.div>
 
-      <p className="text-center text-sm text-muted-foreground">
-        Déjà inscrit ?{" "}
-        <Link href="/login" className="font-medium text-primary hover:underline">
-          Connecte-toi
-        </Link>
-      </p>
-    </form>
+      <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="space-y-4">
+        <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+          <GraduationCap className="h-3.5 w-3.5" />
+          {language === "fr" ? "Ton cursus" : "Your program"}
+        </p>
+
+        <Select
+          label="Faculté (Algérie)"
+          name="university"
+          placeholder={tAuth("facultyPlaceholder", language)}
+          options={FACULTY_OPTIONS}
+          required
+          value={form.university}
+          onValueChange={(value) => update("university", value)}
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+          <Select
+            label={tAuth("specialtyLabel", language)}
+            name="specialty"
+            placeholder="Choisis"
+            options={specialtyOptions}
+            required
+            value={specialtyId != null ? String(specialtyId) : ""}
+            onValueChange={handleSpecialtyChange}
+          />
+
+          <Select
+            label={tAuth("yearLabel", language)}
+            name="academicYear"
+            placeholder="Choisis"
+            options={yearOptions}
+            required
+            disabled={specialtyId == null || yearsLoading}
+            value={academicYearId != null ? String(academicYearId) : ""}
+            onValueChange={handleYearChange}
+            onDisabledOptionClick={handleDisabledYearClick}
+          />
+        </div>
+      </motion.div>
+
+      <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}>
+        <Button
+          type="submit"
+          className="group relative w-full overflow-hidden shadow-[0_0_25px_rgba(20,184,166,0.35)] transition-shadow duration-300 hover:shadow-[0_0_40px_rgba(20,184,166,0.5)]"
+          size="lg"
+          isLoading={isLoading}
+        >
+          Créer mon compte
+          <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+        </Button>
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Déjà inscrit ?{" "}
+          <Link href="/login" className="font-medium text-primary hover:underline">
+            Connecte-toi
+          </Link>
+        </p>
+      </motion.div>
+    </motion.form>
   );
 }

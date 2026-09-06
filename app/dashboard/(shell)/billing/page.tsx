@@ -4,13 +4,14 @@ import { Suspense, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, XCircle, CreditCard, Clock, BookOpenText, GraduationCap, Sparkles, Receipt } from "lucide-react";
-import { PlanCard } from "@/components/billing/PlanCard";
 import { Card } from "@/components/ui/Card";
 import { MotionCard } from "@/components/ui/MotionCard";
 import { RevealSection } from "@/components/ui/RevealSection";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { PLANS, type PlanId } from "@/lib/pricing";
+import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
+import { PricingTierCard } from "@/components/pricing/PricingTierCard";
+import { PLANS, getPlansForCycle, formatDZD, type PlanId, type BillingCycle } from "@/lib/pricing";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tSettings } from "@/lib/translations/settings";
@@ -98,6 +99,7 @@ function BillingPageContent() {
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [plansOpen, setPlansOpen] = useState(false);
+  const [cycle, setCycle] = useState<BillingCycle>("annual");
 
   useEffect(() => {
     if (!user) return;
@@ -184,7 +186,7 @@ function BillingPageContent() {
             </div>
 
             <p className="mt-4">
-              <span className="text-2xl font-medium text-foreground">{currentPlan.priceDZD.toLocaleString("fr-FR")} DZD</span>
+              <span className="text-2xl font-medium text-foreground">{formatDZD(currentPlan.priceDZD)}</span>
               <span className="text-xs text-muted-foreground"> / {formatBillingCycle(currentPlan.durationMonths)}</span>
             </p>
 
@@ -234,16 +236,45 @@ function BillingPageContent() {
 
       {plansOpen && (
         <RevealSection>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {Object.values(PLANS).map((plan) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                isCurrentPlan={subscription?.effectivePlan === plan.id}
-                isLoading={loadingPlan === plan.id}
-                onSubscribe={() => handleSubscribe(plan.id)}
-              />
-            ))}
+          <div className="flex justify-center">
+            <BillingCycleToggle value={cycle} onChange={setCycle} />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+            {getPlansForCycle(cycle).map((plan) => {
+              const isCurrentPlan = subscription?.effectivePlan === plan.id;
+              return (
+                <PricingTierCard
+                  key={plan.id}
+                  plan={plan}
+                  ctaSlot={
+                    <Button
+                      size="lg"
+                      variant={isCurrentPlan ? "outline" : plan.featured ? "primary" : "outline"}
+                      className="mt-6 w-full"
+                      onClick={() => handleSubscribe(plan.id)}
+                      isLoading={loadingPlan === plan.id}
+                      disabled={loadingPlan !== null}
+                    >
+                      {isCurrentPlan ? "Renouveler" : "Souscrire"}
+                    </Button>
+                  }
+                >
+                  {/* No real per-tier gating exists yet server-side (multi-seat
+                      Groupe invites, Promo Cohorte verification are both still
+                      front-end previews — see app/pricing/page.tsx and its own
+                      components) — a real Chargily charge happens here for
+                      ANY of these 3 tiers regardless, so this is an honest
+                      disclaimer rather than a fake interactive "verify" gate
+                      that would just be theater in front of real money. */}
+                  {plan.tier === "promo" && (
+                    <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300">
+                      Tarif réservé aux cohortes universitaires — une vérification de ton éligibilité pourra t&apos;être demandée.
+                    </p>
+                  )}
+                </PricingTierCard>
+              );
+            })}
           </div>
         </RevealSection>
       )}
@@ -291,7 +322,7 @@ function BillingPageContent() {
                         </Badge>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {invoice.amountDZD.toLocaleString("fr-FR")} DZD
+                        {formatDZD(invoice.amountDZD)}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2">
                         <button type="button" disabled title={tSettings("comingSoon", language)} className="font-medium text-muted-foreground underline underline-offset-2 opacity-50">

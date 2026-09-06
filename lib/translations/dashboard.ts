@@ -8,7 +8,12 @@ import type { Language } from "@/providers/LanguageProvider";
 export const DASHBOARD_TRANSLATIONS = {
   // DashboardHero.tsx — {name} interpolated by the caller (String.replace),
   // same pattern as lib/translations/workspaceSynthesis.ts's own {n}/{cached}.
+  // Time-of-day variant picked client-side (see getHeroGreetingKey below) —
+  // heroGreeting itself is kept as the safe, hydration-stable SSR default.
   heroGreeting: { fr: "Bonjour Dr. {name} 👋", en: "Hello Dr. {name} 👋" },
+  heroGreetingMorning: { fr: "Bonjour Dr. {name} ☀️", en: "Good morning Dr. {name} ☀️" },
+  heroGreetingAfternoon: { fr: "Bon après-midi Dr. {name} 👋", en: "Good afternoon Dr. {name} 👋" },
+  heroGreetingEvening: { fr: "Bonsoir Dr. {name} 🌙", en: "Good evening Dr. {name} 🌙" },
   heroWelcomeWithYear: {
     fr: "Bienvenue dans ton espace de {year} — choisis une unité, un module indépendant, ou ajoute un cours indépendant.",
     en: "Welcome to your {year} workspace — choose a teaching unit, an independent module, or add an independent course.",
@@ -52,4 +57,11 @@ export const DASHBOARD_TRANSLATIONS = {
 
 export function tDashboard(key: keyof typeof DASHBOARD_TRANSLATIONS, language: Language): string {
   return DASHBOARD_TRANSLATIONS[key][language];
+}
+
+/** Real-time personalization (Spotify/Google-Dashboard-style "good evening"), not fabricated data — just the visitor's own local hour. Called client-side only (see DashboardHero's own useEffect) to avoid an SSR/client hydration mismatch on the very first paint. */
+export function getHeroGreetingKey(hour: number): "heroGreetingMorning" | "heroGreetingAfternoon" | "heroGreetingEvening" {
+  if (hour < 12) return "heroGreetingMorning";
+  if (hour < 18) return "heroGreetingAfternoon";
+  return "heroGreetingEvening";
 }

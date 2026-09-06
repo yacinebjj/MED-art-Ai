@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AnimatedBrandMark } from "@/components/layout/AnimatedBrandMark";
 import { useLanguage } from "@/providers/LanguageProvider";
-import { tDashboard } from "@/lib/translations/dashboard";
+import { tDashboard, getHeroGreetingKey } from "@/lib/translations/dashboard";
 
 interface DashboardHeroProps {
   firstName: string;
@@ -97,6 +98,14 @@ function HeroMascot({ className }: { className?: string }) {
  */
 export function DashboardHero({ firstName, academicYearName }: DashboardHeroProps) {
   const { language } = useLanguage();
+  // Client-only (see getHeroGreetingKey's own comment on why the initial
+  // render always uses the static "heroGreeting" default rather than reading
+  // `new Date()` directly during render).
+  const [greetingKey, setGreetingKey] = useState<"heroGreeting" | "heroGreetingMorning" | "heroGreetingAfternoon" | "heroGreetingEvening">("heroGreeting");
+  useEffect(() => {
+    setGreetingKey(getHeroGreetingKey(new Date().getHours()));
+  }, []);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -109,7 +118,7 @@ export function DashboardHero({ firstName, academicYearName }: DashboardHeroProp
         <AnimatedBrandMark size="md" className="hidden sm:flex" />
         <div className="min-w-0">
           <h1 className="break-words text-base font-bold tracking-tight text-foreground sm:text-xl lg:text-2xl">
-            {tDashboard("heroGreeting", language).replace("{name}", firstName)}
+            {tDashboard(greetingKey, language).replace("{name}", firstName)}
           </h1>
           <p className="mt-0.5 hidden text-sm text-muted-foreground sm:block">
             {academicYearName

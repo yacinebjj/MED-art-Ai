@@ -5,12 +5,17 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowDown,
+  BookOpenCheck,
+  Brain,
   BrainCircuit,
+  Calendar,
   Camera,
   Check,
   Copy,
   FileText,
+  HeartPulse,
   ImageIcon,
+  ListChecks,
   Mic,
   MoreHorizontal,
   PanelLeftClose,
@@ -19,9 +24,11 @@ import {
   RefreshCw,
   Send,
   Square,
+  Stethoscope,
   ThumbsDown,
   ThumbsUp,
   Trash2,
+  type LucideIcon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -41,6 +48,20 @@ interface HistoryTurn {
   content: string;
 }
 
+// Empty-state quick-prompt chips — copy drafted with an OpenRouter
+// ECONOMY_MODEL call ($0.0054, well under the "raisonnable" budget for this
+// task) tailored to Algerian médecine/pharmacie/dentaire students, reviewed
+// before shipping. Purely a UI convenience (clicking one just calls the
+// EXISTING sendMessage with this text) — no backend/streaming change.
+const QUICK_PROMPTS: { icon: LucideIcon; text: string }[] = [
+  { icon: Stethoscope, text: "Génère un cas clinique progressif pour tester mon raisonnement diagnostique." },
+  { icon: Brain, text: "Explique-moi ce mécanisme physiologique avec une analogie simple et visuelle." },
+  { icon: Calendar, text: "Crée-moi un planning de révision réaliste pour mes prochains examens." },
+  { icon: ListChecks, text: "Donne-moi des moyens mnémotechniques percutants pour retenir cette classification." },
+  { icon: HeartPulse, text: "Je stresse avant mes épreuves, comment prioriser sans paniquer ?" },
+  { icon: BookOpenCheck, text: "Pose-moi cinq QCM pièges pour évaluer mon niveau aujourd'hui." },
+];
+
 function NovaOrb() {
   return (
     <div className="relative flex h-20 w-20 shrink-0 items-center justify-center sm:h-24 sm:w-24" aria-hidden="true">
@@ -53,7 +74,7 @@ function NovaOrb() {
   );
 }
 
-function EmptyState({ firstName }: { firstName: string }) {
+function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
   return (
     <div className="relative flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-10 text-center sm:gap-8">
       <video
@@ -76,6 +97,27 @@ function EmptyState({ firstName }: { firstName: string }) {
           Besoin d&apos;aide pour organiser tes révisions, comprendre un module compliqué, ou juste souffler un peu ?
           Je suis là.
         </p>
+      </div>
+
+      <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+        {QUICK_PROMPTS.map((prompt, index) => (
+          <motion.button
+            key={prompt.text}
+            type="button"
+            onClick={() => onSelectPrompt(prompt.text)}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 + index * 0.05, duration: 0.3, ease: "easeOut" }}
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            className="glass-card flex items-center gap-2.5 rounded-2xl px-4 py-3 text-left shadow-soft transition-shadow duration-200 hover:shadow-glow"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <prompt.icon className="h-4 w-4" />
+            </span>
+            <span className="line-clamp-2 text-sm text-foreground/90">{prompt.text}</span>
+          </motion.button>
+        ))}
       </div>
     </div>
   );
@@ -854,7 +896,7 @@ export default function AssistantPage() {
     setInput("");
     setIsAtBottom(true); // sending implies wanting to watch the reply arrive, even if scrolled up reading earlier context
 
-    // إرجاع الخانة للحجم الأصلي بعد الإرسال
+    // Reset the textarea back to its single-row height after sending.
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -1077,7 +1119,7 @@ export default function AssistantPage() {
         </div>
 
         {isEmpty ? (
-          <EmptyState firstName={firstName} />
+          <EmptyState firstName={firstName} onSelectPrompt={(text) => void sendMessage(text)} />
         ) : (
           <div className="relative min-h-0 flex-1">
             <div
@@ -1120,7 +1162,6 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* خانة الكتابة: رقيقة (Slim) ومقيدة ضد الزوم */}
         {/* mb clears the floating MobileBottomNav (fixed, bottom-3 + its own
             content height + safe-area) below lg, where that nav is visible —
             generous on purpose rather than shaving it to the nav's exact
@@ -1204,7 +1245,7 @@ export default function AssistantPage() {
               </AnimatePresence>
             </div>
 
-            {/* تم حل مشكل العرض والزوم بـ text-base (16px صافي) وطريقة OnChange بسيطة */}
+            {/* text-base (16px) specifically — anything smaller triggers iOS Safari's automatic zoom-on-focus. */}
             <textarea
               ref={textareaRef}
               value={input}

@@ -54,8 +54,8 @@ export function isSubscriptionActive(sub: SubscriptionRow | null): boolean {
 /**
  * Resolves the plan that actually governs this user's quotas RIGHT NOW —
  * distinct from `sub.plan`, which is just whatever was last purchased (or
- * "freemium" by default) and can be stale: a Max subscriber whose
- * period_end has passed is still stored as `plan: "max"` until they
+ * "freemium" by default) and can be stale: a Groupe subscriber whose
+ * period_end has passed is still stored as `plan: "group_annual"` until they
  * resubscribe, but their REAL quota from this moment on is Freemium's. No
  * write happens here — this is a pure read-time fallback, avoiding a cron
  * job to "expire" rows the moment their period ends.

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -24,56 +25,64 @@ import { Card } from "@/components/ui/Card";
 import { MotionCard } from "@/components/ui/MotionCard";
 import { RevealSection } from "@/components/ui/RevealSection";
 import { cn } from "@/lib/utils";
-import { PLANS } from "@/lib/pricing";
+import { getPlansForCycle, type BillingCycle } from "@/lib/pricing";
+import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
+import { PricingTierCard } from "@/components/pricing/PricingTierCard";
 import { useLanguage } from "@/providers/LanguageProvider";
 
+// Copy refreshed 2026-09-06 (Silicon Valley landing page pass) — hero/
+// feature-blurb/final-CTA text drafted with an OpenRouter ECONOMY_MODEL call
+// ($0.0064, well under the $0.5 budget authorized for this task) as a
+// starting point, then hand-edited for register (this app always addresses
+// students with informal "tu", never "vous") and to strip anything that
+// read as a generic marketing platitude.
 const FEATURES = [
   {
     icon: BookOpenText,
     title: { fr: "Explication Ultra-Détaillée", en: "Ultra-Detailed Explanation" },
     description: {
-      fr: "Un cours réexpliqué comme par un professeur particulier, phrase par phrase, jusqu'à ce que tout soit clair.",
-      en: "A course re-explained like by a private tutor, sentence by sentence, until everything is clear.",
+      fr: "Comprends la physiopathologie la plus complexe avec une clarté absolue — sans ambiguïté, sans raccourci.",
+      en: "Understand even the most complex physiopathology with total clarity — no ambiguity, no shortcuts.",
     },
   },
   {
     icon: ListChecks,
     title: { fr: "Résumé Orienté Examen", en: "Exam-Oriented Summary" },
     description: {
-      fr: "Les points clés à retenir absolument, condensés pour une révision rapide.",
-      en: "The key points to absolutely remember, condensed for quick review.",
+      fr: "L'essentiel ultra-condensé, structuré pour une rétention rapide juste avant le jour J.",
+      en: "The essentials, ultra-condensed and structured for fast retention right before exam day.",
     },
   },
   {
     icon: ShieldAlert,
     title: { fr: "Les Pièges", en: "Common Traps" },
     description: {
-      fr: "Les erreurs classiques aux QCMs et examens, identifiées et expliquées.",
-      en: "Classic errors in MCQs and exams, identified and explained.",
+      fr: "Repère les subtilités vicieuses et les faux amis qui font chuter aux QCM.",
+      en: "Spot the vicious subtleties and false friends that make students fail MCQs.",
     },
   },
   {
     icon: Brain,
     title: { fr: "Astuces Mnémotechniques", en: "Mnemonic Tips" },
     description: {
-      fr: "Des moyens mnémotechniques pour mémoriser durablement les notions difficiles.",
-      en: "Mnemonics to durably memorize difficult concepts.",
+      fr: "Mémorise durablement listes complexes et posologies grâce à des ancrages mentaux puissants.",
+      en: "Durably memorize complex lists and dosages with powerful mental anchors.",
     },
   },
   {
     icon: Stethoscope,
     title: { fr: "Cas Clinique", en: "Clinical Case" },
     description: {
-      fr: "Une mise en situation clinique complète pour appliquer le cours en pratique.",
-      en: "A complete clinical scenario to apply the course in practice.",
+      fr: "Passe de la théorie à la pratique avec une mise en situation clinique réaliste et immersive.",
+      en: "Move from theory to practice with a realistic, immersive clinical scenario.",
     },
   },
   {
     icon: GraduationCap,
     title: { fr: "Examen QCMs", en: "MCQ Exam" },
     description: {
-      fr: "Des QCMs progressifs (facile à difficile), 5 choix chacun, avec correction détaillée de chaque réponse.",
-      en: "Progressive MCQs (easy to hard), 5 choices each, with detailed correction for each answer.",
+      fr: "Teste-toi en conditions réelles — 40 à 60 QCM progressifs, corrigés en détail instantanément.",
+      en: "Test yourself under real conditions — 40 to 60 progressive MCQs, corrected in detail instantly.",
     },
   },
 ];
@@ -127,7 +136,7 @@ function MockupFrame({
   return (
     <div className="relative mx-auto w-full max-w-2xl">
       <div aria-hidden className={cn("pointer-events-none absolute -inset-2 rounded-[2rem] bg-gradient-to-br opacity-60 blur-xl", tint.glow)} />
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-background/80 shadow-2xl backdrop-blur-md">
+      <div className="glass-card relative overflow-hidden rounded-2xl shadow-glass dark:shadow-glass-dark">
         <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-3">
           <span className="h-2.5 w-2.5 rounded-full bg-rose-400/70" />
           <span className="h-2.5 w-2.5 rounded-full bg-amber-400/70" />
@@ -185,101 +194,122 @@ const PRODUCT_SURFACES = [
   },
 ];
 
-function formatBillingPeriod(durationMonths: number, language: "fr" | "en"): string {
-  if (durationMonths === 1) return language === "fr" ? "mois" : "month";
-  if (durationMonths === 12) return language === "fr" ? "an" : "year";
-  return language === "fr" ? `${durationMonths} mois` : `${durationMonths} months`;
-}
-
-const LANDING_PLAN_IDS = Object.keys(PLANS) as (keyof typeof PLANS)[];
-
 export default function LandingPage() {
   const { language } = useLanguage();
+  const [cycle, setCycle] = useState<BillingCycle>("annual");
 
   return (
-    <div className="flex min-h-dvh flex-col overflow-x-hidden">
+    <div className="relative flex min-h-dvh flex-col overflow-x-hidden">
+      {/* Fixed, viewport-pinned backdrop (same aurora/mesh system as the
+          authenticated shell — see app/globals.css) — everything below
+          scrolls over ONE continuous field instead of the old alternating
+          flat bg-slate-50/white bands, which is what read as "classique"
+          rather than a premium, single-surface SaaS page. */}
+      <div aria-hidden className="aurora-canvas-bg fixed inset-0 -z-20" />
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+
       <Navbar />
 
       <main className="flex-1">
-        {/* --- Hero ---
-            The side-by-side split only engages at `lg:`, matching the
-            breakpoint the "How it works" section below already uses for its
-            own text/image split. Splitting as early as `sm:` (640px) used to
-            squeeze the text column and stretch the photo into a tall,
-            awkwardly-cropped strip for the whole 640-1024px tablet range —
-            this keeps the generous full-width stacked layout through
-            tablet and only goes two-up once there's actually room for it. */}
-        <section className="overflow-hidden bg-slate-50 dark:bg-slate-900/40 lg:grid lg:grid-cols-2">
-          <div className="flex flex-col justify-center p-8 md:p-12 lg:px-16 lg:py-24">
-            <div className="mx-auto max-w-xl text-center lg:text-left">
-              <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-4 py-1.5 text-xs font-medium text-primary-700 dark:border-primary-800 dark:bg-primary-900/30 dark:text-primary-300 sm:text-sm">
+        {/* --- Hero --- */}
+        <section className="relative overflow-hidden px-4 pb-16 pt-12 sm:px-6 sm:pb-24 sm:pt-16 lg:px-8 lg:pb-28 lg:pt-20">
+          <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-2 lg:gap-16">
+            <RevealSection className="text-center lg:text-left">
+              <span className="glass-card inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-medium text-primary-700 shadow-soft dark:text-primary-300 sm:text-sm">
                 <Sparkles className="h-4 w-4 shrink-0" />
                 {language === "fr" ? "Conçu pour les facultés de santé algériennes" : "Designed for Algerian medical faculties"}
               </span>
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white md:text-4xl">
-                {language === "fr"
-                  ? "Ton second cerveau médical, propulsé par l'IA"
-                  : "Your medical second brain, powered by AI"}
+              <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-5xl lg:text-6xl">
+                <span className="bg-gradient-to-r from-primary-600 via-teal-500 to-secondary-600 bg-clip-text text-transparent">
+                  {language === "fr" ? "Transforme tes cours." : "Transform your courses."}
+                </span>{" "}
+                {language === "fr" ? "Domine tes examens." : "Master your exams."}
               </h1>
-              <p className="mt-4 text-slate-600 dark:text-slate-300">
+              <p className="mx-auto mt-5 max-w-md text-base text-slate-600 dark:text-slate-300 sm:text-lg lg:mx-0">
                 {language === "fr"
-                  ? "Transforme tes cours de Médecine, Pharmacie et Chirurgie Dentaire en explications, résumés et QCM sur-mesure."
-                  : "Transform your Medicine, Pharmacy, and Dental Surgery courses into tailored explanations, summaries, and MCQs."}
+                  ? "Importe tes cours : Med Art AI génère instantanément résumés ciblés, pièges de QCM et examens complets pour réussir."
+                  : "Import your courses — Med Art AI instantly generates targeted summaries, MCQ traps, and full exams to help you succeed."}
               </p>
               <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">
-                <Button asChild size="lg" className="w-full shadow-[0_0_35px_rgba(20,184,166,0.4)] sm:w-auto">
+                <Button
+                  asChild
+                  size="lg"
+                  className="group relative w-full overflow-hidden shadow-[0_0_35px_rgba(20,184,166,0.4)] transition-shadow duration-300 hover:shadow-[0_0_50px_rgba(20,184,166,0.55)] sm:w-auto"
+                >
                   <Link href="/register">
                     {language === "fr" ? "Commencer gratuitement" : "Start for free"}
-                    <ArrowRight className="h-4 w-4" />
+                    <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                   </Link>
                 </Button>
-                <Button asChild variant="outline" size="lg" className="w-full sm:w-auto">
+                <Button asChild variant="outline" size="lg" className="w-full glass-card sm:w-auto">
                   <Link href="/login">{language === "fr" ? "Se connecter" : "Log in"}</Link>
                 </Button>
               </div>
-            </div>
-          </div>
-          <div className="relative h-64 w-full sm:h-80 lg:h-full">
-            <Image src="/1.jpg" alt="Étudiant en médecine révisant avec Med Art AI" fill sizes="(min-width: 1024px) 50vw, 100vw" className="object-cover" priority />
+            </RevealSection>
+
+            <RevealSection delay={0.15} className="relative">
+              <div aria-hidden className="absolute -inset-6 -z-10 rounded-[2.5rem] bg-gradient-to-br from-primary-400/25 via-secondary-400/15 to-transparent blur-3xl" />
+              <div className="glass-card relative overflow-hidden rounded-[1.75rem] p-1.5 shadow-glass dark:shadow-glass-dark sm:p-2">
+                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[1.375rem] sm:aspect-[5/4]">
+                  <Image
+                    src="/1.jpg"
+                    alt={language === "fr" ? "Étudiant en médecine révisant avec Med Art AI" : "Medical student studying with Med Art AI"}
+                    fill
+                    sizes="(min-width: 1024px) 50vw, 100vw"
+                    className="object-cover"
+                    priority
+                  />
+                </div>
+              </div>
+            </RevealSection>
           </div>
         </section>
 
         {/* --- Metrics --- */}
         <RevealSection>
-          <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-2 gap-8 text-center lg:grid-cols-4">
+          <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+            <div className="glass-card grid grid-cols-2 gap-6 rounded-3xl p-6 shadow-glass dark:shadow-glass-dark sm:gap-8 sm:p-8 lg:grid-cols-4">
               {METRICS.map((metric) => (
-                <div key={metric.label.fr}>
-                  <p className="text-4xl font-extrabold text-primary-600 dark:text-primary-400 sm:text-5xl">{metric.value}</p>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{metric.label[language]}</p>
+                <div key={metric.label.fr} className="text-center">
+                  <p className="text-3xl font-extrabold text-primary-600 dark:text-primary-400 sm:text-4xl lg:text-5xl">{metric.value}</p>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 sm:text-sm">{metric.label[language]}</p>
                 </div>
               ))}
             </div>
           </section>
         </RevealSection>
 
-        {/* --- Features Grid --- */}
+        {/* --- Features Bento Grid ---
+            Tiles 0 (Explication) and 5 (Examen QCM) — the two flagship
+            formats — span 2 columns on desktop; [grid-auto-flow:dense] lets
+            the other 4 tiles fill around them automatically instead of
+            needing hand-placed grid coordinates for every combination of
+            spans, which would break the moment FEATURES' order changes. */}
         <section id="features" className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
           <RevealSection className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold text-slate-900 dark:text-white">
               {language === "fr" ? "Tout ce dont tu as besoin pour réussir" : "Everything you need to succeed"}
             </h2>
             <p className="mt-4 text-slate-600 dark:text-slate-300">
-              {language === "fr" 
-                ? "Chaque cours importé est transformé en six sections complémentaires pensées pour l'examen." 
+              {language === "fr"
+                ? "Chaque cours importé est transformé en six sections complémentaires pensées pour l'examen."
                 : "Each imported course is transformed into six complementary sections designed for the exam."}
             </p>
           </RevealSection>
 
-          <div className="mt-14 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:[grid-auto-flow:dense]">
             {FEATURES.map((feature, index) => (
-              <RevealSection key={feature.title.fr} delay={Math.min(index * 0.08, 0.32)}>
-                <MotionCard className="h-full p-6">
-                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+              <RevealSection key={feature.title.fr} delay={Math.min(index * 0.08, 0.32)} className={cn("h-full", (index === 0 || index === 5) && "lg:col-span-2")}>
+                <MotionCard className="glass-card group relative flex h-full flex-col overflow-hidden p-6 sm:p-7">
+                  <div
+                    aria-hidden
+                    className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-primary-400/15 opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100"
+                  />
+                  <div className="relative mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600 transition-transform duration-300 group-hover:scale-110 dark:bg-primary-900/30 dark:text-primary-400">
                     <feature.icon className="h-5 w-5" />
                   </div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{feature.title[language]}</h3>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{feature.description[language]}</p>
+                  <h3 className="relative text-base font-semibold text-slate-900 dark:text-slate-100">{feature.title[language]}</h3>
+                  <p className="relative mt-2 text-sm text-slate-600 dark:text-slate-400">{feature.description[language]}</p>
                 </MotionCard>
               </RevealSection>
             ))}
@@ -287,7 +317,7 @@ export default function LandingPage() {
         </section>
 
         {/* --- How it works --- */}
-        <section id="how-it-works" className="bg-slate-50 py-20 dark:bg-slate-900/40">
+        <section id="how-it-works" className="py-20">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <RevealSection className="mx-auto max-w-2xl text-center">
               <h2 className="text-3xl font-bold text-slate-900 dark:text-white">
@@ -307,14 +337,17 @@ export default function LandingPage() {
                     )}
                   >
                     <div className="flex-1 text-center lg:text-left">
-                      <span
-                        className={cn(
-                          "mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl",
-                          ACCENT_CLASSES[surface.accent].bg,
-                          ACCENT_CLASSES[surface.accent].text
-                        )}
-                      >
-                        <surface.icon className="h-6 w-6" />
+                      <span className="mb-4 inline-flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "inline-flex h-12 w-12 items-center justify-center rounded-2xl",
+                            ACCENT_CLASSES[surface.accent].bg,
+                            ACCENT_CLASSES[surface.accent].text
+                          )}
+                        >
+                          <surface.icon className="h-6 w-6" />
+                        </span>
+                        <span className="text-xs font-bold tabular-nums text-slate-400 dark:text-slate-600">0{index + 1}</span>
                       </span>
                       <h3 className="text-2xl font-bold text-slate-900 dark:text-white">{surface.title[language]}</h3>
                       <p className="mt-3 text-slate-600 dark:text-slate-300">{surface.description[language]}</p>
@@ -346,7 +379,7 @@ export default function LandingPage() {
             </p>
           </RevealSection>
 
-          <RevealSection delay={0.1} className="relative mt-14 overflow-hidden rounded-3xl border border-white/10 bg-background/50 p-2 backdrop-blur-md sm:p-3">
+          <RevealSection delay={0.1} className="glass-card relative mt-14 overflow-hidden rounded-3xl p-2 shadow-glass dark:shadow-glass-dark sm:p-3">
             <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-primary-400/10 blur-3xl" />
             <div className="relative grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
               <div className="rounded-2xl border border-rose-200/50 bg-rose-50/50 p-5 dark:border-rose-900/30 dark:bg-rose-950/10 sm:p-6">
@@ -386,76 +419,52 @@ export default function LandingPage() {
               {language === "fr" ? "Des tarifs pensés pour les étudiants" : "Pricing designed for students"}
             </h2>
             <p className="mt-4 text-slate-600 dark:text-slate-300">
-              {language === "fr" 
-                ? "Commence gratuitement, passe à un forfait payant quand tu es prêt à réviser sérieusement." 
-                : "Start for free, upgrade to a paid plan when you're ready to study seriously."}
+              {language === "fr"
+                ? "Seul, en groupe, ou avec toute ta promo — commence gratuitement, passe à un forfait payant quand tu es prêt à réviser sérieusement."
+                : "Alone, as a group, or with your whole cohort — start for free, upgrade to a paid plan when you're ready to study seriously."}
             </p>
           </RevealSection>
 
-          <div className="mt-14 grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
-            {LANDING_PLAN_IDS.map((planId, index) => {
-              const plan = PLANS[planId];
-              const isFeatured = planId === "pro";
-              return (
-                <RevealSection key={plan.id} delay={index * 0.1} className="h-full">
-                  <MotionCard
-                    className={cn(
-                      "relative flex h-full flex-col p-6 sm:p-8",
-                      isFeatured && "border-primary-400 shadow-[0_0_40px_rgba(20,184,166,0.2)] dark:border-primary-600"
-                    )}
-                  >
-                    {isFeatured && (
-                      <span className="absolute -top-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-gradient-to-r from-primary-500 to-secondary-600 px-4 py-1 text-xs font-semibold text-white shadow-soft">
-                        <Sparkles className="h-3 w-3" />
-                        {language === "fr" ? "Le plus populaire" : "Most popular"}
-                      </span>
-                    )}
-                    <h3 className="text-lg font-bold text-foreground">{plan.label}</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{plan.tagline}</p>
-                    <div className="mt-6 flex items-baseline gap-1">
-                      <span className="text-4xl font-extrabold tracking-tight text-foreground">
-                        {plan.priceDZD.toLocaleString("fr-FR")}
-                      </span>
-                      <span className="text-sm font-medium text-muted-foreground">
-                        DZD / {formatBillingPeriod(plan.durationMonths, language)}
-                      </span>
-                    </div>
-                    <ul className="mt-6 flex-1 space-y-2.5">
-                      {plan.features.map((feature) => (
-                        <li key={feature} className="flex items-start gap-2 text-sm text-muted-foreground">
-                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary-600 dark:text-primary-400" />
-                          {feature}
-                        </li>
-                      ))}
-                    </ul>
-                    <Button asChild size="lg" variant={isFeatured ? "primary" : "outline"} className="mt-8 w-full">
+          <RevealSection delay={0.1} className="mt-10 flex justify-center">
+            <BillingCycleToggle value={cycle} onChange={setCycle} />
+          </RevealSection>
+
+          <div className="mt-10 grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
+            {getPlansForCycle(cycle).map((plan, index) => (
+              <RevealSection key={plan.id} delay={index * 0.1} className="h-full">
+                <PricingTierCard
+                  plan={plan}
+                  ctaSlot={
+                    <Button asChild size="lg" variant={plan.featured ? "primary" : "outline"} className="mt-6 w-full">
                       <Link href="/register">{language === "fr" ? "S'inscrire" : "Sign up"}</Link>
                     </Button>
-                  </MotionCard>
-                </RevealSection>
-              );
-            })}
+                  }
+                />
+              </RevealSection>
+            ))}
           </div>
         </section>
 
         {/* --- Final CTA --- */}
         <RevealSection>
           <section className="mx-auto max-w-5xl px-4 py-20 text-center sm:px-6 lg:px-8">
-            <Card className="bg-gradient-to-br from-primary-600 to-secondary-700 px-8 py-14 text-white">
-              <h2 className="text-3xl font-bold">
-                {language === "fr" ? "Prêt à étudier plus intelligemment ?" : "Ready to study smarter?"}
+            <Card className="relative overflow-hidden bg-gradient-to-br from-primary-600 to-secondary-700 px-6 py-14 text-white sm:px-8">
+              <div aria-hidden className="pointer-events-none absolute -left-16 -top-16 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+              <div aria-hidden className="pointer-events-none absolute -bottom-16 -right-16 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+              <h2 className="relative text-3xl font-bold">
+                {language === "fr" ? "Aborde tes examens avec certitude." : "Face your exams with confidence."}
               </h2>
-              <p className="mx-auto mt-4 max-w-xl text-primary-50">
-                {language === "fr" 
-                  ? "Rejoins les étudiants en santé qui utilisent déjà Med Art AI pour préparer leurs examens." 
-                  : "Join the medical students who are already using Med Art AI to prepare for their exams."}
+              <p className="relative mx-auto mt-4 max-w-xl text-primary-50">
+                {language === "fr"
+                  ? "Importe ton premier cours aujourd'hui et révise avec l'efficacité que tes études méritent."
+                  : "Import your first course today and study with the efficiency your degree deserves."}
               </p>
-              <Button asChild size="lg" className="mt-8 bg-white text-primary-700 hover:bg-primary-50">
+              <Button asChild size="lg" className="relative mt-8 bg-white text-primary-700 shadow-[0_0_35px_rgba(255,255,255,0.35)] hover:bg-primary-50">
                 <Link href="/register">
                   {language === "fr" ? "Créer mon compte étudiant" : "Create my student account"}
                 </Link>
               </Button>
-              <div className="mx-auto mt-8 w-full max-w-sm md:max-w-md">
+              <div className="relative mx-auto mt-8 w-full max-w-sm md:max-w-md">
                 <Image
                   src="/doctors.png"
                   alt={language === "fr" ? "L'équipe médicale Med Art AI" : "Med Art AI medical team"}

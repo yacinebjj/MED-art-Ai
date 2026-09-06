@@ -109,6 +109,44 @@ update subscriptions set plan = 'annual' where plan = 'annuel';
 alter table subscriptions add constraint subscriptions_plan_check
   check (plan in ('freemium', 'basic', 'pro', 'max', 'semester', 'annual'));
 
+-- ---------------------------------------------------------------------------
+-- Migration: 6-plan model (freemium/basic/pro/max/semester/annual) -> the new
+-- 3-tier x 3-cycle model (Individuel/Groupe/Promo Cohorte, each billed at
+-- 1/4/12 mois), replacing basic/pro/max/semester/annual with 9 new PlanIds
+-- named "{tier}_{cycle}" (see lib/pricing.ts). Freemium is untouched — still
+-- the permanent, un-purchased default floor every account has from day one
+-- (unchanged handle_new_user() trigger further down still inserts it).
+--
+-- NOT YET APPLIED to any live database as of this edit — this file is this
+-- project's schema-as-code source of truth, but migrations here are applied
+-- manually (see this repo's own established pattern: several earlier blocks
+-- in this file were written before ever being run live). Whoever deploys
+-- this pricing change MUST run this block against the real database BEFORE
+-- or ATOMICALLY WITH shipping the new app/lib/pricing.ts — otherwise every
+-- real Chargily webhook trying to activate a subscription with one of the
+-- 9 new plan ids will be REJECTED by the OLD constraint below until this
+-- runs, silently failing every real payment in that window.
+--
+-- Existing rows still carrying a retired id are remapped to the closest
+-- Individuel equivalent (never to Groupe/Promo — those carry different
+-- semantics/pricing a past purchase never agreed to): same cadence where one
+-- exists (max/basic/pro were all monthly -> individual_monthly, annual ->
+-- individual_annual), closest available cadence otherwise (semester's 3
+-- months has no exact match in the new 1/4/12 lineup -> individual_quad, the
+-- nearest one up). One-time backfill — no new row will ever need it again.
+-- ---------------------------------------------------------------------------
+alter table subscriptions drop constraint if exists subscriptions_plan_check;
+update subscriptions set plan = 'individual_monthly' where plan in ('basic', 'pro', 'max');
+update subscriptions set plan = 'individual_quad' where plan = 'semester';
+update subscriptions set plan = 'individual_annual' where plan = 'annual';
+alter table subscriptions add constraint subscriptions_plan_check
+  check (plan in (
+    'freemium',
+    'individual_monthly', 'individual_quad', 'individual_annual',
+    'group_monthly', 'group_quad', 'group_annual',
+    'promo_monthly', 'promo_quad', 'promo_annual'
+  ));
+
 -- Highlight-chat quota, tracked alongside generations_used. Shares
 -- generations_period_start as its rollover clock (see
 -- lib/subscription.ts's ensureFreshUsagePeriod) rather than adding a second

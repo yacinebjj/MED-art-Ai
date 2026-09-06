@@ -11,11 +11,12 @@ import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcon
 import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { useAuth } from "@/providers/AuthProvider";
-import { useLanguage } from "@/providers/LanguageProvider"; // 👈 استيراد اللغة
+import { useLanguage } from "@/providers/LanguageProvider";
 import { tDashboard } from "@/lib/translations/dashboard";
 import type { CurriculumYearData } from "@/types/academic";
 
-// 👈 المقولات التحفيزية باللغتين
+// One random quote per mount, same index used for both languages so
+// toggling fr/en mid-session doesn't change which quote is shown.
 const MOTIVATIONAL_QUOTES = {
   fr: [
     "Le succès est la somme de petits efforts, répétés jour après jour. 🌟",
@@ -42,13 +43,12 @@ export default function DashboardPage() {
   const auth = useAuth() ?? {};
   const profile = auth.profile;
   const curriculumProfile = auth.curriculumProfile;
-  const { language } = useLanguage(); // 👈 جلب اللغة الحالية
+  const { language } = useLanguage();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [quoteIndex, setQuoteIndex] = useState(0);
 
   useEffect(() => {
-    // 👈 نختارو رقم مقولة باش تتبدل باللغتين نفس المقولة
     setQuoteIndex(Math.floor(Math.random() * MOTIVATIONAL_QUOTES.fr.length));
   }, []);
 

@@ -11,7 +11,11 @@ import { Button } from "@/components/ui/Button";
 const NAV_LINKS = [
   { href: "#features", label: "Fonctionnalités" },
   { href: "#how-it-works", label: "Comment ça marche" },
-  { href: "#tarifs", label: "Tarifs" },
+  // Points at the new dedicated pricing page (Individuel/Groupe/Promo
+  // Cohorte), not the homepage's own "#tarifs" anchor anymore — that
+  // in-page section still exists (real Chargily-wired plans) but is no
+  // longer what "Tarifs" navigates to from elsewhere on the site.
+  { href: "/pricing", label: "Tarifs" },
 ];
 
 export function Navbar() {
