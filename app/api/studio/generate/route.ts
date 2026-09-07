@@ -19,7 +19,11 @@ import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { reservePlatformCapacity } from "@/lib/platform-spend-guard";
 import { lookupStudioContentCache, recordStudioCacheHit, storeStudioContentCache, type StudioCacheLookupResult } from "@/lib/studio-content-cache";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
-import { runStudioExplicationDeltaPipeline, runStudioExplicationFreshGenerationWithTagging } from "@/lib/studio-explication-delta";
+import {
+  runStudioExplicationDeltaPipeline,
+  runStudioExplicationFreshGenerationWithTagging,
+  runStudioExplicationChunkedGeneration,
+} from "@/lib/studio-explication-delta";
 import { EXPLICATION_CHUNK_TAGGING_ADDENDUM } from "@/lib/prompts/public-course-sections";
 import { dispatchStudioGenerationPush } from "@/lib/push/dispatch";
 import type { JsonSectionId } from "@/lib/demo-content";
@@ -355,13 +359,25 @@ export async function POST(request: NextRequest) {
       // WITH chapter/chunk tagging so THIS course becomes a future
       // candidate for the next university's upload on the same topic.
       try {
-        const markdown = await runStudioExplicationFreshGenerationWithTagging(
-          courseId,
-          truncatedContext,
-          STUDIO_PROMPT_CONFIG.explication.systemPrompt,
-          EXPLICATION_CHUNK_TAGGING_ADDENDUM,
-          maxTokens
-        );
+        // A source past MAX_SOURCE_CHARS would otherwise be silently
+        // truncated by `truncatedContext` above before generation ever sees
+        // the rest of the course — confirmed in production ("the
+        // explanation looks complete but was built from a fraction of a
+        // large course"). Chunked generation reads `resolvedSourceText`
+        // (the FULL, untruncated source) directly instead, splitting it
+        // into sequential slices internally — see that function's own
+        // header comment for what it deliberately trades away (no
+        // cross-university chunk-tagging) to do this safely.
+        const markdown =
+          resolvedSourceText.length > MAX_SOURCE_CHARS
+            ? await runStudioExplicationChunkedGeneration(courseId, resolvedSourceText, STUDIO_PROMPT_CONFIG.explication.systemPrompt, maxTokens)
+            : await runStudioExplicationFreshGenerationWithTagging(
+                courseId,
+                truncatedContext,
+                STUDIO_PROMPT_CONFIG.explication.systemPrompt,
+                EXPLICATION_CHUNK_TAGGING_ADDENDUM,
+                maxTokens
+              );
         raw = JSON.stringify({ explication: markdown });
       } catch (error) {
         await refundGeneration(user.id);

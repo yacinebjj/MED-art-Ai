@@ -23,20 +23,23 @@
  * other cache/clone layer already in this codebase.
  *
  * MODEL POLICY: every OpenRouter call in this file — the delta-chapter/
- * wrapper calls below AND runStudioExplicationFreshGenerationWithTagging —
- * runs on CHEAP_MODEL (deepseek/deepseek-v3.2), no `reasoning` option set
- * (matching every other CHEAP_MODEL call site in lib/ai/openrouter.ts — see
- * that constant's own comment for the full tradeoff disclosure on this
- * switch away from ECONOMY_MODEL). There is no Sonnet fallback anywhere in
- * the Explication pipeline; the delta-chapter/wrapper calls used to omit
- * `model` entirely (silently defaulting to callOpenRouter's own global
- * Sonnet MODEL) — that default is not relied on here.
+ * wrapper calls below, runStudioExplicationFreshGenerationWithTagging, and
+ * runStudioExplicationChunkedGeneration — runs on CHEAP_MODEL
+ * (deepseek/deepseek-v3.2) with `reasoning: { effort: "low" }` (added after a
+ * real production truncation bug: DeepSeek V3.2 is a hidden-reasoning model,
+ * same category as ECONOMY_MODEL, and an uncapped reasoning effort silently
+ * burns most of `maxTokens` on invisible "thinking" before writing a single
+ * visible character — see CHEAP_MODEL's own comment in lib/ai/openrouter.ts).
+ * There is no Sonnet fallback anywhere in the Explication pipeline; the
+ * delta-chapter/wrapper calls used to omit `model` entirely (silently
+ * defaulting to callOpenRouter's own global Sonnet MODEL) — that default is
+ * not relied on here.
  */
 
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
 import { callOpenRouter, CHEAP_MODEL } from "@/lib/ai/openrouter";
-import { parseJsonResponse, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
+import { parseJsonResponse, MAX_SOURCE_CHARS, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
 import { buildExplicationDeltaChapterPrompt, buildExplicationWrapperPrompt } from "@/lib/prompts/public-course-sections";
@@ -717,6 +720,127 @@ export async function runStudioExplicationFreshGenerationWithTagging(
       .upsert(chapterRows, { onConflict: "course_id,chapter_index" });
     if (chapterSaveError) {
       console.error("[studio-explication-delta] Échec sauvegarde de la carte de chapitres (fraîche, non bloquant):", chapterSaveError.message);
+    }
+  }
+
+  return explicationMarkdown;
+}
+
+// buildSourceChunks (lib/search/source-chunking.ts) caps itself at 25 chunks
+// of ~2,200 chars each (≈55,000 chars) — feeding it more than that silently
+// DROPS the excess rather than chunking it, so a slice size must stay safely
+// under that ceiling for every slice to be fully covered by its own call.
+// 50,000 (< MAX_SOURCE_CHARS' own 60,000) keeps each slice's own chunk count
+// comfortably below 25 even accounting for chunk-boundary rounding.
+const CHUNKED_SLICE_CHARS = 50_000;
+
+function splitIntoSourceSlices(fullText: string, sliceChars: number): string[] {
+  const slices: string[] = [];
+  for (let i = 0; i < fullText.length; i += sliceChars) {
+    slices.push(fullText.slice(i, i + sliceChars));
+  }
+  return slices;
+}
+
+/**
+ * For a source document long enough that MAX_SOURCE_CHARS (60,000) would
+ * otherwise silently truncate it before generation ever sees the rest —
+ * confirmed in production as a real cause of "the explanation looks
+ * complete but was built from a fraction of a large course" (distinct from,
+ * but related to, the truncation-DURING-one-call bug the `reasoning` option
+ * above fixes). Splits the FULL, untruncated source into sequential
+ * CHUNKED_SLICE_CHARS-sized slices, generates each slice's own contribution
+ * to the explication in its own bounded call (same model, same core
+ * prompt), then concatenates every part in order into one complete,
+ * continuous explication — no part is ever dropped.
+ *
+ * Deliberately does NOT participate in Cross-University Chunk Caching (the
+ * `explicationChapterChunks` tagging `runStudioExplicationFreshGenerationWithTagging`
+ * produces): that metadata is a reuse OPTIMIZATION for a later, different
+ * student's course on the same topic — a genuine nice-to-have, not a
+ * functional requirement — and scoping it correctly per-slice across a
+ * multi-part generation would add real complexity for a path only
+ * exceptionally long documents ever take. Still saves a per-chapter map
+ * (source_chunk_indices left empty) to studio_course_explication_chapters
+ * so "afficher par chapitre"-style features work identically either way;
+ * an empty source_chunk_indices just naturally never matches as a reuse
+ * candidate for a future course, which is the honest, correct outcome for
+ * content no per-chunk provenance was ever tracked for.
+ */
+export async function runStudioExplicationChunkedGeneration(
+  courseId: number,
+  fullSourceText: string,
+  explicationSystemPrompt: string,
+  maxTokensPerPart: number
+): Promise<string> {
+  const supabase = getSupabaseAdmin();
+  const slices = splitIntoSourceSlices(fullSourceText, CHUNKED_SLICE_CHARS);
+  const parts: string[] = [];
+
+  for (let i = 0; i < slices.length; i++) {
+    const chunks = buildSourceChunks(slices[i]);
+    const numberedExtraits = chunks.map((content, j) => `Extrait ${j + 1}:\n${content}`).join("\n\n");
+    // Every part reuses the exact same base prompt (style, depth, tutoiement
+    // rules) — only this final instruction changes per part, telling the
+    // model which slice of a multi-part document it's writing right now so
+    // it never repeats a general introduction or a recap conclusion inside
+    // an interior part (those belong once, at the very start/end of the
+    // FULL document — a limitation disclosed in this function's own header
+    // comment: no wrapper intro/recap is synthesized across parts here,
+    // unlike buildExplicationWrapperPrompt's per-course use elsewhere in
+    // this file, since each part already has no natural place to attach one
+    // without a second pass this rare, extreme-length case doesn't warrant).
+    const partInstruction =
+      slices.length > 1
+        ? `\n\n---\nMODIFICATION DE FORMAT POUR CETTE GÉNÉRATION — s'ajoute à tout ce qui précède, ne le remplace pas :\nCe cours source est exceptionnellement long et a dû être découpé en ${slices.length} parties consécutives pour être traité. Tu rédiges ICI la PARTIE ${i + 1}/${slices.length} (les extraits numérotés ci-dessous couvrent UNIQUEMENT cette partie, dans l'ordre du cours). Continue directement le contenu, structuré en chapitres Markdown ("## Titre du chapitre") comme d'habitude. N'écris NI introduction générale du cours NI conclusion récapitulative dans cette partie — seulement le corps des chapitres qu'elle couvre ; les autres parties seront concaténées à la suite.`
+        : "";
+
+    const raw = await callOpenRouter(
+      [
+        { role: "system", content: explicationSystemPrompt + partInstruction },
+        {
+          role: "user",
+          content: `Voici le contenu source${slices.length > 1 ? ` (partie ${i + 1}/${slices.length})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
+        },
+      ],
+      { model: CHEAP_MODEL, maxTokens: maxTokensPerPart, bypassMock: true, reasoning: { effort: "low" } }
+    );
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = parseJsonResponse(raw);
+    } catch (error) {
+      const recovered = recoverExplicationOnly(raw);
+      if (!recovered) throw error;
+      console.warn(
+        `[studio-explication-delta] JSON invalide/tronqué pour la partie ${i + 1}/${slices.length}, mais 'explication' récupérée isolément:`,
+        error instanceof Error ? error.message : error
+      );
+      parsed = { explication: recovered };
+    }
+    const partMarkdown = typeof parsed.explication === "string" ? parsed.explication : "";
+    if (!partMarkdown.trim()) {
+      throw new Error(`La réponse de l'IA pour la partie ${i + 1}/${slices.length} ne contient pas de champ 'explication' exploitable.`);
+    }
+    parts.push(partMarkdown.trim());
+  }
+
+  const explicationMarkdown = parts.join("\n\n");
+
+  const sections = splitExplicationByChapter(explicationMarkdown);
+  const chapterRows = sections.map((section, i) => ({
+    course_id: courseId,
+    chapter_index: i,
+    heading: section.headingText,
+    content: section.content,
+    source_chunk_indices: [] as number[],
+  }));
+  if (chapterRows.length > 0) {
+    const { error: chapterSaveError } = await supabase
+      .from("studio_course_explication_chapters")
+      .upsert(chapterRows, { onConflict: "course_id,chapter_index" });
+    if (chapterSaveError) {
+      console.error("[studio-explication-delta] Échec sauvegarde de la carte de chapitres (découpée, non bloquant):", chapterSaveError.message);
     }
   }
 

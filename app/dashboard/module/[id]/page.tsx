@@ -17,6 +17,7 @@ import { tModulePage } from "@/lib/translations/modulePage";
 import { getSectionLabel } from "@/lib/translations/studio";
 import { cn } from "@/lib/utils";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
+import { uploadDocumentDirect } from "@/lib/upload-client";
 import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
@@ -746,25 +747,22 @@ export default function ModuleWorkspacePage() {
 
   /** Returns the new course's id (as a string, matching UploadModal's generic contract) or throws — UploadModal shows the thrown message inline instead of a toast, so the student sees exactly why an upload failed without losing the dialog. useCallback so ModuleSourcesPanel's React.memo isn't defeated by a fresh reference every render. */
   const handleFileSelected = useCallback(async (file: File): Promise<string> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
-    const uploadData = await uploadRes.json().catch(() => ({}));
-    if (!uploadRes.ok || !uploadData.success) throw new Error(uploadData?.error ?? "L'extraction du PDF a échoué.");
+    // Direct-to-storage upload (lib/upload-client.ts) — the file bytes go
+    // straight to Supabase Storage, never through this Next.js server, and
+    // passing `moduleId` here has the server create the studio_courses row
+    // in the SAME request that extracts the text (see /api/upload/finalize's
+    // own comment) instead of sending a potentially huge extracted-text
+    // payload back to the browser only to immediately POST it again to
+    // /api/studio/courses — both are what actually fix large course PDFs
+    // failing to upload (Vercel's ~4.5 MB request-body ceiling applies to
+    // every Node Function regardless of any size limit this app's own code
+    // declares, in EITHER direction of a client-initiated request).
+    const uploaded = await uploadDocumentDirect(file, moduleId);
+    if (!uploaded.course) throw new Error("La création du cours a échoué.");
 
-    const sourceFileUrl: string | null = uploadData.fileUrl ?? null;
-    const createRes = await fetch("/api/studio/courses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moduleId, title: file.name, rawText: uploadData.text, sourceFileUrl }),
-    });
-    const createData = await createRes.json().catch(() => ({}));
-    if (!createRes.ok || !createData.success) throw new Error(createData?.error ?? "La création du cours a échoué.");
-
-    const created: StudioCourseSummary = createData.course;
-    applyCreatedCourse(created, uploadData.text, sourceFileUrl);
+    applyCreatedCourse(uploaded.course, uploaded.text, uploaded.fileUrl);
     toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} a été importé et sauvegardé.` });
-    return String(created.id);
+    return String(uploaded.course.id);
   }, [moduleId, applyCreatedCourse, toast, language]);
 
   /** "Texte brut" tab of the unified Add-sources modal — skips /api/upload entirely (no file to extract from) and creates the course directly from the pasted text. */

@@ -34,6 +34,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { generateId } from "@/lib/generate-id";
+import { uploadDocumentDirect } from "@/lib/upload-client";
 import { useSidebarState } from "@/providers/SidebarProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAssistant } from "@/lib/translations/assistant";
@@ -955,19 +956,15 @@ export default function AssistantPage() {
     );
   }
 
-  /** "Importer un PDF" — reuses /api/upload (the same officeparser-backed extraction pipeline as the rest of the app, see lib/document-extraction.ts) rather than reimplementing parsing here. That route is generic/out of this mission's file perimeter; this page only calls it, never edits it. */
+  /** "Importer un PDF" — direct-to-storage upload (lib/upload-client.ts), same officeparser-backed extraction pipeline as the rest of the app (see lib/document-extraction.ts) under the hood, just never routed through this Next.js server's own request body — that's what lets a large PDF attachment actually upload instead of hitting Vercel's ~4.5 MB request-body ceiling. */
   async function handlePdfFileChosen(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
     setIsAttachmentBusy(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data.error ?? "Extraction du document impossible.");
-      await sendDocumentMessage(file.name, data.text as string);
+      const uploaded = await uploadDocumentDirect(file);
+      await sendDocumentMessage(file.name, uploaded.text);
     } catch (error) {
       pushSystemErrorMessage(error instanceof Error ? error.message : "Impossible d'importer ce document.");
     } finally {
