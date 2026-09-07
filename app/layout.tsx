@@ -6,6 +6,7 @@ import { PomodoroProvider } from "@/providers/PomodoroProvider"; // 👈 است�
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { ToastProvider } from "@/components/ui/Toast";
 import { PushClientFallbackProvider } from "@/providers/PushClientFallbackProvider";
+import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { SecurityGuard } from "@/components/security/SecurityGuard";
 import "./globals.css";
 
@@ -15,6 +16,14 @@ export const metadata: Metadata = {
   title: "Med Art AI — Réussis tes études de santé en Algérie",
   description:
     "Transforme tes cours de Médecine, Pharmacie et Chirurgie Dentaire en explications détaillées, résumés, pièges, mnémotechniques, cas cliniques et QCMs grâce à l'IA.",
+  manifest: "/manifest.json",
+  // iOS Safari never reads the web manifest's `icons` for "Add to Home
+  // Screen" — it only ever looks for an explicit <link rel="apple-touch-icon">,
+  // which this `icons.apple` field renders. Without it, iOS installs with a
+  // blank/default icon regardless of what's in manifest.json.
+  icons: {
+    apple: "/icon-192.png",
+  },
 };
 
 // interactiveWidget: "resizes-content" makes Android Chrome shrink the layout
@@ -42,6 +51,7 @@ export default function RootLayout({
             <PomodoroProvider> {/* 👈 إحاطة التطبيق بالبومودورو لضمان استمراريته في الخلفية */}
               <TooltipProvider delayDuration={200}>
                 <ToastProvider>
+                  <ServiceWorkerRegistration />
                   <PushClientFallbackProvider>
                     <SecurityGuard>{children}</SecurityGuard>
                   </PushClientFallbackProvider>
