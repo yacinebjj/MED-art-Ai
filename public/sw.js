@@ -9,6 +9,19 @@
  * simpler and more auditable than a build-tool-generated one.
  */
 
+/**
+ * Deliberately a no-op passthrough — NOT calling event.respondWith() means
+ * every request is handled exactly as if no service worker existed at all
+ * (normal network fetch, normal HTTP cache, nothing intercepted). This
+ * exists ONLY so browsers that check for "a service worker with a fetch
+ * handler" as a PWA-installability signal see one — this app deploys
+ * frequently, so a real cache-first/offline strategy here would risk
+ * trapping students on stale, already-fixed JS bundles. If real offline
+ * support is ever wanted, build it deliberately (versioned cache name,
+ * explicit invalidation on deploy) rather than bolting it onto this.
+ */
+self.addEventListener("fetch", () => {});
+
 self.addEventListener("push", (event) => {
   let payload = {};
   try {
