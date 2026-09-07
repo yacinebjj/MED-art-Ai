@@ -76,16 +76,41 @@ async function ensureGoogleScripts(): Promise<void> {
   }
 }
 
+// Google Identity Services only invokes `callback` on an explicit outcome
+// (consent granted, consent denied, popup closed by the user). If the
+// production OAuth Client ID is missing "Authorized JavaScript origins" for
+// this domain, or the consent screen is still in "Testing" mode and this
+// student isn't an allow-listed test user, Google renders its own dead-end
+// error page INSIDE the popup — and in both cases the callback frequently
+// never fires at all. Without a timeout, that left the Import button
+// spinning forever with zero feedback, indistinguishable from "nothing
+// happens" (found during a production bug report — this is not hypothetical).
+const ACCESS_TOKEN_TIMEOUT_MS = 90_000;
+
 function requestAccessToken(): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!GOOGLE_CLIENT_ID) {
       reject(new Error("Google Drive n'est pas configuré (NEXT_PUBLIC_GOOGLE_CLIENT_ID manquant)."));
       return;
     }
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(
+        new Error(
+          "La fenêtre Google n'a pas répondu. Vérifie que ton compte est autorisé pour cette application, ou réessaie."
+        )
+      );
+    }, ACCESS_TOKEN_TIMEOUT_MS);
+
     const tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: DRIVE_SCOPE,
       callback: (response: { access_token?: string; error?: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
         if (response.error || !response.access_token) {
           reject(new Error(response.error ?? "Autorisation Google refusée."));
           return;

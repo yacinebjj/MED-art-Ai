@@ -390,13 +390,15 @@ export async function runStudioExplicationDeltaPipeline(
       // exactly the "cours longs" case reported in production. Model
       // explicit (was defaulting to callOpenRouter's global Sonnet MODEL) —
       // see this file's own header comment: every Studio Explication path,
-      // no exception, now runs on CHEAP_MODEL, no `reasoning` option.
+      // no exception, now runs on CHEAP_MODEL. reasoning: { effort: "low" }
+      // — same hidden-reasoning-token truncation fix as the fresh-generation
+      // call below in this file, same DeepSeek V3.2 risk.
       const rawDelta = await callOpenRouter(
         [
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { model: CHEAP_MODEL, maxTokens: 16384, bypassMock: true }
+        { model: CHEAP_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { effort: "low" } }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -427,7 +429,7 @@ export async function runStudioExplicationDeltaPipeline(
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true }
+      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { effort: "low" } }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -659,12 +661,18 @@ export async function runStudioExplicationFreshGenerationWithTagging(
   // trade the above ECONOMY_MODEL validation (word count, register,
   // JSON-escaping — all specific to Gemini) for DeepSeek's reputation for
   // genuinely long, exhaustive long-form writing, at a LOWER cost than
-  // ECONOMY_MODEL. NOT re-validated against this exact prompt with a real
-  // test call — see CHEAP_MODEL's own comment in lib/ai/openrouter.ts for
-  // the full disclosure. recoverExplicationOnly's regex-based repair is
+  // ECONOMY_MODEL. recoverExplicationOnly's regex-based repair is
   // model-agnostic (operates on the raw string, not on anything
-  // Gemini-specific), so it still applies here unchanged. No `reasoning`
-  // option is set, matching every other CHEAP_MODEL call site.
+  // Gemini-specific), so it still applies here unchanged.
+  //
+  // reasoning: { effort: "low" } — confirmed live in production: DeepSeek
+  // V3.2 is a hybrid reasoning model, same category as ECONOMY_MODEL
+  // (Gemini 3.7 Flash) above — an uncapped reasoning effort silently burns
+  // most of `maxTokens` on hidden "thinking" tokens before the model
+  // writes a single visible character, producing the exact mid-sentence
+  // "Explication détaillée cuts off halfway" truncation students reported.
+  // Same fix, same root cause, different model — see app/api/studio/generate/route.ts's
+  // own `reasoningOption` comment for the ECONOMY_MODEL precedent this mirrors.
   const raw = await callOpenRouter(
     [
       { role: "system", content: explicationSystemPrompt + explicationChunkTaggingAddendum },
@@ -673,7 +681,7 @@ export async function runStudioExplicationFreshGenerationWithTagging(
         content: `Voici le contenu source, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
       },
     ],
-    { model: CHEAP_MODEL, maxTokens, bypassMock: true }
+    { model: CHEAP_MODEL, maxTokens, bypassMock: true, reasoning: { effort: "low" } }
   );
 
   let parsed: Record<string, unknown>;

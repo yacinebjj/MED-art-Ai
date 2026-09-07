@@ -143,9 +143,21 @@ export function ModuleStatsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg overflow-hidden sm:max-w-xl">
-        {/* Cockpit accent glow — purely decorative, sits behind the header. */}
-        <div aria-hidden className="pointer-events-none absolute -left-10 -top-16 h-40 w-64 rounded-full bg-primary-500/20 blur-3xl dark:bg-primary-400/10" />
+      <DialogContent className="max-w-lg sm:max-w-xl">
+        {/* Cockpit accent glow — purely decorative, sits behind the header.
+            No `overflow-hidden` on DialogContent itself: that class was
+            silently overriding (via twMerge) the base component's own
+            `overflow-y-auto max-h-[calc(100%-2rem)]`, which is what makes
+            this modal scrollable at all — on a real phone screen (far
+            shorter than this content) that left everything past the first
+            couple of sections completely unreachable, with no scrollbar.
+            Clipped instead to its own box so it can never bleed past the
+            dialog's rounded corners without touching the shared scroll
+            behavior. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-10 -top-16 h-40 w-64 rounded-full bg-primary-500/20 blur-3xl dark:bg-primary-400/10"
+        />
 
         <DialogHeader className="relative">
           <div className="mb-1 flex items-center gap-2 text-primary-600 dark:text-primary-400">

@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
+import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -95,15 +96,6 @@ function NotesPageContent() {
   // "Sauvegarder" bar (pinned at the bottom of that column) stays above the
   // keyboard instead of sliding out of view behind it.
   const keyboardInset = useKeyboardInset();
-
-  useEffect(() => {
-    if (!isFullscreen) return;
-    function handleKeyDown(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape") setIsFullscreen(false);
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isFullscreen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -288,6 +280,122 @@ function NotesPageContent() {
     }
   }
 
+  // Shared between the normal inline panel AND the fullscreen portal below
+  // (FullscreenViewerModal) — the exact same content, mounted in two
+  // different places depending on `isFullscreen`, never two different
+  // implementations to keep in sync.
+  const editorContent = selectedNote && (
+    <motion.div
+      key={selectedNote.id}
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={tNotes("backToListAriaLabel", language)}
+          onClick={() => setSelectedId(null)}
+          className="h-11 w-11 shrink-0 md:hidden md:h-9 md:w-9"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1">
+          <Input
+            value={draftTitle}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            placeholder={tNotes("titlePlaceholder", language)}
+            className="border-none bg-transparent px-0 text-lg font-semibold shadow-none focus:ring-0"
+          />
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={isFullscreen ? tNotes("exitFullscreenAriaLabel", language) : tNotes("fullscreenAriaLabel", language)}
+          onClick={() => setIsFullscreen((v) => !v)}
+          className="h-11 w-11 md:h-9 md:w-9"
+        >
+          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={tNotes("deleteNoteAriaLabel", language)}
+          onClick={() => setConfirmDeleteNote(selectedNote)}
+          disabled={deletingId === selectedNote.id}
+          className="h-11 w-11 md:h-9 md:w-9"
+        >
+          {deletingId === selectedNote.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
+        </Button>
+      </div>
+
+      {/*
+        Persistent save-status pill — never a transient toast alone.
+        A student re-reading a note five minutes after typing should
+        never have to wonder "did that save?"; this always reflects
+        the true current state (saving / just-saved / unsaved edits
+        pending / last attempt failed), driven by `isDirty` (draft vs.
+        the last known server content) plus the saving/error flags.
+      */}
+      <div className="mt-1 flex items-center gap-1.5 text-sm font-medium" aria-live="polite" role="status">
+        {isSaving ? (
+          <>
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+            <span className="text-muted-foreground">{tNotes("savingLabel", language)}</span>
+          </>
+        ) : saveError ? (
+          <>
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+            <span className="text-destructive">{tNotes("saveErrorLabel", language)}</span>
+          </>
+        ) : isDirty ? (
+          <>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+            <span className="text-amber-600 dark:text-amber-400">{tNotes("unsavedChanges", language)}</span>
+          </>
+        ) : (
+          <>
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+            <span className="text-emerald-600 dark:text-emerald-400">{tNotes("savedLabel", language)}</span>
+          </>
+        )}
+      </div>
+
+      <NoteEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
+
+      {/* Point 1 fix — a direct, unconditional pb-28 on mobile (on
+          top of the keyboardInset padding already applied to the
+          fullscreen wrapper above): guarantees the Save button
+          always clears the fixed bottom nav bar's real footprint,
+          instead of relying only on the shell's generic page-level
+          padding or the keyboard-open-only inset. sm:pb-0 — desktop
+          has no bottom nav to clear, so this would just be dead
+          space there. */}
+      <div className="mt-4 flex shrink-0 flex-col gap-2 pb-28 sm:flex-row sm:items-center sm:justify-between sm:pb-0">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleOrganizeByAI}
+            disabled={isOrganizing || stripHtmlToText(draftContent).trim().length === 0}
+            className="h-10 w-full border-purple-500/30 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-950/30 sm:h-8 sm:w-auto"
+          >
+            {isOrganizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {isOrganizing ? tNotes("organizingLabel", language) : tNotes("organizeButton", language)}
+          </Button>
+          <NoteSummaryButton getPlainText={() => stripHtmlToText(draftContent)} />
+        </div>
+
+        <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty} className="h-10 w-full sm:h-8 sm:w-auto">
+          {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+          {tNotes("saveButton", language)}
+        </Button>
+      </div>
+    </motion.div>
+  );
+
   return (
     <div
       className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden"
@@ -407,20 +515,10 @@ function NotesPageContent() {
 
         <div
           className={cn(
-            "glass-card min-h-0 min-w-0 flex-1 flex-col rounded-2xl border border-border shadow-glass dark:shadow-glass-dark",
+            "glass-card h-full min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-2xl border border-border p-5 shadow-glass dark:shadow-glass-dark",
             !selectedId && "hidden md:flex",
-            selectedId && "flex",
-            isFullscreen ? "fixed inset-0 z-50 h-dvh w-screen overflow-y-auto rounded-none border-none p-4 sm:p-8" : "h-full overflow-y-auto p-5"
+            selectedId && "flex"
           )}
-          // The fullscreen note editor is `fixed inset-0` — it fully escapes
-          // this page's own outer keyboardInset-aware wrapper (see that
-          // div's own style prop above), so without this, the "Sauvegarder"
-          // button at the bottom of the form can end up hidden behind the
-          // on-screen keyboard with no scroll room left to reach it. Adds
-          // that same reserved space back, scoped to fullscreen only (the
-          // non-fullscreen path already gets keyboard clearance from the
-          // outer wrapper it never escapes).
-          style={isFullscreen && keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
         >
           {!selectedNote ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -441,118 +539,27 @@ function NotesPageContent() {
               </Button>
             </div>
           ) : (
-            <motion.div
-              key={selectedNote.id}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={tNotes("backToListAriaLabel", language)}
-                  onClick={() => setSelectedId(null)}
-                  className="h-11 w-11 shrink-0 md:hidden md:h-9 md:w-9"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <div className="flex-1">
-                  <Input
-                    value={draftTitle}
-                    onChange={(e) => setDraftTitle(e.target.value)}
-                    placeholder={tNotes("titlePlaceholder", language)}
-                    className="border-none bg-transparent px-0 text-lg font-semibold shadow-none focus:ring-0"
-                  />
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={isFullscreen ? tNotes("exitFullscreenAriaLabel", language) : tNotes("fullscreenAriaLabel", language)}
-                  onClick={() => setIsFullscreen((v) => !v)}
-                  className="h-11 w-11 md:h-9 md:w-9"
-                >
-                  {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={tNotes("deleteNoteAriaLabel", language)}
-                  onClick={() => setConfirmDeleteNote(selectedNote)}
-                  disabled={deletingId === selectedNote.id}
-                  className="h-11 w-11 md:h-9 md:w-9"
-                >
-                  {deletingId === selectedNote.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
-                </Button>
-              </div>
-
-              {/*
-                Persistent save-status pill — never a transient toast alone.
-                A student re-reading a note five minutes after typing should
-                never have to wonder "did that save?"; this always reflects
-                the true current state (saving / just-saved / unsaved edits
-                pending / last attempt failed), driven by `isDirty` (draft vs.
-                the last known server content) plus the saving/error flags.
-              */}
-              <div className="mt-1 flex items-center gap-1.5 text-sm font-medium" aria-live="polite" role="status">
-                {isSaving ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    <span className="text-muted-foreground">{tNotes("savingLabel", language)}</span>
-                  </>
-                ) : saveError ? (
-                  <>
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
-                    <span className="text-destructive">{tNotes("saveErrorLabel", language)}</span>
-                  </>
-                ) : isDirty ? (
-                  <>
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
-                    <span className="text-amber-600 dark:text-amber-400">{tNotes("unsavedChanges", language)}</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                    <span className="text-emerald-600 dark:text-emerald-400">{tNotes("savedLabel", language)}</span>
-                  </>
-                )}
-              </div>
-
-              <NoteEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
-
-              {/* Point 1 fix — a direct, unconditional pb-28 on mobile (on
-                  top of the keyboardInset padding already applied to the
-                  fullscreen wrapper above): guarantees the Save button
-                  always clears the fixed bottom nav bar's real footprint,
-                  instead of relying only on the shell's generic page-level
-                  padding or the keyboard-open-only inset. sm:pb-0 — desktop
-                  has no bottom nav to clear, so this would just be dead
-                  space there. */}
-              <div className="mt-4 flex shrink-0 flex-col gap-2 pb-28 sm:flex-row sm:items-center sm:justify-between sm:pb-0">
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleOrganizeByAI}
-                    disabled={isOrganizing || stripHtmlToText(draftContent).trim().length === 0}
-                    className="h-10 w-full border-purple-500/30 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-950/30 sm:h-8 sm:w-auto"
-                  >
-                    {isOrganizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    {isOrganizing ? tNotes("organizingLabel", language) : tNotes("organizeButton", language)}
-                  </Button>
-                  <NoteSummaryButton getPlainText={() => stripHtmlToText(draftContent)} />
-                </div>
-
-                <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty} className="h-10 w-full sm:h-8 sm:w-auto">
-                  {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {tNotes("saveButton", language)}
-                </Button>
-              </div>
-            </motion.div>
+            editorContent
           )}
         </div>
       </div>
+
+      {/* True fullscreen — a portal to document.body, exactly like the Exam
+          Studio / Module Workspace pages (see FullscreenViewerModal's own
+          doc comment). The editor panel above sits inside this page's own
+          root wrapper, which in turn sits inside <PageTransition>'s
+          motion.div (app/dashboard/(shell)/layout.tsx) — Framer Motion
+          applies an inline `transform` for that page-slide animation, and
+          per the CSS spec `transform` (like `filter`/`backdrop-filter`)
+          makes its element the CONTAINING BLOCK for any `position: fixed`
+          descendant. The previous inline `fixed inset-0` on the editor div
+          only ever filled PageTransition's own animated box, not the true
+          screen — a portal escapes that unconditionally. */}
+      <FullscreenViewerModal open={isFullscreen && !!selectedNote} onClose={() => setIsFullscreen(false)} title={draftTitle || tNotes("titlePlaceholder", language)}>
+        <div className="p-4 sm:p-6" style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}>
+          {editorContent}
+        </div>
+      </FullscreenViewerModal>
 
       <Dialog open={renamingNote !== null} onOpenChange={(open) => !open && setRenamingNote(null)}>
         <DialogContent onClick={(e) => e.stopPropagation()}>
