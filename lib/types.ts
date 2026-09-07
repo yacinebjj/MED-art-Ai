@@ -25,39 +25,36 @@ export interface Course {
 }
 
 /**
- * Each field is a full Markdown block for that section, produced by the
- * "professeur" mega-prompt (see lib/prompts/course-generation.ts). One AI
- * call fills all 5 at once — see lib/course-content-cache.ts. "Explication"
- * is generated separately (see lib/prompts/explication-ultra-detaillee.ts)
- * since it needs its own dedicated, much longer treatise-style prompt.
- */
-export interface CourseContent {
-  resume: string;
-  pieges: string;
-  astuces: string;
-  casClinique: string;
-  qcm: string;
-}
-
-/**
  * Everything that can be generated/displayed for a course in the workspace.
- * "coursOral" is the primary, always-first-generated transcript shown in the
- * center reader; the rest are the Studio panel's on-demand artifacts.
+ * "cours_oral" is the primary, always-first-generated transcript shown in the
+ * center reader; the rest are the Studio panel's on-demand artifacts. Each
+ * has its own dedicated prompt builder (see lib/prompts/) and its own cache
+ * slot — there is no shared mega-prompt anymore (see lib/sub-units.ts for
+ * "cas_clinique" and "qcm", which are further split into sub-units so a
+ * single AI call never has to produce the whole tab's content at once).
  */
 export type ContentType =
   | "cours_oral"
   | "explication"
+  | "mode_visuel"
   | "resume"
-  | "pieges"
-  | "astuces"
   | "cas_clinique"
   | "qcm";
 
-export const STUDIO_CONTENT_TYPES: { id: ContentType; label: string }[] = [
+/** The two content types generated as several parallel sub-units rather than one call — see lib/sub-units.ts. */
+export type ChunkedContentType = "cas_clinique" | "qcm";
+
+/** The remaining content types, each filled by exactly one dedicated AI call. */
+export type SingleUnitContentType = Exclude<ContentType, ChunkedContentType>;
+
+export const STUDIO_CONTENT_TYPES: { id: SingleUnitContentType; label: string }[] = [
   { id: "explication", label: "Explication Ultra-Détaillée" },
+  { id: "mode_visuel", label: "Mode Visuel" },
   { id: "resume", label: "Résumé" },
-  { id: "pieges", label: "Les Pièges" },
-  { id: "astuces", label: "Astuces Mnémotechniques" },
+];
+
+/** Rendered via their own dedicated Live components (see components/course/workspace/), not through CenterReader. */
+export const STUDIO_CHUNKED_CONTENT_TYPES: { id: ChunkedContentType; label: string }[] = [
   { id: "cas_clinique", label: "Cas Clinique" },
   { id: "qcm", label: "Examen QCMs" },
 ];
@@ -66,4 +63,104 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /**
+   * When true, this message is skipped entirely when building the `history`
+   * array for every LATER request — it still displayed in the transcript
+   * and was itself sent to the model for its own reply, but never resends
+   * afterward. Set on BOTH halves of a one-off contextual quick-action
+   * exchange ("Ask MedArt"/"Translate" on a text selection): the user's
+   * message (which embeds the quoted passage) AND the assistant's resulting
+   * reply (which, being a full medical explanation, is just as capable of
+   * anchoring an unrelated later message — like a plain "hello" — back onto
+   * the old topic if left in history). Trimming only the user side isn't
+   * enough; the reply has to go too.
+   */
+  excludeFromHistory?: boolean;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Structured shapes for the two chunked content types. Every field is a    */
+/* plain string (not Markdown) so the AI's JSON output can be validated     */
+/* field-by-field before caching — see lib/ai/generate-course-content.ts.   */
+/* ----------------------------------------------------------------------- */
+
+export interface ClinicalCaseDialogueLine {
+  speaker: "patient" | "medecin" | "autre";
+  name: string;
+  tone: string;
+  text: string;
+  /** Only médecin lines carry one — a patient's raw quote doesn't need a physiopathology note. */
+  pourquoi?: string;
+}
+
+export interface ClinicalCaseExamStep {
+  action: string;
+  pourquoi: string;
+}
+
+export interface ClinicalCaseParaclinicalItem {
+  label: string;
+  result: string;
+  pourquoi: string;
+}
+
+export interface ClinicalCaseDdxItem {
+  maladie: string;
+  raisonnement: string;
+  pourquoi: string;
+}
+
+export interface ClinicalCaseRxItem {
+  ligne: string;
+  pourquoi: string;
+}
+
+export interface ClinicalCaseVital {
+  label: string;
+  value: string;
+  alert?: boolean;
+}
+
+/** One fully-generated clinical case — the payload for a single "cas_clinique" sub-unit. */
+export interface ClinicalCase {
+  numero: number;
+  archetype: string;
+  titre: string;
+  scene: string;
+  vitals: ClinicalCaseVital[];
+  acte1: ClinicalCaseDialogueLine[];
+  acte2: ClinicalCaseExamStep[];
+  acte3: ClinicalCaseParaclinicalItem[];
+  acte4: { items: ClinicalCaseDdxItem[]; conclusion: string };
+  acte5: { items: ClinicalCaseRxItem[]; surveillance: string };
+}
+
+export interface QcmOption {
+  label: string;
+  text: string;
+}
+
+export interface QcmExplication {
+  globale: string;
+  A: string;
+  B: string;
+  C: string;
+  D: string;
+  E: string;
+}
+
+/** One QCM — the payload for a "qcm" batch sub-unit is a QcmItem[]. */
+export interface QcmItem {
+  id: number;
+  question: string;
+  options: QcmOption[];
+  reponsesCorrectes: string[];
+  explication: QcmExplication;
+}
+
+/** One QROC — the payload for the "qroc" sub-unit is a QrocItem[]. */
+export interface QrocItem {
+  id: number;
+  question: string;
+  reponseOfficielle: string;
 }

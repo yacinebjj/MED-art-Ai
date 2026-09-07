@@ -1,7 +1,7 @@
 "use client";
 
-import { DragEvent, useRef, useState } from "react";
-import { FileText, HardDrive, Upload, UploadCloud } from "lucide-react";
+import { DragEvent, KeyboardEvent, useRef, useState } from "react";
+import { Cloud, FileText, FileUp, Upload, UploadCloud } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,35 +9,68 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/Dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type { Course } from "@/lib/types";
+import { openGoogleDrivePicker } from "@/lib/google-drive-picker";
 
-type UploadTab = "file" | "text" | "drive";
+// Statically inlined at build time by Next.js (NEXT_PUBLIC_ vars) — reading
+// it here just lets the Drive card show an honest "not configured" state
+// instead of only failing once the student actually clicks the button.
+const GOOGLE_DRIVE_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && process.env.NEXT_PUBLIC_GOOGLE_API_KEY);
 
-export function UploadModal({
-  open,
-  onOpenChange,
-  onUploaded,
-}: {
+// Must match the server-side MAX_FILE_BYTES in app/api/generate-course/route.ts
+// AND app/api/upload/route.ts (whichever ends up handling this file — see
+// onSubmitFile's own doc comment above for why the two differ by caller).
+// Checked here purely so an oversized file is rejected INSTANTLY, before
+// spending a student's time (and mobile data) uploading e.g. 150 Mo of
+// radiology scans over a slow connection just to get turned away by the
+// server at the very end.
+const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo
+
+function formatOversizedFileError(file: File): string {
+  return `Fichier trop volumineux (${(file.size / (1024 * 1024)).toFixed(1)} Mo, max ${MAX_UPLOAD_FILE_BYTES / (1024 * 1024)} Mo).`;
+}
+
+// Shared shell for the three method cards — a distinct, self-contained zone
+// per import method (local file / Drive / pasted text) rather than tabs that
+// hide two of the three at any given time.
+const CARD_BASE_CLASS =
+  "flex h-full flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-card transition-all duration-300 hover:border-primary hover:shadow-lg";
+
+/** Enter/Space activates a non-<button> clickable zone, matching native button semantics. */
+function handleZoneKeyDown(e: KeyboardEvent<HTMLDivElement>, action: () => void) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    action();
+  }
+}
+
+export interface UploadModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onUploaded: (course: Course) => void;
-}) {
-  const [tab, setTab] = useState<UploadTab>("file");
+  /** Called with whatever identifier the submit handler resolved with (a course slug for the default dashboard flow; a studio_courses id for a caller overriding onSubmitFile/onSubmitText) once the upload succeeds. */
+  onUploaded: (result: string) => void;
+  /** Overrides the default POST /api/generate-course (public `courses` table) flow — e.g. the module workspace instead creates a studio_courses row scoped to one curriculum module. Must resolve with an identifier string, or throw an Error with a user-facing message. */
+  onSubmitFile?: (file: File) => Promise<string>;
+  /** Same override, for the "Texte direct" card. */
+  onSubmitText?: (text: string, title: string) => Promise<string>;
+  title?: string;
+  description?: string;
+}
+
+export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSubmitText, title: modalTitle, description }: UploadModalProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDriveImporting, setIsDriveImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function reset() {
-    setTab("file");
     setIsDragging(false);
     setFile(null);
     setText("");
@@ -46,6 +79,13 @@ export function UploadModal({
   }
 
   function handleOpenChange(next: boolean) {
+    // Radix routes the built-in X button, Escape, AND an overlay click all
+    // through this same callback — blocking it here while a submission is
+    // in flight covers all three at once. Without this, closing mid-upload
+    // (no request is ever aborted) let the student reopen and resubmit
+    // immediately, firing two concurrent course-creation requests from one
+    // upload. Found during a security/UX audit.
+    if (!next && (isSubmitting || isDriveImporting)) return;
     if (!next) reset();
     onOpenChange(next);
   }
@@ -54,7 +94,33 @@ export function UploadModal({
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
-    if (dropped) setFile(dropped);
+    if (!dropped) return;
+    if (dropped.size > MAX_UPLOAD_FILE_BYTES) {
+      setFile(null);
+      setError(formatOversizedFileError(dropped));
+      return;
+    }
+    setError(null);
+    setFile(dropped);
+  }
+
+  async function defaultSubmitFile(f: File): Promise<string> {
+    const body = new FormData();
+    body.append("file", f);
+    const res = await fetch("/api/generate-course", { method: "POST", body });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error ?? "Le téléversement a échoué.");
+    return data.slug;
+  }
+
+  async function defaultSubmitText(t: string, courseTitle: string): Promise<string> {
+    const body = new FormData();
+    body.append("text", t);
+    body.append("title", courseTitle);
+    const res = await fetch("/api/generate-course", { method: "POST", body });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error ?? "L'import a échoué.");
+    return data.slug;
   }
 
   async function handleSubmitFile() {
@@ -63,17 +129,9 @@ export function UploadModal({
     setError(null);
 
     try {
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/generate", { method: "POST", body });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error ?? "Le téléversement a échoué.");
-
-      if (data.course) {
-        onUploaded(data.course);
-        handleOpenChange(false);
-      }
+      const result = await (onSubmitFile ?? defaultSubmitFile)(file);
+      onUploaded(result);
+      handleOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Le téléversement a échoué.");
     } finally {
@@ -90,18 +148,9 @@ export function UploadModal({
     setError(null);
 
     try {
-      const body = new FormData();
-      body.append("text", text);
-      body.append("title", title);
-      const res = await fetch("/api/generate", { method: "POST", body });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error ?? "L'import a échoué.");
-
-      if (data.course) {
-        onUploaded(data.course);
-        handleOpenChange(false);
-      }
+      const result = await (onSubmitText ?? defaultSubmitText)(text, title);
+      onUploaded(result);
+      handleOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "L'import a échoué.");
     } finally {
@@ -109,112 +158,210 @@ export function UploadModal({
     }
   }
 
+  /**
+   * Opens the Google Drive picker, downloads + extracts the chosen file
+   * server-side (app/api/drive/import), then feeds the result through the
+   * exact same onSubmitText path as "Texte direct" — from this point on, a
+   * Drive import is indistinguishable from pasted text to whatever caller
+   * customized onSubmitText (or the default /api/generate-course flow).
+   */
+  async function handleDriveImport() {
+    setError(null);
+    setIsDriveImporting(true);
+
+    try {
+      const picked = await openGoogleDrivePicker();
+      if (!picked) return; // student closed the picker without choosing anything
+
+      const res = await fetch("/api/drive/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId: picked.id, mimeType: picked.mimeType, accessToken: picked.accessToken, fileName: picked.name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "L'import depuis Google Drive a échoué.");
+
+      const result = await (onSubmitText ?? defaultSubmitText)(data.text, picked.name);
+      onUploaded(result);
+      handleOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "L'import depuis Google Drive a échoué.");
+    } finally {
+      setIsDriveImporting(false);
+    }
+  }
+
+  /** Guards the whole-card click/keyboard zone the same way the Drive Button's own `disabled` prop already does. */
+  function activateDriveZone() {
+    if (!GOOGLE_DRIVE_CONFIGURED || isDriveImporting) return;
+    void handleDriveImport();
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Ajouter un cours</DialogTitle>
+          <DialogTitle>{modalTitle ?? "Ajouter un cours"}</DialogTitle>
           <DialogDescription>
-            Importe un document ou colle du texte pour créer un nouvel espace de travail.
+            {description ?? "Importe un document, connecte Google Drive, ou colle du texte pour créer un nouvel espace de travail."}
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as UploadTab)}>
-          <TabsList className="mb-4">
-            <TabsTrigger value="file">Fichier (PDF/DOCX)</TabsTrigger>
-            <TabsTrigger value="text">Texte</TabsTrigger>
-            <TabsTrigger value="drive">Google Drive</TabsTrigger>
-          </TabsList>
-
-          {tab === "file" && (
-            <div className="space-y-4">
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setIsDragging(true);
-                }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={handleDrop}
-                onClick={() => inputRef.current?.click()}
-                className={cn(
-                  "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
-                  isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300 bg-gray-50 hover:bg-gray-100"
-                )}
-              >
-                <input
-                  ref={inputRef}
-                  type="file"
-                  accept={ACCEPTED_FILE_TYPES.join(",")}
-                  className="hidden"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-                <UploadCloud className="mb-3 h-8 w-8 text-gray-400" />
-                <p className="text-sm font-medium text-gray-700">
-                  {file ? file.name : "Glisse-dépose ton fichier ici, ou clique pour parcourir"}
-                </p>
-                <p className="mt-1 text-xs text-gray-500">PDF, PPTX, DOCX</p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {/* 1. Upload local */}
+          <div className={CARD_BASE_CLASS}>
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <FileUp className="h-5 w-5" />
               </div>
-
-              {error && <p className="text-sm text-destructive">{error}</p>}
-
-              <Button
-                className="w-full"
-                disabled={!file || isSubmitting}
-                isLoading={isSubmitting}
-                onClick={handleSubmitFile}
-              >
-                {!isSubmitting && <Upload className="h-4 w-4" />}
-                Ajouter le cours
-              </Button>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Fichier local</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">PDF, DOCX, PPTX, TXT (max 100 Mo)</p>
+              </div>
             </div>
-          )}
 
-          {tab === "text" && (
-            <div className="space-y-4">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => inputRef.current?.click()}
+              onKeyDown={(e) => handleZoneKeyDown(e, () => inputRef.current?.click())}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              aria-label="Glisser-déposer un fichier, ou appuyer pour parcourir"
+              className={cn(
+                "flex min-h-[6.5rem] flex-1 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-3 py-6 text-center transition-colors duration-300",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                isDragging
+                  ? "border-primary bg-primary/5"
+                  : "border-border bg-muted/40 hover:bg-muted/60"
+              )}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept={ACCEPTED_FILE_TYPES.join(",")}
+                className="hidden"
+                onChange={(e) => {
+                  const chosen = e.target.files?.[0] ?? null;
+                  if (chosen && chosen.size > MAX_UPLOAD_FILE_BYTES) {
+                    setFile(null);
+                    setError(formatOversizedFileError(chosen));
+                    return;
+                  }
+                  setError(null);
+                  setFile(chosen);
+                }}
+              />
+              <UploadCloud className="h-6 w-6 text-muted-foreground" />
+              <p className="line-clamp-2 text-xs font-medium text-foreground">
+                {file ? file.name : "Glisse-dépose ton fichier ici, ou clique pour parcourir"}
+              </p>
+            </div>
+
+            <Button
+              className="w-full"
+              disabled={!file || isSubmitting}
+              isLoading={isSubmitting}
+              onClick={handleSubmitFile}
+            >
+              {!isSubmitting && <Upload className="h-4 w-4" />}
+              Ajouter le cours
+            </Button>
+          </div>
+
+          {/* 2. Google Drive / Cloud */}
+          <div className={CARD_BASE_CLASS}>
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Cloud className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Google Drive</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {GOOGLE_DRIVE_CONFIGURED ? "PDF, DOCX, Docs, Slides…" : "Non configuré"}
+                </p>
+              </div>
+            </div>
+
+            <div
+              role="button"
+              tabIndex={GOOGLE_DRIVE_CONFIGURED ? 0 : -1}
+              aria-disabled={!GOOGLE_DRIVE_CONFIGURED}
+              onClick={activateDriveZone}
+              onKeyDown={(e) => handleZoneKeyDown(e, activateDriveZone)}
+              aria-label="Importer un document depuis Google Drive"
+              className={cn(
+                "flex min-h-[6.5rem] flex-1 flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-3 py-6 text-center transition-colors duration-300",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                GOOGLE_DRIVE_CONFIGURED
+                  ? "cursor-pointer border-border bg-muted/40 hover:bg-muted/60"
+                  : "cursor-not-allowed border-border/60 bg-muted/20 opacity-60"
+              )}
+            >
+              <Cloud className="h-6 w-6 text-muted-foreground" />
+              <p className="text-xs font-medium text-foreground">
+                {GOOGLE_DRIVE_CONFIGURED ? "Choisir un fichier dans Drive" : "Voir la configuration requise"}
+              </p>
+            </div>
+
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={!GOOGLE_DRIVE_CONFIGURED || isDriveImporting}
+              isLoading={isDriveImporting}
+              onClick={handleDriveImport}
+            >
+              {!isDriveImporting && <Cloud className="h-4 w-4" />}
+              Importer depuis Drive
+            </Button>
+          </div>
+
+          {/* 3. Texte direct */}
+          <div className={CARD_BASE_CLASS}>
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <FileText className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Texte direct</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Coller ou saisir du texte</p>
+              </div>
+            </div>
+
+            <div className="flex flex-1 flex-col gap-2">
               <Input
                 label="Titre (optionnel)"
                 placeholder="Ex : Physiologie rénale"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">
-                  Contenu du cours
-                </label>
-                <textarea
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  rows={8}
-                  placeholder="Colle ici le texte de ton cours…"
-                  className="w-full rounded-xl border border-input bg-card px-3.5 py-2.5 text-sm text-foreground shadow-soft focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              {error && <p className="text-sm text-destructive">{error}</p>}
-
-              <Button
-                className="w-full"
-                disabled={isSubmitting}
-                isLoading={isSubmitting}
-                onClick={handleSubmitText}
-              >
-                <FileText className="h-4 w-4" />
-                Ajouter le cours
-              </Button>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={4}
+                placeholder="Colle ici le texte de ton cours…"
+                aria-label="Contenu du cours"
+                className="w-full flex-1 resize-none rounded-xl border border-input bg-card px-3.5 py-2.5 text-base text-foreground shadow-soft transition-all duration-300 focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring sm:text-sm"
+              />
             </div>
-          )}
 
-          {tab === "drive" && (
-            <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center">
-              <HardDrive className="mb-3 h-8 w-8 text-gray-400" />
-              <p className="text-sm font-medium text-gray-700">Google Drive</p>
-              <p className="mt-1 text-xs text-gray-500">Bientôt disponible.</p>
-              <Button className="mt-4" disabled variant="outline">
-                Connecter Google Drive
-              </Button>
-            </div>
-          )}
-        </Tabs>
+            <Button
+              className="w-full"
+              disabled={isSubmitting}
+              isLoading={isSubmitting}
+              onClick={handleSubmitText}
+            >
+              {!isSubmitting && <FileText className="h-4 w-4" />}
+              Ajouter le cours
+            </Button>
+          </div>
+        </div>
+
+        {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
       </DialogContent>
     </Dialog>
   );

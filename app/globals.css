@@ -4,61 +4,106 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-
-    --primary: 177 80% 27%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-
-    --muted: 210 40% 94%;
-    --muted-foreground: 215 16% 47%;
-
-    --accent: 214 95% 93%;
-    --accent-foreground: 222 47% 11%;
-
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 214 32% 89%;
-    --input: 214 32% 89%;
-    --ring: 177 80% 27%;
-
-    --radius: 0.75rem;
+    /* Custom shadcn preset tokens (oklch), adopted verbatim from the user's
+       spec — NOTE: --primary here is a near-neutral dark slate, not this
+       app's established teal brand hue. tailwind.config.ts's numbered
+       primary-50..950/secondary-50..950 scales (the literal teal/blue hex
+       swatches used by e.g. CurriculumView's icon badges, the Dashboard
+       hero glow) are untouched by this token set and keep their teal/blue
+       look; only bare `bg-primary`/`text-primary` usages (notably
+       Button's default variant, used by nearly every button in the app)
+       shift to this new neutral. --destructive-foreground is NOT part of
+       the user's pasted spec (their preset omits it) — added here as a
+       near-white, matching this app's own prior convention of always
+       using near-white text on the destructive button regardless of theme,
+       since tailwind.config.ts's `destructive.foreground` needs a real
+       value or destructive buttons/text lose their foreground color. */
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.148 0.004 228.8);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.148 0.004 228.8);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.148 0.004 228.8);
+    --primary: oklch(0.218 0.008 223.9);
+    --primary-foreground: oklch(0.987 0.002 197.1);
+    --secondary: oklch(0.963 0.002 197.1);
+    --secondary-foreground: oklch(0.218 0.008 223.9);
+    --muted: oklch(0.963 0.002 197.1);
+    /* Darkened from oklch(0.56 0.021 213.5) — at 0.56 this text was only
+       ~4.18:1 against --muted's oklch(0.963 ...) background, just under
+       WCAG AA's 4.5:1 for normal text (secondary-button labels, muted
+       badges/captions sitting on a muted or accent surface). 0.47 keeps
+       the exact same hue/chroma (no recolor) and restores AA — roughly
+       5.4:1 on --muted, ~6:1 on plain --background/--card. */
+    --muted-foreground: oklch(0.47 0.021 213.5);
+    --accent: oklch(0.963 0.002 197.1);
+    --accent-foreground: oklch(0.218 0.008 223.9);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.987 0.002 197.1);
+    --border: oklch(0.925 0.005 214.3);
+    --input: oklch(0.925 0.005 214.3);
+    --ring: oklch(0.723 0.014 214.4);
+    --chart-1: oklch(0.855 0.138 181.071);
+    --chart-2: oklch(0.704 0.14 182.503);
+    --chart-3: oklch(0.6 0.118 184.704);
+    --chart-4: oklch(0.511 0.096 186.391);
+    --chart-5: oklch(0.437 0.078 188.216);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.987 0.002 197.1);
+    --sidebar-foreground: oklch(0.148 0.004 228.8);
+    --sidebar-primary: oklch(0.218 0.008 223.9);
+    --sidebar-primary-foreground: oklch(0.987 0.002 197.1);
+    --sidebar-accent: oklch(0.963 0.002 197.1);
+    --sidebar-accent-foreground: oklch(0.218 0.008 223.9);
+    --sidebar-border: oklch(0.925 0.005 214.3);
+    --sidebar-ring: oklch(0.723 0.014 214.4);
   }
 
   .dark {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 96%;
-    --card: 222 40% 9%;
-    --card-foreground: 210 40% 96%;
-    --popover: 222 40% 9%;
-    --popover-foreground: 210 40% 96%;
-
-    --primary: 174 62% 42%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 96%;
-
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-
-    --accent: 217 33% 20%;
-    --accent-foreground: 210 40% 96%;
-
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 96%;
-
-    --border: 217 33% 20%;
-    --input: 217 33% 20%;
-    --ring: 174 62% 50%;
+    --background: oklch(0.148 0.004 228.8);
+    --foreground: oklch(0.987 0.002 197.1);
+    --card: oklch(0.218 0.008 223.9);
+    --card-foreground: oklch(0.987 0.002 197.1);
+    --popover: oklch(0.218 0.008 223.9);
+    --popover-foreground: oklch(0.987 0.002 197.1);
+    --primary: oklch(0.925 0.005 214.3);
+    --primary-foreground: oklch(0.218 0.008 223.9);
+    --secondary: oklch(0.275 0.011 216.9);
+    --secondary-foreground: oklch(0.987 0.002 197.1);
+    --muted: oklch(0.275 0.011 216.9);
+    --muted-foreground: oklch(0.723 0.014 214.4);
+    --accent: oklch(0.275 0.011 216.9);
+    --accent-foreground: oklch(0.987 0.002 197.1);
+    /* Darkened from oklch(0.704 0.191 22.216) — at 0.704 a destructive
+       button's near-white --destructive-foreground text sat at only
+       ~2.8:1 on this background (well under WCAG AA's 4.5:1; delete/danger
+       button labels were genuinely hard to read in dark mode). This same
+       --destructive value doubles as a standalone text/border color
+       (error copy) directly on --background, which is why it can't simply
+       go as dark as possible: with the foreground pinned near-white and
+       --background pinned near-black, ~4.3:1 is the mathematical ceiling
+       for satisfying *both* uses at once. 0.58 keeps the exact same red
+       hue/chroma (22.2°, C 0.191 — not a recolor) and lands both uses at
+       ~4.2-4.5:1, as close to full AA on both fronts as those two fixed
+       endpoints allow (versus one of them failing outright before). */
+    --destructive: oklch(0.58 0.191 22.216);
+    --destructive-foreground: oklch(0.987 0.002 197.1);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.56 0.021 213.5);
+    --chart-1: oklch(0.855 0.138 181.071);
+    --chart-2: oklch(0.704 0.14 182.503);
+    --chart-3: oklch(0.6 0.118 184.704);
+    --chart-4: oklch(0.511 0.096 186.391);
+    --chart-5: oklch(0.437 0.078 188.216);
+    --sidebar: oklch(0.218 0.008 223.9);
+    --sidebar-foreground: oklch(0.987 0.002 197.1);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.987 0.002 197.1);
+    --sidebar-accent: oklch(0.275 0.011 216.9);
+    --sidebar-accent-foreground: oklch(0.987 0.002 197.1);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.56 0.021 213.5);
   }
 
   * {
@@ -70,8 +115,64 @@
   }
 
   body {
-    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+    /* bg-background/text-foreground, not the old hardcoded bg-slate-50
+       text-slate-900 dark:bg-slate-950 dark:text-slate-100 — this app's
+       own rule (see tailwind.config.ts) is semantic tokens only, precisely
+       so dark mode can never be missed; the slate-* here was a leftover
+       from before the oklch token set above existed. The oklch background/
+       foreground values were tuned to the same near-white/near-black
+       slate look, so this is a consistency fix, not a recolor. */
+    @apply bg-background text-foreground;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* Long-form reading comfort — course/Workspace/Studio pages are dense
+       medical text read in extended sessions. A slightly more open
+       line-height than Tailwind's 1.5 default, plus standard antialiasing/
+       legibility hints for crisper glyphs (light text on the dark-mode
+       background above is where aliasing is most fatiguing to read). Any
+       element with its own Tailwind `leading-*`/text-size utility (buttons,
+       badges, nav — this app's UI chrome) keeps its explicit line-height
+       and is unaffected; this only reaches plain inherited body text. */
+    line-height: 1.6;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/**
+ * Mobile-wide text-size bump (Point 7) — deliberately NOT a root `html {
+ * font-size }` change: Tailwind's spacing scale (p-4, gap-2, h-9, ...) is
+ * ALSO rem-based, so bumping the root would inflate padding/margins/icon
+ * boxes right along with text, overflowing the tightly-packed mobile chrome
+ * (bottom nav, compact cards) this app already has. Targets only the actual
+ * text-size utility classes instead, and deliberately sits OUTSIDE any
+ * `@layer` block — Tailwind's utilities (`@tailwind utilities` above) live
+ * inside the cascade layers system, and un-layered rules always win over
+ * layered ones regardless of selector order, so this reliably overrides
+ * `.text-xs`/`.text-sm`/etc. without needing `!important` or fighting
+ * specificity. Scoped to below Tailwind's own `md` breakpoint (768px) so
+ * desktop/tablet typography is completely untouched.
+ */
+@media (max-width: 767px) {
+  .text-xs {
+    font-size: 0.8125rem; /* 13px, up from 12px */
+    line-height: 1.25rem;
+  }
+  .text-sm {
+    font-size: 0.9375rem; /* 15px, up from 14px */
+    line-height: 1.4rem;
+  }
+  .text-base {
+    font-size: 1.0625rem; /* 17px, up from 16px */
+    line-height: 1.6rem;
+  }
+  .text-lg {
+    font-size: 1.1875rem; /* 19px, up from 18px */
+    line-height: 1.7rem;
+  }
+  .text-xl {
+    font-size: 1.3125rem; /* 21px, up from 20px */
+    line-height: 1.8rem;
   }
 }
 
@@ -91,5 +192,247 @@
 
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Thin, translucent scrollbar for dark glassmorphism panels (Mode Visuel). */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.25);
+    border-radius: 9999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* ---------------------------------------------------------------------
+     "Futuristic Medical Elegance" — the app-shell redesign's background
+     and glass surface system (app/dashboard/(shell)/layout.tsx onward).
+     Additive to the Clinical SaaS tokens above, not a replacement — every
+     existing `bg-card`/`border-border`/etc. still resolves through the
+     same CSS vars, so pages that haven't been redesigned yet are
+     unaffected. Only .clinical-mesh-bg/.clinical-canvas-bg (the shell's
+     OLD background, used nowhere else) were removed outright.
+     --------------------------------------------------------------------- */
+
+  /* Three soft, slowly-drifting color fields (teal/violet/cyan) behind the
+     shell — the "breathing" backdrop referenced by the redesign brief.
+     Deliberately not too colorful at rest (6-10% opacity) so long reading
+     sessions (Studio, Workspace) stay comfortable; glass panels placed on
+     top get their real vibrancy from backdrop-blur sampling this layer. */
+  .aurora-canvas-bg {
+    background-color: #f8fafc;
+    background-image:
+      radial-gradient(circle at 15% 20%, rgba(20, 184, 166, 0.16) 0%, transparent 45%),
+      radial-gradient(circle at 85% 15%, rgba(139, 92, 246, 0.14) 0%, transparent 45%),
+      radial-gradient(circle at 50% 90%, rgba(56, 189, 248, 0.12) 0%, transparent 50%);
+  }
+
+  .dark .aurora-canvas-bg {
+    background-color: #030712;
+    background-image:
+      radial-gradient(circle at 15% 20%, rgba(20, 184, 166, 0.22) 0%, transparent 45%),
+      radial-gradient(circle at 85% 15%, rgba(139, 92, 246, 0.2) 0%, transparent 45%),
+      radial-gradient(circle at 50% 90%, rgba(56, 189, 248, 0.16) 0%, transparent 50%);
+  }
+
+  /* Faint grid, sits above .aurora-canvas-bg at low opacity via
+     animate-mesh-pulse (tailwind.config.ts) — same role as the old
+     clinical-mesh-bg, restyled to a neutral slate line so it works over
+     the new multi-color aurora instead of assuming a teal-only backdrop. */
+  .aurora-mesh-bg {
+    background-image:
+      linear-gradient(rgba(100, 116, 139, 0.5) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(100, 116, 139, 0.5) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+
+  /* Chrome surfaces (floating sidebar, topbar, mobile bottom nav) — a
+     frosted pane that lets the aurora field show through. Deliberately
+     more opaque than .glass-card below: nav chrome needs to stay legible
+     even over a busy page behind it, where a card's own content provides
+     that contrast instead. */
+  .glass-panel {
+    background-color: rgb(255 255 255 / 0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgb(255 255 255 / 0.6);
+    /* This is the shell's persistently-fixed/sticky nav chrome (floating
+       sidebar, topbar, mobile bottom nav — see the comment above) sitting
+       over .aurora-canvas-bg + .aurora-mesh-bg, which are themselves other
+       `fixed inset-0` layers animating underneath (animate-mesh-pulse,
+       aurora-breathe). Stacking several independently-animating
+       backdrop-filter layers like this is the textbook trigger for WebKit
+       mobile Safari's blur-recompositing jitter (visibly "swimming"/extra-
+       blurry chrome during scroll or the aurora's own animation) — Safari
+       repaints an un-promoted backdrop-filter's sampling every frame its
+       *background* changes, not just when the element itself changes.
+       will-change here is a hint, not a value, so it can't clobber this
+       class's own real properties above or any layout transform a caller
+       applies alongside it: it just asks the compositor to promote this
+       surface to its own GPU layer up front, so its blur is sampled once
+       instead of being recomputed against every animating layer beneath it. */
+    will-change: transform, opacity;
+  }
+
+  .dark .glass-panel {
+    background-color: rgb(15 23 42 / 0.6);
+    border-color: rgb(255 255 255 / 0.08);
+  }
+
+  /* Content surfaces (cards, panels) — lighter tint than .glass-panel so
+     card content (text, tables) keeps full contrast; the blur is what
+     reads as "glass", not opacity. */
+  .glass-card {
+    background-color: rgb(255 255 255 / 0.55);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(255 255 255 / 0.5);
+  }
+
+  .dark .glass-card {
+    background-color: rgb(30 41 59 / 0.4);
+    border-color: rgb(255 255 255 / 0.07);
+  }
+}
+
+/* Respect the OS-level "reduce motion" preference. The aurora/mesh backdrops
+   (animate-mesh-pulse, aurora-breathe, sidebar-wave) and the app's various
+   fade-in/float/shimmer micro-interactions all opt out through this single
+   media query rather than needing a `motion-safe:` prefix hand-added to every
+   animation utility on every component. No visible effect for the vast
+   majority of users; for anyone with vestibular/motion sensitivity it
+   collapses every animation and transition to effectively instant, in line
+   with this app's "confort visuel, zéro fatigue" goal. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile WebKit backdrop-blur compositing fix.
+
+   Audit (grepped every `backdrop-blur-*` usage in the app): most call sites
+   are a single blur layer over ordinary scrolling content and are fine as-is.
+   The exceptions are the app's `fixed` full-viewport overlays/drawers —
+   Dialog's overlay (components/ui/Dialog.tsx: `fixed inset-0 ... backdrop-
+   blur-md`) and the workspace ChatPanel's mobile drawer (components/course/
+   workspace/ChatPanel.tsx: `fixed inset-y-0 right-0 ... backdrop-blur-xl`/
+   `-2xl`) — which mount on top of a page that is frequently ALSO running its
+   own fixed, animating blur/mesh backdrop (.aurora-canvas-bg/.aurora-mesh-bg
+   above, or this same .glass-panel nav chrome). Layering an un-promoted
+   backdrop-filter on top of another animating one is what produces the
+   "extra-blurry"/swimming look specifically on WebKit mobile (iOS Safari):
+   without its own compositor layer, the top overlay's blur gets resampled
+   against the animating layer(s) beneath it every frame instead of once.
+
+   Targeted at the literal combination (Tailwind's `fixed` utility class +
+   any `backdrop-blur-*` utility) rather than a blanket selector, so this
+   never reaches the locked Studio components (audited: none of the
+   Gastrite-, Resume-, CasClinique-, ExamQcm-, or MindMap-prefixed
+   components use `fixed` positioning) or any other scrolling
+   `backdrop-blur` surface that doesn't need a promoted
+   layer. will-change is a hint, not a value — it cannot override a matched
+   element's own `transform` (e.g. a future centered modal using translate-
+   based centering alongside blur), it only asks the browser to give that
+   element its own GPU layer before the blur is first sampled. */
+.fixed[class*="backdrop-blur"] {
+  will-change: transform, opacity;
+}
+
+/* ---------------------------------------------------------------------------
+   Text-selection sub-pixel blur fix — reported on the long-form reading
+   surfaces a student actually selects text from and gets a highlight from:
+   "Afficher le cours" (FileViewerModal's raw-text fallback), the Sources
+   panel (SourceDocumentPanel), and Studio's own opened-section detail view
+   (StudioPanel's `data-selectable` containers, where the Ask MedArt/Translate
+   tooltip lives). All three sit under Framer Motion `motion.*` ancestors that
+   set an inline `transform` for animation (see StudioPanel.tsx's own comment
+   on this) — selecting text forces a repaint, and without its own stable
+   compositor layer that repaint can inherit the ancestor's fractional-scale
+   transform, rasterizing the glyphs a hair off from their resting position
+   (visible as a brief blur/shimmer specifically ON selection, not at rest,
+   since nothing repaints at rest). Promoting the text container to its own
+   GPU layer up front keeps its rasterization stable regardless of what an
+   ancestor's transform is doing. A dedicated class, not a blanket rule on
+   `.text-reading` itself (that class is a pure font-size/line-height/
+   letter-spacing utility, generated by Tailwind — bolting compositing
+   behavior onto it would conflate two unrelated concerns) — same scoped-
+   selector discipline as the backdrop-blur fix above. */
+.text-select-stable {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+/* ---------------------------------------------------------------------------
+   Anti-leak deterrents (see hooks/useSecurityGuard.ts for the JS half —
+   contextmenu/copy/cut interception with the "smart clipboard" swap,
+   keydown deterrents, focus-loss blur). None of this is a real security
+   boundary; it raises friction, it doesn't stop a determined user.
+
+   A global `user-select: none` was tried here and reverted — this is not a
+   missing exception, it's a wrong approach for this app: this app's OWN
+   highlight/quick-action toolbar (TextSelectionToolbar) is built entirely on
+   `window.getSelection()` returning a real Range, which the browser will
+   never produce over text it was never allowed to let the user select in
+   the first place. No CSS-only exception list can chase every reading
+   surface that legitimately needs selection (Studio tabs, the demo pages,
+   any future one) without missing one and breaking the toolbar again — the
+   actual leak boundary this app cares about is enforced at the clipboard
+   (copy/cut), in JS, not by preventing selection from existing at all. */
+
+/* Point 7 — native text selection on mobile.
+   `-webkit-touch-callout` is NOT `user-select`: user-select gates whether a
+   Range can be selected at all (left alone, see the comment above); this
+   WebKit-only property instead gates whether iOS Safari's own long-press
+   popup (Copy / Look Up / Share…, and the selection handles that a
+   long-press first has to produce before this app's own
+   TextSelectionToolbar — driven by window.getSelection() — can ever show
+   its "Ask MedArt / Highlights / Copier" actions) is allowed to appear at
+   all. Audited: nothing in this codebase sets it to `none` today, so this
+   is a deliberate, explicit guarantee rather than a fix for a currently
+   active override — written down so a future global reset/reused style
+   can't silently reintroduce the exact "toolbar never shows up on mobile"
+   failure mode the `user-select: none` revert above already had to learn
+   the hard way. Scoped to the actual reading/selection surfaces only:
+   `.prose` (lib/markdown.tsx's PROSE_CLASSES/DARK_PROSE_CLASSES, the
+   rendered-markdown course content) and `[data-selectable]` (the Studio
+   panel containers hooks/useTextSelection.ts's containerRef attaches to,
+   for reading surfaces that aren't necessarily markdown). Inherited by
+   descendants, so headings/paragraphs/list items/table cells inside don't
+   need repeating. Deliberately NOT a blanket `*`/`body` rule, and no
+   `select-none` touched — this app's small handful of real `select-none`
+   usages (dropdown/select menus, the Mode Visuel slide canvas's zoomed pan
+   state) are intentionally non-text UI and are outside this fix's scope. */
+.prose,
+[data-selectable] {
+  -webkit-touch-callout: default;
+}
+
+@media print {
+  body {
+    display: none !important;
+  }
+  body::after {
+    content: "Action interdite";
   }
 }

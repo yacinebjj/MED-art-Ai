@@ -2,7 +2,14 @@ import { CheckCircle2 } from "lucide-react";
 import { MotionCard } from "@/components/ui/MotionCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import type { Plan } from "@/lib/pricing";
+import { isPaidPlanId, type Plan } from "@/lib/pricing";
+
+/** "800 DZD / mois" for the 3 monthly plans, "5 000 DZD / 3 mois" and "12 000 DZD / an" for Semester/Annual — durationMonths drives this instead of a hardcoded 12-or-semestre check, which broke the moment a 3rd duration (1 month) entered the plan lineup. */
+function formatBillingPeriod(durationMonths: number): string {
+  if (durationMonths === 1) return "mois";
+  if (durationMonths === 12) return "an";
+  return `${durationMonths} mois`;
+}
 
 export function PlanCard({
   plan,
@@ -15,6 +22,8 @@ export function PlanCard({
   isLoading: boolean;
   onSubscribe: () => void;
 }) {
+  const isFreemium = !isPaidPlanId(plan.id);
+
   return (
     <MotionCard className="flex flex-col p-6 sm:p-8">
       <div className="flex items-center justify-between">
@@ -28,7 +37,7 @@ export function PlanCard({
           {plan.priceDZD.toLocaleString("fr-FR")}
         </span>
         <span className="text-sm font-medium text-muted-foreground">
-          DZD / {plan.durationMonths === 12 ? "an" : "semestre"}
+          DZD / {formatBillingPeriod(plan.durationMonths)}
         </span>
       </div>
 
@@ -47,9 +56,9 @@ export function PlanCard({
         variant={isCurrentPlan ? "outline" : "primary"}
         onClick={onSubscribe}
         isLoading={isLoading}
-        disabled={isLoading}
+        disabled={isLoading || isFreemium}
       >
-        {isCurrentPlan ? "Renouveler" : "Souscrire"}
+        {isFreemium ? "Niveau par défaut" : isCurrentPlan ? "Renouveler" : "Souscrire"}
       </Button>
     </MotionCard>
   );

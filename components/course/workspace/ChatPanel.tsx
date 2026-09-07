@@ -8,7 +8,9 @@ import type { ChatMessage } from "@/lib/types";
 /**
  * "overlay" = narrow slide-over from the right (workspace course page).
  * "split"   = fills its parent column for a true 50/50 split-screen (demo).
- * Both share the same frosted-glass (glassmorphism) styling.
+ * `dark` swaps the light frosted-glass look for the "Clinical Midnight
+ * Aurora" glass variant — opt-in, defaults to false so the course workspace
+ * (which always passes "overlay" and never sets `dark`) is unaffected.
  */
 export function ChatPanel({
   open,
@@ -19,6 +21,7 @@ export function ChatPanel({
   onInputChange,
   onSend,
   variant = "overlay",
+  dark = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,6 +31,7 @@ export function ChatPanel({
   onInputChange: (value: string) => void;
   onSend: () => void;
   variant?: "overlay" | "split";
+  dark?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -43,8 +47,9 @@ export function ChatPanel({
     onSend();
   }
 
-  const glass =
-    "flex flex-col border-l border-white/60 bg-white/40 backdrop-blur-xl shadow-[0_0_40px_-10px_rgba(0,0,0,0.1)]";
+  const glass = dark
+    ? "flex flex-col border-l border-white/10 bg-slate-900/40 backdrop-blur-2xl shadow-[0_0_60px_-15px_rgba(6,182,212,0.25)]"
+    : "flex flex-col border-l border-white/60 bg-white/40 backdrop-blur-xl shadow-[0_0_40px_-10px_rgba(0,0,0,0.1)]";
   const rootClass =
     variant === "split"
       ? cn("relative z-10 h-full w-1/2 shrink-0 animate-fade-in", glass)
@@ -52,24 +57,37 @@ export function ChatPanel({
 
   return (
     <div className={rootClass}>
-      <div className="flex items-center justify-between border-b border-white/40 bg-white/30 p-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-white">
+      <div
+        className={cn(
+          "flex items-center justify-between border-b p-4",
+          dark ? "border-white/10 bg-white/[0.02]" : "border-white/40 bg-white/30"
+        )}
+      >
+        <h2 className={cn("flex items-center gap-2 text-sm font-semibold", dark ? "text-white" : "text-gray-900")}>
+          <span
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded-lg text-white",
+              dark ? "bg-gradient-to-br from-cyan-500 to-blue-600" : "bg-gradient-to-br from-primary-500 to-primary-700"
+            )}
+          >
             <Sparkles className="h-3.5 w-3.5" />
           </span>
           MedArt Assistant
         </h2>
         <button
           onClick={onClose}
-          className="rounded-lg p-1 text-gray-500 transition-colors hover:bg-white/60 hover:text-gray-800"
+          className={cn(
+            "rounded-lg p-1 transition-colors",
+            dark ? "text-slate-400 hover:bg-white/10 hover:text-white" : "text-gray-500 hover:bg-white/60 hover:text-gray-800"
+          )}
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+      <div ref={scrollRef} className={cn("flex-1 space-y-3 overflow-y-auto p-4", dark && "custom-scrollbar")}>
         {messages.length === 0 && (
-          <p className="mt-8 text-center text-sm text-gray-500">
+          <p className={cn("mt-8 text-center text-sm", dark ? "text-slate-500" : "text-gray-500")}>
             Sélectionne un passage du cours ou pose une question ici.
           </p>
         )}
@@ -83,8 +101,10 @@ export function ChatPanel({
               className={cn(
                 "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm shadow-sm",
                 message.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-white/80 text-gray-900 ring-1 ring-white/60"
+                  ? "border border-black/5 bg-white text-gray-900"
+                  : dark
+                    ? "bg-white/5 text-slate-100 ring-1 ring-white/10"
+                    : "bg-white/80 text-gray-900 ring-1 ring-white/60"
               )}
             >
               {message.content}
@@ -94,7 +114,12 @@ export function ChatPanel({
 
         {isTyping && (
           <div className="flex justify-start">
-            <div className="flex items-center gap-1 rounded-2xl bg-white/80 px-4 py-3 text-gray-500 ring-1 ring-white/60">
+            <div
+              className={cn(
+                "flex items-center gap-1 rounded-2xl px-4 py-3",
+                dark ? "bg-white/5 text-slate-400 ring-1 ring-white/10" : "bg-white/80 text-gray-500 ring-1 ring-white/60"
+              )}
+            >
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span className="text-xs">MedArt écrit…</span>
             </div>
@@ -102,17 +127,30 @@ export function ChatPanel({
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="flex gap-2 border-t border-white/40 bg-white/30 p-3">
+      <form
+        onSubmit={handleSubmit}
+        className={cn("flex gap-2 border-t p-3", dark ? "border-white/10 bg-white/[0.02]" : "border-white/40 bg-white/30")}
+      >
         <input
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           placeholder="Pose ta question…"
-          className="flex-1 rounded-lg border border-white/60 bg-white/70 px-3 py-2 text-sm outline-none transition-colors focus:border-blue-400 focus:bg-white"
+          className={cn(
+            "flex-1 rounded-lg border px-3 py-2 text-sm outline-none transition-colors",
+            dark
+              ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:bg-white/10"
+              : "border-white/60 bg-white/70 focus:border-primary-400 focus:bg-white"
+          )}
         />
         <button
           type="submit"
           disabled={input.trim().length === 0 || isTyping}
-          className="flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
+          className={cn(
+            "flex items-center justify-center rounded-lg px-3 py-2 text-white transition-all duration-300 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-40",
+            dark
+              ? "bg-gradient-to-r from-cyan-600 to-blue-600 hover:shadow-[0_0_15px_rgba(6,182,212,0.5)]"
+              : "bg-primary-600 hover:bg-primary-700 hover:shadow-glow"
+          )}
         >
           <Send className="h-4 w-4" />
         </button>

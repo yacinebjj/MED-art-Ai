@@ -1,42 +1,39 @@
 import type { Components } from "react-markdown";
+import { CheckCircle2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-/**
- * Rich, colored @tailwindcss/typography class set shared by every Markdown
- * reader (workspace CenterReader + the static demo page). Kept in one place so
- * the two stay visually identical.
- *
- * Blockquote colors are handled by the custom component below (not here), so
- * this string covers headings, bold, markers, tables and separators. It also
- * strips the plugin's default blockquote quotation marks.
- */
 export const PROSE_CLASSES = [
-  "prose prose-slate prose-lg max-w-none",
-  // Headings — premium, color by importance
+  "prose prose-slate prose-lg md:prose-xl max-w-none",
   "prose-headings:font-bold prose-headings:tracking-tight",
-  "prose-h1:text-slate-900 prose-h2:text-blue-800 prose-h3:text-indigo-600",
-  // Bold text pops in blue
-  "prose-strong:text-blue-700 prose-strong:font-semibold",
+  "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-600 prose-h1:to-emerald-600",
+  "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-600 prose-h2:to-emerald-600",
+  "prose-h3:text-indigo-600",
   "prose-a:text-blue-600",
-  // Bullet / ordered-list markers
-  "marker:text-blue-500",
-  // Kill the default open-/close-quote glyphs on blockquotes (component colors them)
+  "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
+  "prose-ul:list-none prose-ul:pl-0 prose-ol:list-none prose-ol:pl-0",
   "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",
-  // Tables
   "prose-th:bg-blue-600 prose-th:text-white prose-th:font-semibold prose-th:p-3 prose-th:text-left",
   "prose-td:p-3 prose-td:border-t prose-td:border-slate-200 prose-td:align-top",
   "[&_tbody_tr:nth-child(even)]:bg-slate-50",
-  // Horizontal separators
   "prose-hr:border-t-2 prose-hr:border-blue-100",
 ].join(" ");
 
-/**
- * Turns the shorthand blockquote levels into single-level blockquotes tagged
- * with a colored-circle marker so they can be colored without nested-box bugs:
- *   >   ...  -> blue   (default note / physiopathologie)
- *   >>  ...  -> green  (résumé, point positif)
- *   >>> ...  -> red    (alerte, danger, red flag)
- * The colored circle also stays visible as a structural bullet.
- */
+export const DARK_PROSE_CLASSES = [
+  "prose prose-invert prose-lg md:prose-xl max-w-none",
+  "prose-headings:font-bold prose-headings:tracking-wide",
+  "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
+  "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-400 prose-h1:to-emerald-400",
+  "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-400 prose-h2:to-emerald-400",
+  "prose-h3:text-cyan-300",
+  "prose-a:text-cyan-400",
+  "prose-ul:list-none prose-ul:pl-0 prose-ol:list-none prose-ol:pl-0",
+  "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",
+  "prose-th:bg-cyan-600/70 prose-th:text-white prose-th:font-semibold prose-th:p-3 prose-th:text-left",
+  "prose-td:p-3 prose-td:border-t prose-td:border-white/10 prose-td:align-top",
+  "[&_tbody_tr:nth-child(even)]:bg-white/[0.03]",
+  "prose-hr:border-t-2 prose-hr:border-white/10",
+].join(" ");
+
 export function normalizeCallouts(md: string): string {
   return md
     .split("\n")
@@ -51,7 +48,6 @@ export function normalizeCallouts(md: string): string {
     .join("\n");
 }
 
-/** The four callout "tones" and their full literal Tailwind classes (literal so Tailwind's scanner picks them up). */
 type CalloutTone = "blue" | "emerald" | "amber" | "rose";
 
 const CALLOUT_STYLES: Record<CalloutTone, string> = {
@@ -61,7 +57,23 @@ const CALLOUT_STYLES: Record<CalloutTone, string> = {
   rose: "border-l-4 border-rose-500 bg-rose-50 text-slate-800",
 };
 
-/** Flattens a hast node subtree to its text so a blockquote can be classified by content. */
+const DARK_CALLOUT_STYLES: Record<CalloutTone, string> = {
+  blue: "border-l-4 border-cyan-400 bg-cyan-500/10 text-slate-100",
+  emerald: "border-l-4 border-emerald-400 bg-emerald-500/10 text-slate-100",
+  amber: "border-l-4 border-amber-400 bg-amber-500/10 text-slate-100",
+  rose: "border-l-4 border-rose-400 bg-rose-500/10 text-slate-100",
+};
+
+const BADGE_CLASSES = {
+  light: "font-bold text-primary-700",
+  dark: "font-bold text-primary-400",
+};
+
+const LIST_ICON_CLASSES = {
+  light: "mt-1 h-4 w-4 shrink-0 text-emerald-600",
+  dark: "mt-1 h-4 w-4 shrink-0 text-emerald-400",
+};
+
 function hastText(node: unknown): string {
   const n = node as { type?: string; value?: string; children?: unknown[] } | null;
   if (!n) return "";
@@ -70,13 +82,12 @@ function hastText(node: unknown): string {
   return "";
 }
 
-/** Picks a callout color from the blockquote's own text — works for the static demo AND live AI output. */
 function calloutTone(text: string): CalloutTone {
   if (text.includes("🔴")) return "rose";
   if (text.includes("🟡")) return "amber";
   if (text.includes("🟢")) return "emerald";
   if (text.includes("🔵")) return "blue";
-  if (/[؀-ۿ]/.test(text)) return "emerald"; // Arabic memory anchor
+  if (/[؀-ۿ]/.test(text)) return "emerald";
   if (/astuce du prof/i.test(text)) return "amber";
   if (/(attention|danger|red\s*flag|jamais|interdit|urgence vitale|mortel|risque vital)/i.test(text)) {
     return "rose";
@@ -84,25 +95,56 @@ function calloutTone(text: string): CalloutTone {
   return "blue";
 }
 
-/**
- * ReactMarkdown element overrides:
- * - blockquote: colored callout box, tone chosen from its content.
- * - table: wrapped in a rounded, horizontally-scrollable container.
- */
-export const MARKDOWN_COMPONENTS: Components = {
-  blockquote: ({ node, children }) => {
-    const tone = calloutTone(hastText(node));
-    return (
-      <blockquote
-        className={`my-5 rounded-r-lg px-5 py-3 font-normal not-italic shadow-sm ${CALLOUT_STYLES[tone]}`}
-      >
-        {children}
-      </blockquote>
-    );
-  },
-  table: ({ children }) => (
-    <div className="my-6 overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
-      <table className="m-0 w-full">{children}</table>
-    </div>
-  ),
-};
+function createMarkdownComponents(
+  calloutStyles: Record<CalloutTone, string>,
+  tableWrapperClass: string,
+  badgeClass: string,
+  listIconClass: string
+): Components {
+  return {
+    blockquote: ({ node, children }) => {
+      const tone = calloutTone(hastText(node));
+      return (
+        <blockquote
+          className={`my-5 rounded-r-lg px-5 py-3 font-normal not-italic shadow-sm ${calloutStyles[tone]}`}
+        >
+          {children}
+        </blockquote>
+      );
+    },
+    table: ({ children }) => (
+      <div className={cn("my-6 overflow-x-auto rounded-lg border shadow-sm", tableWrapperClass)}>
+        <table className="m-0 w-full">{children}</table>
+      </div>
+    ),
+    strong: ({ children }) => <strong className={badgeClass}>{children}</strong>,
+    li: ({ children }) => (
+      <li className="flex items-start gap-2 py-1">
+        <CheckCircle2 className={listIconClass} />
+        <span className="min-w-0">{children}</span>
+      </li>
+    ),
+    // Highlights are rehydrated once, imperatively, against the real DOM by
+    // StudioPanel's own effect (lib/highlight.ts's rangeFromOffsets/
+    // restoreHighlightBySubstring) — NOT here. This renderer used to also
+    // re-highlight matching substrings on every single paragraph render by
+    // reading localStorage mid-render (impure, and reading
+    // window.location.pathname to guess the slug), which raced/duplicated
+    // against that DOM-level pass and could wrap the same phrase twice.
+    p: ({ children }) => <p className="leading-relaxed my-6">{children}</p>,
+  };
+}
+
+export const MARKDOWN_COMPONENTS: Components = createMarkdownComponents(
+  CALLOUT_STYLES,
+  "border-slate-200",
+  BADGE_CLASSES.light,
+  LIST_ICON_CLASSES.light
+);
+
+export const DARK_MARKDOWN_COMPONENTS: Components = createMarkdownComponents(
+  DARK_CALLOUT_STYLES,
+  "border-white/10",
+  BADGE_CLASSES.dark,
+  LIST_ICON_CLASSES.dark
+);

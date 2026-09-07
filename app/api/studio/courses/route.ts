@@ -1,0 +1,186 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getAuthenticatedUser } from "@/lib/supabase/session-server";
+import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { indexStudioCourseChunksForChat } from "@/lib/studio-explication-delta";
+import type { StudioCourseSummary } from "@/types/studio-course";
+
+export const runtime = "nodejs";
+
+/**
+ * Multi-course Studio persistence (Golden Standard Part 2 — Auto-Save).
+ * One row per uploaded course, per student, per curriculum module —
+ * table `studio_courses` (RLS-enabled, migration run manually in the
+ * Supabase SQL editor; writes go through the admin client with an explicit
+ * `user_id` check in every query, matching this app's established pattern
+ * for qcm_attempts/course_chat_history).
+ */
+
+interface StudioCourseRow {
+  id: number;
+  title: string;
+  created_at: string;
+}
+
+function toSummary(row: StudioCourseRow): StudioCourseSummary {
+  return { id: row.id, title: row.title, createdAt: row.created_at };
+}
+
+/** Sidebar list for one module — oldest first, so a newly added course appears at the bottom (the "empilement visuel" the client asked for). */
+export async function GET(request: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const moduleIdParam = request.nextUrl.searchParams.get("moduleId");
+  const moduleId = moduleIdParam ? Number(moduleIdParam) : NaN;
+  if (!Number.isFinite(moduleId)) {
+    return NextResponse.json({ success: false, error: "'moduleId' est requis et doit être un nombre." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("studio_courses")
+    .select("id, title, created_at")
+    .eq("user_id", user.id)
+    .eq("curriculum_module_id", moduleId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("[studio/courses:list] Échec lecture Supabase:", error);
+    return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
+  }
+
+  const courses: StudioCourseSummary[] = ((data ?? []) as StudioCourseRow[]).map(toSummary);
+  return NextResponse.json({ success: true, courses });
+}
+
+/** Creates a new course row right after /api/upload extracts its text — every section starts null, filled in lazily as the student opens each Studio tab. */
+export async function POST(request: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`studio-courses-create:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch (error) {
+    return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
+  }
+
+  const { moduleId, title, rawText, sourceFileUrl } = (body ?? {}) as {
+    moduleId?: unknown;
+    title?: unknown;
+    rawText?: unknown;
+    sourceFileUrl?: unknown;
+  };
+
+  if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) {
+    return NextResponse.json({ success: false, error: "'moduleId' est requis et doit être un nombre." }, { status: 400 });
+  }
+  if (typeof title !== "string" || !title.trim()) {
+    return NextResponse.json({ success: false, error: "'title' est requis." }, { status: 400 });
+  }
+  if (typeof rawText !== "string" || rawText.trim().length < 50) {
+    return NextResponse.json({ success: false, error: "'rawText' est requis (≥ 50 caractères)." }, { status: 400 });
+  }
+  // Optional — only present when this course came from a real uploaded file
+  // (see app/api/upload/route.ts's uploadSourceFile); absent/null for pasted text.
+  if (sourceFileUrl !== undefined && sourceFileUrl !== null && typeof sourceFileUrl !== "string") {
+    return NextResponse.json({ success: false, error: "'sourceFileUrl' doit être une chaîne ou null." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("studio_courses")
+    .insert({
+      user_id: user.id,
+      curriculum_module_id: moduleId,
+      title: sanitizeForPostgres(title.trim()),
+      raw_text: sanitizeForPostgres(rawText),
+      source_file_url: sourceFileUrl ?? null,
+    })
+    .select("id, title, created_at")
+    .single();
+
+  if (error) {
+    console.error("[studio/courses:create] Échec insertion Supabase:", error);
+    return NextResponse.json({ success: false, error: `Création échouée : ${error.message}` }, { status: 500 });
+  }
+
+  const createdCourse = data as StudioCourseRow;
+
+  // Fire-and-forget: index this course's chunks so the Workspace chat's RAG
+  // retrieval (lib/chat-context-retrieval.ts) has real data from the
+  // student's very first message, instead of only getting indexed later if
+  // and when they generate a Studio "Explication" first. Never awaited —
+  // must not delay the upload response. Failure is non-fatal: chat falls
+  // back to answering from general medical knowledge with no course context
+  // block (see that route's own "no raw_text, ever" rule). Semantic-cache
+  // pre-warming (which used to run after this) was removed along with the
+  // chat semantic cache itself (product direction).
+  void indexStudioCourseChunksForChat(createdCourse.id, rawText, user.id).catch((error) =>
+    console.error("[studio/courses:create] Échec indexation en arrière-plan (non bloquant):", error instanceof Error ? error.message : error)
+  );
+
+  return NextResponse.json({ success: true, course: toSummary(createdCourse) });
+}
+
+/** "Supprimer toutes les sources" from a module card's ⋮ menu — wipes every course this student uploaded into this module. The curriculum module row itself (Anatomie, Cytologie...) is never touched, only their own studio_courses rows. */
+export async function DELETE(request: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const rl = rateLimit(`studio-courses-bulk-delete:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
+  }
+
+  const moduleIdParam = request.nextUrl.searchParams.get("moduleId");
+  const moduleId = moduleIdParam ? Number(moduleIdParam) : NaN;
+  if (!Number.isFinite(moduleId)) {
+    return NextResponse.json({ success: false, error: "'moduleId' est requis et doit être un nombre." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("studio_courses")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("curriculum_module_id", moduleId);
+
+  if (error) {
+    console.error("[studio/courses:bulk-delete] Échec suppression Supabase:", error);
+    return NextResponse.json({ success: false, error: `Suppression échouée : ${error.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}

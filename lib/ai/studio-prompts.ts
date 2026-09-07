@@ -1,0 +1,542 @@
+import type { JsonSectionId } from "@/lib/demo-content";
+import type { ContentBlock } from "@/lib/ai/openrouter";
+import {
+  CAS_CLINIQUE_SYSTEM_PROMPT,
+  EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
+  EXPLICATION_SYSTEM_PROMPT,
+  QCMS_SYSTEM_PROMPT,
+  RESUME_SYSTEM_PROMPT,
+} from "@/lib/prompts/public-course-sections";
+
+/**
+ * The Studio pipeline for the generic curriculum module workspace
+ * (app/dashboard/module/[id]/page.tsx) — "Option A": reuses the same
+ * production-proven, JSON-schema system prompts that generate real Supabase
+ * courses (lib/prompts/public-course-sections.ts — the ones "La Pleurésie"
+ * and "Gastrite" were themselves generated with) for explication and
+ * exemples_analogies unmodified, and overrides résumé/cas clinique/QCM
+ * with additional Golden Standard mandates — always by APPENDING to the
+ * shared prompt, never editing it, so the production per-course pipeline
+ * (app/api/generate/*) is never affected.
+ *
+ * Nothing here touches Supabase — see app/api/studio/generate/route.ts,
+ * which validates the model's JSON with zod (lib/ai/studio-schemas.ts) and
+ * returns it straight to the frontend instead of persisting it.
+ *
+ * MODEL POLICY (explicit product decision, definitive): every Studio
+ * section — Explication Ultra-Détaillée included, no exception — now runs
+ * on ECONOMY_MODEL (google/gemini-3.7-flash, lib/ai/openrouter.ts). The
+ * `STUDIO_MODEL` constant that used to point every Explication/fuzzy-hit
+ * call at "anthropic/claude-sonnet-5" (a real, live model — never the
+ * genuinely dead "anthropic/claude-3.5-sonnet", already gone from this
+ * codebase) has been removed entirely: every call site that used to import
+ * it (app/api/studio/generate/route.ts, lib/studio-explication-delta.ts,
+ * lib/module-synthesis.ts) now imports ECONOMY_MODEL directly instead, with
+ * `reasoning: { effort: "low" }` set on each call — the same cap that
+ * already fixed this exact model's hidden-reasoning-tokens truncation bug
+ * elsewhere in this app (see callOpenRouter's own doc comment).
+ */
+
+/**
+ * Every Studio call MUST bypass lib/ai/mock-data.ts's marker matching (see
+ * the comment on callOpenRouter's `bypassMock` option) — without this, a
+ * JSON-wrapped mock fixture about an unrelated hardcoded topic can silently
+ * replace a real Claude call in dev mode whenever a prompt happens to share a
+ * substring with the production pipeline's own prompts (which is now
+ * guaranteed, since this file imports those exact prompts). Kept as an
+ * explicit named constant (not inlined `true`) so every call site that
+ * passes it stays self-documenting.
+ */
+export const STUDIO_BYPASS_MOCK = true;
+
+/**
+ * CAS_CLINIQUE_SYSTEM_PROMPT (imported above) asks for exactly 1 case —
+ * correct for the production pipeline, which persists one course at a time.
+ * The Studio mandate settled on EXACTLY THREE cases per course (reverted
+ * down from an earlier "minimum 5" mandate, and reverted away from a
+ * lazy/progressive one-case-at-a-time generation flow that used to live here
+ * — both undone for cost reasons: 3 well-chosen cases in one call is cheaper
+ * than 5, and simpler/more predictable to bill than an open-ended "generate
+ * more on demand" flow). Overridden by APPENDING an emphatic override (not by
+ * editing the shared production prompt, which
+ * app/api/generate/cas-clinique/route.ts still relies on for real courses) —
+ * the model reads the whole prompt, so a late, explicit override reliably
+ * wins over the earlier "exactement 1" line while every other rule (schema,
+ * keys, icon/color palette) stays identical.
+ */
+const STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT = `${CAS_CLINIQUE_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "cases" doit contenir EXACTEMENT TROIS (3) cas cliniques complets et distincts — ni plus, ni moins, quelle que soit la longueur du cours source. Choisis les 3 présentations cliniques les PLUS IMPORTANTES et les PLUS FRÉQUENTES de ce cours — celles qu'un étudiant a la plus forte probabilité de croiser à l'examen ou en stage — plutôt que de viser la diversité d'angles rares ou exotiques. Chaque cas doit avoir ses 5 actes intégralement rédigés (interrogatoire complet, examen physique complet, bilan complémentaire complet, raisonnement différentiel, prise en charge) — aucun raccourci, aucun acte vide. Chaque cas garde son propre "id" unique ("cas-1" à "cas-3") et son propre "numero" séquentiel.
+
+PROFONDEUR PHYSIOPATHOLOGIQUE OBLIGATOIRE (Golden Standard — non négociable) : dans CHAQUE cas, pour CHAQUE champ "pourquoi" (acte2_examen_physique, acte3_examens_complementaires, acte4_raisonnement.items) ainsi que pour "acte4_raisonnement.conclusion", détaille minutieusement le mécanisme physiopathologique exact — le processus tissulaire, cellulaire ou moléculaire précis qui relie le symptôme ou le signe observé à la maladie — avec une rigueur médicale absolue. Un "pourquoi" superficiel du type "car c'est un signe évocateur de X" est STRICTEMENT INTERDIT ; explique le mécanisme d'action réel, étape par étape si nécessaire, qui produit ce signe chez CE patient précis.
+
+ÉLAGAGE LÉGER (nouveau — ne touche ni la structure ni la profondeur ci-dessus) : élimine uniquement les mots et tournures de remplissage qui n'apportent aucune information clinique (répétitions inutiles, formules creuses) dans "acte1_interrogatoire", "acte2_examen_physique" et ailleurs — sans raccourcir un seul échange, une seule étape d'examen, ou un seul "pourquoi" physiopathologique.
+
+INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète, sans exception — chacune des 3 cas doit contenir CHACUNE de ses clés ("id", "numero", "archetype", "icon", "color", "titre", "scene", "vitals", "acte1_interrogatoire", "acte2_examen_physique", "acte3_examens_complementaires", "acte4_raisonnement" avec "items" ET "conclusion", "acte5_prise_en_charge" avec "items" ET "surveillance"). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé de niveau supérieur ou imbriquée — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.`;
+
+/**
+ * 2ème année (Sémiologie d'initiation) — explicit product mandate: exactly
+ * ONE case, and it must be genuinely physiological or falsely pathological
+ * (a patient worried about a normal symptom, a normal physiological
+ * adaptation — pregnancy, exertion, stress — or a routine exam with no real
+ * abnormality), never true pathology. Deliberately built on the PLAIN base
+ * prompt (CAS_CLINIQUE_SYSTEM_PROMPT already asks for exactly 1 case — see
+ * that prompt's own "exactement 1 cas clinique" line — so this override
+ * only needs to ADD the physiological-content constraint, never touch the
+ * count) rather than on STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT above, which
+ * mandates 3 real pathological cases — the wrong starting point here.
+ * Same exact JSON schema/keys as the standard 3-case version (see
+ * StudioCasCliniqueYear2Schema, lib/ai/studio-schemas.ts) so
+ * GastriteCasCliniqueStudio renders it with zero code changes.
+ */
+const STUDIO_CAS_CLINIQUE_YEAR2_SYSTEM_PROMPT = `${CAS_CLINIQUE_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE — CAS STRICTEMENT PHYSIOLOGIQUE (2ème année, sémiologie d'initiation) : ce cas ne doit JAMAIS être une vraie maladie. Choisis IMPÉRATIVEMENT l'un de ces trois types de scénario, celui qui colle le mieux au sujet du cours :
+1. Un patient qui s'inquiète pour un symptôme ou une sensation en réalité NORMALE (ex : palpitations après un café, essoufflement après un effort intense, une douleur musculaire banale après le sport) ;
+2. Une adaptation physiologique NORMALE du corps (ex : grossesse, effort physique intense, stress aigu, altitude) qui produit des signes qui POURRAIENT sembler inquiétants à un œil non averti, mais qui sont parfaitement normaux une fois expliqués ;
+3. Un examen de routine ou de dépistage systématique, sans la moindre anomalie détectée.
+Le but pédagogique n'est PAS de diagnostiquer une maladie — c'est d'apprendre à l'étudiant la "carcasse" de l'interrogatoire et de l'examen clinique (comment poser les questions dans l'ordre, comment examiner méthodiquement, comment raisonner à voix haute) sur un terrain sain, avant qu'il soit confronté à la vraie pathologie en 3ème année. La conclusion de "acte4_raisonnement" doit explicitement rassurer et expliquer PORQUOI ce qui semblait potentiellement inquiétant est en réalité normal — jamais poser un vrai diagnostic pathologique, jamais inventer une maladie qui n'existe pas dans ce scénario. "acte5_prise_en_charge" devient une simple conduite à tenir rassurante (explication au patient, pas de traitement d'une maladie inexistante).`;
+
+/**
+ * 1ère année — explicit product mandate: the DEEPEST departure from the
+ * standard cas_clinique contract. No patient, no consultation, no clinical
+ * case of any kind — an essay answering "pourquoi dois-je étudier ce cours,
+ * en quoi cela me sera utile plus tard à l'hôpital ?", aimed squarely at
+ * fighting first-year demotivation on foundational (non-clinical) subjects.
+ * Deliberately NOT built on CAS_CLINIQUE_SYSTEM_PROMPT at all (wrong shape
+ * entirely) — a from-scratch prompt matching StudioClinicalRelevanceSchema
+ * (lib/ai/studio-schemas.ts: {titre, paragraphes}), rendered by
+ * ClinicalRelevanceStudio.tsx, which never attempts to read
+ * interrogatoire/examen_physique-shaped keys that don't exist here.
+ *
+ * Rewritten per explicit product mandate (v2 — "profondeur maximale +
+ * accessibilité radicale + Darja"): the v1 essay above was motivational but
+ * shallow (5 short paragraphs) and used standard académique French
+ * throughout. This version demands real depth (the scientific "pourquoi du
+ * comment", not just "ça sert plus tard"), radical accessibility (every
+ * heavy term deconstructed word-by-word with an everyday analogy, usable by
+ * a student whose French is weak), and a warm "grand frère" register with
+ * Darja/arabe simplifié woven in — see resolveCasCliniqueMaxTokens below,
+ * which raises this section's token ceiling to match Explication's own,
+ * since this much more demanding brief produces a proportionally longer
+ * response and the previous 20000-token cap (still correct for years 2/3+)
+ * would truncate it mid-JSON exactly like Explication's own pre-fix history.
+ */
+const STUDIO_CAS_CLINIQUE_YEAR1_SYSTEM_PROMPT = `Tu es un grand frère/une grande sœur en médecine, plusieurs années au-dessus, du genre que TOUT le monde rêve d'avoir : brillant(e), mais qui n'oublie jamais ce que ça fait d'être largué(e) en 1ère année face à un cours de biochimie, d'histologie ou d'anatomie qui semble n'avoir aucun rapport avec un vrai patient. Un étudiant te donne le contenu brut d'un cours. Ta mission n'est PAS de générer un cas clinique — c'est de lui expliquer, comme tu le ferais assis à côté de lui avec un café, POURQUOI ce cours précis compte vraiment, et de le lui faire comprendre en PROFONDEUR, sans qu'il ait besoin de deviner ou de relire trois fois.
+
+═══════════════════════════════════════
+1. PROFONDEUR MAXIMALE — jamais de survol
+═══════════════════════════════════════
+- Ne te contente JAMAIS d'une phrase du type "cette notion est importante pour plus tard" — explique le POURQUOI DU COMMENT scientifique : quel mécanisme précis, quelle structure, quelle réaction, et comment elle produit concrètement l'effet qu'on observe chez un patient.
+- Relie CHAQUE notion fondamentale du cours à une scène réelle et concrète du terrain — le cabinet du médecin généraliste, les urgences à 3h du matin, la salle d'hospitalisation — où cette notion précise refait surface. Pas une allusion vague : une situation qu'on peut visualiser.
+- Va jusqu'au bout de l'argument : montre explicitement comment NE PAS maîtriser cette notion précise peut mener à une erreur de raisonnement clinique — une erreur qui, selon la notion, pourrait coûter un mauvais diagnostic, un traitement inadapté, ou dans les cas les plus graves, une vie. Et montre, symétriquement, comment la maîtriser peut littéralement permettre de sauver quelqu'un plus tard. Sois concret, jamais mélodramatique ou gratuit — l'exemple doit découler logiquement de la notion du cours, jamais inventé pour l'effet.
+- Ancre CHAQUE argument dans le contenu réel du cours source — cite des notions, structures ou mécanismes précis qui y apparaissent. N'invente aucun fait médical absent du texte source ; les scènes cliniques que tu utilises comme illustration doivent rester médicalement exactes et plausibles.
+
+═══════════════════════════════════════
+2. ACCESSIBILITÉ RADICALE — même pour quelqu'un qui galère en français
+═══════════════════════════════════════
+- Écris comme si l'étudiant en face de toi ne maîtrisait pas bien le français et n'avait AUCUN prérequis scientifique. Zéro jargon lâché sans filet.
+- RÈGLE ABSOLUE : chaque terme scientifique un peu lourd (nom de molécule, structure anatomique, processus biochimique, terme technique) doit être IMMÉDIATEMENT déconstruit — décompose le mot lui-même si son origine aide à comprendre, explique ce qu'il désigne en langage de tous les jours, puis illustre-le avec une analogie simple et concrète tirée de la vie quotidienne (ex : une cellule = une usine avec des ateliers spécialisés ; une enzyme = une clé qui n'ouvre qu'une seule serrure précise ; une membrane = un videur de boîte de nuit qui ne laisse entrer que certaines personnes). Ne suppose JAMAIS que le mot seul suffit.
+- Ton de "mentor bienveillant" : vivant, humain, chaleureux, jamais sec ni académique. Tutoiement systématique. Jamais condescendant, jamais culpabilisant sur une éventuelle démotivation actuelle de l'étudiant — au contraire, reconnais que la matière peut sembler aride vue de loin, puis démonte cette impression avec les exemples concrets ci-dessus.
+- INTÉGRATION SUBTILE DE LA DARJA (arabe dialectal algérien) ET DE L'ARABE CLASSIQUE SIMPLIFIÉ : au milieu de tes explications en français, glisse naturellement — jamais de façon forcée ni systématique à chaque phrase — des tournures en darja ou en arabe simple pour reformuler ou clarifier un point qui vient d'être expliqué, exactement comme le ferait un grand frère algérien en pleine explication. Exemples de calibrage (le REGISTRE à viser, pas des phrases à recopier telles quelles) : "Bref, bach tfhamha mlih..." avant une reformulation simple ; "En gros, had la molécule t3ml..." avant de résumer une fonction ; "Yani, ce que le cours veut dire c'est..." Utilise ce registre avec goût, à quelques endroits stratégiques par paragraphe (jamais dans TOUS), jamais au prix de la clarté scientifique — la darja vient EN PLUS de l'explication claire en français, jamais à sa place.
+
+═══════════════════════════════════════
+3. FORMAT — beaucoup plus long, riche et dense qu'avant
+═══════════════════════════════════════
+- Un titre court et percutant, qui donne envie de lire.
+- Couvre TOUTES les notions clés du cours source, chapitre par chapitre — pas seulement 3 ou 4 exemples choisis au hasard. Un cours dense doit produire un texte dense : ne t'arrête pas après 5 paragraphes si le cours contient plus de matière à relier au terrain.
+- Un minimum de 12 paragraphes développés (souvent davantage sur un cours long), chacun creusant une notion précise du cours + son mécanisme + sa scène clinique concrète + son analogie du quotidien si un terme lourd y apparaît, plus un paragraphe de conclusion motivant qui referme le texte sur une note chaleureuse.
+- Aucun format de consultation, aucun patient fictif, aucun symptôme mis en scène — un texte structuré en paragraphes, jamais un dialogue ni un JSON de cas clinique.
+
+Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte autour :
+{
+  "cas_clinique": {
+    "titre": "Titre court et percutant",
+    "paragraphes": ["Premier paragraphe...", "Deuxième paragraphe...", "..."]
+  }
+}`;
+
+/**
+ * Année 1's "Utilité Clinique" now demands full-course coverage (every
+ * chapter, minimum 12 dense paragraphs, word-by-word term breakdowns) —
+ * proportionally as long as Explication Ultra-Détaillée, so it gets
+ * Explication's own ceiling rather than the standard 20000-token cas_clinique
+ * budget (STUDIO_PROMPT_CONFIG.cas_clinique.maxTokens), which is sized for
+ * the 3-case (year 3+) and 1-case (year 2) prompts — both far shorter than
+ * this one. Mirrors resolveCasCliniqueSystemPrompt's exact same year gate.
+ */
+export function resolveCasCliniqueMaxTokens(studyYear: number | null | undefined): number {
+  if (studyYear === 1) return STUDIO_PROMPT_CONFIG.explication.maxTokens;
+  return STUDIO_PROMPT_CONFIG.cas_clinique.maxTokens;
+}
+
+/**
+ * study_year-aware system-prompt resolver for cas_clinique — mirrors
+ * resolveStudioSchema's exact same gating (lib/ai/studio-schemas.ts): only
+ * exactly 1 or 2 gets a different prompt, anything else (including
+ * null/undefined/unknown) falls through to the unconditional default
+ * (STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, the pre-existing 3ème-année-et-plus
+ * behavior this section has always had).
+ */
+export function resolveCasCliniqueSystemPrompt(studyYear: number | null | undefined): string {
+  if (studyYear === 1) return STUDIO_CAS_CLINIQUE_YEAR1_SYSTEM_PROMPT;
+  if (studyYear === 2) return STUDIO_CAS_CLINIQUE_YEAR2_SYSTEM_PROMPT;
+  return STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT;
+}
+
+/**
+ * RESUME_SYSTEM_PROMPT (imported above) already mandates the exact 6-mode
+ * structure — never touched here. The mandate for this override shifted from
+ * "never leave a bare keyword, always explain why/how" (verbose by
+ * construction — that was actively adding length) to the opposite priority:
+ * maximum density. Every bullet still needs enough context to stand alone
+ * (a bare keyword is still banned), but now as ONE short, dense sentence
+ * instead of an explanatory passage.
+ *
+ * Single-shot generation (product direction, explicitly reverted from an
+ * earlier lazy per-mode-loading + cross-student cache architecture): all 6
+ * modes are always generated together in one call, the instant the Résumé
+ * tab is opened — no per-mode click-to-generate, no separate cache. The
+ * cost lever here is exclusively prompt density (fewer words per bullet),
+ * not deferred/partial generation.
+ */
+const STUDIO_RESUME_SYSTEM_PROMPT = `${RESUME_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE — DENSITÉ MAXIMALE (remplace toute consigne de longueur/verbosité ci-dessus ; la structure des 6 modes reste strictement inchangée) : chaque puce ou point clé (cards.items, cheatsheet cards.items, astuces.details, guideline steps.content, etc.) doit être UNE SEULE phrase courte, dense et autonome — jamais un mot-clé isolé sans aucun contexte, mais jamais non plus une phrase longue ou un mini-paragraphe explicatif. Élimine systématiquement : toute répétition d'une idée déjà énoncée ailleurs dans le même mode, les phrases de transition ou d'introduction sans contenu médical ("il est important de noter que...", "on peut également souligner que..."), et tout mot ou adjectif de remplissage. Le résultat doit être nettement plus compact qu'une rédaction non filtrée, sans jamais donner l'impression d'un résumé tronqué ou incomplet — chaque puce doit rester immédiatement compréhensible seule, juste débarrassée de tout superflu.
+
+INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE de chaque puce, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète du mode généré (toutes ses clés de premier niveau et imbriquées telles que définies dans le schéma — hero, sections, ddx_table, pieges, cards, steps, quotes, perles, items — même quand une clé n'est pas utilisée par CE mode précis, auquel cas renvoie-la comme tableau vide [] ou objet aux champs vides, jamais comme clé absente). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.`;
+
+/**
+ * QCMS_SYSTEM_PROMPT (imported above) asks for 8-12 QCM + 4-6 QROC — the
+ * Studio mandate went through a "minimum 30 QCM + 5 QROC" phase (real cost
+ * driver: 30+ questions, each with a 5-option explanation, is a LOT of
+ * completion tokens) before settling on the current, cost-conscious target:
+ * exactly 15 QCM, and QROC dropped entirely — a focused, high-quality 15-
+ * question set instead of a 35-item épreuve most students never finish
+ * anyway. `qrocs` stays a required key in STUDIO_SCHEMAS (StudioQcmsSchema,
+ * now with no minimum) so InteractiveQuiz — SHARED with the real per-course
+ * production pipeline via GastriteQcmsStudio/ExamQcmStudio, never edited to
+ * assume Studio-only behavior — keeps receiving the exact prop shape it
+ * always has; it already hides its QROC section entirely when the array is
+ * empty (see that component's own comment).
+ */
+const STUDIO_QCMS_SYSTEM_PROMPT = `${QCMS_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "qcms" doit contenir EXACTEMENT QUINZE (15) QCM — ni plus, ni moins, quelle que soit la longueur du cours source. AUCUN QROC : ignore toute mention de QROC dans les consignes ci-dessus — le tableau "qrocs" doit être renvoyé comme un tableau VIDE ([]), sans générer la moindre question QROC. Les 15 QCM doivent être de niveau Résidanat, réellement difficiles (distracteurs plausibles, questions à réponses multiples incluses), avec une explication complète pour chaque option existante (A à E). Numérote "id" séquentiellement à partir de 1, sans trou.`;
+
+/**
+ * EXPLICATION_SYSTEM_PROMPT (imported above) is the shared, production-proven
+ * prompt — NEVER edited directly, so the real per-course pipeline
+ * (app/api/generate/explication/route.ts) is unaffected, same reasoning as
+ * every other override in this file.
+ *
+ * MANDATE REVERSED (explicit product decision, definitive): the Studio
+ * override used to ask for a 10-15% length REDUCTION for cost reasons.
+ * That is now the OPPOSITE of what's wanted — maximum exhaustiveness,
+ * explicitly at the expense of cost/length, is the goal. Every word,
+ * sentence and line of the source material must be explained in
+ * painstaking detail; nothing gets summarized away. See maxTokens below
+ * (raised alongside this prompt change) — a longer mandate needs more room
+ * to actually complete, and fixInvalidJsonEscapes/repairTruncatedJson
+ * (lib/course-generation-shared.ts) are the safety net if a course is long
+ * enough to still hit that higher ceiling.
+ *
+ * SIMPLICITÉ RADICALE (added on top, same product direction): assume ZERO
+ * prior knowledge — the student is explicitly described as struggling with
+ * language and having understood LITERALLY NOTHING from the source on
+ * their own. Every technical word gets an immediate plain-language
+ * explanation, every idea is broken into small sequential steps built on
+ * the previous one, with the key point of each step restated in different
+ * words before moving on. This compounds with exhaustiveness above rather
+ * than fighting it — step-by-step simple explanations are LONGER than
+ * dense technical ones, never shorter.
+ *
+ * CHAÎNE DE "POURQUOI" SANS FIN (third layer, same product direction): for
+ * every sentence in the source, chase WHY it happens exactly that way —
+ * repeatedly, down through cellular/molecular/physiological causes, until
+ * no further "why" is possible — rather than just stating WHAT happens.
+ * Explicitly forbids stopping at a shallow, circular answer ("it happens
+ * because that's the disease"). This is the deepest layer of the same
+ * exhaustiveness goal, not a separate one.
+ *
+ * On maxTokens: NOT raised again alongside this change, deliberately —
+ * real production usage logs so far show completion_tokens landing around
+ * 9,700-10,000 tokens, well under even the PREVIOUS 32,000 ceiling, let
+ * alone the current 65,536. The bottleneck for "legendary" depth has never
+ * been the token ceiling; it's the model stopping early on its own. These
+ * three prompt layers are the actual lever — 65,536 already leaves ample
+ * headroom for whatever they unlock.
+ */
+const STUDIO_EXPLICATION_SYSTEM_PROMPT = `${EXPLICATION_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE — EXHAUSTIVITÉ MAXIMALE (remplace toute consigne de concision ou de réduction ci-dessus) : ceci est la consigne la PLUS IMPORTANTE de tout ce prompt. L'objectif n'est PAS un cours dense mais raisonnable — c'est l'explication la plus longue, la plus détaillée et la plus complète qu'il soit humainement possible de produire sur ce cours, au point qu'AUCUNE information, aucun mot, aucune phrase, aucune ligne du texte source ne reste sans être développé, expliqué et recontextualisé. Vise l'exhaustivité absolue, jamais la brièveté — quand tu hésites entre "couper pour rester concis" et "développer davantage", développe TOUJOURS davantage.
+
+Concrètement :
+- Pour CHAQUE phrase du texte source, explique non seulement CE qu'elle dit, mais POURQUOI c'est vrai, COMMENT ce mécanisme fonctionne en détail, et QUELLES sont ses implications cliniques — jamais une simple reformulation ou paraphrase de la phrase source.
+- N'omets JAMAIS un détail, un chiffre, une exception, une nuance ou un cas particulier présent dans le texte source sous prétexte qu'il semble mineur — un étudiant qui lit ton explication ne doit JAMAIS avoir besoin de retourner au texte source pour combler un manque.
+- Multiplie les exemples, les analogies et les reformulations pédagogiques pour CHAQUE concept, plutôt que de te contenter d'une seule explication — plus il y a d'angles différents pour faire comprendre la même notion, mieux c'est.
+- Le nombre de chapitres et leur longueur individuelle doivent s'étendre autant que le contenu source le permet réellement — ne t'arrête JAMAIS par souci de longueur, de coût, ou de "c'est probablement suffisant". Si le texte source est riche, vise largement plus de 8000 mots, sans plafond réel — plus long et plus détaillé est toujours strictement préférable.
+- Cette exhaustivité ne doit JAMAIS être obtenue en ajoutant du remplissage vide (répétitions creuses, tournures sans contenu médical) — chaque mot supplémentaire doit apporter une vraie information, un vrai mécanisme, un vrai exemple clinique en plus, jamais du bavardage.
+
+SURCHARGE OBLIGATOIRE — TUTOIEMENT STRICT : tu t'adresses à UN SEUL étudiant que tu connais et que tu coaches personnellement, jamais à un auditoire. Utilise EXCLUSIVEMENT la deuxième personne du singulier ("tu", "toi", "ton", "ta", "tes") du tout premier au tout dernier mot — le vouvoiement ("vous", "votre", "vos") est FORMELLEMENT INTERDIT, y compris dans l'introduction, l'avant-propos et le récapitulatif final où le risque de glisser vers un registre plus académique est le plus fort. C'est ce tutoiement constant qui crée le ton "professeur chaleureux en tête-à-tête" exigé ci-dessus — un seul "vous" égaré rompt cet effet pour tout le reste du texte.
+
+SURCHARGE OBLIGATOIRE — SIMPLICITÉ RADICALE, NIVEAU ZÉRO PRÉREQUIS (vient compléter, jamais contredire, l'exhaustivité maximale exigée ci-dessus) : imagine que l'étudiant en face de toi est FAIBLE — pas dans le sens où il est bête, mais dans le sens où il a du mal avec la langue, avec les mots compliqués, et où il n'a LITTÉRALEMENT RIEN compris du cours source par lui-même. Si tu écris comme si l'étudiant avait déjà des bases, tu l'as déjà perdu. Écris comme si c'était sa toute première fois qu'il entend parler du sujet, dans sa vie.
+
+Concrètement :
+- N'utilise JAMAIS un mot médical ou technique sans l'expliquer IMMÉDIATEMENT après, avec des mots encore plus simples, comme si tu expliquais à quelqu'un qui n'a jamais ouvert un livre de médecine. Un mot compliqué non expliqué, même une seule fois, est un échec.
+- Découpe CHAQUE idée, même celle qui te semble évidente, en petites étapes séparées, une par une, dans l'ordre logique — jamais deux idées nouvelles dans la même phrase. Construis chaque notion sur la précédente, comme des marches d'escalier : ne monte à l'étape suivante que si l'étape d'avant est complètement posée et claire.
+- Répète et reformule le point important d'une étape avec d'autres mots avant de passer à la suivante, pour être sûr que ça "rentre" vraiment — ne suppose JAMAIS que l'étudiant a compris du premier coup.
+- Utilise des phrases courtes et un vocabulaire de tous les jours. Remplace systématiquement un mot savant par son équivalent simple quand c'est possible ("provoque" plutôt que "engendre", "empêche" plutôt que "inhibe" — puis donne quand même le terme médical exact à connaître, mais seulement APRÈS l'avoir fait comprendre simplement).
+- Le but final de chaque paragraphe n'est jamais "avoir mentionné l'information" — c'est que l'idée soit vraiment arrivée jusqu'à l'étudiant, qu'il la comprenne dans sa tête avant de continuer.
+- Cette simplicité ne réduit EN RIEN la longueur ou la profondeur exigées plus haut — au contraire, expliquer étape par étape avec des mots simples prend PLUS de mots qu'une phrase technique condensée, jamais moins. Simple ne veut jamais dire court.
+
+SURCHARGE OBLIGATOIRE — CHAÎNE DE "POURQUOI" SANS FIN (le niveau ultime d'exhaustivité, vient compléter tout ce qui précède) : pour CHAQUE phrase, CHAQUE fait, CHAQUE mécanisme du texte source, ne te contente JAMAIS de dire CE qui se passe — creuse systématiquement POURQUOI ça se passe exactement comme ça, encore, et encore, et encore, jusqu'à ce qu'il n'y ait plus aucun "pourquoi" possible à poser. Une seule affirmation isolée sans sa chaîne de "pourquoi" derrière elle est un échec, même si elle est techniquement correcte.
+
+Concrètement, pour chaque phrase importante du cours, pose-toi et réponds explicitement, les unes après les autres, à des questions comme :
+- Pourquoi est-ce que ça se produit exactement de cette façon-là, et pas autrement ?
+- Pourquoi le corps (ou la cellule, ou l'organe, ou le mécanisme) réagit-il précisément comme ça dans cette situation ?
+- Qu'est-ce qui, en amont — au niveau cellulaire, moléculaire, anatomique ou physiologique —, cause ce résultat précis ? Et pourquoi CE niveau-là cause-t-il exactement CE résultat-là ?
+- Pourquoi appelle-t-on ce phénomène ainsi ? Pourquoi utilise-t-on précisément ce mot ou cette formulation dans le cours pour le décrire ?
+- Et cette cause que tu viens de donner, pourquoi arrive-t-elle elle-même ? Continue à remonter la chaîne de "pourquoi" (le pourquoi du pourquoi du pourquoi) jusqu'à atteindre un mécanisme de base que l'étudiant peut vraiment comprendre, jamais en s'arrêtant à un premier "pourquoi" superficiel du type "parce que c'est comme ça".
+
+N'utilise jamais une explication vague ou circulaire ("ça arrive parce que c'est la maladie", "c'est le signe typique") comme fin de chaîne — chaque "pourquoi" doit recevoir une vraie réponse mécanistique, réelle et vérifiable à partir du contenu médical du cours, jamais inventée. Si le texte source ne donne pas explicitement le mécanisme profond, appuie-toi sur les connaissances médicales de base généralement enseignées à ce niveau pour compléter la chaîne de façon médicalement exacte — sans jamais inventer un fait qui contredirait le cours source.
+
+C'est cette chaîne ininterrompue de "pourquoi" — appliquée à CHAQUE phrase, sans exception, du début à la fin du cours — qui doit transformer cette explication en LA référence absolue et légendaire sur ce sujet, celle qu'un étudiant n'oubliera jamais parce qu'il a compris chaque rouage, jusqu'au bout, sans aucune zone d'ombre.`;
+
+/**
+ * Same reasoning as STUDIO_EXPLICATION_SYSTEM_PROMPT above, lighter touch —
+ * the mandate here is to keep every analogy and its full pedagogical
+ * richness completely intact, trimming only the prose AROUND them.
+ */
+const STUDIO_EXEMPLES_ANALOGIES_SYSTEM_PROMPT = `${EXEMPLES_ANALOGIES_SYSTEM_PROMPT}
+
+SURCHARGE OBLIGATOIRE — LÉGER ÉLAGAGE : garde intégralement chaque analogie, son ton Darija+français, et sa richesse pédagogique — aucune analogie ni aucune notion du cours ne doit disparaître. Allège légèrement UNIQUEMENT les phrases qui entourent les analogies (transitions, répétitions d'une idée déjà illustrée) pour réduire modestement le volume total, sans jamais sacrifier la clarté, le ton ou la profondeur qui caractérisent cette section.`;
+
+interface StudioPromptConfig {
+  systemPrompt: string;
+  /**
+   * 32000 is not an arbitrary "as high as possible" guess — it's the exact
+   * ceiling lib/course-generation-shared.ts's SECTION_CONFIG already uses in
+   * production for explication/exemples_analogies (proven reliable there),
+   * and a live call made earlier this session at this same ceiling for
+   * cas_clinique/qcm completed well under budget (~6700-9000 tokens actually
+   * used out of 32000). Per the "no API calls to verify" instruction for
+   * this pass, pushing past this already-proven number would be pure
+   * speculation with no way to confirm it doesn't 400 — 32000 is the honest
+   * "maximum absolu" this codebase can currently back up.
+   */
+  maxTokens: number;
+}
+
+// explication: raised again, 32768 -> 65536 (explicit product instruction:
+// "exhaustivité maximale" — every word/sentence/line of the source explained
+// in painstaking detail, no length ceiling in spirit — see
+// STUDIO_EXPLICATION_SYSTEM_PROMPT's own header comment for the matching
+// prompt rewrite). HONESTY NOTE: this value is NOT live-verified against
+// google/gemini-3.7-flash's real maximum completion-token ceiling (no
+// financial authorization for a real test call at the time of this change)
+// — if OpenRouter/the model rejects or silently clamps a request this
+// large, that will surface as a real, visible error or a shorter-than-
+// requested completion, never a silent corruption: fixInvalidJsonEscapes/
+// repairTruncatedJson (lib/course-generation-shared.ts) still recover
+// whatever was actually written before any cutoff, exactly as they do at
+// the previous, already-proven 32768 ceiling. Lower this back toward 32768
+// if a live test ever shows this specific number failing outright.
+//
+// `reasoning: { effort: "low" }` (see app/api/studio/generate/route.ts and
+// lib/studio-explication-delta.ts) still reserves ~20% of this larger
+// budget for hidden reasoning tokens, leaving roughly 52K tokens of real
+// headroom for the visible explication text — a meaningful increase over
+// the previous ~26K.
+//
+// The other 4 sections: checked against REAL past generations already
+// stored in studio_content_cache (a local, read-only Supabase query — zero
+// OpenRouter tokens spent to check this): estimated real completion-token
+// usage (chars/4) ranged from ~5,400 (exemples_analogies) to ~12,747
+// (cas_clinique), all well under 32,000. Lowered to 20,000 — roughly 1.6x
+// the highest real value observed (cas_clinique), a real safety margin
+// rather than a tight fit, given the sample was thin (n=1 for 3 of the 5
+// sections) and a bigger/longer real course could legitimately need more
+// than what's been generated so far. Re-check with more real data as
+// studio_content_cache accumulates more entries.
+export const STUDIO_PROMPT_CONFIG: Record<JsonSectionId, StudioPromptConfig> = {
+  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 65536 },
+  resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
+  cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
+  qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 20000 },
+  exemples_analogies: { systemPrompt: STUDIO_EXEMPLES_ANALOGIES_SYSTEM_PROMPT, maxTokens: 20000 },
+};
+
+/** Maps each Studio tile id to the top-level JSON key its prompt actually returns. "qcm" is the one mismatch — DEMO_SECTIONS uses the singular tile id, but QCMS_SYSTEM_PROMPT (shared with production) returns the plural "qcms" key. */
+export const STUDIO_SECTION_KEYS: Record<JsonSectionId, string> = {
+  explication: "explication",
+  resume: "resume",
+  cas_clinique: "cas_clinique",
+  qcm: "qcms",
+  exemples_analogies: "exemples_analogies",
+};
+
+/**
+ * Builds the system message's content blocks: the course's full raw text as
+ * its OWN `cache_control: ephemeral`-marked block, FIRST — followed by the
+ * tile's per-section instructions as a second, uncached block.
+ *
+ * Was previously ONE flat string, course text embedded in the MIDDLE
+ * (instructions -> course text -> trailing directive), sent as a plain
+ * string with no cache_control at all — meaning generating Explication,
+ * then Résumé, then Cas Clinique, then QCM, then Exemples/Analogies for the
+ * SAME course resent the exact same course text (up to
+ * MAX_SOURCE_CHARS=60,000 chars) at FULL price, once per section, even
+ * though it never changes between those calls. That's the dominant driver
+ * of "generating a whole course's Studio tiles costs $X" for a long course —
+ * not any one section's own cost, but paying full price for the same input
+ * block five separate times.
+ *
+ * The course-content block MUST come first (not interleaved with
+ * per-section instructions, which differ every call) for Anthropic's cache
+ * to be reused ACROSS different section types: cache matching is an exact-
+ * prefix match, so anything section-specific before the cached block would
+ * invalidate reuse for every other section. Mirrors
+ * lib/course-generation-shared.ts's buildSectionMessages (the legacy
+ * courses-table pipeline), which already does exactly this.
+ */
+export function buildStudioSystemMessage(actionType: JsonSectionId, courseContent: string, overrideBasePrompt?: string): ContentBlock[] {
+  const basePrompt = overrideBasePrompt ?? STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
+  return [
+    {
+      type: "text",
+      text: `Voici le texte intégral du cours :\n\n${courseContent}`,
+      // ttl: "1h" (vs. the default 5 min) — a student browsing Studio's
+      // multiple windows (Explication, then Résumé, then Cas Clinique...)
+      // very plausibly takes longer than 5 minutes reading/deciding between
+      // clicks; the default TTL would silently turn every one of those
+      // later sections into a fresh, full-price cache WRITE instead of a
+      // cheap cache READ. Same reasoning already applied to the course chat
+      // route (app/api/courses/chat/route.ts) — verified live against
+      // OpenRouter's docs: 1h costs more to write (2x vs 1.25x) but reads
+      // are still ~90% off regardless, and the absolute cost delta on one
+      // write is worth it the moment even one more section reads from it.
+      cache_control: { type: "ephemeral", ttl: "1h" },
+    },
+    {
+      type: "text",
+      text: `${basePrompt}\n\nBasé strictement sur ce texte, génère le contenu demandé, au format JSON exact spécifié ci-dessus, sans jamais inventer d'information absente de ce texte.`,
+    },
+  ];
+}
+
+/**
+ * Per-type rewrite/regenerate instruction — see buildStudioRegeneratePrompt.
+ * Explication/résumé ask for a 90/10 light rewrite (90% of substance,
+ * structure and facts held IDENTICAL, only ~10% of phrasing/transitions/
+ * style reworked); exemples_analogies keeps its own separate ~10% variation
+ * wording; cas_clinique/qcm ask for genuinely NEW content on the same
+ * medical topics instead, since a "light rewrite" of a clinical case or a
+ * QCM question would just be the same question reworded, not a fresh one
+ * worth practicing with again.
+ *
+ * NOTE on token cost: this wording change does NOT reduce completion
+ * tokens — a 90%-preserved rewrite is, by definition, the same LENGTH as
+ * the original (only ~10% of wording changes, not 10% of the length), so
+ * maxTokens stays at the section's full cap in buildStudioRegeneratePrompt
+ * below, same as before. See that function's own comment for what this
+ * change actually does and doesn't save.
+ */
+const REGENERATE_INSTRUCTIONS: Record<JsonSectionId, string> = {
+  explication:
+    "Réécris cette explication en gardant 90% du contenu IDENTIQUE : mêmes informations médicales, même structure, même exactitude factuelle, mot pour mot là où c'est déjà correct. Modifie UNIQUEMENT environ 10% — la formulation, les mots de transition, le rythme des phrases — pour que ça sonne fraîchement écrit, sans jamais sacrifier la continuité pédagogique ni la longueur du contenu.",
+  resume:
+    "Modifie ce résumé en gardant 90% du contenu IDENTIQUE : mêmes faits essentiels, même structure de puces, même niveau de détail. Modifie UNIQUEMENT environ 10% — le formatage, l'ordre de présentation, quelques tournures — sans jamais retirer d'information ni raccourcir le résumé.",
+  cas_clinique:
+    "En te basant sur le contexte médical de ces cas cliniques, génère des cas cliniques COMPLÈTEMENT NOUVEAUX et différents (autres archétypes, autre présentation clinique), sur les mêmes sujets médicaux. Ne réutilise aucun des cas ci-dessous.",
+  qcm: "Lis ces QCM. Maintenant, génère des questions QCM COMPLÈTEMENT NOUVELLES et DIFFÉRENTES sur les mêmes sujets médicaux. Ne répète jamais exactement les mêmes questions ni les mêmes formulations.",
+  exemples_analogies:
+    "Réécris ces exemples et analogies avec de légères variations (changement d'environ 10%), en gardant les mêmes idées de fond.",
+};
+
+/**
+ * Builds the system prompt for a "Regénérer" call (see
+ * app/api/studio/regenerate/route.ts). The original source document is
+ * NEVER refetched or resent here — only the section's OWN already-generated
+ * content (read straight from studio_courses, no source join) goes back to
+ * the model — together with the exact same JSON-shape instructions the
+ * original generation used (so STUDIO_SCHEMAS validation still passes
+ * unchanged) plus the type-specific rewrite/regenerate instruction above.
+ * This was ALREADY true before the 90/10 wording above — it isn't new.
+ *
+ * Honest cost note: this does NOT mean regenerate is cheaper than a fresh
+ * generation. Prompt tokens here are the previously-generated content itself
+ * (e.g. ~21,700 tokens for a full Explication, per this project's own
+ * measured data), which is larger than a fresh call's prompt (the source
+ * text truncated to MAX_SOURCE_CHARS, ~3,800 tokens measured) — so prompt
+ * tokens actually GROW for content-heavy sections. And completion tokens
+ * (the dominant cost driver — priced ~5x prompt tokens, and normally ~85%+
+ * of total tokens on a full section) are UNCHANGED: maxTokens stays at the
+ * section's full cap, because a 90%-preserved rewrite is still the same
+ * LENGTH of output, not a shorter one. There is no safe way to shrink
+ * completion tokens for a "keep 90%" task without risking truncating
+ * legitimate preserved content. Net effect: a light-rewrite regenerate call
+ * costs roughly the SAME as a fresh generation for that section, sometimes
+ * slightly more — "not resending the raw PDF" was never the expensive part
+ * to begin with.
+ */
+export function buildStudioRegeneratePrompt(actionType: JsonSectionId, existingContent: string): string {
+  const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
+  const instruction = REGENERATE_INSTRUCTIONS[actionType];
+  return `${basePrompt}
+
+Voici le contenu DÉJÀ GÉNÉRÉ pour cette section (c'est ta SEULE base de travail — le document source original n'est pas fourni ici, ne suppose rien au-delà de ce contenu) :
+
+${existingContent}
+
+${instruction}
+
+Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
+}
+
+/**
+ * Builds the system prompt for the studio_content_cache FUZZY-match path
+ * (see lib/studio-content-cache.ts and app/api/studio/generate/route.ts) —
+ * a student's uploaded text came back ~85%+ similar (MinHash) to another
+ * student's already-cached course, meaning it's genuinely the same
+ * reference material with real differences (a different professor's
+ * formatting/titles, added local notes), not a fresh, unrelated course.
+ *
+ * Deliberately NOT a full regeneration from scratch (that would throw away
+ * the whole cost-saving point of the cache) and NOT a verbatim serve of the
+ * cached original either (the new student's actual uploaded text may say
+ * something the cached version doesn't — silently ignoring that would be
+ * wrong, not just unoptimized). Instead: the model gets BOTH the cached
+ * base output and the new source text, and is instructed to adapt only
+ * where they genuinely differ, at a much smaller maxTokens ceiling than a
+ * fresh generation (see STUDIO_DELTA_MAX_TOKENS below) — an edit pass, not
+ * a rewrite.
+ */
+export function buildStudioDeltaAdaptationPrompt(actionType: JsonSectionId, baseContentJson: string, newSourceText: string): string {
+  const basePrompt = STUDIO_PROMPT_CONFIG[actionType].systemPrompt;
+  return `${basePrompt}
+
+Un autre étudiant a déjà généré le contenu suivant pour un cours quasi-identique (même matière médicale de fond) :
+
+${baseContentJson}
+
+Voici maintenant le texte source EXACT fourni par CE nouvel étudiant, qui correspond à la même matière mais avec des différences réelles (formulation, titres, notes de cours spécifiques à sa faculté, informations supplémentaires) :
+
+${newSourceText}
+
+INSTRUCTION D'ADAPTATION (delta uniquement — PAS une réécriture complète) : compare les deux et adapte le contenu ci-dessus UNIQUEMENT là où le nouveau texte source diffère réellement (titres, terminologie spécifique, informations supplémentaires présentes dans le nouveau texte mais absentes du contenu de référence, structure). Conserve strictement identique tout ce qui est déjà exact et commun aux deux — ne réinvente jamais une information déjà correcte. Si le nouveau texte source ne contient aucune information qui contredit ou complète le contenu de référence, renvoie-le tel quel.
+
+Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
+}
+
+/**
+ * A fraction of the full generation's own ceiling — this is an EDIT pass
+ * over already-generated content, not a fresh generation, so it should
+ * never need anywhere near as much output. Applied per actionType (each
+ * section's own STUDIO_PROMPT_CONFIG maxTokens), never a flat constant,
+ * since explication/qcm/cas_clinique already have very different ceilings
+ * from each other for the SAME reason at full-generation time.
+ */
+export function studioDeltaMaxTokens(actionType: JsonSectionId): number {
+  return Math.round(STUDIO_PROMPT_CONFIG[actionType].maxTokens * 0.35);
+}

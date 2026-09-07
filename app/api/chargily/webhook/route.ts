@@ -49,6 +49,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Payload JSON invalide." }, { status: 400 });
   }
 
+  // `JSON.parse` succeeds (and skips the catch above) on plenty of non-object
+  // JSON — "null", "42", "\"a string\"", "[]" — any of which crashes the very
+  // next line with an unhandled TypeError on `.type`. Signature verification
+  // above already restricts this to Chargily or a holder of the webhook
+  // secret, but a payment-critical endpoint shouldn't produce a raw-stack-
+  // trace 500 on a malformed-but-technically-valid body. Found during a
+  // security audit.
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return NextResponse.json({ error: "Payload invalide : un objet JSON était attendu." }, { status: 400 });
+  }
+
   const eventType = payload.type ?? payload.event ?? "";
   const checkout = payload.data ?? (payload as unknown as ChargilyCheckout);
 

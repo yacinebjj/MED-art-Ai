@@ -29,6 +29,12 @@ export function getSupabaseAdmin(): SupabaseClient<any, any, any> {
 
   client = createClient<any, any, any>(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    // Next.js patches the global fetch() to cache requests by default. Without
+    // this, a course row read before its sections were generated can get
+    // cached and keep serving stale nulls after generation actually succeeds
+    // (reproduced live: DB had the data, this admin client kept returning
+    // null until the cache was forced to bypass).
+    global: { fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }) },
   });
 
   return client;

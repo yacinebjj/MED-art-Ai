@@ -2,88 +2,211 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
-import { UploadModal } from "@/components/dashboard/UploadModal";
-import { CourseGridCard } from "@/components/dashboard/CourseGridCard";
+import Image from "next/image";
+import { motion } from "framer-motion";
+import { Mic, Settings, Sparkles } from "lucide-react";
+import { DashboardHero } from "@/components/dashboard/DashboardHero";
+import { DashboardSearchBar } from "@/components/dashboard/DashboardSearchBar";
+import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcons";
+import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
+import { LanguageToggle } from "@/components/LanguageToggle";
 import { useAuth } from "@/providers/AuthProvider";
-import type { Course } from "@/lib/types";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tDashboard } from "@/lib/translations/dashboard";
+import type { CurriculumYearData } from "@/types/academic";
+
+// One random quote per mount, same index used for both languages so
+// toggling fr/en mid-session doesn't change which quote is shown.
+const MOTIVATIONAL_QUOTES = {
+  fr: [
+    "Le succès est la somme de petits efforts, répétés jour après jour. 🌟",
+    "Chaque page lue aujourd'hui est une vie sauvée demain. 🩺",
+    "La médecine est une science d'incertitude et un art de probabilité. 🧠",
+    "Crois en toi. Il y a quelque chose en toi de plus grand que n'importe quel obstacle. 💪",
+    "N'oublie jamais pourquoi tu as commencé : pour faire la différence. ❤️",
+    "La fatigue passe, mais le titre de docteur reste. Ne lâche rien ! 📚",
+    "Les défis rendent la vie intéressante ; les surmonter lui donne un sens. 🚀"
+  ],
+  en: [
+    "Success is the sum of small efforts, repeated day in and day out. 🌟",
+    "Every page read today is a life saved tomorrow. 🩺",
+    "Medicine is a science of uncertainty and an art of probability. 🧠",
+    "Believe in yourself. There is something inside you that is greater than any obstacle. 💪",
+    "Never forget why you started: to make a difference. ❤️",
+    "Fatigue fades, but the title of Doctor remains. Don't give up! 📚",
+    "Challenges are what make life interesting; overcoming them is what makes life meaningful. 🚀"
+  ]
+};
 
 export default function DashboardPage() {
-  const { user, profile } = useAuth();
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
+  const auth = useAuth() ?? {};
+  const profile = auth.profile;
+  const curriculumProfile = auth.curriculumProfile;
+  const { language } = useLanguage();
+
+  const [quoteIndex, setQuoteIndex] = useState(0);
 
   useEffect(() => {
-    if (!user) return;
-    fetch("/api/courses")
-      .then((res) => res.json())
-      .then((data) => setCourses(data.courses ?? []))
-      .finally(() => setLoading(false));
-  }, [user]);
+    setQuoteIndex(Math.floor(Math.random() * MOTIVATIONAL_QUOTES.fr.length));
+  }, []);
 
-  function handleUploaded(course: Course) {
-    setCourses((prev) => [course, ...prev]);
-  }
+  const [curriculumData, setCurriculumData] = useState<CurriculumYearData | null>(null);
+  const [curriculumLoading, setCurriculumLoading] = useState(false);
+  const [curriculumError, setCurriculumError] = useState<string | null>(null);
 
-  async function handleDelete(id: string) {
-    const previous = courses;
-    setCourses((prev) => prev.filter((c) => c.id !== id));
+  const curriculumSpecialtyName = curriculumProfile?.specialty?.name ?? null;
+  const curriculumLevel = curriculumProfile?.academicYear?.level ?? null;
 
-    const res = await fetch(`/api/courses/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      // Roll back on failure so the card doesn't silently vanish.
-      setCourses(previous);
+  useEffect(() => {
+    if (!curriculumSpecialtyName || curriculumLevel == null) {
+      setCurriculumData(null);
+      return;
     }
-  }
 
-  const firstName = profile?.fullName?.split(" ")[0] || "Étudiant(e)";
+    let cancelled = false;
+    setCurriculumLoading(true);
+    setCurriculumError(null);
+
+    fetch(`/api/curriculum?specialty=${encodeURIComponent(curriculumSpecialtyName)}&level=${curriculumLevel}`)
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error ?? tDashboard("curriculumLoadError", language));
+        return body as CurriculumYearData;
+      })
+      .then((body) => {
+        if (!cancelled) setCurriculumData(body);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCurriculumError(err instanceof Error ? err.message : tDashboard("curriculumLoadError", language));
+          setCurriculumData(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCurriculumLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // `language` is intentionally omitted: it only picks the fallback error
+    // string's locale and must not trigger a curriculum refetch on toggle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curriculumSpecialtyName, curriculumLevel]);
+
+  const firstName = profile?.fullName?.split(" ")[0] || tDashboard("fallbackStudentName", language);
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Bonjour, {firstName}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Tes espaces de travail.</p>
+    // relative — anchors FloatingMedicalIcons' absolute inset-0 layer to
+    // this page's own content height (not the shell layout, and not the
+    // viewport) — see that component's own comment for why it's scoped to
+    // this one page rather than every page under app/dashboard/(shell).
+    <div className="relative mx-auto max-w-7xl">
+      <FloatingMedicalIcons />
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <DashboardHero firstName={firstName} academicYearName={curriculumProfile?.academicYear?.name ?? null} />
+          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground italic sm:line-clamp-none">
+            « {MOTIVATIONAL_QUOTES[language][quoteIndex]} »
+          </p>
         </div>
-
-        <Link
-          href="/dashboard/demo"
-          className="flex shrink-0 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
-        >
-          👀 Voir la Démo
-        </Link>
+        <div className="mt-1 shrink-0">
+          <LanguageToggle />
+        </div>
       </div>
 
-      {loading ? (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-40 animate-pulse rounded-xl bg-gray-100" />
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-4">
-          <button
-            onClick={() => setModalOpen(true)}
-            className="flex h-40 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 text-gray-500 transition-colors hover:bg-gray-100"
-          >
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm">
-              <Plus className="h-5 w-5" />
-            </span>
-            <span className="text-sm font-medium">Ajouter un cours</span>
-          </button>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
+        className="mb-3 grid grid-cols-2 gap-2 sm:mb-6 sm:gap-4 md:grid-cols-4 lg:mb-8 xl:grid-cols-5"
+      >
+        {/* Remplace l'ancienne entrée "Importer un cours indépendant" — même
+            emplacement, même prééminence visuelle, nouvelle destination. */}
+        <Link
+          href="/dashboard/audio-workspace"
+          className="glass-card group col-span-2 flex items-center gap-3 rounded-2xl p-3 text-left shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-orange-500/20 dark:shadow-glass-dark sm:gap-5 sm:rounded-3xl sm:p-6 xl:col-span-3"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[0_0_20px_rgba(249,115,22,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-14 sm:w-14 sm:rounded-2xl">
+            <Mic className="h-5 w-5 sm:h-7 sm:w-7" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-foreground sm:text-lg">{tDashboard("audioNotesTitle", language)}</p>
+            <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block sm:text-sm">
+              {tDashboard("audioNotesSubtitle", language)}
+            </p>
+          </div>
+          <span className="hidden shrink-0 items-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-all duration-300 active:scale-95 sm:flex">
+            <Sparkles className="h-4 w-4" />
+            Ouvrir
+          </span>
+        </Link>
 
-          {courses.map((course) => (
-            <div key={course.id} className="h-40">
-              <CourseGridCard course={course} onDelete={handleDelete} />
+        <Link
+          href="/dashboard/assistant"
+          className="glass-card group flex flex-col items-center justify-center gap-1.5 rounded-2xl p-3 text-center shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-violet-500/20 dark:shadow-glass-dark sm:rounded-3xl sm:p-6 xl:flex-row xl:justify-start xl:gap-3"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-[0_0_16px_rgba(168,85,247,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-11 sm:w-11">
+            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
+          </span>
+          <span className="text-xs font-bold text-foreground sm:text-sm">
+            {tDashboard("assistantLabel", language)}
+          </span>
+        </Link>
+
+        <DashboardSearchBar />
+      </motion.div>
+
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <h2 className="mb-2 text-base font-bold tracking-tight text-foreground sm:mb-4 sm:text-xl">
+          {tDashboard("myCurriculumHeading", language)}
+          {curriculumProfile?.academicYear ? ` — ${curriculumProfile.academicYear.name}` : ""}
+        </h2>
+
+        {curriculumProfile === null || curriculumLoading ? (
+          <CurriculumViewSkeleton />
+        ) : !curriculumProfile?.academicYear ? (
+          <div className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed p-3 text-center sm:flex-row sm:items-center sm:gap-5 sm:text-left sm:p-6">
+            {/* Same chibi mascot set as DashboardHero (public/illustrations/),
+                a different pose — this empty state is the app's own "get
+                started" moment, exactly the kind of spot a friendly
+                illustration earns its keep. Shown on every breakpoint
+                (unlike the hero's desktop-only image): this card is the
+                ENTIRE above-the-fold content when it renders, so there's no
+                competing priority to protect on mobile. */}
+            <div className="shrink-0 overflow-hidden rounded-2xl shadow-md">
+              <Image
+                src="/illustrations/dashboard-empty-state-mascot.jpeg"
+                alt=""
+                role="presentation"
+                width={96}
+                height={96}
+                className="h-20 w-20 object-cover sm:h-24 sm:w-24"
+              />
             </div>
-          ))}
-        </div>
-      )}
-
-      <UploadModal open={modalOpen} onOpenChange={setModalOpen} onUploaded={handleUploaded} />
+            <div className="flex flex-col items-center gap-3 sm:items-start">
+              <p className="text-sm text-muted-foreground">{tDashboard("chooseSpecialtyHelper", language)}</p>
+              <Link
+                href="/dashboard/settings"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-300 active:scale-95"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                {tDashboard("goToSettings", language)}
+              </Link>
+            </div>
+          </div>
+        ) : curriculumError ? (
+          <p className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            {curriculumError}
+          </p>
+        ) : curriculumData ? (
+          <CurriculumView data={curriculumData} />
+        ) : null}
+      </motion.section>
     </div>
   );
 }

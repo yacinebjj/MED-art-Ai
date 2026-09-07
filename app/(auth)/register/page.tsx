@@ -8,10 +8,7 @@ export const metadata: Metadata = {
 
 export default function RegisterPage() {
   return (
-    <AuthLayout
-      title="Crée ton compte étudiant"
-      subtitle="Renseigne ton profil pour recevoir un contenu adapté à ta spécialité et ton année."
-    >
+    <AuthLayout variant="register">
       <RegisterForm />
     </AuthLayout>
   );

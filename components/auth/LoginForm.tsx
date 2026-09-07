@@ -7,10 +7,13 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
+import { useLanguage } from "@/providers/LanguageProvider";
+import { tAuth } from "@/lib/translations/auth";
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { language } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -39,7 +42,7 @@ export function LoginForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {error && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="animate-in fade-in-0 slide-in-from-top-1 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive duration-200">
           {error}
         </div>
       )}
@@ -55,7 +58,7 @@ export function LoginForm() {
       />
 
       <Input
-        label="Mot de passe"
+        label={tAuth("passwordLabel", language)}
         name="password"
         type="password"
         placeholder="••••••••"
@@ -65,14 +68,18 @@ export function LoginForm() {
       />
 
       <div className="flex items-center justify-between text-sm">
-        <label className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+        <label className="flex cursor-pointer items-center gap-2 text-slate-600 dark:text-slate-400">
           <input
             type="checkbox"
-            className="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+            className="h-4 w-4 cursor-pointer rounded border-slate-300 text-primary-600 focus:ring-primary-500 dark:border-slate-600 dark:bg-slate-800"
           />
           Se souvenir de moi
         </label>
-        <a href="#" className="font-medium text-primary-600 hover:underline dark:text-primary-400">
+        <a
+          href="#"
+          onClick={(e) => e.preventDefault()}
+          className="font-medium text-primary-600 transition-colors hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
+        >
           Mot de passe oublié ?
         </a>
       </div>

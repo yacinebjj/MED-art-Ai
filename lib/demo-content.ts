@@ -1,20 +1,47 @@
 import {
   BookOpenText,
   ScrollText,
-  AlertTriangle,
-  Lightbulb,
   Stethoscope,
   ListChecks,
+  Lightbulb,
+  Network,
+  Headphones,
   type LucideIcon,
 } from "lucide-react";
 
 export type DemoSectionId =
   | "explication"
   | "resume"
-  | "pieges"
-  | "astuces"
   | "cas_clinique"
-  | "qcm";
+  | "qcm"
+  | "exemples_analogies"
+  | "infographic"
+  | "audio";
+
+/**
+ * The 5 original sections: JSON/text content, validated against a Zod
+ * schema, generated+saved through the generic /api/studio/generate pipeline
+ * (STUDIO_PROMPT_CONFIG, STUDIO_SCHEMAS, SECTION_TO_COLUMN). "infographic"
+ * and "audio" are excluded — "infographic" is IMAGE-based
+ * (google/gemini-3.1-flash-image-preview via OpenRouter) and "audio" is
+ * AUDIO-based (openai/gpt-audio-mini via OpenRouter), neither has a JSON
+ * schema, neither is saved as a studio_courses column (they live in their
+ * own shared cache tables instead — studio_infographic_cache /
+ * studio_podcast_cache, see each table's own comment in supabase/schema.sql),
+ * and each is generated through its own dedicated route
+ * (app/api/studio/infographic/route.ts, app/api/studio/podcast/route.ts).
+ * This narrower type is what every `Record<_, ...>` mapping built for the
+ * generic pipeline (STUDIO_PROMPT_CONFIG etc.) should use instead of the
+ * full DemoSectionId, so TypeScript itself enforces that neither is ever
+ * accidentally routed through that pipeline.
+ *
+ * (Slides tab removed by explicit product direction — Studio now focuses on
+ * text, flashcards, and chat; see git history for the removed
+ * app/api/studio/slides/route.ts, lib/ai/slides-prompts.ts,
+ * lib/studio-slides-cache.ts, and the SlideDeckViewer/SlidesGeneratingLabel
+ * components if this ever needs resurrecting.)
+ */
+export type JsonSectionId = Exclude<DemoSectionId, "infographic" | "audio">;
 
 export interface DemoSection {
   id: DemoSectionId;
@@ -40,15 +67,33 @@ export function buildDemoTranslatePrompt(selectedText: string): string {
   return `Traduis ce terme ou passage médical en arabe et en français courant : "${selectedText}".`;
 }
 
-const DEMO_DISCLAIMER =
-  "*(Réponse de démonstration statique — l'intégration IA (OpenRouter) est actuellement en pause.)*";
-
-export function buildDemoAskReply(selectedText: string): string {
-  return `**Excellente question, Yacine !**\n\nRevenons sur : *"${selectedText}"*\n\nEn clinique, c'est exactement le genre de détail qui fait la différence entre "je connais le cours" et "je comprends le mécanisme". Imagine ça comme une pièce d'engrenage : si tu la retires du reste de l'explication, tout le mécanisme s'arrête de tourner.\n\n> **Retiens ceci :** reformule toujours ce passage avec tes propres mots avant de passer à la suite — c'est la meilleure façon de vérifier que tu l'as vraiment compris.\n\n${DEMO_DISCLAIMER}`;
+/**
+ * Builds the final chat message for the composer's citation flow ("Ask
+ * MedArt" quotes a passage above the input, the student types their own
+ * question and sends). If the student sends without typing anything — a
+ * very common "just explain this" click — the message would otherwise be
+ * nothing but the bare quoted passage, which reads to the model as content
+ * to acknowledge rather than a question to answer, producing a generic,
+ * unfocused reply. Falling back to an explicit instruction here is what
+ * keeps "Ask MedArt" reliably answering ABOUT the selection instead of just
+ * echoing it back.
+ *
+ * The caller is responsible for sending this with `excludeFromHistory: true`
+ * (see hooks/useCourseChat.ts) — the quote (and the resulting reply, which
+ * is just as capable of anchoring later messages back onto the old topic)
+ * must inform only this ONE exchange, never resend in later requests'
+ * history.
+ */
+export function buildQuotedChatMessage(quotedText: string | null, typedText: string): string {
+  const text = typedText.trim();
+  if (!quotedText) return text;
+  const question = text || "Explique ce passage médical sélectionné, en te concentrant précisément dessus.";
+  return `> ${quotedText}\n\n${question}`;
 }
 
-export function buildDemoTranslateReply(selectedText: string): string {
-  return `**Traduction de :** *"${selectedText}"*\n\n**Français courant :** une reformulation simple de ce terme médical, sans jargon.\n\n**العربية :** الترجمة الطبية المبسطة لهذا المصطلح.\n\n${DEMO_DISCLAIMER}`;
+/** Whether `content` is a composer citation built by buildQuotedChatMessage above — used to recognize & re-exclude an "Ask MedArt" exchange loaded back from persisted history (course_chat_history has no separate flag column for this), since a fresh page load otherwise loses the live session's exclusion and reintroduces the same leak on the next message. */
+export function isQuotedChatMessage(content: string): boolean {
+  return content.startsWith("> ") && content.includes("\n\n");
 }
 
 export const DEMO_SECTIONS: DemoSection[] = [
@@ -601,41 +646,6 @@ Garde ces trois images, et tu seras un bon médecin. Même loin de tout. Même s
 > **Note du prof :** Si tu ne dois retenir qu'une phrase : douleur qui migre du nombril vers la FID = appendicite jusqu'à preuve du contraire.`,
   },
   {
-    id: "pieges",
-    label: "Les Pièges",
-    icon: AlertTriangle,
-    accent: {
-      active: "border-rose-300 bg-rose-50 text-rose-800",
-      chip: "bg-rose-100 text-rose-600",
-      hover: "hover:-translate-y-1 hover:bg-rose-50 hover:text-rose-600 hover:shadow-md",
-    },
-    content: `## Les Pièges Classiques à l'examen
-
-> **Piège n°1 :** Ne confonds pas la douleur péri-ombilicale initiale avec une gastro-entérite — l'examinateur adore ce piège chez les étudiants pressés.
-
-*   **Chez la femme jeune :** Élimine toujours une grossesse extra-utérine ou une torsion d'annexe avant de conclure trop vite à une appendicite.
-*   **Chez la personne âgée :** La présentation est souvent atypique (peu de fièvre, douleur diffuse) — le risque de perforation est plus élevé car le diagnostic est retardé.
-*   **Chez l'enfant :** Ne néglige jamais une douleur abdominale fébrile — l'évolution vers la perforation est plus rapide.
-*   **Erreur fréquente :** Attendre une hyperleucocytose franche avant d'opérer — une NFS normale n'élimine PAS le diagnostic.`,
-  },
-  {
-    id: "astuces",
-    label: "Astuces Mnémotechniques",
-    icon: Lightbulb,
-    accent: {
-      active: "border-amber-300 bg-amber-50 text-amber-800",
-      chip: "bg-amber-100 text-amber-600",
-      hover: "hover:-translate-y-1 hover:bg-amber-50 hover:text-amber-600 hover:shadow-md",
-    },
-    content: `## Astuces Mnémotechniques
-
-> **Pour la migration de la douleur :** "Du nombril au point Mc, en passant par la crampe" — retiens le trajet en trois temps : ombilic vers diffuse vers Fosse Iliaque Droite.
-
-*   **Point de McBurney :** situé au tiers externe de la ligne reliant l'ombilic à l'épine iliaque antéro-supérieure droite — pense à "2/3 - 1/3".
-*   **Signe de Blumberg :** la décompression fait plus mal que la compression — "ça fait mal quand on relâche, pas quand on appuie".
-*   **Triade clinique :** Douleur FID + Défense + Fièvre = pense appendicite avant tout.`,
-  },
-  {
     id: "cas_clinique",
     label: "Cas Clinique",
     icon: Stethoscope,
@@ -685,5 +695,53 @@ C. Une douleur uniquement nocturne
 D. Une contracture généralisée
 
 > **Réponses :** 1-B, 2-B, 3-B. Si tu as tout bon, tu es prêt(e) pour la garde de chirurgie !`,
+  },
+  {
+    id: "exemples_analogies",
+    label: "Exemples & Analogies",
+    icon: Lightbulb,
+    accent: {
+      active: "border-yellow-300 bg-yellow-50 text-yellow-800",
+      chip: "bg-yellow-100 text-yellow-600",
+      hover: "hover:-translate-y-1 hover:bg-yellow-50 hover:text-yellow-600 hover:shadow-md",
+    },
+    // Fallback for legacy-only courses with no Supabase row (e.g. appendicite)
+    // — real content is AI-generated per course, in Darija + termes français,
+    // via app/api/generate/exemples-analogies (see EXEMPLES_ANALOGIES_SYSTEM_PROMPT).
+    content: `## Exemples & Analogies
+
+Ce mode réexplique le cours avec des analogies de la vie de tous les jours (bouteilles, tuyaux, ballons...), pour comprendre le mécanisme de la maladie, déduire les signes de l'examen clinique, et repérer les pièges classiques de QCM.`,
+  },
+  {
+    id: "infographic",
+    label: "Infographie",
+    icon: Network,
+    accent: {
+      active: "border-rose-300 bg-rose-50 text-rose-800",
+      chip: "bg-rose-100 text-rose-600",
+      hover: "hover:-translate-y-1 hover:bg-rose-50 hover:text-rose-600 hover:shadow-md",
+    },
+    // Never actually rendered as markdown — this tile's real content is an
+    // image (activeCourse.infographicUrl), not this string. Kept only for
+    // parity with the other DemoSection entries and the legacy hardcoded
+    // demo course, which has no image to show here.
+    content: `## Infographie Mindmap
+
+Une carte visuelle unique du cours — origines, mécanismes, manifestations cliniques, diagnostic et traitement, réunis dans une seule image de synthèse.`,
+  },
+  {
+    id: "audio",
+    label: "Podcast Audio",
+    icon: Headphones,
+    accent: {
+      active: "border-orange-300 bg-orange-50 text-orange-800",
+      chip: "bg-orange-100 text-orange-600",
+      hover: "hover:-translate-y-1 hover:bg-orange-50 hover:text-orange-600 hover:shadow-md",
+    },
+    // Never actually rendered as markdown — this tile's real content is a
+    // single audio file (activeCourse.audioUrl), not this string.
+    content: `## Podcast Audio
+
+Un épisode de podcast de 10 à 15 minutes qui reprend le cours à voix haute — mélange français médical et darija, pour réviser en écoutant, même en déplacement.`,
   },
 ];

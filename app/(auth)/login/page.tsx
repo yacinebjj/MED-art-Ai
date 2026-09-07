@@ -9,10 +9,7 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <AuthLayout
-      title="Bon retour parmi nous"
-      subtitle="Connecte-toi pour retrouver tes cours et continuer tes révisions."
-    >
+    <AuthLayout variant="login">
       <Suspense>
         <LoginForm />
       </Suspense>
