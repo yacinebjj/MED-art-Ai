@@ -14,4 +14,10 @@ export interface UserNote {
   title: string;
   content: string;
   createdAt: string;
+  /** Set explicitly by PUT /api/notes/[id] on every save. */
+  updatedAt: string;
+  /** Non-null only for notes aggregated from a curriculum module's workspace (see app/api/notes/route.ts's POST). Null for every note created from this page directly. */
+  moduleId: number | null;
+  /** Denormalized display label for moduleId, joined server-side — never editable from here. */
+  moduleTitle: string | null;
 }

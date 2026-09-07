@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Mic, Search, Settings, Sparkles } from "lucide-react";
+import { Mic, Settings, Sparkles } from "lucide-react";
 import { DashboardHero } from "@/components/dashboard/DashboardHero";
+import { DashboardSearchBar } from "@/components/dashboard/DashboardSearchBar";
 import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcons";
 import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -39,24 +39,16 @@ const MOTIVATIONAL_QUOTES = {
 };
 
 export default function DashboardPage() {
-  const router = useRouter();
   const auth = useAuth() ?? {};
   const profile = auth.profile;
   const curriculumProfile = auth.curriculumProfile;
   const { language } = useLanguage();
 
-  const [searchQuery, setSearchQuery] = useState("");
   const [quoteIndex, setQuoteIndex] = useState(0);
 
   useEffect(() => {
     setQuoteIndex(Math.floor(Math.random() * MOTIVATIONAL_QUOTES.fr.length));
   }, []);
-
-  function handleSearchSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    router.push(`/dashboard/search?q=${encodeURIComponent(searchQuery.trim())}`);
-  }
 
   const [curriculumData, setCurriculumData] = useState<CurriculumYearData | null>(null);
   const [curriculumLoading, setCurriculumLoading] = useState(false);
@@ -162,25 +154,7 @@ export default function DashboardPage() {
           </span>
         </Link>
 
-        <form
-          onSubmit={handleSearchSubmit}
-          className="glass-card flex items-center gap-2 rounded-2xl p-3 shadow-glass transition-all duration-300 focus-within:-translate-y-1 focus-within:shadow-emerald-500/20 dark:shadow-glass-dark sm:gap-3 sm:rounded-3xl sm:p-6 lg:col-span-1"
-        >
-          <Search className="h-4 w-4 shrink-0 text-primary-500 dark:text-primary-300" />
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={tDashboard("searchPlaceholder", language)}
-            className="min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
-          />
-          <button
-            type="submit"
-            disabled={!searchQuery.trim()}
-            className="hidden shrink-0 rounded-xl bg-primary-600 px-3 py-2 text-xs font-bold text-white transition-all duration-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 sm:block"
-          >
-            OK
-          </button>
-        </form>
+        <DashboardSearchBar />
       </motion.div>
 
       <motion.section

@@ -1979,6 +1979,17 @@ create policy "Users manage their own notes" on user_notes
 alter table user_notes add column if not exists module_id integer references curriculum_modules (id) on delete set null;
 
 -- ---------------------------------------------------------------------------
+-- updated_at — added for the "God-Tier My Notes" redesign's real "modifié il
+-- y a X" indicator on each note card. Set explicitly by
+-- PUT /api/notes/[id] on every save (no trigger — this app doesn't use
+-- updated_at triggers anywhere else either, see e.g. study_plans' own PATCH
+-- route setting it by hand). Defaults to now() so every pre-existing row
+-- gets a real, honest "created just now" value on migration rather than an
+-- impossible NULL.
+-- ---------------------------------------------------------------------------
+alter table user_notes add column if not exists updated_at timestamptz not null default now();
+
+-- ---------------------------------------------------------------------------
 -- "Résumé global du module" — one AI-generated synthesis PER module, keyed
 -- by module id (as a string — JSON object keys always are) inside a single
 -- jsonb map on the student's own `profiles` row. Same "extend `profiles`

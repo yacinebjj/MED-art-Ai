@@ -9,6 +9,8 @@ import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Camera, Check, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2, TrendingUp } from "lucide-react";
+import { ProgressRing } from "@/components/ui/ProgressRing";
+import { ClinicalConnectionsPanel } from "@/components/course/workspace/ClinicalConnectionsPanel";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { tModulePage } from "@/lib/translations/modulePage";
@@ -330,6 +332,15 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
             {courses.map((course) => {
               const isActive = course.id === activeCourseId;
               const isChecked = selectedSourceIds?.has(course.id) ?? false;
+              // Real course_mastery data (qcm_attempts-derived) — only ever
+              // present once the student has real attempts logged for this
+              // course; a course with none simply renders no ring at all,
+              // never a fake 0%. Averaged (not just QCM alone) so this one
+              // ring reflects both raw QCM success AND spaced-repetition
+              // progress, same two numbers CourseStatsModal already shows
+              // separately — this is their honest combined summary.
+              const mastery = courseMasteryBySlug.get(`studio-course-${course.id}`);
+              const overallMasteryPct = mastery ? Math.round((mastery.qcmSuccessPct + mastery.srsMasteryPct) / 2) : null;
               return (
                 <div
                   key={course.id}
@@ -376,6 +387,18 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                       </p>
                     </div>
                   </button>
+
+                  {overallMasteryPct !== null && (
+                    <ProgressRing
+                      completed={overallMasteryPct}
+                      total={100}
+                      size={30}
+                      strokeWidth={3}
+                      className="mt-0.5 shrink-0"
+                      label={<span className="text-[9px] font-bold text-foreground">{overallMasteryPct}%</span>}
+                      aria-label={`${tModulePage("masteryAriaLabel", language)} ${overallMasteryPct}%`}
+                    />
+                  )}
 
                   <DropdownMenu>
                     <DropdownMenuTrigger
@@ -675,6 +698,25 @@ export default function ModuleWorkspacePage() {
     }
     return map;
   }, [courseMastery]);
+
+  // Visual-only locked-tile signal for StudioPanel/MobileStudioCards (see
+  // their own lockedSections doc comment) — mirrors the REAL gate
+  // handleStudioItemClick already enforces below (every section but
+  // Explication requires it to exist first), just surfaced BEFORE the click
+  // instead of only in a toast after it. Deliberately recomputed from
+  // activeCourse.explication, not stored as its own state, so it can never
+  // drift from the real gate.
+  const lockedSections = useMemo(() => {
+    if (!activeCourse || getSectionValue(activeCourse, "explication")) return undefined;
+    return new Set(DEMO_SECTIONS.map((s) => s.id).filter((id) => id !== "explication"));
+  }, [activeCourse]);
+
+  // Real, already-fetched QCM mastery for the active course's own tile (see
+  // StudioPanel/MobileStudioCards' own sectionMasteryPct doc comment) — never
+  // fabricated: a course with no course_mastery row yet (courseMasteryBySlug
+  // has no entry) simply passes undefined, so the tile keeps its plain dot.
+  const activeCourseMastery = activeCourse ? courseMasteryBySlug.get(`studio-course-${activeCourse.id}`) : undefined;
+  const sectionMasteryPct = activeCourseMastery ? { qcm: Math.round(activeCourseMastery.qcmSuccessPct) } : undefined;
 
   const today = new Date().toLocaleDateString("fr-FR");
   const openedSectionLabel = openedSection ? getSectionLabel(openedSection, language, studyYear) : "";
@@ -1460,6 +1502,8 @@ export default function ModuleWorkspacePage() {
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
       onCollapsedChange={setIsStudioCollapsed}
+      lockedSections={lockedSections}
+      sectionMasteryPct={sectionMasteryPct}
     >
       {isSwitchingCourse ? (
         <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
@@ -1486,6 +1530,7 @@ export default function ModuleWorkspacePage() {
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
                 {normalizeCallouts(activeCourse.explication!)}
               </ReactMarkdown>
+              <ClinicalConnectionsPanel key={activeCourse.id} courseId={activeCourse.id} />
             </article>
           )}
           {openedSection === "exemples_analogies" && (
@@ -1668,6 +1713,8 @@ export default function ModuleWorkspacePage() {
                   onItemClick={handleStudioItemClick}
                   onItemClickWithOptions={handleStudioItemClick}
                   studyYear={studyYear}
+                  lockedSections={lockedSections}
+                  sectionMasteryPct={sectionMasteryPct}
                 />
               ))}
           </div>

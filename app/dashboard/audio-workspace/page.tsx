@@ -20,8 +20,6 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -36,15 +34,21 @@ import {
   X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
-import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES } from "@/lib/markdown";
+import { ProgressRing } from "@/components/ui/ProgressRing";
+import { AudioWaveform } from "@/components/dashboard/AudioWaveform";
+import { SmartNotesView } from "@/components/dashboard/SmartNotesView";
+import { LectureQuizPanel } from "@/components/dashboard/LectureQuizPanel";
 import { LectureNotesGeneratingLabel } from "@/components/dashboard/LectureNotesGeneratingLabel";
 import { LectureNotesAudioPlayer } from "@/components/dashboard/LectureNotesAudioPlayer";
 import { decodeAndChunkAudioFile } from "@/lib/audio/browser-chunking";
+import { formatRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 
 const ACCEPTED_EXTENSIONS = ".m4a,.mp3,.wav,.ogg,audio/mp4,audio/x-m4a,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg";
 
 type Status = "idle" | "staged" | "processing" | "done" | "error";
+/** Which real phase of handleGenerate is currently running — drives the 3 distinct status indicators the redesign asked for. Each one only ever shows while its real underlying work is actually happening (no "live transcription" claim during recording — transcription only starts once recording stops). */
+type ProcessingPhase = "decoding" | "transcribing" | "analyzing" | null;
 
 function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
@@ -110,17 +114,18 @@ function SavedNoteView({ jobId, onBack, isDark }: { jobId: string; onBack: () =>
   }, [jobId]);
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
+    <div className="aurora-canvas-bg relative flex h-full flex-col overflow-hidden">
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+      <header className="glass-panel relative z-10 flex shrink-0 items-center gap-3 px-6 py-4 shadow-glass dark:shadow-glass-dark">
         <button
           type="button"
           onClick={onBack}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
           aria-label="Retour"
         >
           <ArrowLeft className="h-4.5 w-4.5" />
         </button>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-950/40 dark:text-orange-400">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-glow dark:bg-orange-950/40 dark:text-orange-400">
           <FileAudio className="h-4.5 w-4.5" />
         </div>
         <div className="min-w-0">
@@ -151,16 +156,10 @@ function SavedNoteView({ jobId, onBack, isDark }: { jobId: string; onBack: () =>
               <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Enregistrement</h2>
               <LectureNotesAudioPlayer audioUrls={job.audioUrls} title={job.title} />
             </div>
-            <div className="flex flex-col gap-3 lg:h-full lg:w-1/2 lg:overflow-y-auto lg:pl-3 lg:border-l lg:border-border">
+            <div className="flex flex-col gap-4 lg:h-full lg:w-1/2 lg:overflow-y-auto lg:border-l lg:border-border lg:pl-3">
               <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Notes structurées</h2>
-              <article
-                dir="auto"
-                className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none rounded-2xl border border-border bg-card p-6 shadow-sm")}
-              >
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
-                  {job.smartNotes ?? ""}
-                </ReactMarkdown>
-              </article>
+              <SmartNotesView markdown={job.smartNotes ?? ""} isDark={isDark} />
+              {job.smartNotes && <LectureQuizPanel smartNotes={job.smartNotes} />}
             </div>
           </div>
         )}
@@ -202,6 +201,7 @@ function AudioWorkspaceContent() {
   const [status, setStatus] = useState<Status>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [processingPhase, setProcessingPhase] = useState<ProcessingPhase>(null);
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
   const [smartNotes, setSmartNotes] = useState<string | null>(null);
@@ -210,6 +210,10 @@ function AudioWorkspaceContent() {
   const [isSaved, setIsSaved] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  // The REAL live stream, exposed as state (not just the ref below) so
+  // AudioWaveform's effect re-runs the moment recording actually starts/stops
+  // — a ref write alone wouldn't trigger that component to re-render.
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -236,6 +240,7 @@ function AudioWorkspaceContent() {
     // must never survive past this point regardless.
     recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
     recordingStreamRef.current = null;
+    setLiveStream(null);
   }
 
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -263,6 +268,7 @@ function AudioWorkspaceContent() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
+      setLiveStream(stream);
       recordedChunksRef.current = [];
 
       const recorder = new MediaRecorder(stream);
@@ -277,6 +283,7 @@ function AudioWorkspaceContent() {
         stageFile(recordedFile);
         stream.getTracks().forEach((track) => track.stop());
         recordingStreamRef.current = null;
+        setLiveStream(null);
       };
 
       recorder.start();
@@ -304,6 +311,7 @@ function AudioWorkspaceContent() {
   async function handleGenerate() {
     if (!file) return;
     setStatus("processing");
+    setProcessingPhase("decoding");
     setChunkProgress(null);
 
     try {
@@ -313,6 +321,7 @@ function AudioWorkspaceContent() {
       const transcriptParts: string[] = [];
       const audioUrls: string[] = [];
 
+      setProcessingPhase("transcribing");
       for (let i = 0; i < chunks.length; i++) {
         setChunkProgress({ current: i + 1, total: chunks.length });
 
@@ -331,6 +340,7 @@ function AudioWorkspaceContent() {
       }
 
       setChunkProgress(null);
+      setProcessingPhase("analyzing");
 
       const res = await fetch("/api/lecture-notes/process", {
         method: "POST",
@@ -345,9 +355,11 @@ function AudioWorkspaceContent() {
       setJobId(data.jobId);
       setSmartNotes(data.smartNotes);
       setStatus("done");
+      setProcessingPhase(null);
     } catch (error) {
       setStatus("staged"); // Back to "staged", not "error" — the file is still there, ready to retry.
       setChunkProgress(null);
+      setProcessingPhase(null);
       toast({
         variant: "error",
         title: "Échec du traitement",
@@ -397,17 +409,18 @@ function AudioWorkspaceContent() {
     // this div to fill. A literal 100dvh here would still overshoot that by
     // the topbar's own height, which is what let the "Sauvegarder" button
     // end up clipped past the visible area on real mobile devices.
-    <div className="flex h-full flex-col bg-background">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
+    <div className="aurora-canvas-bg relative flex h-full flex-col overflow-hidden">
+      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+      <header className="glass-panel relative z-10 flex shrink-0 items-center gap-3 px-6 py-4 shadow-glass dark:shadow-glass-dark">
         <button
           type="button"
           onClick={() => router.push("/dashboard")}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
           aria-label="Retour au Dashboard"
         >
           <ArrowLeft className="h-4.5 w-4.5" />
         </button>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-950/40 dark:text-orange-400">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-glow dark:bg-orange-950/40 dark:text-orange-400">
           <FileAudio className="h-4.5 w-4.5" />
         </div>
         <div>
@@ -416,25 +429,29 @@ function AudioWorkspaceContent() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 md:flex-row md:overflow-hidden">
         {/* -------- Left panel: Sources -------- */}
-        <section className="flex min-h-0 w-full flex-col gap-4 overflow-y-auto border-b border-border p-6 md:w-1/2 md:border-b-0 md:border-r">
+        <section className="glass-card flex min-h-0 w-full flex-col gap-4 overflow-y-auto rounded-3xl p-6 shadow-glass dark:shadow-glass-dark md:w-1/2">
           <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Sources</h2>
 
           <input ref={fileInputRef} type="file" accept={ACCEPTED_EXTENSIONS} onChange={onInputChange} className="hidden" />
 
           {isRecording ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-2xl border-2 border-red-300 bg-red-50/50 p-10 text-center dark:border-red-900/50 dark:bg-red-950/20">
-              <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600 shadow-sm dark:bg-red-950/40 dark:text-red-400">
+            <div className="relative flex flex-1 flex-col items-center justify-center gap-5 overflow-hidden rounded-3xl border-2 border-red-300 bg-red-50/50 p-8 text-center shadow-glow dark:border-red-900/50 dark:bg-red-950/20">
+              <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-red-100 text-red-600 shadow-glow dark:bg-red-950/40 dark:text-red-400">
                 <span className="absolute inset-0 animate-ping rounded-2xl bg-red-400/40" />
-                <Mic className="relative h-7 w-7" />
+                <Mic className="relative h-8 w-8" />
               </span>
-              <p className="text-sm font-semibold text-foreground">Enregistrement en cours...</p>
-              <p className="font-mono text-2xl font-bold text-red-600 dark:text-red-400">{formatDuration(recordingSeconds)}</p>
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                <p className="text-sm font-semibold text-foreground">Enregistrement en cours...</p>
+              </div>
+              <p className="font-mono text-3xl font-bold tabular-nums text-red-600 dark:text-red-400">{formatDuration(recordingSeconds)}</p>
+              <AudioWaveform stream={liveStream} className="h-16 w-full max-w-xs text-red-500 dark:text-red-400" />
               <button
                 type="button"
                 onClick={stopRecording}
-                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-500 hover:shadow-md"
+                className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-red-600 px-6 py-3 text-sm font-bold text-white shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-500 hover:shadow-glow active:scale-95"
               >
                 <Square className="h-4 w-4" />
                 Arrêter et transcrire
@@ -451,14 +468,14 @@ function AudioWorkspaceContent() {
                 onDrop={onDrop}
                 onClick={() => fileInputRef.current?.click()}
                 className={cn(
-                  "flex flex-1 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-300",
+                  "flex flex-1 cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed p-10 text-center transition-all duration-300",
                   isDragOver
-                    ? "border-primary-400 bg-primary-50/50 dark:bg-primary-950/20"
+                    ? "border-primary-400 bg-primary-50/50 shadow-glow dark:bg-primary-950/20"
                     : "border-border hover:border-primary-400 hover:bg-accent"
                 )}
               >
-                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-950/40 dark:text-orange-400">
-                  <UploadCloud className="h-7 w-7" />
+                <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-soft transition-transform duration-300 group-hover:scale-105 dark:bg-orange-950/40 dark:text-orange-400">
+                  <UploadCloud className="h-8 w-8" />
                 </span>
                 <p className="text-sm font-semibold text-foreground">Glisse-dépose ton enregistrement ici</p>
                 <p className="text-xs text-muted-foreground">ou clique pour choisir un fichier — M4A, MP3, WAV, OGG</p>
@@ -470,13 +487,32 @@ function AudioWorkspaceContent() {
                 <span className="h-px flex-1 bg-border" />
               </div>
 
+              {/* Desktop — a comfortable secondary action alongside the drop
+                  zone above, matching the "cockpit" spec's calmer desktop
+                  ergonomics. */}
               <button
                 type="button"
                 onClick={startRecording}
-                className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-card p-4 text-sm font-semibold text-foreground shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-50/50 hover:shadow-md dark:hover:border-red-900/50 dark:hover:bg-red-950/20"
+                className="hidden min-h-12 items-center justify-center gap-2 rounded-2xl border border-border bg-card p-4 text-sm font-semibold text-foreground shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-50/50 hover:shadow-glow md:flex dark:hover:border-red-900/50 dark:hover:bg-red-950/20"
               >
                 <Mic className="h-4 w-4 text-red-600 dark:text-red-400" />
                 Enregistrer le prof en direct
+              </button>
+
+              {/* Mobile — the "Hero Action": a large, magnetic, one-thumb-
+                  reachable circular record button, per explicit product
+                  direction ("bouton d'enregistrement géant, magnétique et
+                  accessible d'un seul pouce"). */}
+              <button
+                type="button"
+                onClick={startRecording}
+                aria-label="Enregistrer le prof en direct"
+                className="flex flex-col items-center justify-center gap-2 py-2 md:hidden"
+              >
+                <span className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-red-600 text-white shadow-glow transition-transform duration-300 active:scale-90">
+                  <Mic className="h-9 w-9" />
+                </span>
+                <span className="text-xs font-semibold text-foreground">Enregistrer le prof en direct</span>
               </button>
 
               {/* "Notes récentes" — the missing piece that let a saved note
@@ -495,10 +531,11 @@ function AudioWorkspaceContent() {
                         <button
                           type="button"
                           onClick={() => router.push(`/dashboard/audio-workspace?jobId=${recent.id}`)}
-                          className="flex w-full items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-sm"
+                          className="flex min-h-12 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-soft"
                         >
                           <FileAudio className="h-4 w-4 shrink-0 text-orange-600 dark:text-orange-400" />
                           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{recent.title}</span>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">{formatRelativeTime(recent.updatedAt, "fr")}</span>
                         </button>
                       </li>
                     ))}
@@ -508,7 +545,7 @@ function AudioWorkspaceContent() {
             </div>
           ) : (
             <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-soft">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
                   <FileAudio className="h-5 w-5" />
                 </span>
@@ -521,7 +558,7 @@ function AudioWorkspaceContent() {
                     type="button"
                     onClick={clearFile}
                     aria-label="Retirer le fichier"
-                    className="shrink-0 rounded-full p-1.5 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -529,9 +566,33 @@ function AudioWorkspaceContent() {
               </div>
 
               {isBusy && (
-                <div className="flex flex-col items-center gap-3 rounded-2xl border border-border p-8 text-center shadow-sm">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary-600 dark:text-primary-400" />
-                  <LectureNotesGeneratingLabel className="text-sm font-medium text-foreground" progress={chunkProgress ?? undefined} />
+                <div className="flex flex-col items-center gap-4 rounded-3xl border border-border p-8 text-center shadow-soft">
+                  {processingPhase === "transcribing" && chunkProgress ? (
+                    <ProgressRing
+                      completed={chunkProgress.current}
+                      total={chunkProgress.total}
+                      size={64}
+                      strokeWidth={5}
+                      label={
+                        <span className="text-sm font-bold text-foreground">
+                          {chunkProgress.current}/{chunkProgress.total}
+                        </span>
+                      }
+                    />
+                  ) : (
+                    <Loader2 className="h-8 w-8 animate-spin text-primary-600 dark:text-primary-400" />
+                  )}
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-xs font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400">
+                      {processingPhase === "decoding" && "Décodage de l'audio"}
+                      {processingPhase === "transcribing" && "Transcription en cours"}
+                      {processingPhase === "analyzing" && "Analyse IA"}
+                    </p>
+                    <LectureNotesGeneratingLabel
+                      className="text-sm font-medium text-foreground"
+                      progress={processingPhase === "transcribing" ? (chunkProgress ?? undefined) : undefined}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -549,16 +610,16 @@ function AudioWorkspaceContent() {
         </section>
 
         {/* -------- Right panel: Résultats -------- */}
-        <section className="flex min-h-0 w-full flex-col gap-4 overflow-y-auto p-6 md:w-1/2">
+        <section className="glass-card flex min-h-0 w-full flex-col gap-4 overflow-y-auto rounded-3xl p-6 shadow-glass dark:shadow-glass-dark md:w-1/2">
           <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Résultats</h2>
 
           {status !== "done" ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border p-10 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-border p-10 text-center">
               <button
                 type="button"
                 onClick={handleGenerate}
                 disabled={!file || isBusy}
-                className="inline-flex items-center gap-2 rounded-2xl bg-primary-600 px-8 py-4 text-base font-bold text-white shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 dark:bg-primary-500 dark:hover:bg-primary-400"
+                className="inline-flex min-h-14 items-center gap-2 rounded-2xl bg-primary-600 px-8 py-4 text-base font-bold text-white shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 dark:bg-primary-500 dark:hover:bg-primary-400"
               >
                 {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
                 Générer par l&apos;IA
@@ -567,16 +628,11 @@ function AudioWorkspaceContent() {
             </div>
           ) : (
             <div className="animate-fade-in flex flex-1 flex-col gap-4">
-              <article
-                dir="auto"
-                className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none rounded-2xl border border-border bg-card p-6 shadow-sm")}
-              >
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
-                  {smartNotes ?? ""}
-                </ReactMarkdown>
-              </article>
+              <SmartNotesView markdown={smartNotes ?? ""} isDark={isDark} />
 
-              <div className="mt-auto flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
+              {smartNotes && <LectureQuizPanel smartNotes={smartNotes} />}
+
+              <div className="mt-auto flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-soft">
                 <label className="text-xs font-semibold text-muted-foreground">Titre de la note</label>
                 <input
                   value={title}
@@ -584,13 +640,13 @@ function AudioWorkspaceContent() {
                     setTitle(e.target.value);
                     setIsSaved(false);
                   }}
-                  className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary-400"
+                  className="min-h-12 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary-400"
                 />
                 <button
                   type="button"
                   onClick={handleSave}
                   disabled={isSaving || isSaved}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70 dark:bg-primary-500 dark:hover:bg-primary-400"
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-bold text-white shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 dark:bg-primary-500 dark:hover:bg-primary-400"
                 >
                   {isSaving ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

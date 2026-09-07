@@ -22,6 +22,11 @@ export const WORKSPACE_SYNTHESIS_TRANSLATIONS = {
   // Sources sidebar
   sourcesHeading: { fr: "Sources du module", en: "Module sources" },
 
+  // Output export controls ("God-Tier" redesign) — pure client-side, no backend involved
+  copyOutputAriaLabel: { fr: "Copier le résultat", en: "Copy result" },
+  downloadOutputAriaLabel: { fr: "Télécharger en Markdown", en: "Download as Markdown" },
+  copyFailedTitle: { fr: "Échec de la copie", en: "Copy failed" },
+
   // Result history list
   resultsHeading: { fr: "Résultats", en: "Results" },
   entryTypeSummary: { fr: "Résumé", en: "Summary" },

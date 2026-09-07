@@ -1,27 +1,27 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
   Maximize2,
   Minimize2,
-  MoreVertical,
   NotebookPen,
-  Pencil,
   Plus,
-  Trash2,
+  Search,
   Sparkles,
+  Trash2,
+  X,
 } from "lucide-react";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -30,41 +30,12 @@ import { cn } from "@/lib/utils";
 import { stripHtmlToText } from "@/lib/highlight";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tNotes } from "@/lib/translations/notes";
+import { NoteCard } from "@/components/notes/NoteCard";
+import { NoteEditor } from "@/components/notes/NoteEditor";
+import { NoteSummaryButton } from "@/components/notes/NoteSummaryButton";
 import type { UserNote } from "@/types/user-notes";
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
-}
-
-// محرر النصوص الذكي اللي يقبل الألوان والجداول من الذكاء الاصطناعي ديريكت
-function HtmlEditor({ value, onChange, disabled }: { value: string; onChange: (val: string) => void; disabled: boolean }) {
-  const editorRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (editorRef.current && editorRef.current.innerHTML !== value) {
-      editorRef.current.innerHTML = value;
-    }
-  }, [value]);
-
-  return (
-    <div
-      ref={editorRef}
-      contentEditable={!disabled}
-      onInput={(e) => onChange(e.currentTarget.innerHTML)}
-      className={cn(
-        // Sized for comfortable long-session reading: a 16px base with generous
-        // line-height and padding reads far better over a full study session
-        // than the previous cramped text-sm/p-4 — study notes are re-read for
-        // minutes at a time, not skimmed like UI chrome.
-        "mt-3 h-full min-h-[300px] w-full min-w-0 flex-1 overflow-y-auto rounded-xl border border-border bg-transparent p-5 text-base leading-[1.8] outline-none transition-opacity sm:p-6",
-        "selection:bg-primary-100 selection:text-foreground caret-primary-500 dark:selection:bg-primary-900/50",
-        "prose dark:prose-invert max-w-none", // هذي اللي ترد الجداول والعناوين شابين أوتوماتيكيا
-        "prose-table:w-full prose-table:border-collapse prose-td:border prose-td:border-border prose-td:p-2 prose-th:border prose-th:border-border prose-th:bg-muted prose-th:p-2", // ستايل الجداول
-        disabled && "opacity-50 cursor-not-allowed"
-      )}
-    />
-  );
-}
+const SIDEBAR_WIDTH = 300;
 
 function NotesPageContent() {
   const { toast } = useToast();
@@ -76,6 +47,8 @@ function NotesPageContent() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   // Drives the persistent save-status pill in the editor header (see the
@@ -99,6 +72,20 @@ function NotesPageContent() {
   // directly regardless of viewport — that's an explicit navigation, not a
   // default.
   const isDesktopOrTablet = useMediaQuery("(min-width: 768px)");
+  // The bootstrap effect below reads this inside an async fetch().then() —
+  // by the time that resolves, `isDesktopOrTablet` itself has long since
+  // updated via useMediaQuery's own effect, but the bootstrap effect's OWN
+  // closure (deps: []) is frozen at whatever it was on the very first
+  // render, which is ALWAYS false (useMediaQuery defaults to false until
+  // its own effect runs, and effects from the same mount commit apply their
+  // state updates only after the whole commit, not mid-effect) — so the
+  // bootstrap callback would read a permanently-stale `false` regardless of
+  // real screen size, and desktop would never auto-select the first note.
+  // A ref sidesteps this: always current, never a stale closure.
+  const isDesktopOrTabletRef = useRef(isDesktopOrTablet);
+  useEffect(() => {
+    isDesktopOrTabletRef.current = isDesktopOrTablet;
+  }, [isDesktopOrTablet]);
   // Real visualViewport height on iOS Safari, which shrinks when the virtual
   // keyboard opens while `window.innerHeight`/the shell's `h-dvh` do not —
   // Android already gets this for free from the `interactiveWidget:
@@ -131,11 +118,11 @@ function NotesPageContent() {
         // On mobile with no explicit deep link, leave `initial` undefined so
         // the student sees the notes list first instead of jumping straight
         // into whichever note happens to be first.
-        const initial = deepLinked ?? (isDesktopOrTablet ? loaded[0] : undefined);
+        const initial = deepLinked ?? (isDesktopOrTabletRef.current ? loaded[0] : undefined);
         if (initial) {
           setSelectedId(initial.id);
           setDraftTitle(initial.title);
-          setDraftContent(initial.content); // خلينا المحتوى بالألوان والجداول تاعو
+          setDraftContent(initial.content); // keeps rich HTML (colors/tables) as-is
         }
       })
       .catch(() => setNotes([]))
@@ -143,12 +130,20 @@ function NotesPageContent() {
     return () => {
       cancelled = true;
     };
+    // Runs once on mount to resume/deep-link into a note — `language` is read
+    // for its value at that moment only, not a reason to refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
   const selectedOriginalContent = selectedNote ? selectedNote.content : "";
   const isDirty = selectedNote ? draftTitle !== selectedNote.title || draftContent !== selectedOriginalContent : false;
+
+  const filteredNotes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return notes;
+    return notes.filter((n) => n.title.toLowerCase().includes(q) || stripHtmlToText(n.content).toLowerCase().includes(q));
+  }, [notes, searchQuery]);
 
   function selectNote(note: UserNote) {
     setSelectedId(note.id);
@@ -193,7 +188,8 @@ function NotesPageContent() {
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement a échoué.");
 
       const finalTitle = draftTitle.trim() || "Note sans titre";
-      setNotes((prev) => prev.map((n) => (n.id === selectedNote.id ? { ...n, title: finalTitle, content: draftContent } : n)));
+      const updatedAt: string = data.updatedAt ?? new Date().toISOString();
+      setNotes((prev) => prev.map((n) => (n.id === selectedNote.id ? { ...n, title: finalTitle, content: draftContent, updatedAt } : n)));
       setDraftTitle(finalTitle);
       toast({ variant: "success", title: tNotes("toastNoteSaved", language) });
     } catch (error) {
@@ -205,10 +201,9 @@ function NotesPageContent() {
   }
 
   async function handleOrganizeByAI() {
-    // نعتمدو على النص الخام باش نبعثوه للـ AI
     const rawText = stripHtmlToText(draftContent).trim();
     if (!rawText) return;
-    
+
     setIsOrganizing(true);
     try {
       const res = await fetch("/api/notes/organize", {
@@ -220,7 +215,7 @@ function NotesPageContent() {
       if (!res.ok) throw new Error(data?.error ?? "L'organisation par l'IA a échoué.");
 
       setDraftContent(data.organizedContent);
-      toast({ variant: "success", title: "✨ Note organisée avec succès ! N'oublie pas de sauvegarder." });
+      toast({ variant: "success", title: `✨ ${tNotes("organizeSuccessToast", language)}` });
     } catch (error) {
       toast({ variant: "error", title: tNotes("toastErrorTitle", language), description: error instanceof Error ? error.message : tNotes("toastErrorUnknown", language) });
     } finally {
@@ -281,7 +276,8 @@ function NotesPageContent() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "Le renommage a échoué.");
 
-      setNotes((prev) => prev.map((n) => (n.id === renamingNote.id ? { ...n, title: nextTitle } : n)));
+      const updatedAt: string = data.updatedAt ?? new Date().toISOString();
+      setNotes((prev) => prev.map((n) => (n.id === renamingNote.id ? { ...n, title: nextTitle, updatedAt } : n)));
       if (selectedId === renamingNote.id) setDraftTitle(nextTitle);
       setRenamingNote(null);
       toast({ variant: "success", title: tNotes("toastNoteRenamed", language) });
@@ -299,7 +295,7 @@ function NotesPageContent() {
     >
       <div className="shrink-0">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">{tNotes("pageTitle", language)}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Tes notes personnelles, indépendantes de tes cours.</p>
+        <p className="mt-1 text-sm text-muted-foreground">{tNotes("pageSubtitle", language)}</p>
       </div>
 
       {/*
@@ -308,107 +304,113 @@ function NotesPageContent() {
         shared height and both rendered squashed/unusable at once. Below
         `md`, show exactly one pane at a time instead — the list when no
         note is selected, the editor (with its own "back" button) once one
-        is. From `md:` up, both panes render side by side exactly as before.
+        is. From `md:` up, both panes render side by side; the sidebar's own
+        width is animated (not the grid track) so collapsing it to a slim
+        rail doesn't require a second, discontinuous layout.
       */}
-      <div className="mt-6 min-h-0 flex-1 grid grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
-        <Card className={cn("h-full min-h-0 flex-col p-3", selectedId ? "hidden md:flex" : "flex")}>
-          <Button size="sm" className="w-full rounded-xl" onClick={handleCreate} disabled={isCreating}>
-            {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            {tNotes("newNote", language)}
-          </Button>
+      <div className="mt-6 flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
+        <motion.div
+          initial={false}
+          animate={isDesktopOrTablet ? { width: isSidebarCollapsed ? 0 : SIDEBAR_WIDTH } : { width: "100%" }}
+          transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+          className={cn("min-h-0 w-full shrink-0 overflow-hidden", selectedId ? "hidden md:block" : "block")}
+        >
+          <div
+            className="glass-card flex h-full min-h-0 w-full flex-col rounded-2xl border border-border p-3 shadow-glass dark:shadow-glass-dark"
+            style={isDesktopOrTablet ? { width: SIDEBAR_WIDTH } : undefined}
+          >
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" className="w-full flex-1 rounded-xl" onClick={handleCreate} disabled={isCreating}>
+                {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                {tNotes("newNote", language)}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setIsSidebarCollapsed(true)}
+                aria-label={tNotes("collapseSidebarAriaLabel", language)}
+                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:flex"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            </div>
 
-          <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <BrandLoader className="h-6 w-6" />
-                Chargement...
-              </div>
-            ) : notes.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 px-3 py-10 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
-                  <NotebookPen className="h-5 w-5" />
+            <div className="relative mt-3 shrink-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={tNotes("searchPlaceholder", language)}
+                className="h-10 w-full rounded-xl border border-border bg-transparent pl-9 pr-8 text-sm outline-none transition-colors focus:border-primary/40"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  aria-label={tNotes("cancel", language)}
+                  className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-accent"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                  <BrandLoader className="h-6 w-6" />
+                  {tNotes("loading", language)}
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{tNotes("notebookEmpty", language)}</p>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    Note un résumé, une astuce ou une idée à retenir — elle sera toujours là.
-                  </p>
+              ) : notes.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 px-3 py-10 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
+                    <NotebookPen className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{tNotes("notebookEmpty", language)}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{tNotes("emptySelectionBodyNoNotes", language)}</p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <AnimatePresence initial={false}>
-                {notes.map((note) => {
-                  const preview = stripHtmlToText(note.content).trim();
-                  const isSelected = note.id === selectedId;
-                  const hasUnsavedEdits = isSelected && isDirty;
-                  return (
-                    <motion.div
+              ) : filteredNotes.length === 0 ? (
+                <p className="px-3 py-10 text-center text-xs text-muted-foreground">{tNotes("noSearchResults", language)}</p>
+              ) : (
+                <AnimatePresence initial={false}>
+                  {filteredNotes.map((note) => (
+                    <NoteCard
                       key={note.id}
-                      layout
-                      initial={{ opacity: 0, y: -6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                      transition={{ duration: 0.18, ease: "easeOut" }}
-                      className={cn(
-                        "flex items-center gap-2 rounded-xl transition-colors duration-200",
-                        isSelected ? "bg-primary-50 dark:bg-primary-900/30" : "hover:bg-accent"
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => selectNote(note)}
-                        className="min-w-0 flex-1 px-3 py-2.5 text-left transition-transform duration-200 hover:translate-x-0.5"
-                      >
-                        <span className="flex items-center gap-1.5">
-                          <span className="truncate text-sm font-medium text-foreground">{note.title}</span>
-                          {hasUnsavedEdits && (
-                            <span
-                              aria-label={tNotes("unsavedChanges", language)}
-                              title={tNotes("unsavedChanges", language)}
-                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
-                            />
-                          )}
-                        </span>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {formatDate(note.createdAt)} {preview ? `· ${preview.slice(0, 40)}` : ""}
-                        </p>
-                      </button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label="Options de la note"
-                            onClick={(e) => e.stopPropagation()}
-                            className="mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          >
-                            {deletingId === note.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreVertical className="h-4 w-4" />}
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => openRenameDialog(note)}>
-                            <Pencil className="h-4 w-4" />
-                            Renommer
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => setConfirmDeleteNote(note)} className="text-destructive focus:text-destructive">
-                            <Trash2 className="h-4 w-4" />
-                            Supprimer
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
-            )}
+                      note={note}
+                      preview={stripHtmlToText(note.content).trim().slice(0, 90)}
+                      isSelected={note.id === selectedId}
+                      hasUnsavedEdits={note.id === selectedId && isDirty}
+                      isDeleting={deletingId === note.id}
+                      onSelect={() => selectNote(note)}
+                      onRename={() => openRenameDialog(note)}
+                      onDeleteRequest={() => setConfirmDeleteNote(note)}
+                    />
+                  ))}
+                </AnimatePresence>
+              )}
+            </div>
           </div>
-        </Card>
+        </motion.div>
 
-        <Card
+        {isSidebarCollapsed && isDesktopOrTablet && (
+          <button
+            type="button"
+            onClick={() => setIsSidebarCollapsed(false)}
+            aria-label={tNotes("expandSidebarAriaLabel", language)}
+            className="glass-card flex h-10 w-10 shrink-0 items-center justify-center self-start rounded-xl border border-border shadow-glass dark:shadow-glass-dark"
+          >
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        )}
+
+        <div
           className={cn(
-            "min-h-0 min-w-0 flex-col",
+            "glass-card min-h-0 min-w-0 flex-1 flex-col rounded-2xl border border-border shadow-glass dark:shadow-glass-dark",
             !selectedId && "hidden md:flex",
             selectedId && "flex",
-            isFullscreen ? "fixed inset-0 z-50 h-dvh w-screen overflow-y-auto rounded-none bg-background p-4 sm:p-8" : "h-full overflow-y-auto p-5"
+            isFullscreen ? "fixed inset-0 z-50 h-dvh w-screen overflow-y-auto rounded-none border-none p-4 sm:p-8" : "h-full overflow-y-auto p-5"
           )}
           // The fullscreen note editor is `fixed inset-0` — it fully escapes
           // this page's own outer keyboardInset-aware wrapper (see that
@@ -427,12 +429,10 @@ function NotesPageContent() {
               </div>
               <div className="max-w-xs">
                 <p className="text-sm font-medium text-foreground">
-                  {notes.length === 0 ? tNotes("notebookEmpty", language) : "Choisis une note à ouvrir"}
+                  {notes.length === 0 ? tNotes("notebookEmpty", language) : tNotes("emptySelectionTitleWithNotes", language)}
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {notes.length === 0
-                    ? "Note un résumé, une astuce ou une idée à retenir — elle sera toujours là."
-                    : "Sélectionne une note dans la liste à gauche, ou lance-en une nouvelle."}
+                  {notes.length === 0 ? tNotes("emptySelectionBodyNoNotes", language) : tNotes("emptySelectionBodyWithNotes", language)}
                 </p>
               </div>
               <Button size="sm" onClick={handleCreate} disabled={isCreating} className="mt-1 rounded-xl">
@@ -452,7 +452,7 @@ function NotesPageContent() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Retour à la liste"
+                  aria-label={tNotes("backToListAriaLabel", language)}
                   onClick={() => setSelectedId(null)}
                   className="h-11 w-11 shrink-0 md:hidden md:h-9 md:w-9"
                 >
@@ -469,7 +469,7 @@ function NotesPageContent() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
+                  aria-label={isFullscreen ? tNotes("exitFullscreenAriaLabel", language) : tNotes("fullscreenAriaLabel", language)}
                   onClick={() => setIsFullscreen((v) => !v)}
                   className="h-11 w-11 md:h-9 md:w-9"
                 >
@@ -478,7 +478,7 @@ function NotesPageContent() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Supprimer la note"
+                  aria-label={tNotes("deleteNoteAriaLabel", language)}
                   onClick={() => setConfirmDeleteNote(selectedNote)}
                   disabled={deletingId === selectedNote.id}
                   className="h-11 w-11 md:h-9 md:w-9"
@@ -499,12 +499,12 @@ function NotesPageContent() {
                 {isSaving ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    <span className="text-muted-foreground">Enregistrement...</span>
+                    <span className="text-muted-foreground">{tNotes("savingLabel", language)}</span>
                   </>
                 ) : saveError ? (
                   <>
                     <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
-                    <span className="text-destructive">Échec de l'enregistrement — réessaie</span>
+                    <span className="text-destructive">{tNotes("saveErrorLabel", language)}</span>
                   </>
                 ) : isDirty ? (
                   <>
@@ -514,42 +514,44 @@ function NotesPageContent() {
                 ) : (
                   <>
                     <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                    <span className="text-emerald-600 dark:text-emerald-400">Enregistré</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">{tNotes("savedLabel", language)}</span>
                   </>
                 )}
               </div>
 
-              {/* المكون الجديد: محرر يقبل الجداول والألوان مباشرة */}
-              <HtmlEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
+              <NoteEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
 
               {/* Point 1 fix — a direct, unconditional pb-28 on mobile (on
                   top of the keyboardInset padding already applied to the
-                  fullscreen Card above): guarantees the Save button always
-                  clears the fixed bottom nav bar's real footprint, instead
-                  of relying only on the shell's generic page-level padding
-                  or the keyboard-open-only inset. sm:pb-0 — desktop has no
-                  bottom nav to clear, so this would just be dead space
-                  there. */}
-              <div className="mt-4 flex shrink-0 flex-col justify-between gap-3 pb-28 sm:flex-row sm:items-center sm:pb-0">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleOrganizeByAI}
-                  disabled={isOrganizing || stripHtmlToText(draftContent).trim().length === 0}
-                  className="h-10 sm:h-8 w-full sm:w-auto border-purple-500/30 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30 dark:text-purple-400"
-                >
-                  {isOrganizing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
-                  {isOrganizing ? "Organisation en cours..." : "Généré avec l'AI"}
-                </Button>
+                  fullscreen wrapper above): guarantees the Save button
+                  always clears the fixed bottom nav bar's real footprint,
+                  instead of relying only on the shell's generic page-level
+                  padding or the keyboard-open-only inset. sm:pb-0 — desktop
+                  has no bottom nav to clear, so this would just be dead
+                  space there. */}
+              <div className="mt-4 flex shrink-0 flex-col gap-2 pb-28 sm:flex-row sm:items-center sm:justify-between sm:pb-0">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleOrganizeByAI}
+                    disabled={isOrganizing || stripHtmlToText(draftContent).trim().length === 0}
+                    className="h-10 w-full border-purple-500/30 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-950/30 sm:h-8 sm:w-auto"
+                  >
+                    {isOrganizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    {isOrganizing ? tNotes("organizingLabel", language) : tNotes("organizeButton", language)}
+                  </Button>
+                  <NoteSummaryButton getPlainText={() => stripHtmlToText(draftContent)} />
+                </div>
 
-                <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty} className="h-10 sm:h-8 w-full sm:w-auto">
-                  {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                  Sauvegarder
+                <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty} className="h-10 w-full sm:h-8 sm:w-auto">
+                  {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {tNotes("saveButton", language)}
                 </Button>
               </div>
             </motion.div>
           )}
-        </Card>
+        </div>
       </div>
 
       <Dialog open={renamingNote !== null} onOpenChange={(open) => !open && setRenamingNote(null)}>
@@ -568,11 +570,11 @@ function NotesPageContent() {
           />
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setRenamingNote(null)}>
-              Annuler
+              {tNotes("cancel", language)}
             </Button>
             <Button size="sm" onClick={handleRenameSubmit} disabled={isRenaming || renameValue.trim().length === 0}>
               {isRenaming && <Loader2 className="h-4 w-4 animate-spin" />}
-              Renommer
+              {tNotes("rename", language)}
             </Button>
           </div>
         </DialogContent>
@@ -581,22 +583,20 @@ function NotesPageContent() {
       <Dialog open={confirmDeleteNote !== null} onOpenChange={(open) => !open && setConfirmDeleteNote(null)}>
         <DialogContent className="max-w-sm" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>Supprimer la note ?</DialogTitle>
+            <DialogTitle>{tNotes("deleteDialogTitle", language)}</DialogTitle>
             <DialogDescription>
-              « {confirmDeleteNote?.title} » sera supprimée définitivement
-              {confirmDeleteNote && selectedId === confirmDeleteNote.id && isDirty
-                ? ", y compris les modifications non enregistrées que tu es en train d'écrire"
-                : ""}
-              . Cette action est irréversible.
+              « {confirmDeleteNote?.title} » {tNotes("deleteDialogBodySuffix", language)}
+              {confirmDeleteNote && selectedId === confirmDeleteNote.id && isDirty ? tNotes("deleteDialogBodyUnsavedSuffix", language) : ""}
+              {tNotes("deleteDialogBodyEnd", language)}
             </DialogDescription>
           </DialogHeader>
           <div className="mt-5 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setConfirmDeleteNote(null)}>
-              Annuler
+              {tNotes("cancel", language)}
             </Button>
             <Button type="button" variant="danger" onClick={handleConfirmDelete}>
               <Trash2 className="h-3.5 w-3.5" />
-              Supprimer
+              {tNotes("delete", language)}
             </Button>
           </div>
         </DialogContent>

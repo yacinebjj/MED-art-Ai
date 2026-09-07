@@ -40,7 +40,7 @@ export function LectureNotesAudioPlayer({ audioUrls, title }: { audioUrls: strin
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+      <div className="glass-card rounded-2xl border border-border p-4 shadow-soft">
         <audio
           key={activeIndex}
           ref={audioRef}
@@ -53,7 +53,7 @@ export function LectureNotesAudioPlayer({ audioUrls, title }: { audioUrls: strin
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 rounded-full border border-border bg-card p-1 shadow-sm">
+        <div className="flex items-center gap-1 rounded-full border border-border bg-card p-1 shadow-sm">
           {SPEED_OPTIONS.map((option) => (
             <button
               key={option}
@@ -61,9 +61,9 @@ export function LectureNotesAudioPlayer({ audioUrls, title }: { audioUrls: strin
               onClick={() => applySpeed(option)}
               aria-pressed={speed === option}
               className={cn(
-                "rounded-full px-3 py-1 text-xs font-semibold transition-all duration-300",
+                "flex min-h-11 min-w-11 items-center justify-center rounded-full px-3 text-xs font-semibold transition-all duration-300",
                 speed === option
-                  ? "bg-primary-600 text-white dark:bg-primary-500"
+                  ? "bg-primary-600 text-white shadow-glow dark:bg-primary-500"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
               )}
             >
@@ -82,7 +82,7 @@ export function LectureNotesAudioPlayer({ audioUrls, title }: { audioUrls: strin
                 type="button"
                 onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
                 disabled={activeIndex === 0}
-                className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground transition-all duration-300 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex min-h-11 items-center rounded-full border border-border bg-card px-3 text-xs font-semibold text-foreground transition-all duration-300 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Précédent
               </button>
@@ -90,7 +90,7 @@ export function LectureNotesAudioPlayer({ audioUrls, title }: { audioUrls: strin
                 type="button"
                 onClick={() => setActiveIndex((i) => Math.min(audioUrls.length - 1, i + 1))}
                 disabled={activeIndex === audioUrls.length - 1}
-                className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground transition-all duration-300 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex min-h-11 items-center rounded-full border border-border bg-card px-3 text-xs font-semibold text-foreground transition-all duration-300 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Suivant
               </button>

@@ -1,10 +1,11 @@
 "use client";
 
 import { memo, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, MoreVertical, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Lock, MoreVertical, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
+import { ProgressRing } from "@/components/ui/ProgressRing";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +36,10 @@ interface MobileStudioCardsProps {
   onRegenerateSection?: (id: DemoSectionId) => void;
   /** The student's own curriculum level (StudentCurriculumProfile.academicYear.level, types/academic.ts) — only ever changes the "Cas Clinique" tile's own label (getSectionLabel, lib/translations/studio.ts); every other tile ignores it. Mirrors StudioPanelProps' own field of the same name verbatim. */
   studyYear?: number | null;
+  /** Visual-only lock badge — mirrors StudioPanelProps.lockedSections verbatim (see that file's own doc comment). The real gate stays entirely in the caller's onItemClick. */
+  lockedSections?: Set<DemoSectionId>;
+  /** Real mastery percentage per section (today only ever "qcm") — mirrors StudioPanelProps.sectionMasteryPct verbatim. Never fabricated. */
+  sectionMasteryPct?: Partial<Record<DemoSectionId, number>>;
 }
 
 /**
@@ -127,6 +132,8 @@ export const MobileStudioCards = memo(function MobileStudioCards({
   regeneratingSections,
   onRegenerateSection,
   studyYear,
+  lockedSections,
+  sectionMasteryPct,
 }: MobileStudioCardsProps) {
   const { language } = useLanguage();
   const hasAnyResult = sections.some((section) => getSectionStatus(section.id) === "available");
@@ -172,31 +179,35 @@ export const MobileStudioCards = memo(function MobileStudioCards({
 
           const isAvailable = status === "available";
           const isRegenerating = regeneratingSections?.has(section.id) ?? false;
+          const isLocked = lockedSections?.has(section.id) ?? false;
+          const masteryPct = sectionMasteryPct?.[section.id];
           // Point 5 fix — same gate as StudioPanel.tsx's own showOptionsMenu:
           // only a not-yet-generated card offers the pre-generation
           // language/prompt menu; Exemples & Analogies never gets one.
           const showOptionsMenu =
-            Boolean(onItemClickWithOptions) && !isAvailable && SECTIONS_WITH_OPTIONS_MENU.has(section.id);
+            Boolean(onItemClickWithOptions) && !isAvailable && !isLocked && SECTIONS_WITH_OPTIONS_MENU.has(section.id);
 
           return (
             <div
               key={section.id}
               role="button"
               tabIndex={0}
+              title={isLocked ? tStudio("lockedTileTooltip", language) : undefined}
               onClick={() => onItemClick(section.id)}
               onKeyDown={(e) => e.key === "Enter" && onItemClick(section.id)}
               className={cn(
                 "flex cursor-pointer items-center gap-3 rounded-2xl border p-2.5 text-left shadow-soft transition-all duration-300 active:scale-[0.98]",
-                tint.bg
+                tint.bg,
+                isLocked && "opacity-50 saturate-[0.4] active:scale-100"
               )}
             >
               <span
                 className={cn(
-                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background/70 shadow-soft dark:bg-background/30",
+                  "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background/70 shadow-soft dark:bg-background/30",
                   tint.icon
                 )}
               >
-                <Icon className="h-5 w-5" />
+                {isLocked ? <Lock className="h-4 w-4" /> : <Icon className="h-5 w-5" />}
               </span>
               <div className="min-w-0 flex-1">
                 {/* line-clamp-2, not truncate — a long label ("Ultra-
@@ -219,7 +230,19 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                 <RefreshCw aria-hidden className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
               ) : isAvailable ? (
                 <>
-                  <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", tint.dot)} />
+                  {typeof masteryPct === "number" ? (
+                    <ProgressRing
+                      completed={masteryPct}
+                      total={100}
+                      size={28}
+                      strokeWidth={3}
+                      className="shrink-0"
+                      label={<span className="text-[9px] font-bold text-foreground">{masteryPct}%</span>}
+                      aria-label={`${tStudio("masteryAriaLabel", language)} ${masteryPct}%`}
+                    />
+                  ) : (
+                    <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", tint.dot)} />
+                  )}
                   <CardOptionsMenu sectionId={section.id} onRegenerateSection={onRegenerateSection} />
                 </>
               ) : showOptionsMenu ? (

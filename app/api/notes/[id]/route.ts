@@ -52,7 +52,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ success: false, error: "'title' ou 'content' est requis." }, { status: 400 });
   }
 
-  const updates: Record<string, string> = {};
+  const updatedAt = new Date().toISOString();
+  const updates: Record<string, string> = { updated_at: updatedAt };
   if (typeof title === "string") updates.title = sanitizeForPostgres(title.trim() || "Note sans titre");
   if (typeof content === "string") updates.content = sanitizeForPostgres(stripDangerousHtml(content));
 
@@ -76,7 +77,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ success: false, error: "Note introuvable." }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, updatedAt });
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {

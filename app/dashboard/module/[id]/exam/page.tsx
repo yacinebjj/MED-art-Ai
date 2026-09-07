@@ -23,12 +23,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   FilePlus2,
   FileQuestion,
   ListChecks,
   Loader2,
   RotateCcw,
   Sparkles,
+  Trophy,
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,6 +39,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { ProgressRing } from "@/components/ui/ProgressRing";
 import { useToast } from "@/components/ui/Toast";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -46,6 +50,8 @@ import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
+import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
+import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
@@ -131,6 +137,22 @@ export default function ExamGeneratorPage() {
 
   const activeExam = useMemo(() => savedExams.find((e) => e.id === activeExamId) ?? null, [savedExams, activeExamId]);
   const questions = useMemo(() => activeExam?.content.questions ?? [], [activeExam]);
+
+  // "Un-contre-un" testing cockpit — one question in focus at a time
+  // (instead of one giant scroll), with a jump-to-any-question navigator.
+  // Reset to 0 whenever a FRESH testing sitting starts (a new/regenerated
+  // exam, or opening a saved exam that has no attempt yet) — see
+  // generateExam and handleViewExam below. `slideDirection` only drives the
+  // enter/exit animation (+1 going forward, -1 going back); it never affects
+  // which question is shown.
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [slideDirection, setSlideDirection] = useState(1);
+
+  function goToQuestion(index: number) {
+    if (index < 0 || index >= questions.length) return;
+    setSlideDirection(index > currentQuestionIndex ? 1 : -1);
+    setCurrentQuestionIndex(index);
+  }
 
   // Mobile-first UX rework — below `md`, aside/main never render side by
   // side (there was too little room for either once one held a real
@@ -237,6 +259,7 @@ export default function ExamGeneratorPage() {
               setExamState("results");
             } else {
               setExamState("testing");
+              setCurrentQuestionIndex(0);
             }
             setMobileTab("results");
           }
@@ -300,6 +323,7 @@ export default function ExamGeneratorPage() {
       setSavedExams((prev) => [...prev, exam]);
       setActiveExamId(exam.id);
       setExamState("testing");
+      setCurrentQuestionIndex(0);
       // Dès qu'un examen est généré, bascule automatiquement sur l'onglet
       // "Résultats" (mobile uniquement — no-op on desktop, both panels
       // already visible there).
@@ -349,6 +373,7 @@ export default function ExamGeneratorPage() {
     } else {
       setAnswers({});
       setExamState("testing");
+      setCurrentQuestionIndex(0);
     }
     setMobileTab("results");
   }
@@ -414,12 +439,19 @@ export default function ExamGeneratorPage() {
   }, [answers, questions]);
 
   const courseHeaderBlock = (
-    <div className="border-b border-white/40 p-4 dark:border-white/10">
-      <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tExam("coursesOfModule", language)}</h2>
-      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-        {selectedCourseIds.size} / {courses?.length ?? 0} sélectionné{selectedCourseIds.size > 1 ? "s" : ""}
-      </p>
-      <label className="mt-3 flex cursor-pointer items-center gap-2.5 rounded-lg border border-gray-200/70 bg-white/50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors dark:border-neutral-700/70 dark:bg-neutral-800/50 dark:text-gray-200">
+    <div className="border-b border-border p-4">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 shadow-sm dark:bg-primary-950/40 dark:text-primary-400">
+          <FileQuestion className="h-4 w-4" />
+        </span>
+        <div>
+          <h2 className="text-sm font-bold text-foreground">{tExam("coursesOfModule", language)}</h2>
+          <p className="text-xs text-muted-foreground">
+            {selectedCourseIds.size} / {courses?.length ?? 0} sélectionné{selectedCourseIds.size > 1 ? "s" : ""}
+          </p>
+        </div>
+      </div>
+      <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-accent/40 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent">
         <Checkbox checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={toggleAll} />
         Sélectionner tout
       </label>
@@ -429,7 +461,7 @@ export default function ExamGeneratorPage() {
   const courseListContent = coursesLoading ? (
     <div className="space-y-2 p-2">
       {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="h-11 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-800" />
+        <div key={i} className="h-11 animate-pulse rounded-xl bg-muted" />
       ))}
     </div>
   ) : coursesError ? (
@@ -437,38 +469,56 @@ export default function ExamGeneratorPage() {
       <ErrorState message="Échec du chargement des cours de ce module." onRetry={() => setRetryToken((t) => t + 1)} />
     </div>
   ) : !courses || courses.length === 0 ? (
-    <p className="px-3 py-6 text-center text-xs text-gray-400 dark:text-gray-500">Aucun cours dans ce module pour l&apos;instant.</p>
+    <p className="px-3 py-6 text-center text-xs text-muted-foreground">Aucun cours dans ce module pour l&apos;instant.</p>
   ) : (
-    courses.map((course) => (
-      <label
-        key={course.id}
-        className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
-      >
-        <Checkbox checked={selectedCourseIds.has(course.id)} onCheckedChange={() => toggleCourse(course.id)} />
-        {course.title}
-      </label>
-    ))
+    courses.map((course) => {
+      const selected = selectedCourseIds.has(course.id);
+      return (
+        <label
+          key={course.id}
+          className={cn(
+            "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all duration-200 active:scale-[0.99]",
+            selected
+              ? "border-primary-300 bg-primary-50 text-primary-800 shadow-glow dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-200"
+              : "border-transparent text-foreground hover:-translate-y-0.5 hover:border-border hover:bg-accent hover:shadow-soft"
+          )}
+        >
+          <Checkbox checked={selected} onCheckedChange={() => toggleCourse(course.id)} />
+          {course.title}
+        </label>
+      );
+    })
   );
 
   const savedExamsContent = savedExams.length > 0 && (
     <>
-      <h3 className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">Mes Examens</h3>
-      {savedExams.map((exam, index) => (
-        <button
-          key={exam.id}
-          type="button"
-          onClick={() => handleViewExam(exam)}
-          className={cn(
-            "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-300 active:scale-[0.98]",
-            activeExamId === exam.id
-              ? "bg-primary-50 font-semibold text-primary-700 shadow-soft dark:bg-primary-950/40 dark:text-primary-300"
-              : "text-gray-700 hover:translate-x-0.5 hover:bg-white/60 dark:text-gray-300 dark:hover:bg-white/5"
-          )}
-        >
-          <span>Examen {index + 1}</span>
-          <span className="text-xs text-gray-400 dark:text-gray-500">{exam.content.questions.length} QCM</span>
-        </button>
-      ))}
+      <h3 className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">Mes Examens</h3>
+      {savedExams.map((exam, index) => {
+        const savedAttempt = attemptsByExamId[exam.id];
+        return (
+          <button
+            key={exam.id}
+            type="button"
+            onClick={() => handleViewExam(exam)}
+            className={cn(
+              "flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-all duration-200 active:scale-[0.98]",
+              activeExamId === exam.id
+                ? "border border-primary-300 bg-primary-50 font-semibold text-primary-800 shadow-glow dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-200"
+                : "border border-transparent text-foreground hover:-translate-y-0.5 hover:border-border hover:bg-accent hover:shadow-soft"
+            )}
+          >
+            <span className="min-w-0 truncate">Examen {index + 1}</span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {savedAttempt && (
+                <Badge variant={savedAttempt.score / savedAttempt.totalQuestions >= 0.5 ? "success" : "danger"}>
+                  {savedAttempt.score}/{savedAttempt.totalQuestions}
+                </Badge>
+              )}
+              <span className="text-xs text-muted-foreground">{exam.content.questions.length} QCM</span>
+            </span>
+          </button>
+        );
+      })}
     </>
   );
 
@@ -476,19 +526,19 @@ export default function ExamGeneratorPage() {
   // tab — desktop keeps its own bigger, decorative idleContent card below
   // instead (unchanged), since desktop already has the room to spare.
   const generateButtonBlock = (
-    <div className="shrink-0 border-t border-white/40 p-4 dark:border-white/10">
+    <div className="shrink-0 border-t border-border p-4">
       <Button
         size="lg"
         disabled={selectedCourseIds.size === 0 || isGenerating}
         onClick={handleGenerate}
-        className="w-full whitespace-normal text-center leading-snug"
+        className="min-h-12 w-full whitespace-normal text-center leading-snug shadow-glow"
       >
         {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Générer l&apos;examen
       </Button>
-      <p className="mt-2 text-center text-xs text-gray-400 dark:text-gray-500">40 à 60 QCM générés par l&apos;IA</p>
+      <p className="mt-2 text-center text-xs text-muted-foreground">40 à 60 QCM générés par l&apos;IA</p>
       {selectedCourseIds.size === 0 && (
-        <p className="mt-1 text-center text-xs text-gray-400 dark:text-gray-500">Sélectionne au moins un cours pour continuer.</p>
+        <p className="mt-1 text-center text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>
       )}
     </div>
   );
@@ -502,12 +552,13 @@ export default function ExamGeneratorPage() {
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center sm:p-8"
     >
-      <div className="flex h-16 w-16 shrink-0 animate-float items-center justify-center rounded-2xl bg-primary-50 shadow-glow dark:bg-primary-950/40">
-        <FileQuestion className="h-8 w-8 text-primary-600 dark:text-primary-400" />
+      <div className="relative flex h-20 w-20 shrink-0 animate-float items-center justify-center rounded-3xl bg-primary-50 shadow-glow dark:bg-primary-950/40">
+        <span aria-hidden className="absolute inset-0 rounded-3xl bg-primary-400/20 blur-xl" />
+        <FileQuestion className="relative h-9 w-9 text-primary-600 dark:text-primary-400" />
       </div>
       <div>
-        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Prêt à te tester ?</h3>
-        <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">
+        <h3 className="text-xl font-bold text-foreground">Prêt à te tester ?</h3>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
           Sélectionne les cours à couvrir dans le panneau de gauche, puis génère un examen clinique complet.
         </p>
       </div>
@@ -516,13 +567,14 @@ export default function ExamGeneratorPage() {
           size="lg"
           disabled={selectedCourseIds.size === 0 || isGenerating}
           onClick={handleGenerate}
-          className="max-w-full whitespace-normal text-center leading-snug"
+          className="min-h-12 max-w-full whitespace-normal text-center leading-snug shadow-glow"
         >
+          <Sparkles className="h-4 w-4" />
           Générer l&apos;examen
         </Button>
-        <p className="text-xs text-gray-400 dark:text-gray-500">40 à 60 QCM générés par l&apos;IA</p>
+        <p className="text-xs text-muted-foreground">40 à 60 QCM générés par l&apos;IA</p>
       </div>
-      {selectedCourseIds.size === 0 && <p className="text-xs text-gray-400 dark:text-gray-500">Sélectionne au moins un cours pour continuer.</p>}
+      {selectedCourseIds.size === 0 && <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
     </motion.div>
   );
 
@@ -535,20 +587,39 @@ export default function ExamGeneratorPage() {
       transition={{ duration: 0.3 }}
       className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto p-6 sm:p-8"
     >
-      <div className="relative flex h-16 w-16 items-center justify-center">
+      <div className="relative flex h-20 w-20 items-center justify-center">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-30" />
-        <Sparkles className="relative h-7 w-7 text-primary-600 dark:text-primary-400" />
+        <span aria-hidden className="absolute inset-0 rounded-full bg-primary-400/20 blur-xl" />
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+          className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-50 shadow-glow dark:bg-primary-950/40"
+        >
+          <Sparkles className="h-7 w-7 text-primary-600 dark:text-primary-400" />
+        </motion.div>
       </div>
-      <p className="max-w-sm text-center text-sm font-semibold text-gray-700 dark:text-gray-200">
+      <p className="max-w-sm text-center text-sm font-semibold text-foreground">
         Création d&apos;un examen clinique type Faculté de Médecine Saad Dahlab (Blida)...
       </p>
+      {/* Purely ambient — a fixed row of skeleton cards revealing on a
+          staggered delay, NOT tied to any real per-question progress signal
+          (the backend returns the whole exam in one response; sometimes
+          instantly from cache). Never claims a specific question count or
+          step is "done now" — that would be fabricated given caching/pooling
+          upstream (see app/api/exam/generate/route.ts). */}
       <div className="w-full max-w-md space-y-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="space-y-2 rounded-xl border border-gray-200/70 bg-white/40 p-4 dark:border-neutral-800/70 dark:bg-white/5">
-            <div className="h-3 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
-            <div className="h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
-            <div className="h-3 w-5/6 animate-pulse rounded bg-gray-200 dark:bg-neutral-700" />
-          </div>
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: i * 0.5, repeat: Infinity, repeatType: "reverse", repeatDelay: 1 }}
+            className="space-y-2 rounded-xl border border-border bg-accent/40 p-4"
+          >
+            <div className="h-3 w-3/4 animate-pulse rounded bg-muted" />
+            <div className="h-3 w-full animate-pulse rounded bg-muted" />
+            <div className="h-3 w-5/6 animate-pulse rounded bg-muted" />
+          </motion.div>
         ))}
       </div>
     </motion.div>
@@ -558,56 +629,119 @@ export default function ExamGeneratorPage() {
   // FullscreenViewerModal) + the wrapping motion.div (used only for the
   // normal, non-fullscreen panel, which needs its own bounded height/scroll
   // — the modal provides its own single scroll region instead).
+  const currentQuestion = questions[currentQuestionIndex] as ExamQuestion | undefined;
+
   const testingInnerContent = (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Épreuve Clinique</h2>
-        <Badge variant="outline">
-          {answeredCount} / {questions.length} répondues
-        </Badge>
+        <h2 className="text-lg font-bold text-foreground">Épreuve Clinique</h2>
+        <div className="flex items-center gap-2">
+          <ExamTimer key={activeExamId} />
+          <ProgressRing
+            completed={answeredCount}
+            total={questions.length}
+            size={40}
+            strokeWidth={4}
+            label={
+              <span className="text-[10px] font-bold text-foreground">
+                {answeredCount}/{questions.length}
+              </span>
+            }
+            aria-label={`${answeredCount} sur ${questions.length} questions répondues`}
+          />
+        </div>
       </div>
-      <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
-        {questions.map((q, index) => (
+
+      <ExamQuestionNavigator
+        total={questions.length}
+        currentIndex={currentQuestionIndex}
+        isAnswered={(i) => Boolean(answers[questions[i]?.id])}
+        onJump={goToQuestion}
+        className="mb-4"
+      />
+
+      {currentQuestion && (
+        <AnimatePresence mode="wait" custom={slideDirection}>
           <motion.div
-            key={q.id}
-            variants={RESULT_CARD_VARIANTS}
-            className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft transition-all duration-300 dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
+            key={currentQuestion.id}
+            custom={slideDirection}
+            initial={{ x: slideDirection > 0 ? 60 : -60, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: slideDirection > 0 ? -60 : 60, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.15}
+            onDragEnd={(_event, info) => {
+              if (info.offset.x < -80) goToQuestion(currentQuestionIndex + 1);
+              else if (info.offset.x > 80) goToQuestion(currentQuestionIndex - 1);
+            }}
+            className="glass-card cursor-grab touch-pan-y rounded-2xl border border-border p-4 shadow-soft active:cursor-grabbing sm:p-6"
           >
-            <p className="mb-4 text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
-              <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
-              {q.vignette}
-            </p>
-            <div className="space-y-2" role="radiogroup" aria-label={`Options question ${index + 1}`}>
-              {q.options.map((opt) => {
-                const selected = answers[q.id] === opt.label;
+            <div className="mb-4 flex items-center gap-2">
+              <Badge variant="primary">Q{currentQuestionIndex + 1} / {questions.length}</Badge>
+              {answers[currentQuestion.id] && <Badge variant="success">Répondue</Badge>}
+            </div>
+            <p className="mb-5 text-base font-medium leading-relaxed text-foreground">{currentQuestion.vignette}</p>
+            <div className="space-y-2.5" role="radiogroup" aria-label={`Options question ${currentQuestionIndex + 1}`}>
+              {currentQuestion.options.map((opt) => {
+                const selected = answers[currentQuestion.id] === opt.label;
                 return (
                   <label
                     key={opt.label}
                     className={cn(
-                      "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-all duration-300 active:scale-[0.99]",
+                      "flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition-all duration-200 active:scale-[0.99]",
                       selected
-                        ? "border-primary-500 bg-primary-50 shadow-soft dark:border-primary-500 dark:bg-primary-950/30"
-                        : "border-gray-200 hover:bg-gray-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                        ? "border-primary-500 bg-primary-50 shadow-glow dark:border-primary-500 dark:bg-primary-950/30"
+                        : "border-border hover:-translate-y-0.5 hover:bg-accent hover:shadow-soft"
                     )}
                   >
                     <input
                       type="radio"
-                      name={q.id}
+                      name={currentQuestion.id}
                       className="sr-only"
                       checked={selected}
-                      onChange={() => handleSelectAnswer(q.id, opt.label)}
+                      onChange={() => handleSelectAnswer(currentQuestion.id, opt.label)}
                     />
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                    <span
+                      className={cn(
+                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold",
+                        selected ? "border-primary-600 bg-primary-600 text-white" : "border-current text-muted-foreground"
+                      )}
+                    >
                       {opt.label}
                     </span>
-                    <span className="text-gray-700 dark:text-gray-200">{opt.text}</span>
+                    <span className="text-foreground">{opt.text}</span>
                   </label>
                 );
               })}
             </div>
           </motion.div>
-        ))}
-      </motion.div>
+        </AnimatePresence>
+      )}
+
+      <div className="mt-5 flex items-center justify-between gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-h-12"
+          disabled={currentQuestionIndex === 0}
+          onClick={() => goToQuestion(currentQuestionIndex - 1)}
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Précédente
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-h-12"
+          disabled={currentQuestionIndex >= questions.length - 1}
+          onClick={() => goToQuestion(currentQuestionIndex + 1)}
+        >
+          Suivante
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
     </>
   );
 
@@ -624,13 +758,28 @@ export default function ExamGeneratorPage() {
     </motion.div>
   );
 
+  const scorePct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
+  const scoreTone = scorePct >= 80 ? "text-emerald-600 dark:text-emerald-400" : scorePct >= 50 ? "text-amber-600 dark:text-amber-400" : "text-rose-600 dark:text-rose-400";
+
   const resultsInnerContent = (
     <>
-      <div className="mb-6 rounded-2xl border-2 border-primary-200 bg-primary-50 p-5 text-center shadow-glow dark:border-primary-900/50 dark:bg-primary-950/20">
-        <p className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-400">{tExam("finalScore", language)}</p>
-        <p className="mt-1 text-4xl font-black text-gray-900 dark:text-white">
-          {score} / {questions.length}
-        </p>
+      <div className="glass-card mb-6 flex flex-col items-center gap-3 rounded-3xl border border-border p-6 text-center shadow-glow sm:flex-row sm:justify-center sm:gap-6">
+        <ProgressRing
+          completed={score}
+          total={Math.max(questions.length, 1)}
+          size={96}
+          strokeWidth={8}
+          label={<span className={cn("text-2xl font-black", scoreTone)}>{scorePct}%</span>}
+          aria-label={`Score : ${score} sur ${questions.length}`}
+        />
+        <div>
+          <p className="flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground sm:justify-start">
+            <Trophy className="h-3.5 w-3.5" /> {tExam("finalScore", language)}
+          </p>
+          <p className="mt-1 text-4xl font-black text-foreground">
+            {score} / {questions.length}
+          </p>
+        </div>
       </div>
 
       <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
@@ -642,18 +791,17 @@ export default function ExamGeneratorPage() {
             <motion.div
               key={q.id}
               variants={RESULT_CARD_VARIANTS}
-              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-soft dark:border-neutral-800 dark:bg-neutral-900 sm:p-5"
+              className="rounded-2xl border border-border bg-card p-4 shadow-soft sm:p-5"
             >
               <div className="mb-3 flex items-start justify-between gap-3">
-                <p className="text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
+                <p className="text-sm font-medium leading-relaxed text-foreground">
                   <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
                   {q.vignette}
                 </p>
-                {isCorrect ? (
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
-                ) : (
-                  <XCircle className="h-5 w-5 shrink-0 text-rose-500" />
-                )}
+                <Badge variant={isCorrect ? "success" : "danger"} className="shrink-0">
+                  {isCorrect ? <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> : <XCircle className="mr-1 h-3.5 w-3.5" />}
+                  {isCorrect ? "Correcte" : "Incorrecte"}
+                </Badge>
               </div>
 
               <div className="space-y-2">
@@ -663,17 +811,17 @@ export default function ExamGeneratorPage() {
                     <div
                       key={opt.label}
                       className={cn(
-                        "flex items-start gap-3 rounded-xl border p-3 text-sm",
+                        "flex min-h-12 items-center gap-3 rounded-xl border p-3 text-sm",
                         isUserChoice && opt.isCorrect && "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30",
                         isUserChoice && !opt.isCorrect && "border-rose-500 bg-rose-50 dark:border-rose-600 dark:bg-rose-950/30",
-                        !isUserChoice && opt.isCorrect && "border-dashed border-emerald-400 bg-white dark:bg-neutral-900",
-                        !isUserChoice && !opt.isCorrect && "border-gray-200 dark:border-neutral-800"
+                        !isUserChoice && opt.isCorrect && "border-dashed border-emerald-400 bg-card",
+                        !isUserChoice && !opt.isCorrect && "border-border"
                       )}
                     >
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-xs font-bold text-muted-foreground">
                         {opt.label}
                       </span>
-                      <span className="flex-1 text-gray-700 dark:text-gray-200">{opt.text}</span>
+                      <span className="flex-1 text-foreground">{opt.text}</span>
                       {isUserChoice && opt.isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
                       {isUserChoice && !opt.isCorrect && <XCircle className="h-4 w-4 shrink-0 text-rose-600" />}
                       {!isUserChoice && opt.isCorrect && (
@@ -690,7 +838,7 @@ export default function ExamGeneratorPage() {
                 <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-400">
                   <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
                 </p>
-                <ul className="space-y-1.5 text-sm text-gray-700 dark:text-gray-300">
+                <ul className="space-y-1.5 text-sm text-foreground">
                   {q.options.map((opt) => (
                     <li key={opt.label}>
                       <span className="font-semibold">{opt.label}.</span> {opt.explanation}
@@ -705,25 +853,27 @@ export default function ExamGeneratorPage() {
 
       {weakPoints.length > 0 && (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
-          <p className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300">
+          <p className="mb-2.5 flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300">
             <AlertTriangle className="h-4 w-4" /> Points Faibles Identifiés
           </p>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900 dark:text-amber-200">
+          <div className="flex flex-wrap gap-1.5">
             {weakPoints.map((point) => (
-              <li key={point}>{point}</li>
+              <Badge key={point} variant="warning">
+                {point}
+              </Badge>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
       <div className="mt-6 flex flex-col gap-2.5">
-        <Button variant="secondary" className="w-full whitespace-normal text-center leading-snug" onClick={handleStartOver}>
+        <Button variant="secondary" className="min-h-12 w-full whitespace-normal text-center leading-snug" onClick={handleStartOver}>
           <FilePlus2 className="h-4 w-4 shrink-0" />
           {tExam("generateNewExam", language)}
         </Button>
         <Button
           variant="outline"
-          className="w-full whitespace-normal text-center leading-snug"
+          className="min-h-12 w-full whitespace-normal border-blue-300/60 bg-blue-50 text-center leading-snug text-blue-700 hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
           onClick={handleRegenerate}
           disabled={attempts <= 0 || isGenerating}
         >
@@ -803,9 +953,7 @@ export default function ExamGeneratorPage() {
                   instead of shrinking to the parent's bound). */}
               <div className="min-h-0 flex-1 overflow-y-auto p-2">
                 {courseListContent}
-                {savedExams.length > 0 && (
-                  <div className="mt-2 border-t border-white/40 pt-2 dark:border-white/10">{savedExamsContent}</div>
-                )}
+                {savedExams.length > 0 && <div className="mt-2 border-t border-border pt-2">{savedExamsContent}</div>}
               </div>
             </aside>
 
@@ -836,7 +984,7 @@ export default function ExamGeneratorPage() {
         ) : (
           <div className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
             {savedExams.length > 0 && (
-              <div className="max-h-40 shrink-0 overflow-y-auto border-b border-white/40 p-2 dark:border-white/10">{savedExamsContent}</div>
+              <div className="max-h-40 shrink-0 overflow-y-auto border-b border-border p-2">{savedExamsContent}</div>
             )}
             {examState === "testing" || examState === "results" ? (
               <>
@@ -868,12 +1016,34 @@ export default function ExamGeneratorPage() {
           had the backdrop-filter containing-block problem — only its
           z-index needed to move. */}
       {examState === "testing" && (isDesktopOrTablet || mobileTab === "results") && (
-        <div className="glass-panel fixed inset-x-0 bottom-0 z-[110] flex items-center justify-between gap-4 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
-          <p className="hidden text-sm text-gray-500 dark:text-gray-400 sm:block">
-            <ListChecks className="mr-1.5 inline h-4 w-4" />
-            {answeredCount} / {questions.length} questions répondues
-          </p>
-          <Button className="w-full sm:w-auto" onClick={handleFinishExam} disabled={isSavingAttempt} isLoading={isSavingAttempt}>
+        <div className="glass-panel fixed inset-x-0 bottom-0 z-[110] flex items-center justify-between gap-3 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
+          <div className="hidden items-center gap-3 sm:flex">
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-12 w-12 p-0"
+              aria-label="Question précédente"
+              disabled={currentQuestionIndex === 0}
+              onClick={() => goToQuestion(currentQuestionIndex - 1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <p className="text-sm text-muted-foreground">
+              <ListChecks className="mr-1.5 inline h-4 w-4" />
+              {answeredCount} / {questions.length} questions répondues
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-12 w-12 p-0"
+              aria-label="Question suivante"
+              disabled={currentQuestionIndex >= questions.length - 1}
+              onClick={() => goToQuestion(currentQuestionIndex + 1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <Button className="min-h-12 w-full shadow-glow sm:w-auto" onClick={handleFinishExam} disabled={isSavingAttempt} isLoading={isSavingAttempt}>
             Afficher la correction
           </Button>
         </div>

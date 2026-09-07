@@ -34,6 +34,19 @@ export const STUDIO_TRANSLATIONS = {
   emptyState: { fr: "Les résultats de Studio seront enregistrés ici.", en: "Studio results will be saved here." },
   generateAction: { fr: "Générer", en: "Generate" },
   optionsMenuAria: { fr: "Options de génération", en: "Generation options" },
+
+  // "God-Tier" Module Workspace redesign — locked-tile visual + Connexions Cliniques
+  lockedTileTooltip: {
+    fr: "Génère d'abord l'Explication Ultra-Détaillée pour débloquer cette section",
+    en: "Generate the Ultra-Detailed Explanation first to unlock this section",
+  },
+  lockedTileAriaLabel: { fr: "Verrouillé", en: "Locked" },
+  masteryAriaLabel: { fr: "Maîtrise", en: "Mastery" },
+  clinicalConnectionsButton: { fr: "Connexions cliniques", en: "Clinical connections" },
+  clinicalConnectionsLoading: { fr: "Recherche des connexions...", en: "Finding connections..." },
+  clinicalConnectionsTitle: { fr: "Connexions cliniques", en: "Clinical connections" },
+  clinicalConnectionsError: { fr: "Impossible de générer des connexions pour l'instant.", en: "Couldn't generate connections right now." },
+  clinicalConnectionsDismiss: { fr: "Fermer", en: "Close" },
 } satisfies Record<string, Record<Language, string>>;
 
 export function tStudio(key: keyof typeof STUDIO_TRANSLATIONS, language: Language): string {

@@ -29,6 +29,7 @@ export const MODULE_PAGE_TRANSLATIONS = {
 
   // ModuleSourcesPanel — "Add a source" (mobile pill button + Add-sources dialog title)
   addSourceLabel: { fr: "Ajouter une source", en: "Add a source" },
+  masteryAriaLabel: { fr: "Maîtrise", en: "Mastery" },
 
   // ModuleWorkspacePage — toasts
   toastSourceAdded: { fr: "Source ajoutée", en: "Source added" },

@@ -11,6 +11,7 @@ import {
   Italic,
   Link2,
   Loader2,
+  Lock,
   Maximize2,
   Minimize2,
   MoreVertical,
@@ -23,6 +24,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
+import { ProgressRing } from "@/components/ui/ProgressRing";
 import { INFOGRAPHIC_MODEL_OPTIONS, type InfographicModelKey } from "@/lib/ai/infographic-prompts";
 import { type PodcastDialect } from "@/lib/ai/podcast-prompts";
 import { cn } from "@/lib/utils";
@@ -106,6 +108,26 @@ interface StudioPanelProps {
   onCollapsedChange?: (collapsed: boolean) => void;
   /** The student's own curriculum level (StudentCurriculumProfile.academicYear.level, types/academic.ts) — only ever changes the "Cas Clinique" tile's own label (see lib/translations/studio.ts's getSectionLabel); every other tile ignores it. Optional: a caller that omits this simply always gets the standard "Cas Cliniques" label. */
   studyYear?: number | null;
+  /**
+   * Purely a VISUAL signal — the underlying gate (every section but
+   * Explication requires it to exist first) already lives in the caller's
+   * onItemClick and is unchanged by this prop. Before this, a "locked" tile
+   * looked identical to an unlocked one and only revealed the gate via a
+   * toast after being clicked — this renders a real Lock badge + dimmed
+   * tile instead, so the gate is visible before the click, not a surprise
+   * after it. Omitted entirely (or an empty Set) renders every tile
+   * unlocked, matching the previous behavior exactly.
+   */
+  lockedSections?: Set<DemoSectionId>;
+  /**
+   * Real, already-fetched mastery percentage (0-100) for whichever sections
+   * the caller has one for — today only ever "qcm" (course_mastery, see
+   * app/dashboard/module/[id]/page.tsx's courseMasteryBySlug). Renders a
+   * small ProgressRing on that tile (and its "Récemment généré" row)
+   * instead of the plain dot once the section is available. Never
+   * fabricated: a section with no entry here just keeps the plain dot.
+   */
+  sectionMasteryPct?: Partial<Record<DemoSectionId, number>>;
   children: React.ReactNode;
 }
 
@@ -447,6 +469,8 @@ export function StudioPanel({
   courseSlug,
   onCollapsedChange,
   studyYear,
+  lockedSections,
+  sectionMasteryPct,
   children,
 }: StudioPanelProps) {
   const { language } = useLanguage();
@@ -598,7 +622,7 @@ export function StudioPanel({
                 <span className="hidden text-muted-foreground transition-colors group-hover:text-foreground sm:inline">{tStudio("studioHeading", language)}</span>
                 <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:inline" />
                 {openedTint && openedSectionData && (
-                  <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg", openedTint.bg, openedTint.icon)}>
+                  <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg shadow-glow", openedTint.bg, openedTint.icon)}>
                     <openedSectionData.icon className="h-3.5 w-3.5" />
                   </span>
                 )}
@@ -677,6 +701,11 @@ export function StudioPanel({
                   const isGenerating = generatingSections.has(section.id);
                   const tint = TILE_TINTS[section.id];
                   const isDone = getSectionStatus(section.id) === "available";
+                  // Visual-only — see StudioPanelProps.lockedSections' own doc
+                  // comment. The real gate lives entirely in the caller's
+                  // onItemClick, unaffected by this.
+                  const isLocked = lockedSections?.has(section.id) ?? false;
+                  const masteryPct = sectionMasteryPct?.[section.id];
                   // The arrow/options menu only makes sense BEFORE a section
                   // has ever been generated — once it exists, "Régénérer"
                   // (SectionOptionsMenu, on the opened detail view) is the
@@ -712,7 +741,7 @@ export function StudioPanel({
                         // uncollapsed, and the native title tooltip is the
                         // one fallback that works at any width without
                         // guessing.
-                        title={getSectionLabel(section.id, language, studyYear)}
+                        title={isLocked ? tStudio("lockedTileTooltip", language) : getSectionLabel(section.id, language, studyYear)}
                         className={cn(
                           // Compacted per explicit product direction — was
                           // p-3/md:p-4 + text-sm/md:text-base, reading as
@@ -720,6 +749,7 @@ export function StudioPanel({
                           // tool list.
                           "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-sm",
                           isGenerating && "disabled:cursor-wait",
+                          isLocked && "opacity-50 saturate-[0.4] hover:translate-y-0 hover:shadow-none",
                           // Fixed h-14 (uncollapsed) — CSS Grid rows stretch
                           // items WITHIN one row to match automatically, but
                           // each ROW still auto-sizes to ITS OWN tallest
@@ -762,12 +792,36 @@ export function StudioPanel({
                             no layout shift) so a returning student can tell
                             apart a tile they already have content in from one
                             they haven't opened yet at a glance, before even
-                            reading the "recent generations" list below. */}
+                            reading the "recent generations" list below. A
+                            real mastery ring (never fabricated — only ever
+                            set for a section the caller has real data for,
+                            see sectionMasteryPct's own doc comment) replaces
+                            the plain dot when available. */}
                         {isDone && !isGenerating && (
+                          typeof masteryPct === "number" ? (
+                            <ProgressRing
+                              completed={masteryPct}
+                              total={100}
+                              size={isCollapsed ? 18 : 22}
+                              strokeWidth={2.5}
+                              showLabel={false}
+                              className="absolute right-1 top-1"
+                              aria-label={`${tStudio("masteryAriaLabel", language)} ${masteryPct}%`}
+                            />
+                          ) : (
+                            <span
+                              aria-hidden
+                              className={cn("absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full", tint.dot)}
+                            />
+                          )
+                        )}
+                        {isLocked && (
                           <span
-                            aria-hidden
-                            className={cn("absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full", tint.dot)}
-                          />
+                            aria-label={tStudio("lockedTileAriaLabel", language)}
+                            className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-sm"
+                          >
+                            <Lock className="h-2.5 w-2.5" />
+                          </span>
                         )}
                       </button>
                       {showOptionsMenu && (
@@ -849,6 +903,17 @@ export function StudioPanel({
                             <RelativeTime timestamp={lastGeneratedAt} />
                           </p>
                         </div>
+                        {typeof sectionMasteryPct?.[section.id] === "number" && (
+                          <ProgressRing
+                            completed={sectionMasteryPct[section.id]!}
+                            total={100}
+                            size={30}
+                            strokeWidth={3}
+                            className="shrink-0"
+                            label={<span className="text-[9px] font-bold text-foreground">{sectionMasteryPct[section.id]}%</span>}
+                            aria-label={`${tStudio("masteryAriaLabel", language)} ${sectionMasteryPct[section.id]}%`}
+                          />
+                        )}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button
@@ -998,7 +1063,7 @@ export function StudioPanel({
           >
             <div className="flex items-center gap-2 border-b border-border p-4">
               {openedTint && openedSectionData && (
-                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", openedTint.bg, openedTint.icon)}>
+                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-xl shadow-glow", openedTint.bg, openedTint.icon)}>
                   <openedSectionData.icon className="h-4 w-4" />
                 </span>
               )}

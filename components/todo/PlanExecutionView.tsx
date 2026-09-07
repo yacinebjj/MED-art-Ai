@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tTodo } from "@/lib/translations/todo";
-import { ProgressRing } from "./ProgressRing";
+import { ProgressRing } from "@/components/ui/ProgressRing";
 import { TaskRow } from "./TaskRow";
 import type { StudyPlanTask } from "@/types/study-planner";
 

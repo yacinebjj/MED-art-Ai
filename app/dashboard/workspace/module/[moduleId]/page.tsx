@@ -2,18 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useTheme } from "next-themes";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, BookOpenText, FileSpreadsheet, History, Layers, Library, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, BookOpenText, Check, Copy, Download, FileSpreadsheet, History, Layers, Library, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
-import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
+import { PROSE_CLASSES, DARK_PROSE_CLASSES } from "@/lib/markdown";
+import { ModuleSynthesisView } from "@/components/dashboard/ModuleSynthesisView";
 import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
 import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -82,22 +81,6 @@ interface HistoryEntry {
   content: string;
 }
 
-/**
- * ADDITIVE border overrides layered on top of the shared PROSE_CLASSES/
- * DARK_PROSE_CLASSES (lib/markdown.tsx) — deliberately NOT edited into that
- * shared file, since it's also used by the chat reader, the demo workspace,
- * and InteractiveQuiz; changing it there would restyle tables everywhere in
- * the app, not just here. PROSE_CLASSES already sets `prose-td:border-t
- * prose-td:border-slate-200` (top-only) plus a blue-600 `prose-th`
- * background and alternating row tint — this only ADDS the missing sides
- * and collapses the border model, reusing the SAME slate-200 color already
- * in play (not the gray-300 first suggested) so it doesn't create a real
- * two-different-colors conflict on the same border. Dark mode gets the
- * equivalent addition against DARK_PROSE_CLASSES' own white/10 border tint.
- */
-const TABLE_BORDER_OVERRIDES_LIGHT = "prose-table:border-collapse prose-th:border prose-th:border-slate-300 prose-td:border prose-th:text-center";
-const TABLE_BORDER_OVERRIDES_DARK = "prose-table:border-collapse prose-th:border prose-th:border-white/10 prose-td:border prose-th:text-center";
-
 export default function ModuleWorkspacePage() {
   const params = useParams<{ moduleId: string }>();
   const moduleId = Number(params.moduleId);
@@ -138,6 +121,9 @@ export default function ModuleWorkspacePage() {
   // fill the whole screen for comfortable reading — mirrors the note
   // editor's own proven `isFullscreen` pattern.
   const [isOutputFullscreen, setIsOutputFullscreen] = useState(false);
+  // Purely a local UI micro-interaction (Copy button's checkmark) — reset by
+  // its own timeout, never persisted, never affects `output` itself.
+  const [justCopied, setJustCopied] = useState(false);
 
   // Resolved once on mount — see workspaceHistoryStorageKey's own comment
   // for why every localStorage read/write below is gated on this being
@@ -372,19 +358,21 @@ export default function ModuleWorkspacePage() {
   }
 
   const sourcesHeader = (
-    <div className="flex items-center gap-2 border-b border-white/30 px-4 py-4 dark:border-white/10">
-      <Layers className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-      <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("sourcesHeading", language)}</h2>
+    <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-600 shadow-glow dark:bg-teal-950/40 dark:text-teal-400">
+        <Layers className="h-4 w-4" />
+      </span>
+      <h2 className="text-sm font-bold text-foreground">{tWorkspaceSynthesis("sourcesHeading", language)}</h2>
     </div>
   );
 
   const selectAllRow = courses && courses.length > 0 && (
-    <label className="flex cursor-pointer items-center gap-3 border-b border-white/30 px-4 py-3 transition-colors hover:bg-white/50 dark:border-white/10 dark:hover:bg-white/5">
+    <label className="flex min-h-12 cursor-pointer items-center gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-accent">
       <Checkbox
         checked={selectAllState === "indeterminate" ? "indeterminate" : selectAllState === "checked"}
         onCheckedChange={toggleAll}
       />
-      <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+      <span className="text-sm font-semibold text-foreground">
         Sélectionner tout {selectedIds.size > 0 && `(${selectedIds.size}/${courses.length})`}
       </span>
     </label>
@@ -399,7 +387,7 @@ export default function ModuleWorkspacePage() {
       {coursesLoading ? (
         <div className="space-y-2 p-2">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-11 animate-pulse rounded-xl bg-gray-100 dark:bg-neutral-800" />
+            <div key={i} className="h-11 animate-pulse rounded-xl bg-muted" />
           ))}
         </div>
       ) : coursesError ? (
@@ -408,32 +396,49 @@ export default function ModuleWorkspacePage() {
         </div>
       ) : !courses || courses.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-          <BookOpenText className="h-7 w-7 text-gray-300 dark:text-neutral-700" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">Aucun cours généré dans ce module pour l'instant.</p>
+          <BookOpenText className="h-7 w-7 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">Aucun cours généré dans ce module pour l'instant.</p>
         </div>
       ) : (
-        <ul className="space-y-1">
-          {courses.map((course) => (
-            <li key={course.id}>
-              <label
-                className={cn(
-                  "flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 transition-all duration-300 hover:bg-white/50 dark:hover:bg-white/5",
-                  selectedIds.has(course.id) && "bg-teal-50 dark:bg-teal-500/10"
-                )}
-              >
-                <Checkbox checked={selectedIds.has(course.id)} onCheckedChange={() => toggleOne(course.id)} className="mt-0.5" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700 dark:text-gray-200">{course.title}</span>
-              </label>
-            </li>
-          ))}
+        <ul className="space-y-1.5">
+          {courses.map((course) => {
+            const isSelected = selectedIds.has(course.id);
+            return (
+              <li key={course.id}>
+                {/* "Magnetic" selection card — a subtle lift + glow on the
+                    checked state, matching the app's other recently-
+                    redesigned card-selection surfaces (e.g. the Module
+                    Workspace's own Sources panel), instead of a flat
+                    checkbox row with no real affordance beyond its tint. */}
+                <label
+                  className={cn(
+                    "flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 transition-all duration-300",
+                    isSelected
+                      ? "border-teal-300 bg-teal-50 shadow-glow dark:border-teal-800 dark:bg-teal-950/30"
+                      : "border-transparent hover:-translate-y-0.5 hover:border-border hover:bg-accent hover:shadow-soft"
+                  )}
+                >
+                  <Checkbox checked={isSelected} onCheckedChange={() => toggleOne(course.id)} className="mt-0.5" />
+                  <span className={cn("min-w-0 flex-1 truncate text-sm font-medium", isSelected ? "text-teal-900 dark:text-teal-200" : "text-foreground")}>
+                    {course.title}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
   );
 
   const generateButtonsRow = (
-    <div className="flex flex-col gap-2 border-b border-white/30 px-4 py-4 dark:border-white/10 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:px-6">
-      <Button onClick={handleGenerateGlobalSummary} disabled={!hasSelection || isGenerating} size="lg" className="w-full sm:w-auto">
+    <div className="flex flex-col gap-2 border-b border-border px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:px-6">
+      <Button
+        onClick={handleGenerateGlobalSummary}
+        disabled={!hasSelection || isGenerating}
+        size="lg"
+        className="min-h-12 w-full bg-teal-600 shadow-glow hover:bg-teal-500 sm:w-auto dark:bg-teal-500 dark:hover:bg-teal-400"
+      >
         {isGeneratingSummary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Générer un Résumé Global
       </Button>
@@ -442,7 +447,7 @@ export default function ModuleWorkspacePage() {
         disabled={!hasSelection || isGenerating}
         variant="secondary"
         size="lg"
-        className="w-full sm:w-auto"
+        className="min-h-12 w-full border border-blue-300/60 bg-blue-50 text-blue-700 shadow-soft hover:bg-blue-100 sm:w-auto dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
       >
         {isGeneratingKeywords ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
         Générer Tableau des Mots-Clés
@@ -452,13 +457,13 @@ export default function ModuleWorkspacePage() {
         disabled={!hasSelection || isGenerating}
         variant="secondary"
         size="lg"
-        className="w-full sm:w-auto"
+        className="min-h-12 w-full border border-amber-300/60 bg-amber-50 text-amber-700 shadow-soft hover:bg-amber-100 sm:w-auto dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-950/50"
       >
         {isGeneratingDictionary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Library className="h-4 w-4" />}
         Générer Dictionnaire Médical
       </Button>
       {!hasSelection && (
-        <span className="text-xs text-gray-400 dark:text-gray-500">
+        <span className="text-xs text-muted-foreground">
           {tWorkspaceSynthesis("minSelectionHint", language).replace("{n}", String(MIN_COURSES_REQUIRED))} (
           {selectedIds.size}/{MIN_COURSES_REQUIRED}).
         </span>
@@ -468,10 +473,10 @@ export default function ModuleWorkspacePage() {
 
   const historySection = history.length > 0 && (
     <>
-      <hr className="mx-4 my-2 border-white/30 dark:border-white/10" />
+      <hr className="mx-4 my-2 border-border" />
       <div className="flex items-center gap-2 px-4 py-2">
         <History className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-        <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">{tWorkspaceSynthesis("resultsHeading", language)}</h2>
+        <h2 className="text-sm font-bold text-foreground">{tWorkspaceSynthesis("resultsHeading", language)}</h2>
       </div>
       <ul className="max-h-56 space-y-1 overflow-y-auto px-2 pb-3 md:max-h-56">
         {history.map((entry) => (
@@ -480,10 +485,10 @@ export default function ModuleWorkspacePage() {
               type="button"
               onClick={() => viewHistoryEntry(entry)}
               className={cn(
-                "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition-all duration-300 active:scale-[0.98] hover:bg-white/50 dark:hover:bg-white/5",
+                "flex min-h-12 w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition-all duration-300 hover:bg-accent active:scale-[0.98]",
                 activeHistoryId === entry.id
                   ? "bg-teal-50 text-teal-700 shadow-soft dark:bg-teal-500/10 dark:text-teal-300"
-                  : "text-gray-600 dark:text-gray-300"
+                  : "text-muted-foreground"
               )}
             >
               {entry.type === "global_summary" ? (
@@ -533,68 +538,52 @@ export default function ModuleWorkspacePage() {
             exit={{ opacity: 0 }}
             className="flex flex-col items-center gap-4 py-16 text-center sm:py-24"
           >
-            <div className="relative flex h-16 w-16 items-center justify-center">
-              <span className="absolute inset-0 animate-ping rounded-full bg-teal-400/30" />
-              <Sparkles className="relative h-8 w-8 text-teal-600 dark:text-teal-400" />
+            <div
+              className={cn(
+                "relative flex h-20 w-20 items-center justify-center rounded-full shadow-glow",
+                isGeneratingSummary
+                  ? "bg-teal-100 dark:bg-teal-950/40"
+                  : isGeneratingKeywords
+                    ? "bg-blue-100 dark:bg-blue-950/40"
+                    : "bg-amber-100 dark:bg-amber-950/40"
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute inset-0 animate-ping rounded-full",
+                  isGeneratingSummary ? "bg-teal-400/30" : isGeneratingKeywords ? "bg-blue-400/30" : "bg-amber-400/30"
+                )}
+              />
+              <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: "linear" }}>
+                <Sparkles
+                  className={cn(
+                    "relative h-9 w-9",
+                    isGeneratingSummary ? "text-teal-600 dark:text-teal-400" : isGeneratingKeywords ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"
+                  )}
+                />
+              </motion.div>
             </div>
-            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+            <p className="text-sm font-semibold text-foreground">
               {isGeneratingSummary
                 ? "Synthèse des cours en cours..."
                 : isGeneratingKeywords
                   ? "Extraction des mots-clés en cours..."
                   : "Construction du dictionnaire médical en cours..."}
             </p>
-            <p className="max-w-xs text-xs text-gray-400 dark:text-gray-500">
+            <p className="max-w-xs text-xs text-muted-foreground/70">
               Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.
             </p>
           </motion.div>
         ) : output ? (
-          // Was previously rendered with NO prose wrapper at all — every
-          // heading/table/blockquote style this whole page exists to
-          // showcase was silently inert. Fixed alongside the requested
-          // border overrides (TABLE_BORDER_OVERRIDES_*) rather than as a
-          // separate change, since both land on this same element.
-          <motion.div
-            key="output"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, isDark ? TABLE_BORDER_OVERRIDES_DARK : TABLE_BORDER_OVERRIDES_LIGHT)}
-          >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                ...(isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS),
-                // Wraps ONLY the <table> in a horizontal-scroll container —
-                // now that column count is dynamic (per selected courses),
-                // a wide table must scroll internally instead of forcing
-                // the whole page to overflow. Scoped here, not added to
-                // the shared MARKDOWN_COMPONENTS in lib/markdown.tsx,
-                // which every other Markdown surface in the app (chat,
-                // demo pages, quizzes) also renders through.
-                table: ({ ...props }) => (
-                  <div className="overflow-x-auto">
-                    <table {...props} />
-                  </div>
-                ),
-                // Dictionnaire Médical's 3rd column (الشرح بالعربية) is
-                // genuine Arabic text sitting in an otherwise LTR table —
-                // without an explicit direction, the browser's bidi
-                // algorithm can misorder punctuation/parentheses inside
-                // that cell. `dir="auto"` lets each cell resolve its own
-                // direction from its own content (French/term cells stay
-                // ltr, the Arabic cell renders rtl) — same technique
-                // already used for Arabic text elsewhere in the app (e.g.
-                // GastriteCasCliniqueStudio's dialogue bubbles). Harmless
-                // for the other two tabs' tables, which have no Arabic
-                // content to trigger it.
-                td: ({ ...props }) => <td dir="auto" {...props} />,
-                th: ({ ...props }) => <th dir="auto" {...props} />,
-              }}
-            >
-              {normalizeCallouts(output)}
-            </ReactMarkdown>
+          // ModuleSynthesisView splits stitchSummaryChunks' per-course "## "
+          // chunks (global_summary/medical_dictionary) into distinct
+          // "chapter" cards — the "séparateurs de chapitres élégants" the
+          // redesign asked for — while a headerless result (keywords_table's
+          // single combined table) safely renders as one plain block, same
+          // as before. Each chapter card's own stagger delay is what gives
+          // the "puces qui s'illuminent une à une" progressive-reveal feel.
+          <motion.div key="output" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
+            <ModuleSynthesisView markdown={output} isDark={isDark} />
           </motion.div>
         ) : (
           <motion.div
@@ -607,7 +596,7 @@ export default function ModuleWorkspacePage() {
             <span className="flex h-14 w-14 animate-float items-center justify-center rounded-2xl bg-teal-50 not-prose dark:bg-teal-500/10">
               <Sparkles className="h-7 w-7 text-teal-500" />
             </span>
-            <p className="!my-0 text-base font-medium not-prose text-gray-500 dark:text-gray-400">
+            <p className="!my-0 text-base font-medium not-prose text-muted-foreground">
               Choisis tes sources puis lance une génération pour voir le résultat ici.
             </p>
           </motion.div>
@@ -626,6 +615,31 @@ export default function ModuleWorkspacePage() {
           ? tWorkspaceSynthesis("entryTypeDictionary", language)
           : moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language);
 
+  /** Real client-side export — no backend involved, the content is already sitting in `output`. */
+  function handleCopyOutput() {
+    if (!output) return;
+    navigator.clipboard
+      .writeText(output)
+      .then(() => {
+        setJustCopied(true);
+        setTimeout(() => setJustCopied(false), 2000);
+      })
+      .catch(() => {
+        toast({ variant: "error", title: tWorkspaceSynthesis("copyFailedTitle", language) });
+      });
+  }
+
+  function handleDownloadOutput() {
+    if (!output) return;
+    const blob = new Blob([output], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${outputTitle.replace(/[^a-zA-Z0-9-_]+/g, "_")}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Inline (non-fullscreen) panel — the maximize button just OPENS the
   // separate, portaled FullscreenViewerModal below; it no longer toggles
   // this panel's own classes to `fixed inset-0` (that approach silently
@@ -637,7 +651,29 @@ export default function ModuleWorkspacePage() {
   // visible underneath it. A portal sidesteps this entirely.
   const outputPanel = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center justify-end px-2 pt-2 sm:px-3">
+      <div className="flex shrink-0 items-center justify-end gap-1.5 px-2 pt-2 sm:px-3">
+        {output && (
+          <>
+            <button
+              type="button"
+              onClick={handleCopyOutput}
+              aria-label={tWorkspaceSynthesis("copyOutputAriaLabel", language)}
+              title={tWorkspaceSynthesis("copyOutputAriaLabel", language)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-soft backdrop-blur transition-all duration-200 hover:bg-accent hover:text-foreground active:scale-95"
+            >
+              {justCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadOutput}
+              aria-label={tWorkspaceSynthesis("downloadOutputAriaLabel", language)}
+              title={tWorkspaceSynthesis("downloadOutputAriaLabel", language)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-soft backdrop-blur transition-all duration-200 hover:bg-accent hover:text-foreground active:scale-95"
+            >
+              <Download className="h-4 w-4" />
+            </button>
+          </>
+        )}
         <FullscreenToggleButton isFullscreen={false} onToggle={() => setIsOutputFullscreen(true)} />
       </div>
 

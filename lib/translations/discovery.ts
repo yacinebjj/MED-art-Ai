@@ -19,6 +19,20 @@ export const DISCOVERY_TRANSLATIONS = {
   searchAriaLabel: { fr: "Rechercher", en: "Search" },
   searchButton: { fr: "Rechercher", en: "Search" },
   noModuleGroup: { fr: "Sans module", en: "No module" },
+  // "God-Tier" pass — replaces a pre-existing, inaccurate "recherche
+  // sémantique" claim: app/api/search/route.ts is deliberately plain
+  // substring matching over the student's own studio_courses (see that
+  // route's own header comment), not an embeddings/semantic index. This is
+  // the honest description of what the feature actually does.
+  searchSubtitle: {
+    fr: "Recherche par mot-clé dans tes cours — trouve instantanément où un terme apparaît.",
+    en: "Keyword search across your courses — instantly find where a term appears.",
+  },
+  /** {n} placeholder — real result count, {q} placeholder — the raw query text. */
+  resultsCountLabel: {
+    fr: "{n} résultat{s} pour « {q} »",
+    en: "{n} result{s} for “{q}”",
+  },
 
   // components/curriculum/CurriculumView.tsx
   independentModulesHeading: { fr: "Modules Indépendants", en: "Independent Modules" },

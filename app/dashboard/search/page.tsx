@@ -28,11 +28,42 @@ interface SearchResult {
 const RESULTS_GROUP_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
 const RESULT_ITEM_VARIANTS = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Wraps every literal occurrence of a query word inside `text` in a <mark>.
+ * app/api/search/route.ts is plain substring matching (see that file's own
+ * header comment) — never an embeddings/semantic index — so a literal
+ * highlight here is always honest: it only ever lights up text that really
+ * is the reason this excerpt matched, never a fabricated/approximate match.
+ */
+function highlightMatches(text: string, query: string) {
+  const words = Array.from(new Set(query.trim().split(/\s+/).filter((w) => w.length > 0)));
+  if (words.length === 0) return text;
+  const pattern = new RegExp(`(${words.map(escapeRegExp).join("|")})`, "gi");
+  const parts = text.split(pattern);
+  return parts.map((part, i) =>
+    words.some((w) => w.toLowerCase() === part.toLowerCase()) ? (
+      <mark key={i} className="rounded bg-primary-200/70 px-0.5 text-inherit dark:bg-primary-500/30">
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 export default function SearchPage() {
   const { language } = useLanguage();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [results, setResults] = useState<SearchResult[] | null>(null);
+  // The query that actually produced `results` — kept separate from the
+  // live `query` input so highlighting/counts stay accurate even if the
+  // student edits the box again without resubmitting yet.
+  const [searchedQuery, setSearchedQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +80,7 @@ export default function SearchPage() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error ?? "La recherche a échoué.");
       setResults(body.results ?? []);
+      setSearchedQuery(q);
     } catch (err) {
       setError(err instanceof Error ? err.message : "La recherche a échoué.");
       setResults(null);
@@ -96,9 +128,7 @@ export default function SearchPage() {
           <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-gray-100 sm:text-3xl">
             Recherche dans mes cours
           </h1>
-          <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">
-            Recherche sémantique — trouve un concept même s'il n'est pas formulé avec les mêmes mots dans le cours.
-          </p>
+          <p className="mt-2 text-sm text-slate-500 dark:text-gray-400">{tDiscovery("searchSubtitle", language)}</p>
         </motion.div>
 
         <motion.form
@@ -188,13 +218,19 @@ export default function SearchPage() {
                   <Sparkles className="h-5 w-5" />
                 </span>
                 <p className="max-w-sm text-sm text-slate-500 dark:text-gray-400">
-                  Lance une recherche pour explorer instantanément tous tes cours générés, même avec des mots différents de ceux du texte original.
+                  Lance une recherche pour explorer instantanément tous tes cours générés — les mots-clés trouvés sont surlignés directement dans les résultats.
                 </p>
               </motion.div>
             )}
 
             {!loading && grouped && Object.keys(grouped).length > 0 && (
               <motion.div key="results" initial="hidden" animate="show" variants={RESULTS_GROUP_VARIANTS} className="space-y-8">
+                <p className="text-xs font-medium text-slate-500 dark:text-gray-400">
+                  {tDiscovery("resultsCountLabel", language)
+                    .replace("{n}", String(results?.length ?? 0))
+                    .replace("{s}", (results?.length ?? 0) > 1 ? "s" : "")
+                    .replace("{q}", searchedQuery)}
+                </p>
                 {Object.entries(grouped).map(([moduleName, moduleResults]) => (
                   <div key={moduleName}>
                     <div className="mb-3 flex items-center gap-2">
@@ -221,13 +257,15 @@ export default function SearchPage() {
                           >
                             <div className="mb-1 flex items-center gap-2">
                               <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                              <p className="min-w-0 flex-1 truncate text-sm font-bold text-slate-900 dark:text-gray-100">{r.courseTitle}</p>
+                              <p className="min-w-0 flex-1 truncate text-sm font-bold text-slate-900 dark:text-gray-100">
+                                {highlightMatches(r.courseTitle, searchedQuery)}
+                              </p>
                               <span className="ml-auto shrink-0 rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
                                 {r.sectionLabel}
                               </span>
                             </div>
                             <p dir="auto" className="line-clamp-2 text-sm text-slate-600 dark:text-gray-400">
-                              {r.excerpt}
+                              {highlightMatches(r.excerpt, searchedQuery)}
                             </p>
                           </Link>
                         </motion.div>
