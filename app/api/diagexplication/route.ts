@@ -15,6 +15,15 @@ import { STUDIO_PROMPT_CONFIG } from "@/lib/ai/studio-prompts";
 // and reads no real user data (synthetic content only, no DB access at all).
 export const runtime = "nodejs";
 export const maxDuration = 280;
+// Without this, Next.js tries to STATICALLY PRE-RENDER this GET route at
+// BUILD TIME (it has no other dynamic-data signal) — meaning the build
+// process itself tries to call generateExplicationPart/OpenRouter, hits
+// Next's own build-worker timeout (a fixed 60s, unrelated to Vercel runtime
+// duration limits entirely), and fails the WHOLE deployment. Confirmed via
+// a local `next build` reproducing the exact failure. Real, useful finding
+// about build-time static generation — but irrelevant to the actual
+// production routes, which are POST-only and never statically pre-rendered.
+export const dynamic = "force-dynamic";
 
 const sourceParagraph =
   "Le muscle cardiaque, ou myocarde, est un tissu musculaire strié involontaire qui assure la fonction de pompe du cœur. Il se distingue du muscle squelettique par la présence de disques intercalaires et par son caractère syncytial fonctionnel. La contraction cardiaque est initiée par le nœud sinusal, qui génère un potentiel d'action se propageant à travers le système de conduction cardiaque, incluant le nœud auriculo-ventriculaire, le faisceau de His et les fibres de Purkinje. ";
