@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import dns from "dns";
 import { generateExplicationPart, computeExplicationSlices } from "@/lib/studio-explication-delta";
 import { STUDIO_PROMPT_CONFIG } from "@/lib/ai/studio-prompts";
+
+// Testing a specific hypothesis: plain fetch() to OpenRouter hangs for the
+// FULL configured timeout when called from WITHIN Vercel's serverless
+// runtime, despite completing in ~7s for the identical request from outside
+// Vercel — the classic signature of broken/unreachable IPv6 egress on the
+// serverless platform while DNS still offers an AAAA record first (Node's
+// default resolver order is "verbatim" — whatever the DNS response returns
+// — not IPv4-first). mode=ipv4 forces IPv4-only resolution before the call.
+dns.setDefaultResultOrder("ipv4first");
 
 // TEMPORARY DIAGNOSTIC ROUTE — deleted before this fix is finalized.
 // ?mode=real (default) calls the REAL generateExplicationPart (real prompt,
@@ -66,7 +76,7 @@ async function runPlainFetch(sourceText: string) {
   }
 }
 
-const DIAG_VERSION = "v4-ping-marker";
+const DIAG_VERSION = "v5-ipv4-forced";
 
 export async function GET(request: NextRequest) {
   const modeParam = request.nextUrl.searchParams.get("mode");
