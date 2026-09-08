@@ -43,9 +43,43 @@ export const maxDuration = 280;
  * customPrompt are re-sent on every part (not just part 0) since each part
  * is its own independent generation call needing the full system prompt.
  *
- * Response: `{ success: true, partIndex, totalParts, isLastPart, partMarkdown }`
- * on success, or `{ success: false, error }` on a clean, retryable failure —
- * never an unhandled crash or a silent hang.
+ * RESPONSE SHAPE — deliberately a STREAMED, newline-delimited JSON body
+ * (Content-Type: application/x-ndjson), always HTTP 200, NOT a single JSON
+ * object — added after a real, confirmed production report of "échec de
+ * génération" specifically on MOBILE (never on PC/desktop, for the exact
+ * same course). Root cause: this route's real generation call
+ * (generateExplicationPart) legitimately takes anywhere from ~100 to 260+
+ * seconds, and the PREVIOUS implementation held one plain request/response
+ * open that entire time with ZERO bytes flowing in either direction until
+ * the very end. A cellular carrier's carrier-grade NAT (every mobile data
+ * connection sits behind one) commonly drops an idle TCP mapping after as
+ * little as 30-120 seconds of total silence — a well-documented mobile-
+ * network reality that has nothing to do with screen locking, tab
+ * backgrounding, or this app's own code, and would fail IDENTICALLY on
+ * every one of lib/studio-explication-client.ts's 3 retries for the exact
+ * same course/part, since it's a deterministic property of the network
+ * path, not a random flake. Home/office WiFi and wired connections
+ * typically tolerate a MUCH longer idle window (or none at all) on an
+ * already-established TCP connection, which is exactly why this class of
+ * failure would show up on mobile and not PC for the identical request.
+ *
+ * Fix: emit a `{"type":"heartbeat"}\n` line every 15 seconds for the entire
+ * duration generateExplicationPart is in flight, so real bytes keep flowing
+ * over the connection continuously — this defeats an idle-timeout drop
+ * entirely, independent of how long the actual generation takes. The final
+ * line is always `{"type":"result", success, ...}` — `success:true` carries
+ * `partIndex, totalParts, isLastPart, partMarkdown` (exactly the old
+ * response's fields); `success:false` carries `error` and a `status`
+ * field holding the LOGICAL status this failure would have had as a plain
+ * response (mirrors OpenRouterError.status, or 502) — since real HTTP
+ * status can't change after streaming has already started with a 200,
+ * lib/studio-explication-client.ts's postPartWithHeartbeat reads THIS
+ * field, not the transport status, to decide retryability. Heartbeat lines
+ * are otherwise inert and ignored by the client's line parser. Every
+ * validation failure BEFORE generation starts (auth/rate-limit/body/course
+ * lookup below) is completely unaffected — those return in milliseconds, so
+ * they stay plain, ordinary `NextResponse.json(...)` responses with their
+ * real HTTP status codes, exactly as before.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -120,15 +154,46 @@ export async function POST(request: NextRequest) {
   }
 
   const systemPrompt = STUDIO_PROMPT_CONFIG.explication.systemPrompt + languageInstruction + customPromptInstruction;
-  try {
-    const partMarkdown = await generateExplicationPart(slices[partIndex], systemPrompt, partIndex + 1, totalParts);
-    const isLastPart = partIndex === totalParts - 1;
-    return NextResponse.json({ success: true, partIndex, totalParts, isLastPart, partMarkdown });
-  } catch (error) {
-    if (error instanceof OpenRouterError) {
-      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-    }
-    console.error(`[explication-part] Échec génération partie ${partIndex + 1}/${totalParts}:`, error);
-    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
-  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      // See this route's own header comment for why this exists: keeps real
+      // bytes flowing over the connection for the ~100-260+ seconds
+      // generateExplicationPart can legitimately take, so a mobile carrier's
+      // NAT never sees this connection as idle long enough to drop it.
+      const heartbeatInterval = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify({ type: "heartbeat" })}\n`));
+        } catch {
+          clearInterval(heartbeatInterval);
+        }
+      }, 15_000);
+
+      generateExplicationPart(slices[partIndex], systemPrompt, partIndex + 1, totalParts)
+        .then((partMarkdown) => {
+          const isLastPart = partIndex === totalParts - 1;
+          controller.enqueue(
+            encoder.encode(`${JSON.stringify({ type: "result", success: true, partIndex, totalParts, isLastPart, partMarkdown })}\n`)
+          );
+        })
+        .catch((error) => {
+          const status = error instanceof OpenRouterError ? error.status : 502;
+          const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
+          if (!(error instanceof OpenRouterError)) {
+            console.error(`[explication-part] Échec génération partie ${partIndex + 1}/${totalParts}:`, error);
+          }
+          controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", success: false, error: message, status })}\n`));
+        })
+        .finally(() => {
+          clearInterval(heartbeatInterval);
+          controller.close();
+        });
+    },
+  });
+
+  return new NextResponse(stream, {
+    status: 200,
+    headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" },
+  });
 }

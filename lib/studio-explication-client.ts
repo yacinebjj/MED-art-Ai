@@ -96,9 +96,110 @@ async function postJson(
   }
 }
 
-/** 4xx client errors (bad request, auth, forbidden/quota) are never retried — retrying the exact same broken request just wastes attempts and delays the real error reaching the student. Everything else (network failure, 5xx, a clean timeout) is retryable. */
+/**
+ * explication-part specifically streams a heartbeat while it works (see
+ * that route's own header comment for the full mechanism: a mobile
+ * carrier's NAT can drop a request that sits fully silent for the
+ * ~100-260+ seconds a real generation can take — a confirmed, real cause of
+ * "échec de génération" specifically on mobile, never on PC/WiFi). The
+ * route always answers HTTP 200 once streaming starts (the real outcome
+ * isn't known yet when headers are sent) and encodes the actual result as
+ * the LAST newline-delimited JSON line, `{"type":"result", success, ...}` —
+ * a `status` field on that line carries the LOGICAL status this failure
+ * would have had as a plain response (mirrors OpenRouterError.status, or
+ * 502), since the real HTTP transport status is stuck at 200. Every
+ * `{"type":"heartbeat"}` line in between is inert and skipped. A non-200
+ * response (the auth/rate-limit/validation failures earlier in that route,
+ * which are NOT streamed) is handled exactly like postJson — transport
+ * status is authoritative there, since those never reach the streaming
+ * branch at all.
+ */
+async function postPartWithHeartbeat(
+  url: string,
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!res.ok || !res.body) {
+      // An early validation failure (auth/rate-limit/bad request/course
+      // lookup) never reaches the streaming branch — plain JSON, real
+      // transport status is authoritative here, exactly like postJson.
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIndex: number;
+      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (!line) continue;
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          continue; // A malformed/split line — keep reading for the real one.
+        }
+        if (parsed.type === "heartbeat") continue;
+        if (parsed.type === "result") {
+          const status = typeof parsed.status === "number" ? parsed.status : parsed.success === true ? 200 : 502;
+          return { ok: parsed.success === true, status, data: parsed };
+        }
+      }
+    }
+    // Stream ended with no "result" line ever seen — the connection was
+    // dropped (or the server crashed) mid-stream. Same bucket as a network
+    // failure (status 0): isRetryable treats this as retryable.
+    return { ok: false, status: 0, data: {} };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * 4xx client errors (bad request, forbidden/quota) are never retried —
+ * retrying the exact same broken request just wastes attempts and delays
+ * the real error reaching the student. Everything else (network failure,
+ * 5xx, a clean timeout) is retryable.
+ *
+ * 401 IS THE ONE DELIBERATE EXCEPTION, added after a real, confirmed
+ * production incident matching this exact symptom on mobile: a persistent
+ * "échec de génération" with no truncation and no timeout involved. See
+ * lib/supabase/session-server.ts's own header comment for the full
+ * mechanism — Supabase rotates refresh tokens on use (single-use), so TWO
+ * genuinely concurrent authenticated requests sharing the same
+ * not-yet-refreshed session cookie (this app's own architecture explicitly
+ * allows a Studio generation to keep running in the background while the
+ * student navigates elsewhere or opens another tile — see
+ * trackGeneration's "survives navigation" design) can race: one wins and
+ * gets a fresh rotated cookie written back to the browser, the other
+ * hard-fails with "Invalid Refresh Token: Already Used". That failure is
+ * PERMANENT for the token that just died, but NOT for the session as a
+ * whole — the browser's cookie has already been updated by the winning
+ * response by the time a retry (after this file's own 2s/5s backoff) fires,
+ * so simply trying again, now carrying the browser's current cookie, is
+ * genuinely likely to succeed rather than repeat the same failure. Treating
+ * 401 as a hard, permanent stop (the previous behavior) meant losing the
+ * WHOLE multi-minute generation to a one-time, self-resolving race that a
+ * single retry would have survived.
+ */
 function isRetryable(status: number): boolean {
-  return status === 0 || status >= 500;
+  return status === 0 || status === 401 || status >= 500;
 }
 
 async function abandon(courseId: number): Promise<void> {
@@ -157,12 +258,27 @@ async function runGenerationInParts(
   extra: { language?: string; customPrompt?: string },
   onProgress?: (progress: ExplicationGenerationProgress) => void
 ): Promise<ExplicationGenerationResult> {
-  // Step 1 — reserve, exactly once, never retried. See this file's header
-  // comment for why retrying this specific call is the one thing that must
-  // never happen.
+  // Step 1 — reserve, exactly once, never retried FOR AMBIGUOUS OUTCOMES.
+  // See this file's header comment for why a 5xx/network failure here is
+  // never safely retryable (a reservation may have already happened,
+  // server-side, before the response was lost). A 401 is the ONE
+  // unambiguous exception: getAuthenticatedUser() is the very first thing
+  // explication-start's route handler does, before touching quota/cache/
+  // anything else, so a 401 here PROVES no reservation was even attempted —
+  // there is nothing an unambiguous, one-time retry could double-charge.
+  // Added after a confirmed production incident (see isRetryable's own
+  // comment for the full mechanism: a genuinely-concurrent request racing
+  // this app's own Supabase refresh-token rotation) — a single 401 here used
+  // to permanently fail the whole flow before it ever started, even though
+  // the browser's session cookie is very likely already valid again by the
+  // time a short, deliberate retry fires.
   let startOutcome: { ok: boolean; status: number; data: Record<string, unknown> };
   try {
     startOutcome = await postJson("/api/studio/generate/explication-start", { courseId, ...extra }, START_FETCH_TIMEOUT_MS);
+    if (startOutcome.status === 401) {
+      await wait(1500);
+      startOutcome = await postJson("/api/studio/generate/explication-start", { courseId, ...extra }, START_FETCH_TIMEOUT_MS);
+    }
   } catch (error) {
     // Never reached the server (or the response never arrived) — no
     // confirmation of a reservation exists, so no abandon() call either.
@@ -200,7 +316,7 @@ async function runGenerationInParts(
 
       let outcome: { ok: boolean; status: number; data: Record<string, unknown> };
       try {
-        outcome = await postJson("/api/studio/generate/explication-part", { courseId, partIndex, ...extra }, PART_FETCH_TIMEOUT_MS);
+        outcome = await postPartWithHeartbeat("/api/studio/generate/explication-part", { courseId, partIndex, ...extra }, PART_FETCH_TIMEOUT_MS);
       } catch (error) {
         lastError = error instanceof Error ? error.message : "Erreur réseau.";
         if (attempt < MAX_PART_ATTEMPTS) await wait(PART_RETRY_DELAYS_MS[attempt - 1] ?? 5000);
@@ -227,14 +343,28 @@ async function runGenerationInParts(
   }
 
   // Every part succeeded via genuine fresh generation — assemble + persist.
+  // Retried on the same terms as a part (see isRetryable's own comment,
+  // 401 included) — this is the single most expensive point to lose the
+  // whole flow to a transient failure, since every part's real, billed
+  // generation work is already done; finalize is a pure DB write + a
+  // re-send of already-collected text, so retrying it is always safe
+  // (never re-runs any AI call, never re-reserves quota).
   try {
-    const finalizeOutcome = await postJson("/api/studio/generate/explication-finalize", { courseId, parts, ...extra }, FINALIZE_FETCH_TIMEOUT_MS);
-    if (!finalizeOutcome.ok || finalizeOutcome.data.success !== true) {
+    let finalizeOutcome: { ok: boolean; status: number; data: Record<string, unknown> } | null = null;
+    let finalizeError = "La finalisation a échoué.";
+    for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS; attempt++) {
+      finalizeOutcome = await postJson("/api/studio/generate/explication-finalize", { courseId, parts, ...extra }, FINALIZE_FETCH_TIMEOUT_MS);
+      if (finalizeOutcome.ok && finalizeOutcome.data.success === true) break;
+      finalizeError = typeof finalizeOutcome.data.error === "string" ? finalizeOutcome.data.error : `Erreur ${finalizeOutcome.status}.`;
+      if (isRetryable(finalizeOutcome.status) && attempt < MAX_PART_ATTEMPTS) {
+        await wait(PART_RETRY_DELAYS_MS[attempt - 1] ?? 5000);
+        continue;
+      }
+      break;
+    }
+    if (!finalizeOutcome || !finalizeOutcome.ok || finalizeOutcome.data.success !== true) {
       await abandon(courseId);
-      return {
-        success: false,
-        error: typeof finalizeOutcome.data.error === "string" ? finalizeOutcome.data.error : "La finalisation a échoué.",
-      };
+      return { success: false, error: finalizeError };
     }
     return {
       success: true,
