@@ -15,6 +15,7 @@ import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { openGoogleDrivePicker } from "@/lib/google-drive-picker";
 import { useToast } from "@/components/ui/Toast";
+import { OcrSuggestedError } from "@/lib/upload-client";
 
 // Statically inlined at build time by Next.js (NEXT_PUBLIC_ vars) — reading
 // it here just lets the Drive card show an honest "not configured" state
@@ -57,11 +58,20 @@ export interface UploadModalProps {
   onSubmitFile?: (file: File) => Promise<string>;
   /** Same override, for the "Texte direct" card. */
   onSubmitText?: (text: string, title: string) => Promise<string>;
+  /**
+   * Only meaningful when onSubmitFile throws lib/upload-client.ts's
+   * OcrSuggestedError (a PDF with no real text layer — a scanned/rasterized
+   * document — for which a real OCR fallback exists). Callers that support
+   * it wire this to lib/upload-client.ts's retryUploadWithOcr (closing over
+   * their own moduleId, exactly like onSubmitFile does); callers that don't
+   * pass it simply never see the "Essayer l'OCR" action rendered.
+   */
+  onRetryWithOcr?: (path: string, fileName: string) => Promise<string>;
   title?: string;
   description?: string;
 }
 
-export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSubmitText, title: modalTitle, description }: UploadModalProps) {
+export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSubmitText, onRetryWithOcr, title: modalTitle, description }: UploadModalProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
@@ -69,6 +79,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDriveImporting, setIsDriveImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ocrSuggestion, setOcrSuggestion] = useState<{ path: string; fileName: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -78,6 +89,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     setText("");
     setTitle("");
     setError(null);
+    setOcrSuggestion(null);
   }
 
   function handleOpenChange(next: boolean) {
@@ -129,6 +141,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     if (!file) return;
     setIsSubmitting(true);
     setError(null);
+    setOcrSuggestion(null);
 
     try {
       const result = await (onSubmitFile ?? defaultSubmitFile)(file);
@@ -137,7 +150,35 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     } catch (err) {
       const message = err instanceof Error ? err.message : "Le téléversement a échoué.";
       setError(message);
+      // Only offer the OCR retry action if THIS caller actually wired
+      // onRetryWithOcr — a caller that didn't (e.g. one with no course/
+      // moduleId concept to attach the result to) just sees the plain error,
+      // same as any other extraction failure.
+      if (err instanceof OcrSuggestedError && onRetryWithOcr) {
+        setOcrSuggestion({ path: err.path, fileName: err.fileName });
+      }
       toast({ variant: "error", title: "Le téléversement a échoué", description: message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  /** Explicit, student-initiated OCR retry after handleSubmitFile surfaced an OcrSuggestedError — never triggered automatically (see onRetryWithOcr's own doc comment: a real, billed OpenRouter call). */
+  async function handleOcrRetry() {
+    if (!ocrSuggestion || !onRetryWithOcr) return;
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const result = await onRetryWithOcr(ocrSuggestion.path, ocrSuggestion.fileName);
+      setOcrSuggestion(null);
+      onUploaded(result);
+      handleOpenChange(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "L'extraction OCR a échoué.";
+      setError(message);
+      setOcrSuggestion(null);
+      toast({ variant: "error", title: "L'extraction OCR a échoué", description: message });
     } finally {
       setIsSubmitting(false);
     }
@@ -387,7 +428,16 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
           </div>
         </div>
 
-        {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+        {error && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <p className="text-sm text-destructive">{error}</p>
+            {ocrSuggestion && (
+              <Button type="button" variant="outline" isLoading={isSubmitting} disabled={isSubmitting} onClick={handleOcrRetry}>
+                Essayer l&apos;OCR (1-2 min)
+              </Button>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

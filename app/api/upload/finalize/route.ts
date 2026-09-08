@@ -139,11 +139,24 @@ export async function POST(request: NextRequest) {
   }
 
   if (text.length < 50) {
+    // PDF-only: a real, cheap OCR fallback exists (see
+    // app/api/upload/finalize-ocr/route.ts) for exactly this case — a
+    // scanned/photographed/rasterized-slide PDF with no real text layer.
+    // `suggestOcr` + the already-uploaded `path`/`fileName` let the client
+    // offer a one-click retry via OCR WITHOUT re-uploading the file (it's
+    // already sitting in Storage from this same request). Not offered for
+    // DOCX/PPTX/TXT — the OCR engine used here is PDF-specific, and a
+    // genuinely empty/near-empty DOCX or TXT isn't a "scanned document",
+    // it's just an empty file.
+    const suggestOcr = extension === "pdf";
     return NextResponse.json(
       {
         success: false,
-        error:
-          "Le contenu est trop court ou illisible — ce PDF est peut-être un document scanné/image sans texte réel (l'extraction automatique ne fonctionne alors pas). Essaie un autre fichier, idéalement exporté directement en PDF texte.",
+        error: suggestOcr
+          ? "Le contenu est trop court ou illisible — ce PDF est peut-être un document scanné/image sans texte réel (l'extraction automatique ne fonctionne alors pas). Tu peux tenter une extraction OCR (peut prendre 1 à 2 minutes)."
+          : "Le contenu est trop court ou illisible — vérifie que le fichier contient bien du texte, puis réessaie.",
+        suggestOcr,
+        ...(suggestOcr ? { path, fileName } : {}),
       },
       { status: 422 }
     );

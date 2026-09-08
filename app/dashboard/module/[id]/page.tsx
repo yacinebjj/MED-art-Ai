@@ -17,7 +17,7 @@ import { tModulePage } from "@/lib/translations/modulePage";
 import { getSectionLabel } from "@/lib/translations/studio";
 import { cn } from "@/lib/utils";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
-import { uploadDocumentDirect } from "@/lib/upload-client";
+import { uploadDocumentDirect, retryUploadWithOcr } from "@/lib/upload-client";
 import { generateExplicationInParts } from "@/lib/studio-explication-client";
 import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
@@ -179,6 +179,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   isSwitchingCourse,
   onSubmitFile,
   onSubmitText,
+  onRetryWithOcr,
   onSelectCourse,
   onShowCourseFile,
   onDeleteCourse,
@@ -194,6 +195,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   isSwitchingCourse: boolean;
   onSubmitFile: (file: File) => Promise<string>;
   onSubmitText: (text: string, title: string) => Promise<string>;
+  onRetryWithOcr: (path: string, fileName: string) => Promise<string>;
   onSelectCourse: (id: number) => void;
   onShowCourseFile: (id: number) => void;
   onDeleteCourse: (id: number) => Promise<void>;
@@ -489,6 +491,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
         onUploaded={() => {}}
         onSubmitFile={onSubmitFile}
         onSubmitText={onSubmitText}
+        onRetryWithOcr={onRetryWithOcr}
         title={tModulePage("addSourceLabel", language)}
         description="Importe un document ou colle du texte pour ce module."
       />
@@ -763,6 +766,16 @@ export default function ModuleWorkspacePage() {
 
     applyCreatedCourse(uploaded.course, uploaded.text, uploaded.fileUrl);
     toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} a été importé et sauvegardé.` });
+    return String(uploaded.course.id);
+  }, [moduleId, applyCreatedCourse, toast, language]);
+
+  /** Explicit OCR retry after handleFileSelected throws lib/upload-client.ts's OcrSuggestedError (a scanned PDF with no real text layer) — a real, billed OpenRouter call, only ever triggered by the student's own click on UploadModal's "Essayer l'OCR" action, never automatically. */
+  const handleOcrRetry = useCallback(async (path: string, fileName: string): Promise<string> => {
+    const uploaded = await retryUploadWithOcr(path, fileName, moduleId);
+    if (!uploaded.course) throw new Error("La création du cours a échoué.");
+
+    applyCreatedCourse(uploaded.course, uploaded.text, uploaded.fileUrl);
+    toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${fileName} a été importé (OCR) et sauvegardé.` });
     return String(uploaded.course.id);
   }, [moduleId, applyCreatedCourse, toast, language]);
 
@@ -1647,6 +1660,7 @@ export default function ModuleWorkspacePage() {
                 isSwitchingCourse={isSwitchingCourse}
                 onSubmitFile={handleFileSelected}
                 onSubmitText={handleTextSubmitted}
+                onRetryWithOcr={handleOcrRetry}
                 onSelectCourse={handleSelectCourse}
                 onShowCourseFile={handleShowCourseFile}
                 onDeleteCourse={handleDeleteCourse}
@@ -1713,6 +1727,7 @@ export default function ModuleWorkspacePage() {
                 isSwitchingCourse={isSwitchingCourse}
                 onSubmitFile={handleFileSelected}
                 onSubmitText={handleTextSubmitted}
+                onRetryWithOcr={handleOcrRetry}
                 onSelectCourse={handleSelectCourse}
                 onShowCourseFile={handleShowCourseFile}
                 onDeleteCourse={handleDeleteCourse}

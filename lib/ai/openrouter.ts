@@ -1044,3 +1044,122 @@ export async function streamOpenRouter(
 
   return res.body.pipeThrough(unwrapSse);
 }
+
+// Fallback text extraction for uploaded documents that have NO real text
+// layer (a scanned/photographed course, or a PDF "printed" from slides
+// rather than natively exported — confirmed in production: a real 59-page
+// course PDF extracted to 59 bytes of pure page-break characters via
+// officeparser's normal, non-OCR text extraction). officeparser's OWN
+// `ocr: true` option does NOT help here — its PDF parser's own source
+// comment states OCR is not supported for PDF page images at all ("Tesseract.js
+// requires encoded image files... To enable OCR, a PNG encoder would need to
+// be added") — confirmed live: a real test against this exact file returned
+// in 6.5s with ~0 chars extracted, consistent with that documented gap.
+// Rather than building a local PDF-page-rasterization + PNG-encoding +
+// Tesseract pipeline from scratch (real engineering cost AND a real risk of
+// native-dependency breakage on Vercel's serverless runtime — explicitly the
+// trade-off this approach was chosen to avoid), this uses OpenRouter's own
+// `file-parser` plugin with the `mistral-ocr` engine: a real, documented,
+// server-side PDF OCR service (https://openrouter.ai/docs/features/multimodal/pdfs),
+// priced at $2/1,000 pages (~$0.0002/page) — no local rendering, no native
+// deps, works on any model. Confirmed via OpenRouter's own docs (not
+// guessed): the parsed result comes back in the assistant message's
+// `annotations[].file.content` array, SEPARATE from whatever the model
+// itself replies — so this never risks the model paraphrasing, summarizing,
+// or truncating a long document while "reproducing" it; the parsed text is
+// read directly, verbatim, regardless of how minimal a reply the model gives.
+const OCR_MODEL = CHEAP_VISION_MODEL;
+
+export interface PdfOcrResult {
+  text: string;
+  /** Number of `annotations[].file.content` text blocks concatenated — purely diagnostic (logged, not relied on for correctness). */
+  blockCount: number;
+}
+
+/**
+ * Extracts text from a PDF via OpenRouter's mistral-ocr file-parser plugin.
+ * `fileUrl` must be a publicly reachable URL (this app's Supabase Storage
+ * bucket for uploaded course sources is already public — see
+ * lib/course-source-storage.ts) since OpenRouter's parser fetches it
+ * server-side rather than accepting raw bytes inline for this shape.
+ */
+export async function extractPdfTextViaOcr(fileUrl: string, fileName: string, options?: { timeoutMs?: number }): Promise<PdfOcrResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
+  }
+
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+        "X-Title": "Med Art AI",
+      },
+      body: JSON.stringify({
+        model: OCR_MODEL,
+        plugins: [{ id: "file-parser", pdf: { engine: "mistral-ocr" } }],
+        messages: [
+          {
+            role: "user",
+            content: [
+              // Minimal instruction — the model's OWN reply is discarded
+              // entirely below; only the plugin-produced `annotations` are
+              // read. maxTokens is kept small to bound the (separate, much
+              // smaller) cost of the model actually reading/replying to
+              // whatever gets injected into its context.
+              { type: "text", text: "Confirme uniquement que le document a été reçu, en un mot." },
+              { type: "file", file: { filename: fileName, file_data: fileUrl } },
+            ],
+          },
+        ],
+        max_tokens: 20,
+      }),
+      signal: timeoutController.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter PDF OCR timed out after ${timeoutMs}ms`);
+      throw new OpenRouterError("L'extraction OCR met trop de temps. Réessaie dans un instant.", 504);
+    }
+    console.error("OpenRouter PDF OCR fetch failed", error);
+    throw new OpenRouterError("L'appel au service OCR a échoué. Réessaie dans un instant.", 502);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const detail = extractOpenRouterErrorDetail(body);
+    console.error(`OpenRouter PDF OCR API error (${res.status})`, body.slice(0, 500));
+    throw new OpenRouterError(`L'extraction OCR a échoué : ${detail}`, res.status);
+  }
+
+  const data = await res.json();
+  logUsage(`extractPdfTextViaOcr model=${OCR_MODEL}`, data?.usage);
+
+  const annotations = data?.choices?.[0]?.message?.annotations;
+  const fileContent = Array.isArray(annotations)
+    ? annotations.find((a: unknown) => (a as { type?: string })?.type === "file")?.file?.content
+    : undefined;
+
+  if (!Array.isArray(fileContent)) {
+    console.error("OpenRouter PDF OCR returned no file annotation", JSON.stringify(data).slice(0, 500));
+    throw new OpenRouterError("Le service OCR n'a renvoyé aucun contenu exploitable pour ce document.", 502);
+  }
+
+  const textBlocks = fileContent.filter((block: unknown) => (block as { type?: string })?.type === "text") as { text?: string }[];
+  const text = textBlocks
+    .map((block) => (typeof block.text === "string" ? block.text : ""))
+    .join("\n\n")
+    .trim();
+
+  return { text, blockCount: textBlocks.length };
+}

@@ -12,6 +12,26 @@ export interface UploadedDocument {
 }
 
 /**
+ * Thrown instead of a plain Error when /api/upload/finalize detected a
+ * PDF with no real text layer (a scanned/rasterized document) AND a real
+ * OCR fallback is available for it (see app/api/upload/finalize-ocr/route.ts).
+ * `path`/`fileName` are exactly what that fallback route needs — the file is
+ * already sitting in Storage from this same upload, no re-upload needed.
+ * Callers (UploadModal) can `instanceof` this to offer a one-click "Essayer
+ * l'OCR" action instead of a dead-end error.
+ */
+export class OcrSuggestedError extends Error {
+  path: string;
+  fileName: string;
+  constructor(message: string, path: string, fileName: string) {
+    super(message);
+    this.name = "OcrSuggestedError";
+    this.path = path;
+    this.fileName = fileName;
+  }
+}
+
+/**
  * Direct-to-storage document upload — the browser uploads the raw file
  * bytes straight to Supabase Storage (via a short-lived signed URL this app
  * requests for it), completely bypassing this app's own Next.js Route
@@ -176,7 +196,11 @@ export async function uploadDocumentDirect(file: File, moduleId?: number): Promi
   );
   const finalizeData = finalizeOutcome.data;
   if (!finalizeOutcome.ok || finalizeData?.success !== true) {
-    throw new Error(typeof finalizeData?.error === "string" ? finalizeData.error : "L'extraction du document a échoué.");
+    const message = typeof finalizeData?.error === "string" ? finalizeData.error : "L'extraction du document a échoué.";
+    if (finalizeData?.suggestOcr === true && typeof finalizeData.path === "string" && typeof finalizeData.fileName === "string") {
+      throw new OcrSuggestedError(message, finalizeData.path, finalizeData.fileName);
+    }
+    throw new Error(message);
   }
 
   return {
@@ -184,5 +208,41 @@ export async function uploadDocumentDirect(file: File, moduleId?: number): Promi
     fileName: finalizeData.fileName as string,
     fileUrl: (finalizeData.fileUrl as string | null | undefined) ?? null,
     course: finalizeData.course as StudioCourseSummary | undefined,
+  };
+}
+
+// OCR (mistral-ocr via OpenRouter) genuinely takes longer than normal
+// extraction — real per-page server-side processing, not something this
+// client controls. Comfortably under finalize-ocr/route.ts's own 280s
+// maxDuration.
+const FINALIZE_OCR_TIMEOUT_MS = 260_000;
+
+/**
+ * Explicit, student-initiated retry via OCR after uploadDocumentDirect threw
+ * an OcrSuggestedError — a real, billed OpenRouter call (see
+ * app/api/upload/finalize-ocr/route.ts's own header comment), so this is
+ * never triggered automatically. `path`/`fileName` come straight from that
+ * error; no re-upload needed, the file is already in Storage.
+ */
+export async function retryUploadWithOcr(path: string, fileName: string, moduleId?: number): Promise<UploadedDocument> {
+  const outcome = await fetchJsonWithTimeout(
+    "/api/upload/finalize-ocr",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, fileName, ...(moduleId !== undefined ? { moduleId } : {}) }),
+    },
+    FINALIZE_OCR_TIMEOUT_MS,
+    "L'extraction OCR a pris trop de temps — réessaie dans un instant, ou essaie un autre fichier."
+  );
+  const data = outcome.data;
+  if (!outcome.ok || data?.success !== true) {
+    throw new Error(typeof data?.error === "string" ? data.error : "L'extraction OCR a échoué.");
+  }
+  return {
+    text: data.text as string,
+    fileName: data.fileName as string,
+    fileUrl: (data.fileUrl as string | null | undefined) ?? null,
+    course: data.course as StudioCourseSummary | undefined,
   };
 }
