@@ -146,10 +146,42 @@ async function ensureGoogleScripts(): Promise<void> {
 // happens" (found during a production bug report — this is not hypothetical).
 const ACCESS_TOKEN_TIMEOUT_MS = 90_000;
 
+/**
+ * Best-effort, INSTANT popup-blocked detection — opens and immediately
+ * closes a tiny throwaway window in the SAME synchronous call stack as the
+ * click handler (still counts as "user-initiated" to the browser's popup
+ * heuristic, unlike an async check after an await). If the browser blocks
+ * popups for this origin, `window.open` returns `null`/`undefined` (Chrome,
+ * Firefox) or throws (some mobile browsers/in-app webviews). Catching this
+ * BEFORE handing off to Google Identity Services means a blocked popup
+ * surfaces a specific, actionable message immediately instead of the
+ * generic ACCESS_TOKEN_TIMEOUT_MS 90-second wait — GIS's own popup, once
+ * blocked the same way, would otherwise just silently never invoke its
+ * callback, indistinguishable from any other kind of hang.
+ */
+function isPopupLikelyBlocked(): boolean {
+  try {
+    const probe = window.open("", "_blank", "width=1,height=1");
+    if (!probe) return true;
+    probe.close();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 function requestAccessToken(): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!GOOGLE_CLIENT_ID) {
       reject(new Error("Google Drive n'est pas configuré (NEXT_PUBLIC_GOOGLE_CLIENT_ID manquant)."));
+      return;
+    }
+    if (isPopupLikelyBlocked()) {
+      reject(
+        new Error(
+          "Ton navigateur a bloqué la fenêtre de connexion Google. Autorise les popups pour ce site (icône dans la barre d'adresse, ou réglages du navigateur), puis réessaie."
+        )
+      );
       return;
     }
     let settled = false;

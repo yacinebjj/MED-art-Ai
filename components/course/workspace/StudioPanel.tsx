@@ -109,14 +109,14 @@ interface StudioPanelProps {
   /** The student's own curriculum level (StudentCurriculumProfile.academicYear.level, types/academic.ts) — only ever changes the "Cas Clinique" tile's own label (see lib/translations/studio.ts's getSectionLabel); every other tile ignores it. Optional: a caller that omits this simply always gets the standard "Cas Cliniques" label. */
   studyYear?: number | null;
   /**
-   * Purely a VISUAL signal — the underlying gate (every section but
-   * Explication requires it to exist first) already lives in the caller's
-   * onItemClick and is unchanged by this prop. Before this, a "locked" tile
-   * looked identical to an unlocked one and only revealed the gate via a
-   * toast after being clicked — this renders a real Lock badge + dimmed
-   * tile instead, so the gate is visible before the click, not a surprise
-   * after it. Omitted entirely (or an empty Set) renders every tile
-   * unlocked, matching the previous behavior exactly.
+   * Purely a VISUAL signal — any actual gate lives entirely in the caller's
+   * onItemClick, never here. The caller no longer passes this (the earlier
+   * "every section but Explication requires it to exist first" product gate
+   * was reversed by explicit request — every Studio section is independently
+   * generatable now, on every screen size), so every tile renders unlocked.
+   * Kept as a real, general capability for a future caller that DOES want
+   * per-tile locking — omitted entirely (or an empty Set) renders every tile
+   * unlocked.
    */
   lockedSections?: Set<DemoSectionId>;
   /**

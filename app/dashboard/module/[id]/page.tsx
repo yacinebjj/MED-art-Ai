@@ -704,18 +704,6 @@ export default function ModuleWorkspacePage() {
     return map;
   }, [courseMastery]);
 
-  // Visual-only locked-tile signal for StudioPanel/MobileStudioCards (see
-  // their own lockedSections doc comment) — mirrors the REAL gate
-  // handleStudioItemClick already enforces below (every section but
-  // Explication requires it to exist first), just surfaced BEFORE the click
-  // instead of only in a toast after it. Deliberately recomputed from
-  // activeCourse.explication, not stored as its own state, so it can never
-  // drift from the real gate.
-  const lockedSections = useMemo(() => {
-    if (!activeCourse || getSectionValue(activeCourse, "explication")) return undefined;
-    return new Set(DEMO_SECTIONS.map((s) => s.id).filter((id) => id !== "explication"));
-  }, [activeCourse]);
-
   // Real, already-fetched QCM mastery for the active course's own tile (see
   // StudioPanel/MobileStudioCards' own sectionMasteryPct doc comment) — never
   // fabricated: a course with no course_mastery row yet (courseMasteryBySlug
@@ -894,22 +882,11 @@ export default function ModuleWorkspacePage() {
       return;
     }
 
-    // Enforced Studio Pipeline — every OTHER section is locked until
-    // "Explication Ultra-Détaillée" exists for this course. Explicit product
-    // decision: this does not reduce per-message chat cost (every reply's
-    // tokens are still generated and billed fresh regardless of what
-    // grounds them) and forces a real generation cost on every course,
-    // whether or not the student ever wanted Explication specifically —
-    // accepted knowingly, not a side effect.
-    if (id !== "explication" && !getSectionValue(activeCourse, "explication")) {
-      toast({
-        variant: "info",
-        title: "Explication Ultra-Détaillée requise",
-        description: "Génère d'abord l'Explication Ultra-Détaillée de ce cours — les autres sections se débloquent ensuite.",
-      });
-      return;
-    }
-
+    // Every Studio section is independently generatable — the earlier
+    // "Explication Ultra-Détaillée required first" gate (product decision,
+    // now reversed) was removed by explicit request after real students hit
+    // it as a hard blocker on mobile. lockedSections is no longer passed to
+    // StudioPanel/MobileStudioCards for the matching visual-lock removal.
     if (getSectionValue(activeCourse, id)) {
       startNavTransition(() => setOpenedSection(id));
       return;
@@ -1533,7 +1510,6 @@ export default function ModuleWorkspacePage() {
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
       onCollapsedChange={setIsStudioCollapsed}
-      lockedSections={lockedSections}
       sectionMasteryPct={sectionMasteryPct}
     >
       {isSwitchingCourse ? (
@@ -1746,7 +1722,6 @@ export default function ModuleWorkspacePage() {
                   onItemClick={handleStudioItemClick}
                   onItemClickWithOptions={handleStudioItemClick}
                   studyYear={studyYear}
-                  lockedSections={lockedSections}
                   sectionMasteryPct={sectionMasteryPct}
                 />
               ))}

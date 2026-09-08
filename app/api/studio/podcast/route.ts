@@ -41,6 +41,7 @@ interface CourseRow {
   id: number;
   title: string;
   explication: string | null;
+  raw_text: string | null;
 }
 
 /** Mirrors app/api/studio/infographic/route.ts's ensureInfographicBucket exactly — a concurrent request can win the race to create the bucket, which is not a real failure. */
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course, error: courseError } = await supabase
     .from("studio_courses")
-    .select("id, title, explication")
+    .select("id, title, explication, raw_text")
     .eq("id", courseId)
     .eq("user_id", user.id)
     .maybeSingle<CourseRow>();
@@ -145,14 +146,18 @@ export async function POST(request: NextRequest) {
   if (!course) {
     return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
   }
-  if (!course.explication || course.explication.trim().length < 50) {
-    return NextResponse.json(
-      { success: false, error: "Génère d'abord l'Explication Ultra-Détaillée de ce cours — le podcast s'appuie dessus." },
-      { status: 400 }
-    );
+  // Prefers the polished Explication (better-structured input for a script)
+  // when it exists, but no longer REQUIRES it — Studio sections are
+  // independently generatable now (product reversal: a student can generate
+  // Podcast Audio, or any other section, without ever touching Explication
+  // first), matching the same explication ?? raw_text fallback already
+  // established elsewhere (exam/generate, module-synthesis, search, chat).
+  const sourceText = course.explication && course.explication.trim().length >= 50 ? course.explication : course.raw_text;
+  if (!sourceText || sourceText.trim().length < 50) {
+    return NextResponse.json({ success: false, error: "Ce cours n'a pas assez de contenu source pour générer un podcast." }, { status: 400 });
   }
 
-  const contentHash = sha256(normalizeText(course.explication));
+  const contentHash = sha256(normalizeText(sourceText));
 
   try {
     if (isDefaultVariant) {
@@ -169,7 +174,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const excerpt = course.explication.slice(0, MAX_EXPLICATION_CHARS_FOR_PODCAST);
+      const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_PODCAST);
       const script = await planPodcastScript(course.title, excerpt, dialect);
 
       const { pcm16 } = await generateOpenRouterAudio(

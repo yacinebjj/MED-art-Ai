@@ -1,28 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
-import { buildStudioDeltaAdaptationPrompt, studioDeltaMaxTokens } from "@/lib/ai/studio-prompts";
-import { errorMessage, MAX_SOURCE_CHARS, parseJsonResponse } from "@/lib/course-generation-shared";
+import { errorMessage, MAX_SOURCE_CHARS } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { reservePlatformCapacity } from "@/lib/platform-spend-guard";
-import { lookupStudioContentCache, recordStudioCacheHit, storeStudioContentCache, type StudioCacheLookupResult } from "@/lib/studio-content-cache";
+import { lookupStudioContentCache, recordStudioCacheHit, type StudioCacheLookupResult } from "@/lib/studio-content-cache";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
-import { runStudioExplicationDeltaPipeline, computeExplicationSlices } from "@/lib/studio-explication-delta";
-import { dispatchStudioGenerationPush } from "@/lib/push/dispatch";
-
-// Fuzzy-hit delta-adaptation (see the isFuzzyHit branch below) is an EDIT
-// pass over another student's already-generated output, not fresh
-// generation from raw source — comparable in spirit to /api/studio/generate/
-// route.ts's own generic-path delta adaptation. Bounded well under this
-// route's own maxDuration so a slow/stuck adaptation call fails cleanly
-// and falls through to full generation instead, rather than risking this
-// otherwise-fast, never-retried route hanging.
-const DELTA_ADAPTATION_TIMEOUT_MS = 45_000;
+import { computeExplicationSlices } from "@/lib/studio-explication-delta";
 
 export const runtime = "nodejs";
-export const maxDuration = 60; // no AI generation call happens in this route on the fresh-generation path — only cache/DB reads and, rarely, the cross-university-delta pipeline's own bounded calls.
+// Deliberately tight, and this route now genuinely never approaches it: a
+// real production 504 traced to this exact route making TWO real OpenRouter
+// calls (via the cross-university-delta pipeline, formerly invoked
+// synchronously below) with no timeoutMs override — inheriting
+// callOpenRouter's 240s DEFAULT_TIMEOUT_MS, four times this route's own
+// maxDuration — plus an unbounded number of embedding calls (one per source
+// chunk, on a course's first-ever indexing) from ensureStudioCourseChunked.
+// Both the cross-university-delta pipeline AND the fuzzy-cache delta
+// adaptation (bounded at 45s, but with almost no margin left once stacked
+// on top of the DB round-trips already in this route) have been REMOVED
+// from this route entirely — this route must now be pure DB reads/writes,
+// finishing in well under a second, full stop. Both optimizations still
+// exist (lib/studio-explication-delta.ts's runStudioExplicationDeltaPipeline,
+// lib/ai/studio-prompts.ts's buildStudioDeltaAdaptationPrompt) and are
+// disclosed as disabled here — a reasonable, deliberate reliability-over-
+// cost-savings trade-off, reachable again in the future only via a
+// genuinely async/background mechanism that never blocks this route's own
+// response.
+export const maxDuration = 15;
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
@@ -72,24 +78,6 @@ async function markReservationPending(supabase: SupabaseAdmin, courseId: number,
 }
 
 /**
- * Used at every failure point AFTER markReservationPending has already
- * succeeded — refunding the courseCap unit alone is not enough here: the
- * pending flag must ALSO be cleared in the same breath, or it would stay
- * orphaned `true` forever despite the unit already being refunded, which
- * could let a later, unrelated explication-abandon call wrongly believe a
- * reservation is still outstanding and refund a SECOND time for nothing.
- */
-async function refundAndClearPending(supabase: SupabaseAdmin, courseId: number, userId: string): Promise<void> {
-  await refundGeneration(userId);
-  const { error } = await supabase
-    .from("studio_courses")
-    .update({ explication_reservation_pending: false })
-    .eq("id", courseId)
-    .eq("user_id", userId);
-  if (error) console.error("[explication-start] Échec nettoyage explication_reservation_pending après refund (non bloquant):", error.message);
-}
-
-/**
  * First (and, unlike explication-part, DELIBERATELY UN-RETRIED) step of the
  * client-driven, multi-request Explication pipeline — see
  * lib/studio-explication-delta.ts's ARCHITECTURE comment for the overall
@@ -114,10 +102,13 @@ async function refundAndClearPending(supabase: SupabaseAdmin, courseId: number, 
  *
  * Response shapes:
  *  - `{ success: true, totalParts: 1, needsFinalize: false, partMarkdown,
- *      servedFromCache?, cacheMode? }` — the whole Explication was already
- *    resolved (exact cache hit, a fuzzy-cache delta adaptation, or a
- *    cross-university chunk-delta match) and already persisted. The caller
- *    must NOT call explication-part or explication-finalize afterward.
+ *      servedFromCache: true, cacheMode: "exact" }` — an EXACT cross-student
+ *    cache hit resolved the whole Explication instantly, already persisted.
+ *    The caller must NOT call explication-part or explication-finalize
+ *    afterward. (Fuzzy-cache delta adaptation and the cross-university
+ *    chunk-delta pipeline are NOT attempted here — see this file's top-of-
+ *    file comment for why; a fuzzy/no cache match always falls through to
+ *    the reservation branch below instead.)
  *  - `{ success: true, totalParts, needsFinalize: true, reserved: true }` —
  *    quota WAS reserved for this generation; the caller must now drive
  *    explication-part for partIndex 0..totalParts-1, and — if it ultimately
@@ -230,86 +221,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: pending.error }, { status: 500 });
   }
 
-  // Fuzzy cache hit (another student's near-identical course, ~85%+
-  // similar but not byte-identical) — a much cheaper edit/adaptation pass
-  // instead of full multi-part generation, mirroring the same optimization
-  // /api/studio/generate/route.ts's generic path applies to every other
-  // section. Fail-open: any failure here (parse error, timeout, OpenRouter
-  // error) just falls through to full fresh generation below rather than
-  // erroring the whole request — the fuzzy hit was only ever an
-  // optimization, never a correctness requirement.
-  if (cacheResult.hit && cacheResult.matchType === "fuzzy") {
-    try {
-      const raw = await callOpenRouter(
-        [
-          { role: "system", content: buildStudioDeltaAdaptationPrompt("explication", JSON.stringify(cacheResult.data), truncatedContext) },
-          { role: "user", content: "Génère le contenu adapté demandé." },
-        ],
-        {
-          model: CHEAP_MODEL,
-          maxTokens: studioDeltaMaxTokens("explication"),
-          bypassMock: true,
-          reasoning: { effort: "low" },
-          timeoutMs: DELTA_ADAPTATION_TIMEOUT_MS,
-        }
-      );
-      const parsed = parseJsonResponse(raw);
-      const adapted = typeof parsed.explication === "string" ? parsed.explication.trim() : "";
-      if (adapted.length >= 50) {
-        const persisted = await persistExplicationResult(supabase, courseId, user.id, adapted, contentHash, true);
-        if (persisted.error) {
-          await refundAndClearPending(supabase, courseId, user.id);
-          return NextResponse.json({ success: false, error: persisted.error }, { status: 500 });
-        }
-        await storeStudioContentCache("explication", truncatedContext, adapted);
-        if (courseRow?.title && courseRow.curriculum_module_id) {
-          try {
-            await dispatchStudioGenerationPush(user.id, courseRow.title, "explication", `/dashboard/module/${courseRow.curriculum_module_id}`);
-          } catch (error) {
-            console.error("[explication-start] Échec envoi push (non bloquant):", error);
-          }
-        }
-        return NextResponse.json({ success: true, totalParts: 1, needsFinalize: false, partMarkdown: adapted, cacheMode: "delta" });
-      }
-      console.warn("[explication-start] Adaptation delta trop courte/vide — génération complète à la place.");
-    } catch (error) {
-      const detail = error instanceof OpenRouterError ? error.message : errorMessage(error);
-      console.error("[explication-start] Échec adaptation delta (fail-open, génération complète):", detail);
-    }
-  }
-
-  if (!isPersonalizedVariant) {
-    let crossUniversityMarkdown: string | null = null;
-    try {
-      crossUniversityMarkdown = await runStudioExplicationDeltaPipeline(courseId, truncatedContext, user.id);
-    } catch (error) {
-      console.error("[explication-start] Pipeline delta cross-université échoué (fail-open, génération classique):", errorMessage(error));
-    }
-    if (crossUniversityMarkdown !== null) {
-      const persisted = await persistExplicationResult(supabase, courseId, user.id, crossUniversityMarkdown, contentHash, true);
-      if (persisted.error) {
-        await refundAndClearPending(supabase, courseId, user.id);
-        return NextResponse.json({ success: false, error: persisted.error }, { status: 500 });
-      }
-      await storeStudioContentCache("explication", truncatedContext, crossUniversityMarkdown);
-      if (courseRow?.title && courseRow.curriculum_module_id) {
-        try {
-          await dispatchStudioGenerationPush(user.id, courseRow.title, "explication", `/dashboard/module/${courseRow.curriculum_module_id}`);
-        } catch (error) {
-          console.error("[explication-start] Échec envoi push (non bloquant):", error);
-        }
-      }
-      return NextResponse.json({
-        success: true,
-        totalParts: 1,
-        needsFinalize: false,
-        partMarkdown: crossUniversityMarkdown,
-        cacheMode: "cross-university-delta",
-      });
-    }
-  }
-
   // Genuine fresh generation needed — quota is reserved and confirmed to the
-  // client, which now drives explication-part for every part.
+  // client, which now drives explication-part for every part. Deliberately
+  // NO fuzzy-cache delta adaptation or cross-university-delta pipeline
+  // attempted here anymore (see this file's own top-of-file comment) — this
+  // response is the whole point of this route being fast: DB work only,
+  // no AI call, every single time.
   return NextResponse.json({ success: true, totalParts, needsFinalize: true, reserved: true });
 }
