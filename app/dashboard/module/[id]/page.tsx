@@ -48,6 +48,7 @@ import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROS
 import { DEMO_SECTIONS, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
 import { getInFlightGeneration, trackGeneration } from "@/lib/studio-generation-tracker";
 import { PodcastGeneratingLabel } from "@/components/course/workspace/PodcastGeneratingLabel";
+import { ExplicationGeneratingLabel } from "@/components/course/workspace/ExplicationGeneratingLabel";
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
@@ -1526,6 +1527,8 @@ export default function ModuleWorkspacePage() {
               static line would read as stalled over that much longer wait. */}
           {openedSection === "audio" ? (
             <PodcastGeneratingLabel className="text-sm text-muted-foreground" />
+          ) : openedSection === "explication" ? (
+            <ExplicationGeneratingLabel className="text-sm text-muted-foreground" />
           ) : (
             <p className="text-sm text-muted-foreground">Génération en cours...</p>
           )}

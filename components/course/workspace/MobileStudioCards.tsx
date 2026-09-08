@@ -20,6 +20,7 @@ import {
   type TileGenerationOptions,
 } from "@/components/course/workspace/StudioPanel";
 import { GeneratingRotatingLabel } from "@/components/course/workspace/GeneratingRotatingLabel";
+import { ExplicationGeneratingLabel } from "@/components/course/workspace/ExplicationGeneratingLabel";
 import type { DemoSection, DemoSectionId } from "@/lib/demo-content";
 
 interface MobileStudioCardsProps {
@@ -171,7 +172,11 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-foreground">{getSectionLabel(section.id, language, studyYear)}</p>
-                  <GeneratingRotatingLabel className="truncate text-xs text-muted-foreground" />
+                  {section.id === "explication" ? (
+                    <ExplicationGeneratingLabel className="truncate text-xs text-muted-foreground" />
+                  ) : (
+                    <GeneratingRotatingLabel className="truncate text-xs text-muted-foreground" />
+                  )}
                 </div>
               </div>
             );

@@ -110,9 +110,51 @@ async function abandon(courseId: number): Promise<void> {
   }
 }
 
+/**
+ * Minimal wrapper around the standard Screen Wake Lock API
+ * (https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API) —
+ * added defensively after a real production report of "échec de génération"
+ * on mobile specifically (not PC), for the exact same course pipeline. This
+ * flow is a SEQUENTIAL chain of several multi-minute HTTP round-trips (real,
+ * measured per-call latency is 100s of seconds even on a clean success — see
+ * PART_FETCH_TIMEOUT_MS's own comment), easily totaling several minutes to
+ * 10+ minutes for a multi-part course — a well-documented risk window for a
+ * mobile browser to suspend/throttle a backgrounded tab's JS/network the
+ * moment the student's screen locks, which no amount of server-side retrying
+ * can help once the WHOLE page execution context is suspended, not just one
+ * request. Requesting a wake lock keeps the screen on for the duration of
+ * this call, removing the single most common reason a student's screen would
+ * lock during a long wait. Feature-detected and best-effort throughout: a
+ * browser without support (or a user who denies it) just gets no wake lock,
+ * never an error — this is a defensive improvement, not a load-bearing
+ * requirement for correctness.
+ */
+async function acquireWakeLock(): Promise<{ release: () => Promise<void> } | null> {
+  try {
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<{ release: () => Promise<void> }> } };
+    if (!nav.wakeLock) return null;
+    return await nav.wakeLock.request("screen");
+  } catch {
+    return null;
+  }
+}
+
 export async function generateExplicationInParts(
   courseId: number,
   extra: { language?: string; customPrompt?: string } = {},
+  onProgress?: (progress: ExplicationGenerationProgress) => void
+): Promise<ExplicationGenerationResult> {
+  const wakeLock = await acquireWakeLock();
+  try {
+    return await runGenerationInParts(courseId, extra, onProgress);
+  } finally {
+    await wakeLock?.release().catch(() => {});
+  }
+}
+
+async function runGenerationInParts(
+  courseId: number,
+  extra: { language?: string; customPrompt?: string },
   onProgress?: (progress: ExplicationGenerationProgress) => void
 ): Promise<ExplicationGenerationResult> {
   // Step 1 — reserve, exactly once, never retried. See this file's header

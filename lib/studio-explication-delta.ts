@@ -596,14 +596,23 @@ const NEXT_KEY_RE = /"\s*,\s*"explicationChapterChunks"/g;
  *     invalid escape targets — escapeKnownStringBody above fixes all three
  *     in one pass, unconditionally, since we already know this whole span
  *     is content).
- *  2. UNCLOSED-TO-END — the second key was never written at all (the
- *     response was cut off before ever reaching it, e.g. genuine token-
- *     ceiling truncation while still writing "explication" itself, the far
- *     more common shape for a very long response): the body is everything
- *     from the opening quote to the end of the raw text. A dangling,
- *     unescaped trailing backslash (truncated mid-escape-sequence) is
- *     dropped before decoding — appending a bare `"` after a lone `\` would
- *     be read as an ESCAPED quote, not a closing one, and break the decode.
+ *  2. UNCLOSED-TO-END — the second key was never written at all: the body is
+ *     everything from the opening quote to the end of the raw text. A
+ *     dangling, unescaped trailing backslash (truncated mid-escape-sequence)
+ *     is dropped before decoding — appending a bare `"` after a lone `\`
+ *     would be read as an ESCAPED quote, not a closing one, and break the
+ *     decode.
+ *
+ *     IMPORTANT INVARIANT, since callOpenRouter's own finish_reason check
+ *     (lib/ai/openrouter.ts) was added: this function is only ever reached
+ *     with a COMPLETE response now (genuine token-ceiling truncation —
+ *     finish_reason "length" — is caught and thrown as a clean, retryable
+ *     error before generateExplicationPart ever sees it). This
+ *     UNCLOSED-TO-END shape should therefore now be rare, caused only by a
+ *     genuine JSON-formatting defect near the very end of an otherwise
+ *     complete response, not by real truncation — do NOT reintroduce
+ *     tolerance for actual truncation here; fix it at the source
+ *     (callOpenRouter / EXPLICATION_PART_MAX_TOKENS) instead.
  *
  * Neither shape ever fabricates content or silently serves a suspiciously
  * short fragment — both are rejected by the same 50-char floor
@@ -653,9 +662,24 @@ function tryDecodeJsonString(escaped: string): string | null {
 // of ~2,200 chars each (≈55,000 chars) — feeding it more than that silently
 // DROPS the excess rather than chunking it, so a slice size must stay safely
 // under that ceiling for every slice to be fully covered by its own call.
-// 50,000 (< MAX_SOURCE_CHARS' own 60,000) keeps each slice's own chunk count
-// comfortably below 25 even accounting for chunk-boundary rounding.
-const CHUNKED_SLICE_CHARS = 50_000;
+//
+// LOWERED 50,000 -> 30,000 after a real, confirmed production incident: a
+// student's Explication came out genuinely INCOMPLETE (stopped mid-content,
+// not a clean error). Root cause (see EXPLICATION_PART_MAX_TOKENS' own
+// comment below for the full mechanism): the Explication system prompt
+// explicitly demands unbounded, exhaustive length ("vise largement plus de
+// 8000 mots, sans plafond réel") per slice, and a 50,000-char slice could
+// genuinely need more visible output than EXPLICATION_PART_MAX_TOKENS
+// allowed — the SAME "exhaustivité maximale" mandate needed maxTokens raised
+// to 65,536 for a full document under the old, pre-chunking architecture,
+// over 3x what one slice was budgeted here. Shrinking the slice (this
+// constant) AND raising the per-slice budget (below) both reduce that risk;
+// shrinking it also shortens each individual OpenRouter round-trip, which
+// independently reduces exposure to the platform's own real per-call latency
+// (confirmed live: ~161s+ even on a clean success) and to a mobile browser
+// suspending a long-running background tab mid-request. 30,000/2,200 ≈ 14
+// chunks, still comfortably under buildSourceChunks' 25-chunk ceiling.
+const CHUNKED_SLICE_CHARS = 30_000;
 
 /**
  * Safe per-part token ceiling for the client-driven, multi-request
@@ -681,12 +705,37 @@ const CHUNKED_SLICE_CHARS = 50_000;
  * pattern to repeat if this ever needs re-verifying on a different Vercel
  * project/plan.
  *
- * 20,000 (up from 16,000) restores headroom now that the real timeout below
- * is no longer the tight constraint it used to be — still well above real
- * historical usage (completion_tokens landing around 9,700-10,000 for a
- * FULL document under the old, pre-chunking architecture).
+ * RAISED AGAIN, 20,000 -> 32,000, after a second real, confirmed production
+ * incident: a student's Explication came out genuinely INCOMPLETE — stopped
+ * mid-content, not a clean error. Root cause, confirmed by direct code
+ * inspection (see lib/ai/openrouter.ts's callOpenRouter, now fixed to check
+ * `finish_reason`): this constant's own PREVIOUS justification — "well above
+ * real historical usage (completion_tokens landing around 9,700-10,000 for a
+ * FULL document under the old, pre-chunking architecture)" — was internally
+ * inconsistent with this codebase's OWN history: the Explication system
+ * prompt explicitly demands unbounded, exhaustive length ("vise largement
+ * plus de 8000 mots, sans plafond réel — plus long et plus détaillé est
+ * toujours strictement préférable"), and that SAME mandate, on a FULL
+ * document under the old architecture, required maxTokens raised to 65,536
+ * elsewhere (see lib/ai/studio-prompts.ts) — over 3x what a single slice was
+ * budgeted here. Whenever a slice's genuinely-exhaustive output exceeded
+ * 20,000 tokens, the response was cut off mid-string by the model provider,
+ * and — until the finish_reason fix above — this was NEVER detected: the
+ * cut-off JSON failed to parse, recoverExplicationOnly below salvaged
+ * whatever partial "explication" text existed, and it was accepted as a
+ * complete, successful part with only a trivial 50-character floor. 32,000
+ * (paired with CHUNKED_SLICE_CHARS lowered 50,000 -> 30,000 above, so each
+ * slice now needs meaningfully less exhaustive output to begin with) is a
+ * deliberately conservative middle ground: real headroom above the old
+ * ceiling without reaching for the full 65,536 a much larger, whole-document
+ * prompt needed, since a single 30,000-char slice's own content is
+ * proportionally smaller. If truncation is ever still observed in production
+ * logs (search for "OpenRouter response truncated by max_tokens ceiling"),
+ * that is now a LOUD, honest, retryable error (not a silent corruption) —
+ * treat a recurrence as a signal to raise this further or shrink
+ * CHUNKED_SLICE_CHARS again, not to re-add tolerance for it.
  */
-const EXPLICATION_PART_MAX_TOKENS = 20_000;
+const EXPLICATION_PART_MAX_TOKENS = 32_000;
 
 /**
  * Hard abort for a single part's OpenRouter call. 260s — comfortably inside

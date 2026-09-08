@@ -352,16 +352,35 @@ const DEFAULT_TIMEOUT_MS = 240_000;
  * calls), not a process-wide default.
  */
 const OPENROUTER_CONNECT_TIMEOUT_MS = 60_000;
+// REAL BUG this was silently causing, found while investigating the
+// recurring "échec de génération" on Explication Ultra-Détaillée: this
+// Agent is a SINGLE module-level instance, its headersTimeout/bodyTimeout
+// fixed once at construction — no per-call `timeoutMs` a caller passes to
+// callOpenRouter ever reaches it (fetchOpenRouterWithRetry only ever
+// attaches `dispatcher: OPENROUTER_DISPATCHER`, nothing overrides its
+// timeouts per call). These previously matched DEFAULT_TIMEOUT_MS (240s) —
+// but several real call sites deliberately configure a LONGER AbortController
+// timeoutMs than that (explication-part: 260s, podcast/regenerate: 280s),
+// believing that value is the operative ceiling. It never was: undici's
+// Agent-level headersTimeout/bodyTimeout fires as its own
+// UND_ERR_HEADERS_TIMEOUT/UND_ERR_BODY_TIMEOUT error, independent of and
+// EARLIER than the AbortController signal — the exact same class of "a
+// second, invisible, lower timeout underneath the one you configured" bug
+// this file's own OPENROUTER_CONNECT_TIMEOUT_MS comment already documents
+// for the connect phase, but never fixed here for headers/body. A slice
+// whose real generation genuinely took 240-260s was being deterministically
+// killed at 240s on EVERY attempt (not a network flake — the same wall every
+// retry), exhausting all 3 client-side retries and surfacing as a hard,
+// unrecoverable "échec de génération". Decoupled from DEFAULT_TIMEOUT_MS and
+// set generously above the longest timeoutMs any real caller configures
+// today (280s, podcast/regenerate) so this Agent-level ceiling is never the
+// binding constraint again — each call's own AbortController timeoutMs
+// remains the real, intended authority.
+const OPENROUTER_DISPATCHER_TIMEOUT_MS = 300_000;
 const OPENROUTER_DISPATCHER = new Agent({
   connect: { timeout: OPENROUTER_CONNECT_TIMEOUT_MS },
-  // headersTimeout/bodyTimeout are undici's OTHER two built-in timeouts —
-  // time-to-first-response-byte and max-gap-between-body-chunks,
-  // respectively, both also defaulting to values this app never explicitly
-  // chose. Matched to DEFAULT_TIMEOUT_MS so neither becomes a NEW, tighter,
-  // undocumented ceiling underneath the one this file's callers already
-  // reason about.
-  headersTimeout: DEFAULT_TIMEOUT_MS,
-  bodyTimeout: DEFAULT_TIMEOUT_MS,
+  headersTimeout: OPENROUTER_DISPATCHER_TIMEOUT_MS,
+  bodyTimeout: OPENROUTER_DISPATCHER_TIMEOUT_MS,
 });
 
 // Bounded — a persistently broken network still fails (not an infinite
@@ -530,6 +549,38 @@ export async function callOpenRouter(
   }
 
   const data = await res.json();
+
+  // REAL BUG this was silently causing, found while investigating the
+  // recurring "the Explication came out incomplete, stopped mid-way"
+  // production report: this function used to read ONLY
+  // `message.content`, never the standard OpenAI-compatible
+  // `finish_reason` field OpenRouter also returns per choice. When a
+  // response hits its `max_tokens` ceiling mid-generation, `finish_reason`
+  // is `"length"` and `content` is genuinely, silently INCOMPLETE (cut off
+  // mid-sentence) — but it was still a normal string, so it sailed straight
+  // through as a "successful" call. Downstream, generateExplicationPart's
+  // JSON-repair/recovery fallback (lib/studio-explication-delta.ts) then
+  // salvaged whatever partial "explication" text it could find and accepted
+  // it as a complete part with only a trivial 50-character floor — its own
+  // doc comment already named this exact "cut off before ever closing" shape
+  // as "the far more common shape for a very long response", i.e. this was
+  // a known, accepted risk, not a hidden edge case. Failing loudly HERE
+  // instead restores that recovery path's real intended scope (rescuing a
+  // COMPLETE response that's merely malformed JSON — a real, separate
+  // failure mode) while turning genuine truncation into an honest,
+  // retryable error every caller's own retry logic can act on, instead of a
+  // silently-corrupted "success".
+  const finishReason = data?.choices?.[0]?.finish_reason;
+  if (finishReason === "length") {
+    console.error(
+      `OpenRouter response truncated by max_tokens ceiling (model=${options?.model ?? MODEL}, maxTokens=${options?.maxTokens ?? 8192})`
+    );
+    throw new OpenRouterError(
+      "La réponse de l'IA a été coupée avant la fin (limite de longueur atteinte). Réessaie — la génération sera automatiquement redécoupée si besoin.",
+      502
+    );
+  }
+
   const content = data?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string" || !content.trim()) {
