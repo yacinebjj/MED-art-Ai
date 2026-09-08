@@ -1,5 +1,35 @@
 import { Agent } from "undici";
+import dns from "dns";
 import { detectMockPayload } from "@/lib/ai/mock-data";
+
+/**
+ * THE REAL, EMPIRICALLY-CONFIRMED ROOT CAUSE of the "Erreur 504" that kept
+ * recurring on Explication Ultra-Détaillée no matter how generously every
+ * timeout in this app was raised. Two prior rounds of fixes on the app side
+ * (removing AI calls from the fast route, raising every timeoutMs/maxDuration
+ * to match this project's real, measured Vercel duration ceiling — 250s+,
+ * confirmed live) were all individually correct but never touched the ACTUAL
+ * problem: a plain, unmodified `fetch()` call to OpenRouter — no custom
+ * Agent, no retry logic, nothing app-specific — HUNG for the FULL configured
+ * timeout (260s+) every time it was made from WITHIN this Vercel project's
+ * serverless runtime, while the IDENTICAL request (same model, same prompt,
+ * same 50KB+ payload) completed in ~7 SECONDS when sent from outside Vercel
+ * entirely. That specific signature — works everywhere, hangs on one cloud
+ * platform, same request — is the classic fingerprint of broken/slow IPv6
+ * egress: Node's default DNS result order is "verbatim" (whatever order the
+ * resolver returns, which can put an AAAA/IPv6 record first) even when the
+ * platform's actual IPv6 route to the destination is unreachable or far
+ * slower than its IPv4 route. Confirmed by direct A/B test against a live
+ * diagnostic route deployed to this exact project: forcing IPv4-first
+ * resolution turned a guaranteed 260s+ timeout into a successful 200
+ * response. Scoped here (not a Next.js instrumentation hook or a
+ * project-wide config) so it's guaranteed to run before ANY OpenRouter call
+ * in this file — the first, and for this bug the only, module that needs it
+ * — the moment this module is first imported; `dns.setDefaultResultOrder`
+ * affects the whole Node process, so one call here is sufficient and safe to
+ * repeat (idempotent) if some other module ever calls it too.
+ */
+dns.setDefaultResultOrder("ipv4first");
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // "anthropic/claude-3.5-sonnet" was retired by OpenRouter (404s with
