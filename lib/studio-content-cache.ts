@@ -65,8 +65,29 @@ export interface StudioCacheLookupResult {
   cacheRowId?: string;
 }
 
-/** Checked before every OpenRouter call in app/api/studio/generate/route.ts. Returns `{ hit: false }` on any Supabase error or misconfiguration — a lookup failure must never block generation, only skip the optimization. */
-export async function lookupStudioContentCache(section: JsonSectionId, rawText: string): Promise<StudioCacheLookupResult> {
+/**
+ * Checked before every OpenRouter call in app/api/studio/generate/route.ts.
+ * Returns `{ hit: false }` on any Supabase error or misconfiguration — a
+ * lookup failure must never block generation, only skip the optimization.
+ *
+ * `exactOnly` — skips the fuzzy tier (a second, up-to-500-row query plus an
+ * in-process MinHash similarity scan over all of them) entirely. Added for
+ * app/api/studio/generate/explication-start/route.ts specifically: that
+ * route was rearchitected to NEVER consume a fuzzy match (see its own
+ * ARCHITECTURE comment — the fuzzy-cache delta adaptation that used to
+ * follow a fuzzy hit was removed after a real production 504 traced to AI
+ * calls running inside that latency-critical, tightly-bounded route), so
+ * paying for the fuzzy scan there was pure wasted latency on every single
+ * cache-miss request — exactly the kind of avoidable delay that matters
+ * once a route's whole budget is measured in single-digit seconds. Every
+ * OTHER caller (the generic /api/studio/generate route, which still does
+ * use fuzzy hits) is unaffected — this defaults to false.
+ */
+export async function lookupStudioContentCache(
+  section: JsonSectionId,
+  rawText: string,
+  exactOnly = false
+): Promise<StudioCacheLookupResult> {
   if (!isSupabaseConfigured()) return { hit: false };
   const supabase = getSupabaseAdmin();
   const normalized = normalizeText(rawText);
@@ -86,6 +107,7 @@ export async function lookupStudioContentCache(section: JsonSectionId, rawText: 
   if (exactRow) {
     return { hit: true, data: exactRow.data, matchType: "exact", similarity: 1, cacheRowId: exactRow.id };
   }
+  if (exactOnly) return { hit: false };
 
   // Fuzzy tier: pull cached signatures for this section and compare
   // in-process — keeps the similarity math in one place

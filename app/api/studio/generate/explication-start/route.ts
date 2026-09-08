@@ -179,9 +179,13 @@ export async function POST(request: NextRequest) {
   const truncatedContext = resolvedSourceText.slice(0, MAX_SOURCE_CHARS);
   const contentHash = sha256(normalizeText(truncatedContext));
 
+  // exactOnly=true — this route never consumes a fuzzy match (see this
+  // file's top-of-file comment), so skip that tier's extra ~500-row query +
+  // in-process MinHash scan entirely; pure wasted latency here otherwise,
+  // and this route's whole point is to be as fast as possible.
   const cacheResult: StudioCacheLookupResult = isPersonalizedVariant
     ? { hit: false }
-    : await lookupStudioContentCache("explication", truncatedContext);
+    : await lookupStudioContentCache("explication", truncatedContext, true);
 
   if (cacheResult.hit && cacheResult.matchType === "exact") {
     const markdown = cacheResult.data as string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, KeyboardEvent, useRef, useState } from "react";
+import { DragEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Cloud, FileText, FileUp, Upload, UploadCloud } from "lucide-react";
 import {
   Dialog,
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { openGoogleDrivePicker } from "@/lib/google-drive-picker";
+import { openGoogleDrivePicker, preloadGoogleDriveScripts } from "@/lib/google-drive-picker";
 import { useToast } from "@/components/ui/Toast";
 import { OcrSuggestedError } from "@/lib/upload-client";
 
@@ -82,6 +82,17 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   const [ocrSuggestion, setOcrSuggestion] = useState<{ path: string; fileName: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Fires the moment this modal opens, well before any click — see
+  // preloadGoogleDriveScripts' own doc comment: by the time the student
+  // actually taps "Importer depuis Drive", the Google scripts this needs are
+  // already loaded, so the click handler's own await on them resolves near-
+  // instantly instead of introducing a real async gap between the tap and
+  // Google's own popup call (the gap several mobile browsers treat as
+  // "gesture no longer trusted", silently blocking the popup).
+  useEffect(() => {
+    if (open) preloadGoogleDriveScripts();
+  }, [open]);
 
   function reset() {
     setIsDragging(false);

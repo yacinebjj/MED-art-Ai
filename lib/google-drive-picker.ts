@@ -102,6 +102,36 @@ declare global {
 
 let gapiPickerLoaded = false;
 
+/**
+ * Fire-and-forget, safe to call multiple times (loadScriptOnce's own
+ * document.querySelector short-circuit makes every call after the first a
+ * near-instant no-op) — call this as EARLY as possible (e.g. the moment the
+ * upload modal opens), well before the student actually clicks "Importer
+ * depuis Drive". Real production issue this fixes: openGoogleDrivePicker
+ * used to `await ensureGoogleScripts()` INSIDE the click handler itself,
+ * before ever calling Google's own popup-opening `requestAccessToken()` —
+ * that `await` is a genuine async gap between the click and the popup call,
+ * and several mobile browsers (Safari in particular) only grant "trusted
+ * user gesture" popup privileges to a `window.open` call that happens
+ * SYNCHRONOUSLY within the original click/tap handler, revoking it across
+ * any intervening microtask/macrotask boundary. A cold script load (even a
+ * fast one) is exactly such a gap — the likely real cause of Google's own
+ * popup silently failing to open ("hangs or does nothing") even once the
+ * Client ID's Authorized JavaScript origins are correctly configured.
+ * Preloading here means that by the time the click handler actually runs,
+ * ensureGoogleScripts() resolves synchronously-fast (already-loaded scripts,
+ * no real await), keeping the gesture fresh through to requestAccessToken().
+ */
+export function preloadGoogleDriveScripts(): void {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) return;
+  void ensureGoogleScripts().catch((error) => {
+    // Best-effort only — a failed preload just means the click handler's
+    // own await ensureGoogleScripts() call (still in place, unchanged)
+    // retries it and surfaces the real error normally at that point.
+    console.warn("[google-drive-picker] Préchargement des scripts Google échoué (non bloquant, réessayé au clic):", error);
+  });
+}
+
 async function ensureGoogleScripts(): Promise<void> {
   await Promise.all([
     loadScriptOnce("https://apis.google.com/js/api.js"),
@@ -147,41 +177,33 @@ async function ensureGoogleScripts(): Promise<void> {
 const ACCESS_TOKEN_TIMEOUT_MS = 90_000;
 
 /**
- * Best-effort, INSTANT popup-blocked detection — opens and immediately
- * closes a tiny throwaway window in the SAME synchronous call stack as the
- * click handler (still counts as "user-initiated" to the browser's popup
- * heuristic, unlike an async check after an await). If the browser blocks
- * popups for this origin, `window.open` returns `null`/`undefined` (Chrome,
- * Firefox) or throws (some mobile browsers/in-app webviews). Catching this
- * BEFORE handing off to Google Identity Services means a blocked popup
- * surfaces a specific, actionable message immediately instead of the
- * generic ACCESS_TOKEN_TIMEOUT_MS 90-second wait — GIS's own popup, once
- * blocked the same way, would otherwise just silently never invoke its
- * callback, indistinguishable from any other kind of hang.
+ * Google Identity Services' OWN documented mechanism for exactly this
+ * (https://developers.google.com/identity/oauth2/web/reference/js-reference)
+ * — `error_callback` receives `{ type }` for a handful of non-OAuth
+ * failures, including `"popup_failed_to_open"` (the browser blocked the
+ * popup outright) and `"popup_closed"` (the student closed it before
+ * finishing). Using GIS's own signal here instead of a home-grown
+ * window.open() probe avoids two real risks a probe would add: an extra
+ * popup call that could itself confuse a strict browser's "how many popups
+ * did this one gesture open" heuristic, and a false negative/positive from
+ * guessing at browser-specific window.open() return-value quirks.
  */
-function isPopupLikelyBlocked(): boolean {
-  try {
-    const probe = window.open("", "_blank", "width=1,height=1");
-    if (!probe) return true;
-    probe.close();
-    return false;
-  } catch {
-    return true;
+type TokenClientErrorType = "popup_failed_to_open" | "popup_closed" | "unknown";
+
+function messageForTokenClientError(type: TokenClientErrorType): string {
+  if (type === "popup_failed_to_open") {
+    return "La fenêtre Google Drive a été bloquée par ton navigateur. Autorise les fenêtres surgissantes (pop-ups) pour ce site, puis réessaie.";
   }
+  if (type === "popup_closed") {
+    return "Tu as fermé la fenêtre Google avant la fin de la connexion — réessaie si tu veux importer un fichier.";
+  }
+  return "La connexion à Google a échoué. Réessaie dans un instant.";
 }
 
 function requestAccessToken(): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!GOOGLE_CLIENT_ID) {
       reject(new Error("Google Drive n'est pas configuré (NEXT_PUBLIC_GOOGLE_CLIENT_ID manquant)."));
-      return;
-    }
-    if (isPopupLikelyBlocked()) {
-      reject(
-        new Error(
-          "Ton navigateur a bloqué la fenêtre de connexion Google. Autorise les popups pour ce site (icône dans la barre d'adresse, ou réglages du navigateur), puis réessaie."
-        )
-      );
       return;
     }
     let settled = false;
@@ -195,6 +217,10 @@ function requestAccessToken(): Promise<string> {
       );
     }, ACCESS_TOKEN_TIMEOUT_MS);
 
+    // No `await` (or any other async gap) between this call and the click
+    // handler that led here — see preloadGoogleDriveScripts' own comment for
+    // why that matters: this call must stay inside the same trusted user
+    // gesture as the original tap for the browser to allow the popup at all.
     const tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: DRIVE_SCOPE,
@@ -207,6 +233,14 @@ function requestAccessToken(): Promise<string> {
           return;
         }
         resolve(response.access_token);
+      },
+      error_callback: (error: { type?: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        const type: TokenClientErrorType =
+          error?.type === "popup_failed_to_open" || error?.type === "popup_closed" ? error.type : "unknown";
+        reject(new Error(messageForTokenClientError(type)));
       },
     });
     tokenClient.requestAccessToken();
