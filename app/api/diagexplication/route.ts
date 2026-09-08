@@ -66,8 +66,19 @@ async function runPlainFetch(sourceText: string) {
   }
 }
 
+const DIAG_VERSION = "v4-ping-marker";
+
 export async function GET(request: NextRequest) {
-  const mode = request.nextUrl.searchParams.get("mode") === "plain" ? "plain" : "real";
+  const modeParam = request.nextUrl.searchParams.get("mode");
+  // Instant, zero-cost freshness check — no OpenRouter call at all. Confirms
+  // the LATEST deployed code (with mode=plain support) is actually live
+  // before spending another real, ~260s+billed test cycle — a real,
+  // repeated risk this session given Vercel deployment propagation has been
+  // unexpectedly slow/inconsistent for this specific route.
+  if (modeParam === "ping") {
+    return NextResponse.json({ success: true, version: DIAG_VERSION, now: Date.now() });
+  }
+  const mode = modeParam === "plain" ? "plain" : "real";
   const t0 = Date.now();
   const sourceText = buildSourceText();
   const slices = computeExplicationSlices(sourceText);
