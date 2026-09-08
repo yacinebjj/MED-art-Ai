@@ -52,17 +52,23 @@ export interface ExplicationGenerationProgress {
 const MAX_PART_ATTEMPTS = 3;
 const PART_RETRY_DELAYS_MS = [2000, 5000];
 // Each client-side timeout is kept ABOVE its route's own `maxDuration`
-// (explication-start/-part/-finalize are all 60s) — deliberately, and not
-// merely generous headroom: explication-start is never retried by this
-// driver (see this file's header comment), so if the client gave up BEFORE
-// the server could possibly finish, it would have no way to know whether a
-// reservation happened right as it stopped waiting, exactly the kind of
-// ambiguous-outcome window this whole redesign exists to minimize. Letting
-// the client always wait at least as long as the server's own hard ceiling
-// means a genuine platform kill (not a client-side impatience) is the only
-// way this ambiguity can still occur.
+// (explication-start=15s, explication-part=280s, explication-finalize=60s —
+// see each route's own file for why) — deliberately, and not merely
+// generous headroom: explication-start is never retried by this driver (see
+// this file's header comment), so if the client gave up BEFORE the server
+// could possibly finish, it would have no way to know whether a reservation
+// happened right as it stopped waiting, exactly the kind of ambiguous-
+// outcome window this whole redesign exists to minimize. Letting the client
+// always wait at least as long as the server's own hard ceiling means a
+// genuine platform kill (not a client-side impatience) is the only way this
+// ambiguity can still occur. PART_FETCH_TIMEOUT_MS in particular was a real,
+// repeated production bug when it sat at 70s while explication-part could
+// legitimately run close to that — an empirical test proved this project's
+// real Vercel ceiling is 250s+, so explication-part's own maxDuration was
+// raised to 280s, and this must stay comfortably above THAT, not the old
+// value.
 const START_FETCH_TIMEOUT_MS = 70_000;
-const PART_FETCH_TIMEOUT_MS = 70_000;
+const PART_FETCH_TIMEOUT_MS = 290_000;
 const FINALIZE_FETCH_TIMEOUT_MS = 70_000;
 
 function wait(ms: number): Promise<void> {

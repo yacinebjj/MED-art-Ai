@@ -33,21 +33,25 @@ const MAX_VARIATIONS = 20;
 
 /**
  * Explication's own maxTokens ceiling (65,536, STUDIO_PROMPT_CONFIG) is far
- * above every other section's (20,000) — the same real-Vercel-duration-
- * ceiling risk that the /api/studio/generate/explication-* pipeline was
- * rewritten to eliminate for FRESH generation (see
- * lib/studio-explication-delta.ts's ARCHITECTURE comment) still exists here
- * for a Régénérer click on an already-large Explication, since this route
- * was intentionally NOT rewritten into the same multi-part pipeline
- * (disclosed scope boundary — regeneration rewrites already-generated
- * content via the fast HAIKU_MODEL, not fresh source, a materially lower-risk
- * shape than the bug this session's fix targeted). This bound at least
- * ensures a stuck/slow regeneration call fails CLEANLY and fast — retryable
- * by the student — instead of silently inheriting callOpenRouter's full
- * 240s DEFAULT_TIMEOUT_MS, which risks colliding with a tight real Vercel
- * ceiling exactly like the original bug report.
+ * above every other section's (20,000) for a Régénérer click on an already-
+ * large Explication, since this route was intentionally NOT rewritten into
+ * the same multi-part pipeline as fresh generation (disclosed scope
+ * boundary — regeneration rewrites already-generated content via the fast
+ * HAIKU_MODEL, not fresh source, a materially lower-risk shape).
+ *
+ * Bounded here so a genuinely stuck/slow regeneration call fails CLEANLY —
+ * retryable by the student — instead of silently inheriting callOpenRouter's
+ * full 240s DEFAULT_TIMEOUT_MS with no route-level margin. An EARLIER
+ * version of this constant was 55s, calibrated against an ASSUMED tight
+ * Vercel duration ceiling that was never actually measured — an empirical,
+ * zero-cost test (see lib/studio-explication-delta.ts's
+ * EXPLICATION_PART_MAX_TOKENS HISTORY comment for the full incident this
+ * caused on the explication-part route) confirmed this project's real
+ * ceiling exceeds 250 seconds live. 280s here restores real margin under
+ * this route's own maxDuration=300 instead of repeating that same mistake
+ * on the Régénérer button.
  */
-const EXPLICATION_REGENERATE_TIMEOUT_MS = 55_000;
+const EXPLICATION_REGENERATE_TIMEOUT_MS = 280_000;
 
 const VALID_SECTIONS = Object.keys(STUDIO_PROMPT_CONFIG) as JsonSectionId[];
 

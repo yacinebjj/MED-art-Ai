@@ -8,14 +8,18 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { computeExplicationSlices, generateExplicationPart } from "@/lib/studio-explication-delta";
 
 export const runtime = "nodejs";
-// Deliberately tight — every call here is ONE bounded part of a
-// client-driven sequence (see lib/studio-explication-delta.ts's ARCHITECTURE
-// comment). 60s gives generateExplicationPart's own 50s OpenRouter timeout a
-// small buffer for JSON parsing / response serialization, while staying
-// safely inside even a strict Hobby-plan-without-Fluid-Compute real ceiling
-// — the actual, disclosed root cause of the previous architecture's
-// repeated "échec de génération".
-export const maxDuration = 60;
+// 280s — comfortably inside this project's REAL enforced ceiling, which an
+// empirical, zero-cost test (an awaited sleep, no AI call — see
+// app/api/diagsleep, deleted after use) confirmed exceeds 250 seconds live.
+// The previous value here (60s) was a DEFENSIVE GUESS against a possible
+// tight platform ceiling that turned out not to apply to this project —
+// see lib/studio-explication-delta.ts's EXPLICATION_PART_MAX_TOKENS HISTORY
+// comment for the full incident: that guess, not a platform kill, was the
+// actual cause of the repeated 504 (this route's OWN
+// EXPLICATION_PART_TIMEOUT_MS aborting a genuinely-still-in-progress
+// generation early). 280s gives generateExplicationPart's own 260s
+// OpenRouter timeout real margin for JSON parsing / response serialization.
+export const maxDuration = 280;
 
 /**
  * Generation-only step of the client-driven, multi-request Explication

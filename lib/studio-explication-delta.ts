@@ -660,35 +660,45 @@ const CHUNKED_SLICE_CHARS = 50_000;
 /**
  * Safe per-part token ceiling for the client-driven, multi-request
  * Explication pipeline (app/api/studio/generate/explication-part/route.ts —
- * see that route's own header comment for the full architecture). Formerly
- * every Explication call — long OR short source — used
- * STUDIO_PROMPT_CONFIG.explication.maxTokens directly (65,536), sized for a
- * single server-side call with no real wall-clock budget. That is no longer
- * how Explication generates: every request is now ONE bounded part of a
- * sequence, each of which must comfortably finish inside a tight serverless
- * duration ceiling — Vercel's OWN real enforced cap can be as low as 10-60s
- * depending on plan/Fluid Compute settings, REGARDLESS of this app's own
- * `maxDuration` config (see app/api/studio/generate/route.ts's own disclosed
- * comment on this — the actual root cause of "échec de génération" repeated
- * 3-4 times before an eventually-truncated success). 16,000 is chosen well
- * above real historical usage — production logs showed completion_tokens
- * landing around 9,700-10,000 for a FULL document under the old ceiling — so
- * a genuine quality regression is unlikely, while being ~4x lower than the
- * old ceiling to keep realistic per-part completion time safely under
- * EXPLICATION_PART_TIMEOUT_MS below.
+ * see that route's own header comment for the full architecture).
+ *
+ * HISTORY — a real, repeated production incident this exact constant caused:
+ * two prior rounds of "fix the 504" assumed Vercel's REAL enforced duration
+ * ceiling for this project was tight (as low as 10-60s, a documented
+ * possibility on some plans/Fluid-Compute configurations) and calibrated
+ * EXPLICATION_PART_TIMEOUT_MS/EXPLICATION_PART_MAX_TOKENS defensively around
+ * that guess, WITHOUT ever actually measuring it. The guess was wrong: a
+ * throwaway diagnostic route (an awaited sleep, no AI call, no side effects,
+ * deployed and deleted the same session) empirically confirmed this
+ * project's real ceiling comfortably exceeds 250 SECONDS. The 504 the
+ * student kept hitting "every single time" was never a platform kill at
+ * all — it was THIS code's own EXPLICATION_PART_TIMEOUT_MS (formerly 50s)
+ * aborting the OpenRouter call before a genuinely large "ultra-détaillée"
+ * generation could finish, which apparently needed more than 50s essentially
+ * every time. Lesson encoded here, not just in a commit message: NEVER
+ * recalibrate a timeout against an assumed platform ceiling again without
+ * measuring it first — see app/api/diagsleep (deleted after use) for the
+ * pattern to repeat if this ever needs re-verifying on a different Vercel
+ * project/plan.
+ *
+ * 20,000 (up from 16,000) restores headroom now that the real timeout below
+ * is no longer the tight constraint it used to be — still well above real
+ * historical usage (completion_tokens landing around 9,700-10,000 for a
+ * FULL document under the old, pre-chunking architecture).
  */
-const EXPLICATION_PART_MAX_TOKENS = 16_000;
+const EXPLICATION_PART_MAX_TOKENS = 20_000;
 
 /**
- * Hard abort for a single part's OpenRouter call — well under any plausible
- * real Vercel duration ceiling (see EXPLICATION_PART_MAX_TOKENS's comment
- * above), so a slow/stuck generation fails CLEANLY with a retryable error
- * instead of the whole serverless function being killed with no response at
- * all. This is the actual mechanism that makes automatic client-side retry
- * (lib/studio-explication-client.ts) safe and effective: a clean, fast
- * failure is retryable; a platform-level function kill is not.
+ * Hard abort for a single part's OpenRouter call. 260s — comfortably inside
+ * the empirically-measured real ceiling (250s+ confirmed live, see
+ * EXPLICATION_PART_MAX_TOKENS's own HISTORY comment for how), with margin
+ * under explication-part/route.ts's own maxDuration=280 for JSON parsing/
+ * response serialization. Still a real, necessary safety net — a
+ * genuinely stuck call fails CLEANLY and retryably instead of the whole
+ * function being killed with no response at all — just no longer
+ * artificially tight relative to what this platform can actually sustain.
  */
-const EXPLICATION_PART_TIMEOUT_MS = 50_000;
+const EXPLICATION_PART_TIMEOUT_MS = 260_000;
 
 /**
  * Deterministic slice plan for a course's full source text — same slicing
