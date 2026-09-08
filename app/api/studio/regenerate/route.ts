@@ -31,6 +31,24 @@ export const maxDuration = 300; // same headroom as /api/studio/generate — a r
  */
 const MAX_VARIATIONS = 20;
 
+/**
+ * Explication's own maxTokens ceiling (65,536, STUDIO_PROMPT_CONFIG) is far
+ * above every other section's (20,000) — the same real-Vercel-duration-
+ * ceiling risk that the /api/studio/generate/explication-* pipeline was
+ * rewritten to eliminate for FRESH generation (see
+ * lib/studio-explication-delta.ts's ARCHITECTURE comment) still exists here
+ * for a Régénérer click on an already-large Explication, since this route
+ * was intentionally NOT rewritten into the same multi-part pipeline
+ * (disclosed scope boundary — regeneration rewrites already-generated
+ * content via the fast HAIKU_MODEL, not fresh source, a materially lower-risk
+ * shape than the bug this session's fix targeted). This bound at least
+ * ensures a stuck/slow regeneration call fails CLEANLY and fast — retryable
+ * by the student — instead of silently inheriting callOpenRouter's full
+ * 240s DEFAULT_TIMEOUT_MS, which risks colliding with a tight real Vercel
+ * ceiling exactly like the original bug report.
+ */
+const EXPLICATION_REGENERATE_TIMEOUT_MS = 55_000;
+
 const VALID_SECTIONS = Object.keys(STUDIO_PROMPT_CONFIG) as JsonSectionId[];
 
 function isValidSection(value: unknown): value is JsonSectionId {
@@ -245,7 +263,12 @@ export async function POST(request: NextRequest) {
         // fresh generation of comparable length/depth (see this route's own
         // MAX_VARIATIONS comment for why the REAL "later regenerate is
         // free" mechanism is the variation cache, not a cheaper model).
-        { model: HAIKU_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+        {
+          model: HAIKU_MODEL,
+          maxTokens,
+          bypassMock: STUDIO_BYPASS_MOCK,
+          timeoutMs: section === "explication" ? EXPLICATION_REGENERATE_TIMEOUT_MS : undefined,
+        }
       );
     } catch (error) {
       await refundGeneration(user.id);
@@ -312,7 +335,12 @@ export async function POST(request: NextRequest) {
         { role: "user", content: "Génère le contenu régénéré demandé." },
       ],
       // Haiku, not Sonnet — same reasoning as the variation-cache path above.
-      { model: HAIKU_MODEL, maxTokens, bypassMock: STUDIO_BYPASS_MOCK }
+      {
+        model: HAIKU_MODEL,
+        maxTokens,
+        bypassMock: STUDIO_BYPASS_MOCK,
+        timeoutMs: section === "explication" ? EXPLICATION_REGENERATE_TIMEOUT_MS : undefined,
+      }
     );
   } catch (error) {
     await refundGeneration(user.id);

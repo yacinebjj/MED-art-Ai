@@ -38,17 +38,57 @@ export interface DrivePickedFile {
   mimeType: string;
 }
 
+// A blocked/stalled script request doesn't always fire the element's own
+// `error` event (some ad/privacy blockers, or a request that just hangs
+// rather than failing outright) — without a bound, `loadScriptOnce` could
+// wait forever, and every caller above it (ensureGoogleScripts,
+// openGoogleDrivePicker, handleDriveImport) would hang right along with it:
+// the Import button spinning forever with zero error, indistinguishable
+// from the "click does nothing" production report. Same pattern/rationale
+// as ACCESS_TOKEN_TIMEOUT_MS below, applied one step earlier in the flow.
+const SCRIPT_LOAD_TIMEOUT_MS = 20_000;
+
 function loadScriptOnce(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+    // Only trust an existing tag if IT already finished loading (marked via
+    // data-loaded below) — a tag left behind by a PREVIOUS attempt that
+    // timed out/errored is NOT proof the script ever actually loaded
+    // (window.gapi/window.google could still be undefined). Without this
+    // distinction, retrying after a genuine failure would silently
+    // "succeed" from the stale tag and crash one step later on
+    // window.gapi.load(...)/window.google.accounts... being called on
+    // undefined — a real, confirmed gap in the first version of this fix.
+    if (existing?.dataset.loaded === "true") {
       resolve();
       return;
     }
+    if (existing) existing.remove();
+
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      script.remove();
+      reject(new Error("Impossible de charger les services Google — vérifie ta connexion ou désactive ton bloqueur de publicités, puis réessaie."));
+    }, SCRIPT_LOAD_TIMEOUT_MS);
     const script = document.createElement("script");
     script.src = src;
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Échec du chargement de ${src}`));
+    script.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      script.dataset.loaded = "true";
+      resolve();
+    };
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      script.remove();
+      reject(new Error(`Échec du chargement de ${src}`));
+    };
     document.body.appendChild(script);
   });
 }
@@ -70,7 +110,26 @@ async function ensureGoogleScripts(): Promise<void> {
 
   if (!gapiPickerLoaded) {
     await new Promise<void>((resolve, reject) => {
-      window.gapi.load("picker", { callback: resolve, onerror: () => reject(new Error("Échec du chargement de Google Picker.")) });
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("Le chargement du sélecteur Google Drive a pris trop de temps — réessaie."));
+      }, SCRIPT_LOAD_TIMEOUT_MS);
+      window.gapi.load("picker", {
+        callback: () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve();
+        },
+        onerror: () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(new Error("Échec du chargement de Google Picker."));
+        },
+      });
     });
     gapiPickerLoaded = true;
   }
@@ -139,28 +198,54 @@ export async function openGoogleDrivePicker(): Promise<(DrivePickedFile & { acce
   await ensureGoogleScripts();
   const accessToken = await requestAccessToken();
 
-  return new Promise((resolve, reject) => {
-    const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS)
-      .setMimeTypes(PICKER_MIME_TYPES)
-      .setSelectFolderEnabled(false);
+  // Same class of risk as the two steps above (script loading, OAuth token
+  // request) — a Picker API misconfiguration (API key missing the "Google
+  // Picker API" enablement, or a referrer restriction mismatch — a DIFFERENT
+  // failure mode than the Client ID/API key presence check above, since the
+  // widget itself renders but its callback then never fires PICKED or
+  // CANCEL) left this specific promise with no timeout at all in the first
+  // version of this fix — the last remaining unguarded async step in the
+  // whole Drive-import chain, and a real way for the "click does nothing,
+  // spins forever" bug class to survive one step further down the pipeline.
+  const PICKER_DISPLAY_TIMEOUT_MS = 90_000;
 
-    const picker = new window.google.picker.PickerBuilder()
-      .addView(view)
-      .setOAuthToken(accessToken)
-      .setDeveloperKey(GOOGLE_API_KEY)
-      .setCallback((data: any) => {
-        if (data.action === window.google.picker.Action.PICKED) {
-          const doc = data.docs[0];
-          resolve({ id: doc.id, name: doc.name, mimeType: doc.mimeType, accessToken });
-        } else if (data.action === window.google.picker.Action.CANCEL) {
-          resolve(null);
-        }
-      })
-      .build();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Le sélecteur Google Drive n'a pas répondu. Vérifie la configuration de l'API Picker, ou réessaie."));
+    }, PICKER_DISPLAY_TIMEOUT_MS);
 
     try {
+      const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS)
+        .setMimeTypes(PICKER_MIME_TYPES)
+        .setSelectFolderEnabled(false);
+
+      const picker = new window.google.picker.PickerBuilder()
+        .addView(view)
+        .setOAuthToken(accessToken)
+        .setDeveloperKey(GOOGLE_API_KEY)
+        .setCallback((data: any) => {
+          if (settled) return;
+          if (data.action === window.google.picker.Action.PICKED) {
+            const doc = data.docs[0];
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve({ id: doc.id, name: doc.name, mimeType: doc.mimeType, accessToken });
+          } else if (data.action === window.google.picker.Action.CANCEL) {
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(null);
+          }
+        })
+        .build();
+
       picker.setVisible(true);
     } catch (error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
       reject(error instanceof Error ? error : new Error("Échec de l'ouverture du sélecteur Google Drive."));
     }
   });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL, CHEAP_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import {
   STUDIO_BYPASS_MOCK,
   STUDIO_PROMPT_CONFIG,
@@ -19,12 +19,6 @@ import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { reservePlatformCapacity } from "@/lib/platform-spend-guard";
 import { lookupStudioContentCache, recordStudioCacheHit, storeStudioContentCache, type StudioCacheLookupResult } from "@/lib/studio-content-cache";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
-import {
-  runStudioExplicationDeltaPipeline,
-  runStudioExplicationFreshGenerationWithTagging,
-  runStudioExplicationChunkedGeneration,
-} from "@/lib/studio-explication-delta";
-import { EXPLICATION_CHUNK_TAGGING_ADDENDUM } from "@/lib/prompts/public-course-sections";
 import { dispatchStudioGenerationPush } from "@/lib/push/dispatch";
 import type { JsonSectionId } from "@/lib/demo-content";
 
@@ -167,7 +161,6 @@ export async function POST(request: NextRequest) {
     documentContext,
     courseId,
     language: languageRaw,
-    customPrompt: customPromptRaw,
     studyYear: studyYearRaw,
   } = (body ?? {}) as {
     actionType?: unknown;
@@ -187,8 +180,6 @@ export async function POST(request: NextRequest) {
     courseId?: unknown;
     /** Studio tile pre-generation menu (Point 4) — "fr" (default, omitted) or "en". */
     language?: unknown;
-    /** Explication-only free-text addition from the tile's pre-generation menu — ignored for every other actionType. */
-    customPrompt?: unknown;
     /**
      * The student's OWN curriculum level (StudentCurriculumProfile.
      * academicYear.level, types/academic.ts — sent by the client, resolved
@@ -207,12 +198,25 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  // Explication now generates exclusively through its own client-driven,
+  // multi-request pipeline (app/api/studio/generate/explication-part +
+  // explication-finalize — see lib/studio-explication-delta.ts's
+  // ARCHITECTURE comment for why: a single request/serverless invocation
+  // could not reliably survive Explication's real generation time against
+  // Vercel's own duration ceiling). Guarded here, explicitly, so this route
+  // can never silently fall back into that retired, unsafe single-call path
+  // for Explication specifically — every OTHER actionType is unaffected.
+  if (actionType === "explication") {
+    return NextResponse.json(
+      { success: false, error: "'explication' se génère via /api/studio/generate/explication-part, pas via cette route." },
+      { status: 400 }
+    );
+  }
   if (typeof courseId !== "number" || !Number.isFinite(courseId)) {
     return NextResponse.json({ success: false, error: "'courseId' est requis et doit être un nombre." }, { status: 400 });
   }
 
   const language: "fr" | "en" = languageRaw === "en" ? "en" : "fr";
-  const customPrompt = actionType === "explication" && typeof customPromptRaw === "string" ? customPromptRaw.trim().slice(0, 2000) : "";
   // Only exactly 1 or 2 is ever meaningful (see resolveCasCliniqueSystemPrompt/
   // resolveStudioSchema's own identical gating) — anything else (a real
   // number like 3-7, or a missing/malformed value) resolves to `null`,
@@ -234,15 +238,11 @@ export async function POST(request: NextRequest) {
   // 1ère année and a 3ème année student uploading the SAME course text
   // would silently share one cas_clinique cache entry — showing one of
   // them the wrong shape/content entirely.
-  const isPersonalizedVariant =
-    language !== "fr" || customPrompt.length > 0 || (actionType === "cas_clinique" && studyYear !== null);
+  const isPersonalizedVariant = language !== "fr" || (actionType === "cas_clinique" && studyYear !== null);
   const languageInstruction =
     language === "en"
       ? "\n\nINSTRUCTION DE LANGUE OBLIGATOIRE (remplace toute langue de sortie précédemment implicite) : rédige l'INTÉGRALITÉ de ta réponse — tous les champs textuels du JSON, sans exception — en ANGLAIS, jamais en français, en conservant strictement le même niveau de rigueur médicale, la même structure JSON et le même format exact déjà exigés ci-dessus."
       : "";
-  const customPromptInstruction = customPrompt
-    ? `\n\nCONSIGNE PERSONNALISÉE DE L'ÉTUDIANT (à respecter en plus de tout ce qui précède, sans jamais sacrifier la rigueur médicale ni le format JSON exact déjà exigé) : ${customPrompt}`
-    : "";
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -324,70 +324,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: platformCapacity.reason }, { status: 503 });
     }
 
-    // EXPLICATION-ONLY: Cross-University Chunk Caching — attempted before any
-    // generic path, but ONLY on a true whole-document miss (a fuzzy
-    // whole-document hit above already has a cheaper, proven path via
-    // buildStudioDeltaAdaptationPrompt, and re-running chunk-level matching
-    // on top of it would just be redundant work for the same saving). See
-    // lib/studio-explication-delta.ts's own header comment for the full
-    // design — fails open by construction, so any error/no-candidate case
-    // below just falls through to full generation exactly as before this
-    // feature existed.
-    let crossUniversityMarkdown: string | null = null;
-    if (actionType === "explication" && !isFuzzyHit && !isPersonalizedVariant) {
-      try {
-        crossUniversityMarkdown = await runStudioExplicationDeltaPipeline(courseId, truncatedContext, user.id);
-      } catch (error) {
-        console.error(
-          `[studio/generate:explication] Pipeline delta cross-université échoué (fail-open, génération classique):`,
-          errorMessage(error)
-        );
-      }
-    }
-
-    let raw: string | null = null;
-    if (crossUniversityMarkdown !== null) {
-      cacheMode = "cross-university-delta";
-      // Shimmed into the exact same JSON shape the generic path below
-      // expects ({ [sectionKey]: value }) so every downstream step —
-      // parseJsonResponse, sanitizeForPostgres, zod validation, error
-      // handling, storeStudioContentCache — runs completely unchanged.
-      raw = JSON.stringify({ explication: crossUniversityMarkdown });
-    } else if (actionType === "explication" && !isFuzzyHit && !isPersonalizedVariant) {
-      // True miss, no cross-university candidate at all (first course ever
-      // on this topic, or this module opted out) — full generation, but
-      // WITH chapter/chunk tagging so THIS course becomes a future
-      // candidate for the next university's upload on the same topic.
-      try {
-        // A source past MAX_SOURCE_CHARS would otherwise be silently
-        // truncated by `truncatedContext` above before generation ever sees
-        // the rest of the course — confirmed in production ("the
-        // explanation looks complete but was built from a fraction of a
-        // large course"). Chunked generation reads `resolvedSourceText`
-        // (the FULL, untruncated source) directly instead, splitting it
-        // into sequential slices internally — see that function's own
-        // header comment for what it deliberately trades away (no
-        // cross-university chunk-tagging) to do this safely.
-        const markdown =
-          resolvedSourceText.length > MAX_SOURCE_CHARS
-            ? await runStudioExplicationChunkedGeneration(courseId, resolvedSourceText, STUDIO_PROMPT_CONFIG.explication.systemPrompt, maxTokens)
-            : await runStudioExplicationFreshGenerationWithTagging(
-                courseId,
-                truncatedContext,
-                STUDIO_PROMPT_CONFIG.explication.systemPrompt,
-                EXPLICATION_CHUNK_TAGGING_ADDENDUM,
-                maxTokens
-              );
-        raw = JSON.stringify({ explication: markdown });
-      } catch (error) {
-        await refundGeneration(user.id);
-        if (error instanceof OpenRouterError) {
-          return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-        }
-        console.error(`[studio/generate:explication] Échec génération fraîche avec tagging:`, error);
-        return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
-      }
-    }
+    // `raw` used to be pre-filled here for actionType "explication" (a
+    // dedicated cross-university-delta / chunked-generation path) — that
+    // whole branch moved to app/api/studio/generate/explication-part +
+    // explication-finalize (see the guard at the top of this handler and
+    // lib/studio-explication-delta.ts's ARCHITECTURE comment). Every
+    // actionType reaching this point now always falls through to the
+    // generic path below.
+    const raw: string | null = null;
 
     if (raw !== null) {
       // Single-shot path (cross-university-delta or fresh-tagging) — both
@@ -437,27 +381,23 @@ export async function POST(request: NextRequest) {
       const casCliniqueOverride = actionType === "cas_clinique" ? resolveCasCliniqueSystemPrompt(studyYear) : null;
       const overrideBasePrompt =
         casCliniqueOverride ??
-        (isPersonalizedVariant ? `${STUDIO_PROMPT_CONFIG[actionType].systemPrompt}${languageInstruction}${customPromptInstruction}` : undefined);
+        (isPersonalizedVariant ? `${STUDIO_PROMPT_CONFIG[actionType].systemPrompt}${languageInstruction}` : undefined);
       const systemContent: string | ReturnType<typeof buildStudioSystemMessage> = isFuzzyHit
         ? buildStudioDeltaAdaptationPrompt(actionType, JSON.stringify(cacheResult.data), truncatedContext)
         : buildStudioSystemMessage(actionType, truncatedContext, overrideBasePrompt);
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
-      // MODEL POLICY: every Studio section runs on ECONOMY_MODEL (Gemini 3.7
-      // Flash) EXCEPT Explication Ultra-Détaillée, which runs on CHEAP_MODEL
-      // (DeepSeek V3.2) — explicit product decision to prioritize maximally
-      // long, exhaustive long-form writing on the app's single most
-      // rigor-critical section, at a $/M-token cost LOWER than ECONOMY_MODEL,
-      // not higher (see CHEAP_MODEL's own comment in lib/ai/openrouter.ts for
-      // the full tradeoff disclosure — not validated with a real test call
-      // before shipping). Résumé/cas_clinique/qcm/exemples_analogies keep the
-      // ECONOMY_MODEL policy exactly as tested (see this comment's own prior
-      // history: each was independently tested against this exact
-      // prompt+schema on a real course — Hémolyse — with a full structural
-      // re-validation and a manual medical-accuracy read finding no errors).
-      // There is no Sonnet fallback anywhere in this route, for either model.
-      const generationModel = actionType === "explication" ? CHEAP_MODEL : ECONOMY_MODEL;
+      // MODEL POLICY: every Studio section reaching this generic path runs
+      // on ECONOMY_MODEL (Gemini 3.7 Flash) — Explication Ultra-Détaillée
+      // (CHEAP_MODEL/DeepSeek V3.2) never reaches here anymore, see the
+      // actionType === "explication" guard near the top of this handler.
+      // Résumé/cas_clinique/qcm/exemples_analogies keep the ECONOMY_MODEL
+      // policy exactly as tested (each was independently tested against its
+      // exact prompt+schema on a real course — Hémolyse — with a full
+      // structural re-validation and a manual medical-accuracy read finding
+      // no errors). There is no Sonnet fallback anywhere in this route.
+      const generationModel = ECONOMY_MODEL;
 
       // reasoning: { effort: "low" } — confirmed production root cause of
       // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
@@ -469,10 +409,8 @@ export async function POST(request: NextRequest) {
       // actual JSON, truncating it mid-structure regardless of how high
       // the ceiling is set. `streamOpenRouter` (the chat path) already caps
       // this for the exact same model — every ECONOMY_MODEL Studio call
-      // gets the identical cap. CHEAP_MODEL (explication) gets no
-      // `reasoning` option at all, matching every other CHEAP_MODEL call
-      // site in lib/ai/openrouter.ts — none of them set one either.
-      const reasoningOption = actionType === "explication" ? undefined : ({ effort: "low" } as const);
+      // gets the identical cap.
+      const reasoningOption = { effort: "low" } as const;
 
       const MAX_GENERIC_ATTEMPTS = 2;
       let correctiveNote: string | null = null;

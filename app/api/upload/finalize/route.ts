@@ -11,6 +11,35 @@ export const runtime = "nodejs"; // officeparser needs the Node runtime, not edg
 export const maxDuration = 300; // a large/image-heavy PDF can take a while to parse — see app/api/upload/route.ts's own identical comment.
 
 /**
+ * Turns a raw extraction error into an actionable French message instead of
+ * whatever raw string officeparser/pdfjs-dist happened to throw — "bulletproof
+ * error handling" per the production report this fixes: a crash should never
+ * just surface a cryptic internal error with no next step for the student.
+ * Pattern-matched against known, real failure classes (see
+ * lib/document-extraction.ts's own investigation comments); anything
+ * unrecognized falls back to the raw message, never silently hidden.
+ */
+function classifyExtractionError(error: unknown): string {
+  const raw = errorMessage(error);
+  const lower = raw.toLowerCase();
+  if (lower.includes("trop de temps")) {
+    return raw; // already the clear, specific timeout message from extractDocumentText.
+  }
+  if (lower.includes("password") || lower.includes("encrypted") || lower.includes("mot de passe")) {
+    return "Ce fichier est protégé par un mot de passe — retire la protection puis réessaie.";
+  }
+  if (
+    lower.includes("end of central directory") ||
+    lower.includes("invalid xml") ||
+    lower.includes("failed to open zip") ||
+    lower.includes("corrupt")
+  ) {
+    return "Ce fichier semble corrompu ou dans un format invalide — essaie de le réexporter puis réessaie.";
+  }
+  return raw;
+}
+
+/**
  * Step 2 of the direct-to-storage upload pipeline (see app/api/upload/sign
  * for step 1). The browser has already PUT the file bytes straight to
  * Supabase Storage using the signed URL from step 1 — this route never
@@ -106,12 +135,16 @@ export async function POST(request: NextRequest) {
     text = sanitizeForPostgres(await extractDocumentText(buffer, extension));
   } catch (error) {
     console.error(`[upload/finalize] Échec de l'extraction ${extension}:`, error);
-    return NextResponse.json({ success: false, error: `Extraction échouée : ${errorMessage(error)}` }, { status: 422 });
+    return NextResponse.json({ success: false, error: `Extraction échouée : ${classifyExtractionError(error)}` }, { status: 422 });
   }
 
   if (text.length < 50) {
     return NextResponse.json(
-      { success: false, error: "Le contenu est trop court ou illisible (pas assez de texte exploitable)." },
+      {
+        success: false,
+        error:
+          "Le contenu est trop court ou illisible — ce PDF est peut-être un document scanné/image sans texte réel (l'extraction automatique ne fonctionne alors pas). Essaie un autre fichier, idéalement exporté directement en PDF texte.",
+      },
       { status: 422 }
     );
   }

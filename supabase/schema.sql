@@ -3381,3 +3381,48 @@ as $$
 $$;
 
 revoke execute on function reserve_dashboard_assistant_request(date, integer) from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- explication_reservation_pending: tracks whether a courseCap unit is
+-- CURRENTLY reserved-and-outstanding for THIS SPECIFIC course's Explication
+-- generation — closes a real, adversarial-code-review-confirmed CRITICAL gap
+-- in the client-driven, multi-request Explication pipeline
+-- (app/api/studio/generate/explication-start/-part/-finalize/-abandon, see
+-- lib/studio-explication-delta.ts's ARCHITECTURE comment for the full
+-- design). reserveGeneration/refundGeneration (lib/subscription.ts) only
+-- ever touch a single GLOBAL per-user counter (generations_used on
+-- subscriptions), never scoped to WHICH course a given reservation was for.
+-- explication-abandon's entire job is refunding one specific, real,
+-- outstanding reservation when the client gives up — without per-course
+-- state, it had no way to verify one actually existed for the courseId a
+-- caller claimed. A prior mitigation ("refuse to refund if this course's
+-- explication column is already populated") was proven bypassable: ANY of a
+-- student's own courses that simply hasn't had Explication generated yet
+-- (explication IS NULL — true of every course before its first successful
+-- generation, and true forever for a course with a fabricated/nonexistent
+-- id) passed that check, letting a direct API call refund a unit that was
+-- never reserved for it at all, repeatable up to the endpoint's rate limit —
+-- eroding a capped student's usage counter back down indefinitely.
+--
+-- Set true by explication-start immediately after a real reservation
+-- succeeds (before attempting any further work); cleared to false by
+-- whichever of explication-start's own shortcut paths (fuzzy/cross-
+-- university delta), explication-finalize, or explication-abandon next
+-- touches this course — each does so with an atomic, WHERE-conditioned
+-- UPDATE (see those routes), so a duplicate/concurrent abandon call for an
+-- already-cleared reservation safely no-ops instead of double-refunding.
+--
+-- Disclosed residual limitation (not a security hole — not something a
+-- student can trigger on demand): if the SERVER process is killed by the
+-- platform (e.g. Vercel's own duration ceiling) after this flag is set but
+-- before any response ever reaches the client, the client has no way to
+-- know a reservation exists and — correctly, per its own contract — will
+-- never call explication-abandon for it, leaving `true` orphaned. This is
+-- now a bounded, AUDITABLE state (unlike the old global-counter leak): a
+-- future cleanup job can safely sweep
+-- `explication_reservation_pending = true and updated_at < now() - interval
+-- '10 minutes'` rows and refund+clear them. Not implemented as a scheduled
+-- job here — flagged as a reasonable follow-up, not a blocking gap, given
+-- how narrow and non-adversarial the trigger condition is.
+-- ---------------------------------------------------------------------------
+alter table studio_courses add column if not exists explication_reservation_pending boolean not null default false;

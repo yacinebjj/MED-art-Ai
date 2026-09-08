@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { openGoogleDrivePicker } from "@/lib/google-drive-picker";
+import { useToast } from "@/components/ui/Toast";
 
 // Statically inlined at build time by Next.js (NEXT_PUBLIC_ vars) — reading
 // it here just lets the Drive card show an honest "not configured" state
@@ -69,6 +70,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   const [isDriveImporting, setIsDriveImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
 
   function reset() {
     setIsDragging(false);
@@ -133,7 +135,9 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
       onUploaded(result);
       handleOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Le téléversement a échoué.");
+      const message = err instanceof Error ? err.message : "Le téléversement a échoué.";
+      setError(message);
+      toast({ variant: "error", title: "Le téléversement a échoué", description: message });
     } finally {
       setIsSubmitting(false);
     }
@@ -152,7 +156,9 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
       onUploaded(result);
       handleOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "L'import a échoué.");
+      const message = err instanceof Error ? err.message : "L'import a échoué.";
+      setError(message);
+      toast({ variant: "error", title: "L'import a échoué", description: message });
     } finally {
       setIsSubmitting(false);
     }
@@ -166,6 +172,17 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
    * customized onSubmitText (or the default /api/generate-course flow).
    */
   async function handleDriveImport() {
+    // Deliberately NOT gated on GOOGLE_DRIVE_CONFIGURED here (unlike the old
+    // version of this function/activateDriveZone below) — production report:
+    // clicking the Drive card did "literally nothing, no popup, no error".
+    // Root cause was this exact silent early-return: when the env vars
+    // aren't baked into the build, the click produced zero feedback of any
+    // kind. openGoogleDrivePicker() already throws a clear, specific error
+    // in that exact case ("Google Drive n'est pas configuré...") — routing
+    // through the SAME try/catch below (which already surfaces both an
+    // inline message AND a toast) means a missing/stale config now fails
+    // exactly as visibly as any other Drive error, never silently.
+    if (isDriveImporting) return;
     setError(null);
     setIsDriveImporting(true);
 
@@ -185,15 +202,17 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
       onUploaded(result);
       handleOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "L'import depuis Google Drive a échoué.");
+      const message = err instanceof Error ? err.message : "L'import depuis Google Drive a échoué.";
+      setError(message);
+      toast({ variant: "error", title: "L'import Google Drive a échoué", description: message });
     } finally {
       setIsDriveImporting(false);
     }
   }
 
-  /** Guards the whole-card click/keyboard zone the same way the Drive Button's own `disabled` prop already does. */
+  /** Whole-card click/keyboard zone — see handleDriveImport's own comment for why this no longer short-circuits on GOOGLE_DRIVE_CONFIGURED. */
   function activateDriveZone() {
-    if (!GOOGLE_DRIVE_CONFIGURED || isDriveImporting) return;
+    if (isDriveImporting) return;
     void handleDriveImport();
   }
 
@@ -311,7 +330,14 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
             <Button
               variant="outline"
               className="w-full"
-              disabled={!GOOGLE_DRIVE_CONFIGURED || isDriveImporting}
+              // Deliberately NOT disabled when !GOOGLE_DRIVE_CONFIGURED — a
+              // native `disabled` button swallows the click before any JS
+              // runs at all, which was the other half of the "click does
+              // literally nothing" production report (the div zone above was
+              // the other half, already fixed). Clicking now always reaches
+              // handleDriveImport, which surfaces a clear, specific error
+              // either way (missing config, or a real Drive/network failure).
+              disabled={isDriveImporting}
               isLoading={isDriveImporting}
               onClick={handleDriveImport}
             >

@@ -18,6 +18,7 @@ import { getSectionLabel } from "@/lib/translations/studio";
 import { cn } from "@/lib/utils";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { uploadDocumentDirect } from "@/lib/upload-client";
+import { generateExplicationInParts } from "@/lib/studio-explication-client";
 import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
@@ -963,6 +964,25 @@ export default function ModuleWorkspacePage() {
           }
           resultValue = data.audioUrl;
           cached = Boolean(data.cached);
+        } else if (id === "explication") {
+          // Client-driven, multi-request pipeline — see
+          // lib/studio-explication-client.ts's own header comment. Replaces
+          // a single postStudioGenerate call: a multi-minute "ultra-détaillée"
+          // generation could not reliably survive one HTTP
+          // request/serverless invocation against Vercel's real duration
+          // ceiling (the actual cause of repeated "échec de génération" +
+          // truncation reported in production). Retries happen per-part,
+          // automatically, inside generateExplicationInParts — a toast here
+          // only fires on genuine, fully-exhausted failure.
+          const result = await generateExplicationInParts(courseId, {
+            language: options?.language,
+            customPrompt: options?.customPrompt,
+          });
+          if (!result.success) {
+            throw new Error(result.error ?? "La génération a échoué.");
+          }
+          resultValue = result.data;
+          cached = Boolean(result.cached);
         } else {
           // /api/studio/generate now saves to Supabase itself before returning
           // success (atomic generate-then-save — see that route's header
