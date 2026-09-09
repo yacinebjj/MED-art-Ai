@@ -377,11 +377,36 @@ const OPENROUTER_CONNECT_TIMEOUT_MS = 60_000;
 // binding constraint again — each call's own AbortController timeoutMs
 // remains the real, intended authority.
 const OPENROUTER_DISPATCHER_TIMEOUT_MS = 300_000;
-const OPENROUTER_DISPATCHER = new Agent({
-  connect: { timeout: OPENROUTER_CONNECT_TIMEOUT_MS },
-  headersTimeout: OPENROUTER_DISPATCHER_TIMEOUT_MS,
-  bodyTimeout: OPENROUTER_DISPATCHER_TIMEOUT_MS,
-});
+/**
+ * FINAL FIX for the underlying hang this whole Agent existed to work around:
+ * this used to be ONE module-level Agent instance, its connections pooled
+ * and REUSED across every invocation of this serverless function for as
+ * long as the instance stayed warm. Confirmed live, isolated from every
+ * other variable (request size, background-execution ceiling, DNS
+ * resolution — all already tested clean): a real OpenRouter call made
+ * through this exact pooled dispatcher, inside a `waitUntil` background
+ * job, hung for 450+ seconds and never completed or errored — while an
+ * identical-duration pure background sleep (no network I/O at all)
+ * completed cleanly. A pooled, kept-alive connection going stale across a
+ * serverless instance's freeze/thaw cycle (or across the handoff into a
+ * `waitUntil` background continuation specifically) is a well-documented
+ * failure class: the far end can silently drop the connection while the
+ * client-side socket still looks alive, so a request reusing it can hang
+ * indefinitely with no error ever surfacing — undici has no way to detect
+ * that on its own. A FRESH Agent per call can never suffer this: there is
+ * nothing to have gone stale, since nothing is ever reused. This costs one
+ * new TCP+TLS handshake per call instead of reusing a warm connection —
+ * real but small overhead, and irrelevant against calls that already take
+ * 60-260+ seconds. Function, not a module-level constant, so every caller
+ * of fetchOpenRouterWithRetry gets its own unshared instance.
+ */
+function createOpenRouterDispatcher(): Agent {
+  return new Agent({
+    connect: { timeout: OPENROUTER_CONNECT_TIMEOUT_MS },
+    headersTimeout: OPENROUTER_DISPATCHER_TIMEOUT_MS,
+    bodyTimeout: OPENROUTER_DISPATCHER_TIMEOUT_MS,
+  });
+}
 
 // Bounded — a persistently broken network still fails (not an infinite
 // retry loop), just after a couple of quick, cheap extra attempts instead of
@@ -437,7 +462,10 @@ function isTransientNetworkError(error: unknown): boolean {
  * fix instead of re-implementing (or worse, half-implementing) it.
  */
 export async function fetchOpenRouterWithRetry(url: string, init: RequestInit): Promise<Response> {
-  const initWithDispatcher = { ...init, dispatcher: OPENROUTER_DISPATCHER } as RequestInit;
+  // A fresh dispatcher per call, deliberately — see createOpenRouterDispatcher's
+  // own comment for why a shared/pooled one was the real, confirmed cause of
+  // a hang no timeout could ever catch.
+  const initWithDispatcher = { ...init, dispatcher: createOpenRouterDispatcher() } as RequestInit;
   for (let attempt = 0; ; attempt++) {
     try {
       return await fetch(url, initWithDispatcher);
