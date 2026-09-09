@@ -951,15 +951,20 @@ export default function ModuleWorkspacePage() {
           // mobile, because holding one silent request open for minutes is a
           // known trigger for a cellular carrier's NAT to drop the
           // connection mid-wait.
+          // postJsonWithHeartbeat never throws — every outcome carries a
+          // `diagnostic` string naming concretely what happened on the wire
+          // (see lib/heartbeat-fetch.ts's own comment), appended below so a
+          // failure toast is actual forensic evidence, not another bare
+          // "échec de génération".
           const outcome = await postJsonWithHeartbeat("/api/studio/podcast", { courseId, dialect: options?.dialect }, 320_000);
           if (!outcome.ok || outcome.data.success !== true) {
-            throw new Error(
+            const baseError =
               outcome.status === 429
                 ? buildRateLimitMessageFromSeconds(outcome.retryAfterSeconds)
                 : typeof outcome.data.error === "string"
                   ? outcome.data.error
-                  : "La génération a échoué."
-            );
+                  : "La génération a échoué.";
+            throw new Error(`${baseError} [${outcome.diagnostic}]`);
           }
           resultValue = outcome.data.audioUrl;
           cached = Boolean(outcome.data.cached);

@@ -241,17 +241,16 @@ async function runGenerationInParts(
     for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !succeeded; attempt++) {
       onProgress?.({ partIndex, totalParts, attempt });
 
-      let outcome: { ok: boolean; status: number; data: Record<string, unknown> };
-      try {
-        outcome = await postJsonWithHeartbeat("/api/studio/generate/explication-part", { courseId, partIndex, ...extra }, PART_FETCH_TIMEOUT_MS);
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : "Erreur réseau.";
-        if (attempt < MAX_PART_ATTEMPTS) await wait(PART_RETRY_DELAYS_MS[attempt - 1] ?? 5000);
-        continue;
-      }
+      // postJsonWithHeartbeat never throws — every outcome, including a raw
+      // network failure, comes back as a normal result carrying a
+      // `diagnostic` string (see lib/heartbeat-fetch.ts's own comment) so a
+      // failure surfaced to the student names concretely what happened,
+      // instead of another guess from a bare "échec de génération".
+      const outcome = await postJsonWithHeartbeat("/api/studio/generate/explication-part", { courseId, partIndex, ...extra }, PART_FETCH_TIMEOUT_MS);
 
       if (!outcome.ok || outcome.data.success !== true) {
-        lastError = typeof outcome.data.error === "string" ? outcome.data.error : `Erreur ${outcome.status}.`;
+        const baseError = typeof outcome.data.error === "string" ? outcome.data.error : `Erreur ${outcome.status}.`;
+        lastError = `${baseError} [${outcome.diagnostic}]`;
         if (isRetryable(outcome.status) && attempt < MAX_PART_ATTEMPTS) {
           await wait(PART_RETRY_DELAYS_MS[attempt - 1] ?? 5000);
           continue;
