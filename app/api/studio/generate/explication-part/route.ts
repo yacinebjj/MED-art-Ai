@@ -31,9 +31,13 @@ export const maxDuration = 280;
  * now completely safe from a quota standpoint since this route never
  * reserves or refunds anything.
  *
- * Body: `{ courseId, partIndex, language?, customPrompt? }` — language/
- * customPrompt are re-sent on every part (not just part 0) since each part
- * is its own independent generation call needing the full system prompt.
+ * Body: `{ courseId, partIndex, previousPartTail?, language?, customPrompt? }`
+ * — language/customPrompt are re-sent on every part (not just part 0) since
+ * each part is its own independent generation call needing the full system
+ * prompt. `previousPartTail` — the tail of the PREVIOUS part's own real
+ * output, sent by the client for every part after the first — fixes a real
+ * reported bug ("chapters get mixed up, the topic changes completely"); see
+ * generateExplicationPart's own comment for the full mechanism.
  *
  * RESPONSE SHAPE — a STREAMED, newline-delimited JSON body (Content-Type:
  * application/x-ndjson), always HTTP 200, NOT a single JSON object. This
@@ -105,9 +109,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { courseId, partIndex, language: languageRaw, customPrompt: customPromptRaw } = (body ?? {}) as {
+  const {
+    courseId,
+    partIndex,
+    previousPartTail: previousPartTailRaw,
+    language: languageRaw,
+    customPrompt: customPromptRaw,
+  } = (body ?? {}) as {
     courseId?: unknown;
     partIndex?: unknown;
+    previousPartTail?: unknown;
     language?: unknown;
     customPrompt?: unknown;
   };
@@ -117,6 +128,11 @@ export async function POST(request: NextRequest) {
   if (typeof partIndex !== "number" || !Number.isInteger(partIndex) || partIndex < 0) {
     return NextResponse.json({ success: false, error: "'partIndex' est requis et doit être un entier ≥ 0." }, { status: 400 });
   }
+  // Optional — see generateExplicationPart's own comment on why this fixes
+  // the "chapters mixed up" bug. Capped defensively (this route never
+  // trusts a client-supplied string's length) even though the client only
+  // ever sends a short tail of the PREVIOUS part's own real output.
+  const previousPartTail = typeof previousPartTailRaw === "string" ? previousPartTailRaw.slice(-4000) : undefined;
 
   const language: "fr" | "en" = languageRaw === "en" ? "en" : "fr";
   const customPrompt = typeof customPromptRaw === "string" ? customPromptRaw.trim().slice(0, 2000) : "";
@@ -173,7 +189,7 @@ export async function POST(request: NextRequest) {
         }
       }, 15_000);
 
-      generateExplicationPart(slices[partIndex], systemPrompt, partIndex + 1, totalParts)
+      generateExplicationPart(slices[partIndex], systemPrompt, partIndex + 1, totalParts, previousPartTail)
         .then((partMarkdown) => {
           const isLastPart = partIndex === totalParts - 1;
           controller.enqueue(

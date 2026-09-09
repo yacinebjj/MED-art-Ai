@@ -242,9 +242,15 @@ async function runGenerationInParts(
       // `diagnostic` string (see lib/heartbeat-fetch.ts's own comment) so a
       // failure surfaced to the student names concretely what happened,
       // instead of another guess from a bare "échec de génération".
+      //
+      // previousPartTail — the tail of the LAST SUCCESSFULLY GENERATED part
+      // (parts[parts.length-1], never undefined once partIndex > 0, since a
+      // part only gets pushed after succeeding) — fixes a real reported bug
+      // ("chapters get mixed up, the topic changes completely"); see
+      // generateExplicationPart's own comment for the full mechanism.
       const outcome = await postJsonWithHeartbeat(
         "/api/studio/generate/explication-part",
-        { courseId, partIndex, ...extra },
+        { courseId, partIndex, previousPartTail: parts[parts.length - 1], ...extra },
         PART_FETCH_TIMEOUT_MS
       );
 

@@ -763,10 +763,57 @@ const EXPLICATION_PART_TIMEOUT_MS = 260_000;
  * re-send the plan itself (each request just recomputes it from the same
  * raw_text and gets the same answer).
  */
+// How far back from the ideal CHUNKED_SLICE_CHARS boundary this searches for
+// a natural break (paragraph, then line, then sentence) before giving up and
+// cutting mid-sentence anyway — small relative to CHUNKED_SLICE_CHARS so a
+// slice is never meaningfully shorter than intended just to find a boundary.
+const BOUNDARY_SEARCH_WINDOW_CHARS = 2000;
+
+/**
+ * Finds the best real break point at or before `idealEnd` — a paragraph
+ * break first, then a line break, then a sentence end, searched for within
+ * BOUNDARY_SEARCH_WINDOW_CHARS of the ideal cut point. Falls back to a hard
+ * cut at `idealEnd` only if none exists in that window (rare — a genuinely
+ * enormous unbroken block of text).
+ *
+ * REAL BUG this fixes, found from a real production report: computeExplicationSlices
+ * used to cut every slice at a raw, arbitrary character offset with zero
+ * regard for where a sentence, paragraph, or chapter actually ended — the
+ * SAME source chapter could easily straddle two slices, one ending mid-word
+ * or mid-sentence. Combined with generateExplicationPart's own per-part
+ * isolation (each part is generated with NO knowledge of what the previous
+ * part wrote — see that function's own comment on `previousPartTail`), a
+ * part starting on a fragment like "...la stimulation du" had no way to
+ * know it was continuing an already-started chapter, and would often either
+ * restart the topic with a fresh heading or lose the thread entirely —
+ * exactly the reported "chapters get mixed up, the topic changes
+ * completely" symptom. This alone does not fully fix that (see
+ * `previousPartTail` for the other half), but it removes the single biggest
+ * source of genuinely ambiguous, badly-bounded input the model was ever
+ * asked to make sense of.
+ */
+function findSliceBoundary(text: string, idealEnd: number): number {
+  if (idealEnd >= text.length) return text.length;
+  const windowStart = Math.max(0, idealEnd - BOUNDARY_SEARCH_WINDOW_CHARS);
+  const window = text.slice(windowStart, idealEnd);
+  const paragraphBreak = window.lastIndexOf("\n\n");
+  if (paragraphBreak !== -1) return windowStart + paragraphBreak + 2;
+  const lineBreak = window.lastIndexOf("\n");
+  if (lineBreak !== -1) return windowStart + lineBreak + 1;
+  const sentenceBreak = window.lastIndexOf(". ");
+  if (sentenceBreak !== -1) return windowStart + sentenceBreak + 2;
+  return idealEnd;
+}
+
 export function computeExplicationSlices(fullSourceText: string): string[] {
   const slices: string[] = [];
-  for (let i = 0; i < fullSourceText.length; i += CHUNKED_SLICE_CHARS) {
-    slices.push(fullSourceText.slice(i, i + CHUNKED_SLICE_CHARS));
+  let start = 0;
+  while (start < fullSourceText.length) {
+    const idealEnd = Math.min(start + CHUNKED_SLICE_CHARS, fullSourceText.length);
+    const end = findSliceBoundary(fullSourceText, idealEnd);
+    const safeEnd = end > start ? end : idealEnd; // never an empty/backwards slice
+    slices.push(fullSourceText.slice(start, safeEnd));
+    start = safeEnd;
   }
   return slices.length > 0 ? slices : [""];
 }
@@ -796,17 +843,56 @@ export function computeExplicationSlices(fullSourceText: string): string[] {
  * secondary benefit — not worth it against the reliability this rewrite
  * exists for.
  */
+// How much of the PREVIOUS part's own generated markdown is shown to the
+// next part as continuity context — see generateExplicationPart's
+// `previousPartTail` param for why this exists. Long enough to reliably
+// include the last heading and a few sentences of real content (so the
+// model can judge "is the source below continuing THIS chapter or starting
+// a new one"), short and cheap enough to add negligible cost/latency next
+// to a part whose own budget is EXPLICATION_PART_MAX_TOKENS.
+const PREVIOUS_PART_TAIL_CHARS = 800;
+
+/**
+ * Cheap, dependency-free trim to PREVIOUS_PART_TAIL_CHARS ending on a real
+ * word boundary — used so the continuity excerpt shown to the next part
+ * never starts mid-word, which would read as noise rather than genuine
+ * context.
+ */
+function tailForContinuity(markdown: string): string {
+  if (markdown.length <= PREVIOUS_PART_TAIL_CHARS) return markdown;
+  const raw = markdown.slice(-PREVIOUS_PART_TAIL_CHARS);
+  const firstSpace = raw.indexOf(" ");
+  return firstSpace === -1 ? raw : raw.slice(firstSpace + 1);
+}
+
 export async function generateExplicationPart(
   slice: string,
   explicationSystemPrompt: string,
   partNumber: number,
-  totalParts: number
+  totalParts: number,
+  // REAL FIX for a real, reported production bug: "chapters get mixed up,
+  // the topic changes completely" between parts. Root cause — each part was
+  // generated in complete isolation: the model writing part N had ZERO
+  // knowledge of what part N-1 actually wrote, only the raw source text for
+  // ITS OWN slice. Since a chapter routinely straddles a slice boundary
+  // (computeExplicationSlices' own boundary-finding reduces but can't fully
+  // eliminate this), the model starting part N had no way to tell "the
+  // source I'm given continues a chapter already half-written" from "this
+  // is a fresh topic" — it would often restart with a new heading mid-
+  // chapter, or lose the thread entirely once the opening sentence was cut
+  // off mid-word. Passing the tail of what the PREVIOUS part actually wrote
+  // (not the source text — the model's OWN prior output) lets it judge that
+  // correctly and continue seamlessly instead of guessing.
+  previousPartTail?: string
 ): Promise<string> {
   const chunks = buildSourceChunks(slice);
   const numberedExtraits = chunks.map((content, j) => `Extrait ${j + 1}:\n${content}`).join("\n\n");
+  const continuityInstruction = previousPartTail
+    ? `\n\nCONTEXTE DE CONTINUITÉ — voici comment se terminait la partie précédente (${partNumber - 1}/${totalParts}), déjà écrite et déjà montrée à l'étudiant, pour que tu juges correctement si le contenu source ci-dessous continue le MÊME chapitre ou en commence un nouveau :\n"""\n[...] ${tailForContinuity(previousPartTail)}\n"""\nSi les extraits numérotés ci-dessous continuent visiblement ce même chapitre (même sujet, suite logique), CONTINUE-LE directement, sans répéter ni réécrire ce qui précède, et sans ajouter un nouveau titre "## " pour ce même chapitre. N'ouvre un nouveau "## Titre" que lorsque le contenu source aborde un sujet réellement différent.`
+    : "";
   const partInstruction =
     totalParts > 1
-      ? `\n\n---\nMODIFICATION DE FORMAT POUR CETTE GÉNÉRATION — s'ajoute à tout ce qui précède, ne le remplace pas :\nCe cours source est traité en ${totalParts} parties consécutives (contrainte technique de plateforme, invisible pour l'étudiant qui verra un seul document continu). Tu rédiges ICI la PARTIE ${partNumber}/${totalParts} (les extraits numérotés ci-dessous couvrent UNIQUEMENT cette partie, dans l'ordre du cours). Continue directement le contenu, structuré en chapitres Markdown ("## Titre du chapitre") comme d'habitude. N'écris NI introduction générale du cours NI conclusion récapitulative dans cette partie — seulement le corps des chapitres qu'elle couvre ; les autres parties seront concaténées à la suite.\n\nPRÉCISION IMPORTANTE SUR LA LONGUEUR POUR CETTE PARTIE SPÉCIFIQUEMENT (corrige une lecture possible de la consigne de longueur ci-dessus) : la consigne "vise largement plus de 8000 mots, sans plafond réel" s'applique au DOCUMENT COMPLET, cumulé sur l'ensemble des ${totalParts} parties — jamais à cette seule partie prise isolément. Garde exactement les mêmes exigences de fond pour CETTE partie (exhaustivité clinique réelle, simplicité pédagogique, redondance utile, aucun raccourci sur le contenu source qu'elle couvre) mais n'essaie PAS d'atteindre 8000+ mots pour cette partie seule si le volume réel des extraits ci-dessous ne le justifie pas — une partie qui couvre peu de contenu source doit rester proportionnellement plus courte, jamais artificiellement gonflée pour viser un total qui ne s'applique qu'au document entier.`
+      ? `\n\n---\nMODIFICATION DE FORMAT POUR CETTE GÉNÉRATION — s'ajoute à tout ce qui précède, ne le remplace pas :\nCe cours source est traité en ${totalParts} parties consécutives (contrainte technique de plateforme, invisible pour l'étudiant qui verra un seul document continu). Tu rédiges ICI la PARTIE ${partNumber}/${totalParts} (les extraits numérotés ci-dessous couvrent UNIQUEMENT cette partie, dans l'ordre du cours). Continue directement le contenu, structuré en chapitres Markdown ("## Titre du chapitre") comme d'habitude. N'écris NI introduction générale du cours NI conclusion récapitulative dans cette partie — seulement le corps des chapitres qu'elle couvre ; les autres parties seront concaténées à la suite.\n\nPRÉCISION IMPORTANTE SUR LA LONGUEUR POUR CETTE PARTIE SPÉCIFIQUEMENT (corrige une lecture possible de la consigne de longueur ci-dessus) : la consigne "vise largement plus de 8000 mots, sans plafond réel" s'applique au DOCUMENT COMPLET, cumulé sur l'ensemble des ${totalParts} parties — jamais à cette seule partie prise isolément. Garde exactement les mêmes exigences de fond pour CETTE partie (exhaustivité clinique réelle, simplicité pédagogique, redondance utile, aucun raccourci sur le contenu source qu'elle couvre) mais n'essaie PAS d'atteindre 8000+ mots pour cette partie seule si le volume réel des extraits ci-dessous ne le justifie pas — une partie qui couvre peu de contenu source doit rester proportionnellement plus courte, jamais artificiellement gonflée pour viser un total qui ne s'applique qu'au document entier.${continuityInstruction}`
       : "";
 
   const raw = await callOpenRouter(
