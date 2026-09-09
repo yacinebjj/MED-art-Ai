@@ -145,22 +145,37 @@ export async function POST(_request: NextRequest) {
   let reserved = false;
 
   try {
-    const perCourseWeakItems = await Promise.all(
-      eligibleCourses.map(async (course) => {
-        const { data: weakRows, error: weakError } = await supabase.rpc("course_weak_qcms", {
-          p_user_id: user.id,
-          p_course_slug: `studio-course-${course.id}`,
-          p_limit: PER_COURSE_LIMIT,
-        });
-        if (weakError) {
-          console.error(`[remediation-plan/generate] course_weak_qcms a échoué pour le cours ${course.id}:`, weakError.message);
-          return [];
-        }
-        return ((weakRows ?? []) as WeakQcmRow[])
-          .map((row) => resolveWeakItem(row, course.title, course.qcms))
-          .filter((item): item is RemediationSourceItem => item !== null);
-      })
-    );
+    // PERFORMANCE: perCourseWeakItems and the user_exam_attempts query below
+    // are fully independent reads (the latter is filtered only by user.id —
+    // see its own comment for why it's deliberately not scoped by
+    // eligibleCourses/activeModuleIds) — run concurrently instead of
+    // sequentially, shaving one full round trip off this route's
+    // pre-generation latency (this route already has maxDuration=120 and a
+    // real downstream LLM call).
+    const [perCourseWeakItems, examAttemptsResult] = await Promise.all([
+      Promise.all(
+        eligibleCourses.map(async (course) => {
+          const { data: weakRows, error: weakError } = await supabase.rpc("course_weak_qcms", {
+            p_user_id: user.id,
+            p_course_slug: `studio-course-${course.id}`,
+            p_limit: PER_COURSE_LIMIT,
+          });
+          if (weakError) {
+            console.error(`[remediation-plan/generate] course_weak_qcms a échoué pour le cours ${course.id}:`, weakError.message);
+            return [];
+          }
+          return ((weakRows ?? []) as WeakQcmRow[])
+            .map((row) => resolveWeakItem(row, course.title, course.qcms))
+            .filter((item): item is RemediationSourceItem => item !== null);
+        })
+      ),
+      supabase
+        .from("user_exam_attempts")
+        .select("wrong_questions, module_generated_exams(selected_courses)")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(MAX_EXAM_ATTEMPTS_CONSIDERED),
+    ]);
 
     // SECOND SOURCE — the standalone Générateur d'Examen (user_exam_attempts,
     // see app/api/exam/attempts/route.ts). Its wrong_questions are already
@@ -180,12 +195,7 @@ export async function POST(_request: NextRequest) {
     // module the student has ever taken an exam in — an exam attempt has no
     // per-item cap the way PER_COURSE_LIMIT does, so this is what bounds
     // token cost regardless of how large a student's exam history is.
-    const { data: examAttempts, error: examAttemptsError } = await supabase
-      .from("user_exam_attempts")
-      .select("wrong_questions, module_generated_exams(selected_courses)")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(MAX_EXAM_ATTEMPTS_CONSIDERED);
+    const { data: examAttempts, error: examAttemptsError } = examAttemptsResult;
 
     if (examAttemptsError) {
       // Fail-open, like course_weak_qcms's own per-course error handling

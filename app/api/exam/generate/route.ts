@@ -311,33 +311,46 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("module_generated_exams")
-    .select("id, selected_courses, content, created_at")
-    .eq("user_id", user.id)
-    .eq("curriculum_module_id", moduleId)
-    .order("created_at", { ascending: true });
+
+  // PERFORMANCE: this read is fully independent of the exam-history query
+  // just below (filtered only by user.id, no data dependency either way) —
+  // wrapped in its own never-throwing IIFE (preserving the exact same
+  // fail-open-to-0 behavior as before) so it can run CONCURRENTLY instead of
+  // strictly after, shaving one avoidable round trip off every "Mes Examens"
+  // sidebar load.
+  const regenerationsUsedPromise = (async (): Promise<number> => {
+    try {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("module_exam_regenerations_used")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profileError) {
+        console.warn("[exam/generate] Échec lecture quota régénération (fail-open à 0):", profileError.message);
+        return 0;
+      }
+      return profile?.module_exam_regenerations_used ?? 0;
+    } catch (profileReadError) {
+      console.warn("[exam/generate] Erreur inattendue lecture quota régénération (fail-open à 0):", profileReadError);
+      return 0;
+    }
+  })();
+
+  const [{ data, error }, regenerationsUsed] = await Promise.all([
+    supabase
+      .from("module_generated_exams")
+      .select("id, selected_courses, content, created_at")
+      .eq("user_id", user.id)
+      .eq("curriculum_module_id", moduleId)
+      .order("created_at", { ascending: true }),
+    regenerationsUsedPromise,
+  ]);
 
   if (error) {
     console.error("[exam/generate] Échec lecture historique:", error);
     return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
   }
 
-  let regenerationsUsed = 0;
-  try {
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("module_exam_regenerations_used")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (profileError) {
-      console.warn("[exam/generate] Échec lecture quota régénération (fail-open à 0):", profileError.message);
-    } else {
-      regenerationsUsed = profile?.module_exam_regenerations_used ?? 0;
-    }
-  } catch (profileReadError) {
-    console.warn("[exam/generate] Erreur inattendue lecture quota régénération (fail-open à 0):", profileReadError);
-  }
   const regenerationsRemaining = Math.max(0, MODULE_EXAM_REGENERATE_CAP - regenerationsUsed);
 
   return NextResponse.json({

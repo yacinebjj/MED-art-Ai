@@ -44,6 +44,41 @@ export async function lookupFlashcardsCache(contentHash: string): Promise<Flashc
   }
 }
 
+/**
+ * Batched form of lookupFlashcardsCache — fetches every candidate content
+ * hash in ONE query instead of one sequential round trip per hash. Used by
+ * app/api/flashcards/generate/route.ts's Pass-1 scan across a student's
+ * eligible courses (previously N sequential lookupFlashcardsCache calls, a
+ * real N+1 whenever earlier-ordered courses lacked a cross-student cache
+ * entry — a common case for newly-uploaded courses). Same fail-open
+ * contract: any Supabase error returns an empty map, never throws.
+ */
+export async function lookupFlashcardsCacheBatch(contentHashes: string[]): Promise<Map<string, FlashcardQA[]>> {
+  const result = new Map<string, FlashcardQA[]>();
+  if (!isSupabaseConfigured() || contentHashes.length === 0) return result;
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("flashcards_content_cache")
+      .select("content_hash, cards_data")
+      .in("content_hash", contentHashes);
+
+    if (error) {
+      console.error("[flashcards-content-cache:lookupBatch] Échec lecture — génération réelle utilisée à la place:", error.message);
+      return result;
+    }
+
+    for (const row of (data ?? []) as { content_hash: string; cards_data: unknown }[]) {
+      if (Array.isArray(row.cards_data)) result.set(row.content_hash, row.cards_data as FlashcardQA[]);
+    }
+    return result;
+  } catch (error) {
+    console.error("[flashcards-content-cache:lookupBatch] Échec lookup — exception:", error instanceof Error ? error.message : error);
+    return result;
+  }
+}
+
 /** Stores a freshly-generated definitive set for future cross-student reuse. Fail-open: a write failure is logged, never thrown — the student's own generation already succeeded and must not be blocked by a caching side-effect failing. */
 export async function storeFlashcardsCache(contentHash: string, cards: FlashcardQA[]): Promise<void> {
   if (!isSupabaseConfigured()) return;

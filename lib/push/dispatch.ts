@@ -38,41 +38,32 @@ interface StudioCourseFlashcardRow {
   flashcard_queue: { id: string; question: string; answer: string }[] | null;
 }
 
+interface FlashcardProfileRow {
+  flashcard_active_module_ids: number[] | null;
+  push_subscriptions: PushSubscriptionRecord[] | null;
+}
+
 /**
- * Sends one flashcard-reminder push to every device the given user has
- * subscribed from — picks one random card from a random active-module
- * course (same selection spirit as app/api/flashcards/pool, just one card
- * instead of the whole pool). Any subscription the push service reports as
- * permanently gone (404/410 — browser uninstalled, permission revoked) is
- * dropped from `profiles.push_subscriptions`; anything else (network blip,
- * 5xx) is left alone for the next attempt. Returns how many devices were
- * actually notified — 0 for every silent, non-error case (no active
- * modules, no queued cards yet, no subscriptions at all).
+ * Core of dispatchFlashcardPushToUser, factored out so the bulk sweep
+ * (dispatchFlashcardPushToAllUsers) can pass in profile/course rows it
+ * already fetched in ONE batched query across all eligible users, instead
+ * of every user re-querying both tables individually — a real, confirmed
+ * N+1 on the hourly cron path (2 extra unbatched round trips per eligible
+ * user: a redundant profile re-fetch, and an unbatched studio_courses
+ * query, on top of the bulk profiles query dispatchFlashcardPushToAllUsers
+ * already does).
  */
-export async function dispatchFlashcardPushToUser(userId: string): Promise<number> {
-  ensureVapidConfigured();
-  const supabase = getSupabaseAdmin();
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("flashcard_active_module_ids, push_subscriptions")
-    .eq("id", userId)
-    .maybeSingle<{ flashcard_active_module_ids: number[] | null; push_subscriptions: PushSubscriptionRecord[] | null }>();
-
-  if (profileError || !profile) return 0;
-
+async function sendFlashcardPushForProfile(
+  userId: string,
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  profile: FlashcardProfileRow,
+  courses: StudioCourseFlashcardRow[]
+): Promise<number> {
   const subscriptions = profile.push_subscriptions ?? [];
   const activeModuleIds = profile.flashcard_active_module_ids ?? [];
   if (subscriptions.length === 0 || activeModuleIds.length === 0) return 0;
 
-  const { data: courses } = await supabase
-    .from("studio_courses")
-    .select("id, title, curriculum_module_id, flashcard_queue")
-    .eq("user_id", userId)
-    .in("curriculum_module_id", activeModuleIds);
-
-  const rows = (courses ?? []) as StudioCourseFlashcardRow[];
-  const coursesWithCards = rows.filter((row) => (row.flashcard_queue?.length ?? 0) > 0);
+  const coursesWithCards = courses.filter((row) => (row.flashcard_queue?.length ?? 0) > 0);
   if (coursesWithCards.length === 0) return 0;
 
   const course = coursesWithCards[Math.floor(Math.random() * coursesWithCards.length)];
@@ -106,6 +97,45 @@ export async function dispatchFlashcardPushToUser(userId: string): Promise<numbe
   }
 
   return sentCount;
+}
+
+/**
+ * Sends one flashcard-reminder push to every device the given user has
+ * subscribed from — picks one random card from a random active-module
+ * course (same selection spirit as app/api/flashcards/pool, just one card
+ * instead of the whole pool). Any subscription the push service reports as
+ * permanently gone (404/410 — browser uninstalled, permission revoked) is
+ * dropped from `profiles.push_subscriptions`; anything else (network blip,
+ * 5xx) is left alone for the next attempt. Returns how many devices were
+ * actually notified — 0 for every silent, non-error case (no active
+ * modules, no queued cards yet, no subscriptions at all).
+ *
+ * Standalone entry point (app/api/push/dispatch-self/route.ts) — fetches
+ * its own profile/course rows, unlike the bulk sweep below which already
+ * has them in hand and calls sendFlashcardPushForProfile directly instead.
+ */
+export async function dispatchFlashcardPushToUser(userId: string): Promise<number> {
+  ensureVapidConfigured();
+  const supabase = getSupabaseAdmin();
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("flashcard_active_module_ids, push_subscriptions")
+    .eq("id", userId)
+    .maybeSingle<FlashcardProfileRow>();
+
+  if (profileError || !profile) return 0;
+
+  const activeModuleIds = profile.flashcard_active_module_ids ?? [];
+  if ((profile.push_subscriptions?.length ?? 0) === 0 || activeModuleIds.length === 0) return 0;
+
+  const { data: courses } = await supabase
+    .from("studio_courses")
+    .select("id, title, curriculum_module_id, flashcard_queue")
+    .eq("user_id", userId)
+    .in("curriculum_module_id", activeModuleIds);
+
+  return sendFlashcardPushForProfile(userId, supabase, profile, (courses ?? []) as StudioCourseFlashcardRow[]);
 }
 
 /**
@@ -182,15 +212,41 @@ export async function dispatchFlashcardPushToAllUsers(): Promise<{ usersNotified
 
   if (error) throw new Error(error.message);
 
-  const eligibleUserIds = (data ?? [])
-    .filter(
-      (row) =>
-        ((row.push_subscriptions as unknown[] | null)?.length ?? 0) > 0 &&
-        ((row.flashcard_active_module_ids as unknown[] | null)?.length ?? 0) > 0
-    )
-    .map((row) => row.id as string);
+  const eligibleProfiles = (data ?? []).filter(
+    (row) =>
+      ((row.push_subscriptions as unknown[] | null)?.length ?? 0) > 0 &&
+      ((row.flashcard_active_module_ids as unknown[] | null)?.length ?? 0) > 0
+  ) as (FlashcardProfileRow & { id: string })[];
 
-  const results = await Promise.allSettled(eligibleUserIds.map((userId) => dispatchFlashcardPushToUser(userId)));
+  if (eligibleProfiles.length === 0) return { usersNotified: 0, devicesNotified: 0 };
+
+  // PERFORMANCE: was one unbatched studio_courses query (plus a fully
+  // redundant re-fetch of the SAME profile row already in hand above) PER
+  // eligible user — a real, confirmed N+1 on this hourly sweep. ONE batched
+  // query across every eligible user instead, grouped back per-user in
+  // memory just below (each user's own flashcard_active_module_ids only
+  // makes sense scoped to their own courses, so the module-id filter moves
+  // from SQL to this in-memory step rather than being lost).
+  const eligibleUserIds = eligibleProfiles.map((row) => row.id);
+  const { data: allCourses } = await supabase
+    .from("studio_courses")
+    .select("id, title, curriculum_module_id, flashcard_queue, user_id")
+    .in("user_id", eligibleUserIds);
+
+  const coursesByUser = new Map<string, StudioCourseFlashcardRow[]>();
+  for (const row of (allCourses ?? []) as (StudioCourseFlashcardRow & { user_id: string })[]) {
+    const list = coursesByUser.get(row.user_id);
+    if (list) list.push(row);
+    else coursesByUser.set(row.user_id, [row]);
+  }
+
+  const results = await Promise.allSettled(
+    eligibleProfiles.map((profile) => {
+      const activeModuleIds = new Set(profile.flashcard_active_module_ids ?? []);
+      const userCourses = (coursesByUser.get(profile.id) ?? []).filter((c) => activeModuleIds.has(c.curriculum_module_id));
+      return sendFlashcardPushForProfile(profile.id, supabase, profile, userCourses);
+    })
+  );
 
   let usersNotified = 0;
   let devicesNotified = 0;

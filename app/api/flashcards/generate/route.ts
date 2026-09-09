@@ -6,7 +6,7 @@ import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openroute
 import { buildDefinitiveFlashcardSetPrompt } from "@/lib/ai/flashcard-prompts";
 import { FlashcardGenerationSchema } from "@/lib/ai/flashcard-schemas";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
-import { lookupFlashcardsCache, storeFlashcardsCache, recordFlashcardsCacheHit, type FlashcardQA } from "@/lib/flashcards-content-cache";
+import { lookupFlashcardsCacheBatch, storeFlashcardsCache, recordFlashcardsCacheHit, type FlashcardQA } from "@/lib/flashcards-content-cache";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
@@ -161,9 +161,20 @@ export async function POST(request: NextRequest) {
     // Pass 1: serve from an already-cached, not-yet-exhausted course — zero
     // API cost, zero quota reservation (cache hits never consume quota,
     // same rule as every other cache in this app).
-    for (const course of orderedCourses) {
-      const contentHash = sha256(normalizeText(course.explication!));
-      const cached = await lookupFlashcardsCache(contentHash);
+    //
+    // PERFORMANCE: content hashes are computed synchronously (no await
+    // needed), so every candidate is resolved in ONE batched query up front
+    // instead of one sequential DB round trip per course — a real N+1
+    // whenever earlier-ordered courses lack a cross-student cache entry
+    // (common for newly-uploaded courses), previously forcing up to N
+    // blocking round trips before falling through to Pass 2.
+    const contentHashes = orderedCourses.map((course) => sha256(normalizeText(course.explication!)));
+    const cacheByHash = await lookupFlashcardsCacheBatch(contentHashes);
+
+    for (let i = 0; i < orderedCourses.length; i++) {
+      const course = orderedCourses[i];
+      const contentHash = contentHashes[i];
+      const cached = cacheByHash.get(contentHash);
       if (!cached) continue; // no definitive set yet for this course — candidate for Pass 2
 
       const items = await serveFromCache(course, cached, contentHash);
