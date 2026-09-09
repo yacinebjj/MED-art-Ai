@@ -82,9 +82,6 @@ INTERDICTIONS STRICTES : jamais de texte approximatif, tronqué ou illisible ; j
 INSTRUCTION DE LANGUE OBLIGATOIRE : tout le texte visible dans l'infographie (titres, cartouches, légendes) doit être rédigé en ANGLAIS, jamais en français, tout en conservant strictement le même style visuel et la même rigueur ci-dessus.`;
 }
 
-/** @deprecated kept only so any stray import doesn't hard-crash the build — every real call site now goes through buildInfographicSystemPrompt(language). Equivalent to the "fr" (original, default) variant. */
-export const INFOGRAPHIC_SYSTEM_PROMPT = buildInfographicSystemPrompt(DEFAULT_INFOGRAPHIC_LANGUAGE);
-
 export function buildInfographicUserMessage(courseTitle: string, explicationExcerpt: string): string {
   return `Titre du cours : "${courseTitle}"\n\nVoici le contenu du cours à transformer en infographie mindmap :\n"""\n${explicationExcerpt}\n"""\n\nGénère l'infographie mindmap complète en respectant strictement le style demandé.`;
 }

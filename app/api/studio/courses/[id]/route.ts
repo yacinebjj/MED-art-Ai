@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { resolveStudioSchema } from "@/lib/ai/studio-schemas";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { lookupStudioInfographicCache } from "@/lib/studio-infographic-cache";
@@ -85,7 +86,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
   if (error) {
     console.error("[studio/courses/[id]:get] Échec lecture Supabase:", error);
-    return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Lecture échouée. Réessaie." }, { status: 500 });
   }
   if (!data) {
     return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
@@ -149,12 +150,32 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { section, data: sectionData } = (body ?? {}) as { section?: unknown; data?: unknown };
+  const { section, data: sectionData, studyYear: studyYearRaw } = (body ?? {}) as {
+    section?: unknown;
+    data?: unknown;
+    studyYear?: unknown;
+  };
   if (!isValidSection(section)) {
     return NextResponse.json({ success: false, error: "'section' invalide." }, { status: 400 });
   }
   if (sectionData === undefined || sectionData === null) {
     return NextResponse.json({ success: false, error: "'data' est requis." }, { status: 400 });
+  }
+
+  // SECURITY/INTEGRITY: this route used to write `sectionData` straight into
+  // the column with no shape validation at all — sanitizeForPostgres only
+  // strips control characters, it doesn't check shape/size. Unlike
+  // /api/studio/generate and /api/studio/regenerate (which both reject a
+  // malformed AI response via this exact schema before ever persisting), a
+  // client sending an arbitrarily-shaped `data` here would corrupt the
+  // column and crash the section's own renderer next time the student
+  // opens this course. studyYear mirrors those two routes' own gating —
+  // only actionType "cas_clinique" is affected, everything else ignores it.
+  const studyYear = typeof studyYearRaw === "number" && Number.isFinite(studyYearRaw) ? studyYearRaw : null;
+  const validation = resolveStudioSchema(section, studyYear).safeParse(sectionData);
+  if (!validation.success) {
+    console.error(`[studio/courses/[id]:patch] Validation zod échouée pour la section "${section}":`, validation.error.flatten().fieldErrors);
+    return NextResponse.json({ success: false, error: "Le contenu fourni ne correspond pas au format attendu pour cette section." }, { status: 400 });
   }
 
   if (!isSupabaseConfigured()) {
@@ -167,13 +188,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   // this safe against a race — the ownership check and the write happen atomically.
   const { error, count } = await supabase
     .from("studio_courses")
-    .update({ [column]: sanitizeForPostgres(sectionData), updated_at: new Date().toISOString() }, { count: "exact" })
+    .update({ [column]: sanitizeForPostgres(validation.data), updated_at: new Date().toISOString() }, { count: "exact" })
     .eq("id", id)
     .eq("user_id", user.id);
 
   if (error) {
     console.error("[studio/courses/[id]:patch] Échec update Supabase:", error);
-    return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${error.message}` }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Sauvegarde échouée. Réessaie." }, { status: 500 });
   }
   if (count === 0) {
     return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
@@ -212,7 +233,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
 
   if (error) {
     console.error("[studio/courses/[id]:delete] Échec suppression Supabase:", error);
-    return NextResponse.json({ success: false, error: `Suppression échouée : ${error.message}` }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Suppression échouée. Réessaie." }, { status: 500 });
   }
   if (count === 0) {
     return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });

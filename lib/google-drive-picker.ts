@@ -341,7 +341,11 @@ export async function listDriveFiles(accessToken: string, opts: ListDriveFilesOp
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error("Google Drive n'a pas répondu à temps. Vérifie ta connexion et réessaie.");
     }
-    throw error;
+    // A genuine dropped connection (e.g. a mobile network blip) — the only
+    // other case this function can throw from besides a non-OK response,
+    // and previously the one path left unwrapped in French, unlike its
+    // sibling branch just above.
+    throw new Error("La connexion à Google Drive a été interrompue. Vérifie ta connexion et réessaie.");
   } finally {
     clearTimeout(timeoutId);
   }
@@ -349,6 +353,13 @@ export async function listDriveFiles(accessToken: string, opts: ListDriveFilesOp
   if (!res.ok) {
     if (res.status === 401) {
       throw new DriveAuthExpiredError("Ta session Google Drive a expiré. Reconnecte-toi pour continuer à parcourir tes fichiers.");
+    }
+    // A rate limit is retryable and self-resolving in seconds — worth a
+    // distinct, actionable message instead of Google's raw JSON error body
+    // (the generic branch below), which every other non-OK status still
+    // falls into unchanged.
+    if (res.status === 429) {
+      throw new Error("Trop de requêtes envoyées à Google Drive — patiente quelques secondes puis réessaie.");
     }
     const detail = await res.text().catch(() => "");
     throw new Error(`Google Drive a répondu ${res.status}${detail ? ` : ${detail.slice(0, 200)}` : ""}.`);
