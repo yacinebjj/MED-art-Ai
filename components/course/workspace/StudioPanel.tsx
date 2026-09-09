@@ -747,7 +747,7 @@ export function StudioPanel({
                           // p-3/md:p-4 + text-sm/md:text-base, reading as
                           // oversized blocks instead of an elegant, dense
                           // tool list.
-                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none md:text-sm",
+                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.02] hover:border-primary/50 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-none md:text-sm",
                           isGenerating && "disabled:cursor-wait",
                           isLocked && "opacity-50 saturate-[0.4] hover:translate-y-0 hover:shadow-none",
                           // Fixed h-14 (uncollapsed) — CSS Grid rows stretch

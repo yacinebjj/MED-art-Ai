@@ -71,19 +71,28 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
           <Logo size="sm" />
         </Link>
         <span className="hidden h-6 w-px shrink-0 bg-border sm:block" />
-        <h1 className="truncate text-sm font-semibold text-foreground sm:text-lg">
+        <h1 className="truncate bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-sm font-bold tracking-tight text-transparent sm:text-lg">
+          <span className="hidden text-muted-foreground/70 font-medium md:inline">MedArt Workspace — </span>
           {title || tWorkspaceTopbar("courseFallbackTitle", language)}
         </h1>
       </div>
 
-      <div className="flex items-center gap-0.5 sm:gap-2">
-        <Button variant="ghost" size="icon" aria-label={tWorkspaceTopbar("copyLinkAriaLabel", language)} onClick={handleCopyLink}>
-          <Copy className="h-4 w-4 text-muted-foreground" />
+      <div className="flex items-center gap-1 sm:gap-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:px-3"
+          aria-label={tWorkspaceTopbar("copyLinkAriaLabel", language)}
+          onClick={handleCopyLink}
+        >
+          <Copy className="h-4 w-4" />
+          <span className="hidden lg:inline">{tWorkspaceTopbar("copyLinkAriaLabel", language)}</span>
         </Button>
 
         <Button
           variant="ghost"
-          size="icon"
+          size="sm"
+          className="gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:px-3"
           aria-label={
             isDark
               ? tWorkspaceTopbar("switchToLightMode", language)
@@ -91,19 +100,26 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
           }
           onClick={() => setTheme(isDark ? "light" : "dark")}
         >
-          {!mounted ? (
-            <Moon className="h-4 w-4 text-muted-foreground" />
-          ) : isDark ? (
-            <Sun className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <Moon className="h-4 w-4 text-muted-foreground" />
-          )}
+          {!mounted ? <Moon className="h-4 w-4" /> : isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          <span className="hidden lg:inline">
+            {!mounted
+              ? tWorkspaceTopbar("switchToDarkMode", language)
+              : isDark
+                ? tWorkspaceTopbar("switchToLightMode", language)
+                : tWorkspaceTopbar("switchToDarkMode", language)}
+          </span>
         </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={tWorkspaceTopbar("settings", language)}>
-              <Settings className="h-4 w-4 text-muted-foreground" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:px-3"
+              aria-label={tWorkspaceTopbar("settings", language)}
+            >
+              <Settings className="h-4 w-4" />
+              <span className="hidden lg:inline">{tWorkspaceTopbar("settings", language)}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">

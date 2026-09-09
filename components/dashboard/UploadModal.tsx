@@ -39,7 +39,7 @@ function formatOversizedFileError(file: File): string {
 // per import method (local file / Drive / pasted text) rather than tabs that
 // hide two of the three at any given time.
 const CARD_BASE_CLASS =
-  "flex h-full flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-card transition-all duration-300 hover:border-primary hover:shadow-lg";
+  "flex h-full flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-glow";
 
 /** Enter/Space activates a non-<button> clickable zone, matching native button semantics. */
 function handleZoneKeyDown(e: KeyboardEvent<HTMLDivElement>, action: () => void) {
@@ -304,11 +304,11 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
               onDrop={handleDrop}
               aria-label="Glisser-déposer un fichier, ou appuyer pour parcourir"
               className={cn(
-                "flex min-h-[6.5rem] flex-1 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-3 py-6 text-center transition-colors duration-300",
+                "flex min-h-[6.5rem] flex-1 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-3 py-6 text-center transition-all duration-300",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 isDragging
-                  ? "border-primary bg-primary/5"
-                  : "border-border bg-muted/40 hover:bg-muted/60"
+                  ? "scale-[1.01] border-primary bg-gradient-to-br from-primary/10 via-primary/5 to-transparent shadow-glow"
+                  : "border-border bg-gradient-to-br from-muted/50 via-muted/30 to-transparent hover:border-primary/40 hover:from-primary/5 hover:via-muted/40"
               )}
             >
               <input
@@ -327,7 +327,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                   setFile(chosen);
                 }}
               />
-              <UploadCloud className="h-6 w-6 text-muted-foreground" />
+              <UploadCloud className={cn("h-6 w-6 transition-transform duration-300", isDragging ? "scale-110 text-primary" : "text-muted-foreground")} />
               <p className="line-clamp-2 text-xs font-medium text-foreground">
                 {file ? file.name : "Glisse-dépose ton fichier ici, ou clique pour parcourir"}
               </p>

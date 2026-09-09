@@ -1641,7 +1641,7 @@ export default function ModuleWorkspacePage() {
       {isDesktop && (
         <div className="flex flex-1 flex-row gap-4 overflow-hidden p-4">
           {!isSplitScreen && (
-            <aside className={cn(panelShellClasses, "shrink-0 transition-all duration-300", isSourcesCollapsed ? "w-20" : "w-72")}>
+            <aside className={cn(panelShellClasses, "shrink-0 transition-all duration-300", isSourcesCollapsed ? "w-20" : "w-80")}>
               <ModuleSourcesPanel
                 courses={courses}
                 activeCourseId={activeCourse?.id ?? null}
