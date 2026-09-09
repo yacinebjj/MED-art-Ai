@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,12 @@ interface CookieToSet {
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  // SECURITY: sanitizeRedirectPath forces this to a same-origin relative
+  // path — see its own header comment. A raw, unvalidated `next` here was a
+  // real, confirmed open redirect (e.g. `next=@evil-phish.com`, which both
+  // NextResponse.redirect and the browser parse with evil-phish.com as the
+  // actual host once concatenated onto `origin`).
+  const next = sanitizeRedirectPath(searchParams.get("next"));
 
   if (code) {
     const cookieStore = cookies();

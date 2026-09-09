@@ -408,7 +408,28 @@ export async function POST(request: NextRequest) {
             // studio-course-{id} (Workspace) vs a real public course slug
             // (legacy pipeline) — the slug's own shape is enough to tell them apart.
             const studioIdMatch = courseSlug.match(/^studio-course-(\d+)$/);
-            const chunkSource = studioIdMatch ? { studioCourseId: Number(studioIdMatch[1]) } : { legacyCourseSlug: courseSlug };
+            // SECURITY: studio_courses.id is a plain sequential bigint — without
+            // this ownership check, ANY authenticated student could read ANY
+            // other student's private course chunks/Explication by guessing a
+            // small integer here (a real, confirmed IDOR — retrieveRelevantContext
+            // itself queries studio_course_chunks by course_id alone, via the
+            // service-role client, which bypasses that table's own RLS entirely).
+            // Fails open to `null` (no course context, same as "not indexed yet")
+            // rather than a distinguishable error — this must never become an
+            // oracle for "does course id N exist".
+            let chunkSource: { studioCourseId: number } | { legacyCourseSlug: string } | null = studioIdMatch
+              ? { studioCourseId: Number(studioIdMatch[1]) }
+              : { legacyCourseSlug: courseSlug };
+            if (studioIdMatch && supabase) {
+              const { data: ownedCourse } = await supabase
+                .from("studio_courses")
+                .select("id")
+                .eq("id", Number(studioIdMatch[1]))
+                .eq("user_id", user.id)
+                .maybeSingle();
+              if (!ownedCourse) chunkSource = null;
+            }
+            if (!chunkSource) return null;
 
             // A short, anaphoric follow-up ("zid chrahli b tafsil", "donne-moi un
             // exemple") embeds almost meaninglessly on its own — nothing in

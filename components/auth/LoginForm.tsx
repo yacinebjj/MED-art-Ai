@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
+import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
 
@@ -34,7 +35,12 @@ export function LoginForm() {
       return;
     }
 
-    const next = searchParams.get("next") ?? "/dashboard";
+    // SECURITY: sanitizeRedirectPath forces this to a same-origin relative
+    // path — a raw `next` here was a real, confirmed open redirect
+    // (router.push on a cross-origin URL performs a genuine hard
+    // location.assign in Next's App Router, no trick required beyond a
+    // crafted `?next=https://evil.com` link).
+    const next = sanitizeRedirectPath(searchParams.get("next"));
     router.push(next);
     router.refresh();
   }
