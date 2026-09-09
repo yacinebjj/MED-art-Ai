@@ -34,15 +34,16 @@ const MIME_TO_EXTENSION: Record<string, string> = {
 };
 
 /**
- * Downloads one file the student just picked via the Google Drive Picker
- * (see lib/google-drive-picker.ts) and runs it through the exact same text
- * extraction as a local upload (lib/document-extraction.ts), so from this
- * point on a Drive import is indistinguishable from a local file to every
- * caller (UploadModal treats the result like the "Texte brut" path).
+ * Downloads one file the student just picked in the Drive browser (see
+ * components/dashboard/DriveBrowser.tsx / lib/google-drive-picker.ts) and
+ * runs it through the exact same text extraction as a local upload
+ * (lib/document-extraction.ts), so from this point on a Drive import is
+ * indistinguishable from a local file to every caller (UploadModal treats
+ * the result like the "Texte brut" path).
  *
- * The access token is the short-lived OAuth token the Picker flow already
- * obtained client-side (scope: drive.file) — this route only ever uses it
- * for one immediate download, never stores it.
+ * The access token is the short-lived OAuth token Google Identity Services'
+ * popup token flow already obtained client-side (scope: drive.readonly) —
+ * this route only ever uses it for one immediate download, never stores it.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();

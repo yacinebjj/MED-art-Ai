@@ -13,14 +13,10 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { openGoogleDrivePicker, preloadGoogleDriveScripts } from "@/lib/google-drive-picker";
+import { preloadGoogleDriveScripts, type DriveListItem } from "@/lib/google-drive-picker";
+import { DriveBrowser } from "@/components/dashboard/DriveBrowser";
 import { useToast } from "@/components/ui/Toast";
 import { OcrSuggestedError } from "@/lib/upload-client";
-
-// Statically inlined at build time by Next.js (NEXT_PUBLIC_ vars) — reading
-// it here just lets the Drive card show an honest "not configured" state
-// instead of only failing once the student actually clicks the button.
-const GOOGLE_DRIVE_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && process.env.NEXT_PUBLIC_GOOGLE_API_KEY);
 
 // Must match the server-side MAX_FILE_BYTES in app/api/generate-course/route.ts
 // AND app/api/upload/route.ts (whichever ends up handling this file — see
@@ -77,17 +73,19 @@ export interface UploadModalProps {
 }
 
 export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSubmitText, onRetryWithOcr, title: modalTitle, description }: UploadModalProps) {
-  // Which method's content shows in the central zone — "Drive" has no
-  // inline content of its own (it opens Google's own popup immediately,
-  // see activateDriveZone), so it's never a value of this state, just a
-  // pill that fires an action.
-  const [activeMethod, setActiveMethod] = useState<"upload" | "text">("upload");
+  const [activeMethod, setActiveMethod] = useState<"upload" | "text" | "drive">("upload");
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDriveImporting, setIsDriveImporting] = useState(false);
+  // Lifted out of DriveBrowser so the OAuth connection survives switching to
+  // another pill and back — DriveBrowser itself unmounts/remounts with the
+  // active tab, same as the upload dropzone/paste-text form either side of
+  // it, but re-running Google's OAuth popup on every tab switch would be a
+  // real, avoidable annoyance the other two tabs don't have.
+  const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ocrSuggestion, setOcrSuggestion] = useState<{ path: string; fileName: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -112,6 +110,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     setTitle("");
     setError(null);
     setOcrSuggestion(null);
+    setDriveAccessToken(null);
   }
 
   function handleOpenChange(next: boolean) {
@@ -228,35 +227,24 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   }
 
   /**
-   * Opens the Google Drive picker, downloads + extracts the chosen file
-   * server-side (app/api/drive/import), then feeds the result through the
-   * exact same onSubmitText path as "Texte direct" — from this point on, a
-   * Drive import is indistinguishable from pasted text to whatever caller
-   * customized onSubmitText (or the default /api/generate-course flow).
+   * Called by DriveBrowser once the student taps a real file (not a
+   * folder). Downloads + extracts it server-side (app/api/drive/import)
+   * using the access token DriveBrowser already obtained, then feeds the
+   * result through the exact same onSubmitText path as "Texte direct" —
+   * from this point on, a Drive import is indistinguishable from pasted
+   * text to whatever caller customized onSubmitText (or the default
+   * /api/generate-course flow).
    */
-  async function handleDriveImport() {
-    // Deliberately NOT gated on GOOGLE_DRIVE_CONFIGURED here (unlike the old
-    // version of this function/activateDriveZone below) — production report:
-    // clicking the Drive card did "literally nothing, no popup, no error".
-    // Root cause was this exact silent early-return: when the env vars
-    // aren't baked into the build, the click produced zero feedback of any
-    // kind. openGoogleDrivePicker() already throws a clear, specific error
-    // in that exact case ("Google Drive n'est pas configuré...") — routing
-    // through the SAME try/catch below (which already surfaces both an
-    // inline message AND a toast) means a missing/stale config now fails
-    // exactly as visibly as any other Drive error, never silently.
+  async function handleDriveFileSelected(picked: DriveListItem, accessToken: string) {
     if (isDriveImporting) return;
     setError(null);
     setIsDriveImporting(true);
 
     try {
-      const picked = await openGoogleDrivePicker();
-      if (!picked) return; // student closed the picker without choosing anything
-
       const res = await fetch("/api/drive/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileId: picked.id, mimeType: picked.mimeType, accessToken: picked.accessToken, fileName: picked.name }),
+        body: JSON.stringify({ fileId: picked.id, mimeType: picked.mimeType, accessToken, fileName: picked.name }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "L'import depuis Google Drive a échoué.");
@@ -273,12 +261,6 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     }
   }
 
-  /** Whole-card click/keyboard zone — see handleDriveImport's own comment for why this no longer short-circuits on GOOGLE_DRIVE_CONFIGURED. */
-  function activateDriveZone() {
-    if (isDriveImporting) return;
-    void handleDriveImport();
-  }
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-3xl">
@@ -290,11 +272,10 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
         </DialogHeader>
 
         <div className="flex flex-col gap-5">
-          {/* Central content zone — dropzone or paste-text form, whichever
-              method is active. This is the visually dominant element, per
-              the request's own "central dropzone" spec — Drive has no
-              content of its own here (see the pill nav below), it opens
-              Google's popup directly the moment its pill is clicked. */}
+          {/* Central content zone — dropzone, paste-text form, or the Drive
+              browser, whichever method is active. This is the visually
+              dominant element, per the request's own "central dropzone"
+              spec. */}
           {activeMethod === "upload" ? (
             <div className="flex flex-col items-center gap-4">
               <div
@@ -343,7 +324,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                 Ajouter le cours
               </Button>
             </div>
-          ) : (
+          ) : activeMethod === "text" ? (
             <div className="flex flex-col gap-3">
               <Input
                 label="Titre (optionnel)"
@@ -364,16 +345,22 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                 Ajouter le cours
               </Button>
             </div>
+          ) : (
+            <DriveBrowser
+              accessToken={driveAccessToken}
+              onAccessTokenChange={setDriveAccessToken}
+              onFileSelected={handleDriveFileSelected}
+              disabled={isDriveImporting}
+            />
           )}
 
           {/* Horizontal pill nav — the 3 REAL import methods this app
-              supports. Deliberately not disabled by !GOOGLE_DRIVE_CONFIGURED
-              (see handleDriveImport's own comment): clicking it must always
-              reach a real, visible error rather than doing nothing. */}
+              supports. */}
           <div className="flex flex-wrap items-center justify-center gap-2 border-t border-border pt-4">
             <button
               type="button"
               onClick={() => setActiveMethod("upload")}
+              disabled={isDriveImporting}
               className={cn(NAV_PILL_BASE, activeMethod === "upload" ? NAV_PILL_ACTIVE : NAV_PILL_INACTIVE)}
               aria-pressed={activeMethod === "upload"}
             >
@@ -382,11 +369,11 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
             </button>
             <button
               type="button"
-              onClick={activateDriveZone}
+              onClick={() => setActiveMethod("drive")}
               disabled={isDriveImporting}
-              className={cn(NAV_PILL_BASE, NAV_PILL_INACTIVE, !GOOGLE_DRIVE_CONFIGURED && "opacity-60")}
+              className={cn(NAV_PILL_BASE, activeMethod === "drive" ? NAV_PILL_ACTIVE : NAV_PILL_INACTIVE)}
+              aria-pressed={activeMethod === "drive"}
               aria-label="Importer un document depuis Google Drive"
-              title={GOOGLE_DRIVE_CONFIGURED ? undefined : "Google Drive n'est pas configuré — cliquer affichera les détails."}
             >
               {isDriveImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
               Drive
@@ -394,6 +381,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
             <button
               type="button"
               onClick={() => setActiveMethod("text")}
+              disabled={isDriveImporting}
               className={cn(NAV_PILL_BASE, activeMethod === "text" ? NAV_PILL_ACTIVE : NAV_PILL_INACTIVE)}
               aria-pressed={activeMethod === "text"}
             >

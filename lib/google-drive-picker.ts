@@ -1,51 +1,70 @@
 "use client";
 
 /**
- * Thin client-side wrapper around Google's Picker API + Identity Services
- * OAuth token flow — the standard way to let a user pick ONE file from their
- * own Drive without your server ever needing broad, persistent Drive access
- * (the token requested here is short-lived and scoped to
- * drive.readonly/drive.file, not a stored refresh token).
+ * Thin client-side wrapper around Google Identity Services' OAuth token
+ * popup flow + the Drive REST API v3 — lets a student browse their own
+ * Drive (Récents / Mon Drive / Partagés avec moi) and pick a file, entirely
+ * inside our own responsive UI (see components/dashboard/DriveBrowser.tsx).
  *
- * Requires two Google Cloud Console setup steps before this can work at all
- * (see the two env vars below): a Web application OAuth 2.0 Client ID, and
- * an API key with the "Google Picker API" enabled. Both are DESIGNED to be
- * public/client-exposed — restricted server-side by Google via "Authorized
- * JavaScript origins" on the Client ID and API key referrer restrictions,
- * not by secrecy — which is why they're NEXT_PUBLIC_ and not server-only.
+ * Previously this rendered Google's own hosted Picker widget
+ * (google.picker.PickerBuilder) inside an iframe. That widget has two real,
+ * externally-documented limitations that no amount of our own config could
+ * fix: (1) with third-party cookies blocked (Chrome's default now), the
+ * Picker's internal account-chooser sometimes renders a dead "Sign in to
+ * your Google Account" box INSIDE its own iframe instead of using the
+ * already-granted OAuth token, and (2) its internal layout is fixed/
+ * desktop-oriented and not meaningfully responsive below tablet width, no
+ * matter how the outer iframe is sized. Talking to the Drive REST API
+ * directly (Bearer token, no iframe at all) removes both failure classes
+ * at the source instead of working around them.
+ *
+ * Only needs a Web application OAuth 2.0 Client ID from Google Cloud
+ * Console (Authorized JavaScript origins covering this domain) with the
+ * Drive API enabled — no API key, no "Google Picker API" enablement
+ * needed anymore (that was Picker-widget-specific; a Bearer-token REST
+ * call authenticates entirely via the OAuth token).
  */
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
 
-// Scopes down to files the picker itself lets the user select, rather than
-// blanket read access to the whole Drive — the narrowest scope the Picker
-// API supports for a one-off "import this file" flow.
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+// Broader than the old Picker flow's drive.file (which only grants access to
+// files the widget itself hands back) — our own browsing UI needs to LIST
+// files the student hasn't explicitly picked yet (Récents/Mon Drive/
+// Partagés avec moi), which requires read access to the whole Drive.
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
-const PICKER_MIME_TYPES = [
+// Same supported formats as the rest of the import pipeline
+// (app/api/drive/import/route.ts's GOOGLE_NATIVE_EXPORT/MIME_TO_EXTENSION,
+// lib/constants.ts's ACCEPTED_FILE_TYPES) — kept as a single source of
+// truth here since it drives the Drive API `q=` filter below.
+export const SUPPORTED_DRIVE_MIME_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
   "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
   "text/plain",
-  "application/vnd.google-apps.document", // Google Docs (needs export, see app/api/drive/import)
-  "application/vnd.google-apps.presentation", // Google Slides (needs export)
-].join(",");
+  "application/vnd.google-apps.document", // Google Docs (exported server-side, see app/api/drive/import)
+  "application/vnd.google-apps.presentation", // Google Slides (exported server-side)
+];
 
-export interface DrivePickedFile {
+const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+
+export interface DriveListItem {
   id: string;
   name: string;
   mimeType: string;
+  iconLink?: string;
+  modifiedTime?: string;
+  isFolder: boolean;
 }
 
 // A blocked/stalled script request doesn't always fire the element's own
 // `error` event (some ad/privacy blockers, or a request that just hangs
 // rather than failing outright) — without a bound, `loadScriptOnce` could
 // wait forever, and every caller above it (ensureGoogleScripts,
-// openGoogleDrivePicker, handleDriveImport) would hang right along with it:
-// the Import button spinning forever with zero error, indistinguishable
-// from the "click does nothing" production report. Same pattern/rationale
-// as ACCESS_TOKEN_TIMEOUT_MS below, applied one step earlier in the flow.
+// requestAccessToken) would hang right along with it: the Import button
+// spinning forever with zero error, indistinguishable from the "click does
+// nothing" production report. Same pattern/rationale as
+// ACCESS_TOKEN_TIMEOUT_MS below, applied one step earlier in the flow.
 const SCRIPT_LOAD_TIMEOUT_MS = 20_000;
 
 function loadScriptOnce(src: string): Promise<void> {
@@ -54,11 +73,11 @@ function loadScriptOnce(src: string): Promise<void> {
     // Only trust an existing tag if IT already finished loading (marked via
     // data-loaded below) — a tag left behind by a PREVIOUS attempt that
     // timed out/errored is NOT proof the script ever actually loaded
-    // (window.gapi/window.google could still be undefined). Without this
-    // distinction, retrying after a genuine failure would silently
-    // "succeed" from the stale tag and crash one step later on
-    // window.gapi.load(...)/window.google.accounts... being called on
-    // undefined — a real, confirmed gap in the first version of this fix.
+    // (window.google could still be undefined). Without this distinction,
+    // retrying after a genuine failure would silently "succeed" from the
+    // stale tag and crash one step later on window.google.accounts... being
+    // called on undefined — a real, confirmed gap in the first version of
+    // this fix.
     if (existing?.dataset.loaded === "true") {
       resolve();
       return;
@@ -95,21 +114,19 @@ function loadScriptOnce(src: string): Promise<void> {
 
 declare global {
   interface Window {
-    gapi: any;
     google: any;
   }
 }
-
-let gapiPickerLoaded = false;
 
 /**
  * Fire-and-forget, safe to call multiple times (loadScriptOnce's own
  * document.querySelector short-circuit makes every call after the first a
  * near-instant no-op) — call this as EARLY as possible (e.g. the moment the
- * upload modal opens), well before the student actually clicks "Importer
- * depuis Drive". Real production issue this fixes: openGoogleDrivePicker
- * used to `await ensureGoogleScripts()` INSIDE the click handler itself,
- * before ever calling Google's own popup-opening `requestAccessToken()` —
+ * upload modal opens), well before the student actually clicks "Se
+ * connecter à Google Drive". Real production issue this fixes:
+ * requestAccessToken used to be reached only after an `await` on this
+ * script load, INSIDE the click handler itself, before ever calling
+ * Google's own popup-opening `requestAccessToken()` on the token client —
  * that `await` is a genuine async gap between the click and the popup call,
  * and several mobile browsers (Safari in particular) only grant "trusted
  * user gesture" popup privileges to a `window.open` call that happens
@@ -123,46 +140,18 @@ let gapiPickerLoaded = false;
  * no real await), keeping the gesture fresh through to requestAccessToken().
  */
 export function preloadGoogleDriveScripts(): void {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) return;
+  if (!GOOGLE_CLIENT_ID) return;
   void ensureGoogleScripts().catch((error) => {
-    // Best-effort only — a failed preload just means the click handler's
-    // own await ensureGoogleScripts() call (still in place, unchanged)
-    // retries it and surfaces the real error normally at that point.
+    // Best-effort only — a failed preload just means the "Se connecter"
+    // click handler's own await ensureGoogleScripts() call (still in place,
+    // unchanged) retries it and surfaces the real error normally at that
+    // point.
     console.warn("[google-drive-picker] Préchargement des scripts Google échoué (non bloquant, réessayé au clic):", error);
   });
 }
 
 async function ensureGoogleScripts(): Promise<void> {
-  await Promise.all([
-    loadScriptOnce("https://apis.google.com/js/api.js"),
-    loadScriptOnce("https://accounts.google.com/gsi/client"),
-  ]);
-
-  if (!gapiPickerLoaded) {
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const timeoutId = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        reject(new Error("Le chargement du sélecteur Google Drive a pris trop de temps — réessaie."));
-      }, SCRIPT_LOAD_TIMEOUT_MS);
-      window.gapi.load("picker", {
-        callback: () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeoutId);
-          resolve();
-        },
-        onerror: () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeoutId);
-          reject(new Error("Échec du chargement de Google Picker."));
-        },
-      });
-    });
-    gapiPickerLoaded = true;
-  }
+  await loadScriptOnce("https://accounts.google.com/gsi/client");
 }
 
 // Google Identity Services only invokes `callback` on an explicit outcome
@@ -171,9 +160,10 @@ async function ensureGoogleScripts(): Promise<void> {
 // this domain, or the consent screen is still in "Testing" mode and this
 // student isn't an allow-listed test user, Google renders its own dead-end
 // error page INSIDE the popup — and in both cases the callback frequently
-// never fires at all. Without a timeout, that left the Import button
-// spinning forever with zero feedback, indistinguishable from "nothing
-// happens" (found during a production bug report — this is not hypothetical).
+// never fires at all. Without a timeout, that left the "Se connecter"
+// button spinning forever with zero feedback, indistinguishable from
+// "nothing happens" (found during a production bug report — this is not
+// hypothetical).
 const ACCESS_TOKEN_TIMEOUT_MS = 90_000;
 
 /**
@@ -200,12 +190,20 @@ function messageForTokenClientError(type: TokenClientErrorType): string {
   return "La connexion à Google a échoué. Réessaie dans un instant.";
 }
 
-function requestAccessToken(): Promise<string> {
+/**
+ * Opens Google's OAuth consent popup and resolves with a short-lived
+ * (~1h) access token scoped to drive.readonly. Never stored beyond the
+ * caller's own in-memory state — re-requested fresh every time the student
+ * opens the Drive browser in a new modal session.
+ */
+export async function requestAccessToken(): Promise<string> {
+  if (!GOOGLE_CLIENT_ID) {
+    throw new Error("Google Drive n'est pas configuré (NEXT_PUBLIC_GOOGLE_CLIENT_ID manquant).");
+  }
+
+  await ensureGoogleScripts();
+
   return new Promise((resolve, reject) => {
-    if (!GOOGLE_CLIENT_ID) {
-      reject(new Error("Google Drive n'est pas configuré (NEXT_PUBLIC_GOOGLE_CLIENT_ID manquant)."));
-      return;
-    }
     let settled = false;
     const timeoutId = setTimeout(() => {
       if (settled) return;
@@ -247,90 +245,124 @@ function requestAccessToken(): Promise<string> {
   });
 }
 
+export type DriveSection = "recent" | "mydrive" | "shared";
+
+export interface ListDriveFilesOptions {
+  section: DriveSection;
+  /** Folder to list the contents of — "mydrive" section only. Omit/undefined means the Drive root. */
+  folderId?: string;
+  /** Free-text search — when set, overrides the section's own query (searches across all of Drive, matching NotebookLM's own picker behavior). */
+  searchQuery?: string;
+  pageToken?: string;
+}
+
+interface ListDriveFilesResult {
+  files: DriveListItem[];
+  nextPageToken?: string;
+}
+
 /**
- * Opens the Google Drive file picker and resolves with the chosen file's
- * {id, name, mimeType}, or `null` if the student closes the picker without
- * choosing anything. The actual file bytes are fetched server-side
- * afterward (see app/api/drive/import/route.ts) using this same access
- * token, so this function never downloads file content itself.
+ * Thrown by listDriveFiles specifically for a 401 — lets callers offer a
+ * distinct "Se reconnecter" action (drop the stale token, request a fresh
+ * one) instead of blindly retrying a request that will just fail the same
+ * way again with the same expired token.
  */
-export async function openGoogleDrivePicker(): Promise<(DrivePickedFile & { accessToken: string }) | null> {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
-    throw new Error(
-      "Google Drive n'est pas configuré côté serveur (NEXT_PUBLIC_GOOGLE_CLIENT_ID / NEXT_PUBLIC_GOOGLE_API_KEY manquants dans .env.local)."
-    );
+export class DriveAuthExpiredError extends Error {}
+
+/** Drive API `q=` string values need single quotes escaped — see https://developers.google.com/drive/api/guides/ref-search-terms */
+function escapeDriveQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function buildMimeTypeClause(includeFolders: boolean): string {
+  const types = includeFolders ? [...SUPPORTED_DRIVE_MIME_TYPES, FOLDER_MIME_TYPE] : SUPPORTED_DRIVE_MIME_TYPES;
+  return `(${types.map((t) => `mimeType='${t}'`).join(" or ")})`;
+}
+
+function buildDriveQuery(opts: ListDriveFilesOptions): string {
+  const clauses = ["trashed=false"];
+
+  if (opts.searchQuery?.trim()) {
+    clauses.push(`name contains '${escapeDriveQueryValue(opts.searchQuery.trim())}'`);
+    clauses.push(buildMimeTypeClause(true));
+    return clauses.join(" and ");
   }
 
-  await ensureGoogleScripts();
-  const accessToken = await requestAccessToken();
+  if (opts.section === "recent") {
+    clauses.push(buildMimeTypeClause(false));
+  } else if (opts.section === "shared") {
+    clauses.push("sharedWithMe=true");
+    clauses.push(buildMimeTypeClause(false));
+  } else {
+    clauses.push(`'${escapeDriveQueryValue(opts.folderId ?? "root")}' in parents`);
+    clauses.push(buildMimeTypeClause(true));
+  }
 
-  // Same class of risk as the two steps above (script loading, OAuth token
-  // request) — a Picker API misconfiguration (API key missing the "Google
-  // Picker API" enablement, or a referrer restriction mismatch — a DIFFERENT
-  // failure mode than the Client ID/API key presence check above, since the
-  // widget itself renders but its callback then never fires PICKED or
-  // CANCEL) left this specific promise with no timeout at all in the first
-  // version of this fix — the last remaining unguarded async step in the
-  // whole Drive-import chain, and a real way for the "click does nothing,
-  // spins forever" bug class to survive one step further down the pipeline.
-  const PICKER_DISPLAY_TIMEOUT_MS = 90_000;
+  return clauses.join(" and ");
+}
 
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timeoutId = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error("Le sélecteur Google Drive n'a pas répondu. Vérifie la configuration de l'API Picker, ou réessaie."));
-    }, PICKER_DISPLAY_TIMEOUT_MS);
+// Same rationale as SCRIPT_LOAD_TIMEOUT_MS/ACCESS_TOKEN_TIMEOUT_MS above — this
+// call fires far more often than either of those (every section switch,
+// folder click, search keystroke, and "Charger plus" click), so a stalled
+// connection here (e.g. a student on flaky mobile data) would otherwise leave
+// DriveBrowser's loading spinner spinning forever with zero feedback, the
+// exact bug class this file's other two async steps were already hardened
+// against.
+const DRIVE_LIST_TIMEOUT_MS = 20_000;
 
-    try {
-      const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS)
-        .setMimeTypes(PICKER_MIME_TYPES)
-        .setSelectFolderEnabled(false);
-
-      // Explicit origin for the Picker <-> parent-window postMessage
-      // handshake — Google's own documented guard against a real (if rare)
-      // class of cross-origin failure where the widget renders but its
-      // PICKED/CANCEL callback never reaches this page. Costs nothing when
-      // everything is already working.
-      const builder = new window.google.picker.PickerBuilder()
-        .addView(view)
-        .setOAuthToken(accessToken)
-        .setDeveloperKey(GOOGLE_API_KEY)
-        .setOrigin(window.location.origin);
-
-      // Google's Picker defaults to fixed, desktop-oriented dimensions —
-      // on a real phone viewport that renders as a cramped box with
-      // barely-tappable rows. Sizing it to the actual viewport (capped at
-      // a sane minimum so a tiny/foldable screen doesn't get an unusably
-      // small picker either) fixes that without needing any custom
-      // overlay — the Picker's own iframe just fills the space it's given.
-      if (typeof window !== "undefined" && window.innerWidth < 768) {
-        builder.setSize(Math.max(window.innerWidth, 320), Math.max(window.innerHeight, 480));
-      }
-
-      const picker = builder
-        .setCallback((data: any) => {
-          if (settled) return;
-          if (data.action === window.google.picker.Action.PICKED) {
-            const doc = data.docs[0];
-            settled = true;
-            clearTimeout(timeoutId);
-            resolve({ id: doc.id, name: doc.name, mimeType: doc.mimeType, accessToken });
-          } else if (data.action === window.google.picker.Action.CANCEL) {
-            settled = true;
-            clearTimeout(timeoutId);
-            resolve(null);
-          }
-        })
-        .build();
-
-      picker.setVisible(true);
-    } catch (error) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      reject(error instanceof Error ? error : new Error("Échec de l'ouverture du sélecteur Google Drive."));
-    }
+/**
+ * Lists one page of the student's Drive files for the given section/folder/
+ * search, via a direct Bearer-token REST call — no iframe, no Picker widget,
+ * fully under our own UI's control (see components/dashboard/DriveBrowser.tsx).
+ * Throws on any non-OK response, including a 401 from an expired access
+ * token — callers should catch that and prompt for a fresh
+ * requestAccessToken() rather than retrying blindly.
+ */
+export async function listDriveFiles(accessToken: string, opts: ListDriveFilesOptions): Promise<ListDriveFilesResult> {
+  const params = new URLSearchParams({
+    q: buildDriveQuery(opts),
+    fields: "files(id,name,mimeType,iconLink,modifiedTime),nextPageToken",
+    pageSize: "30",
+    orderBy: opts.section === "recent" && !opts.searchQuery ? "viewedByMeTime desc" : "folder,name",
+    spaces: "drive",
   });
+  if (opts.pageToken) params.set("pageToken", opts.pageToken);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DRIVE_LIST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Google Drive n'a pas répondu à temps. Vérifie ta connexion et réessaie.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new DriveAuthExpiredError("Ta session Google Drive a expiré. Reconnecte-toi pour continuer à parcourir tes fichiers.");
+    }
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Google Drive a répondu ${res.status}${detail ? ` : ${detail.slice(0, 200)}` : ""}.`);
+  }
+
+  const data = (await res.json()) as { files?: any[]; nextPageToken?: string };
+  const files: DriveListItem[] = (data.files ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    mimeType: f.mimeType,
+    iconLink: f.iconLink,
+    modifiedTime: f.modifiedTime,
+    isFolder: f.mimeType === FOLDER_MIME_TYPE,
+  }));
+
+  return { files, nextPageToken: data.nextPageToken };
 }
