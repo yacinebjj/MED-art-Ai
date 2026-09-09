@@ -1,5 +1,7 @@
 "use client";
 
+import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
+
 /**
  * Browser-side driver for the client-driven, multi-request Explication
  * pipeline — see lib/studio-explication-delta.ts's ARCHITECTURE comment and
@@ -91,81 +93,6 @@ async function postJson(
     });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data };
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-/**
- * explication-part specifically streams a heartbeat while it works (see
- * that route's own header comment for the full mechanism: a mobile
- * carrier's NAT can drop a request that sits fully silent for the
- * ~100-260+ seconds a real generation can take — a confirmed, real cause of
- * "échec de génération" specifically on mobile, never on PC/WiFi). The
- * route always answers HTTP 200 once streaming starts (the real outcome
- * isn't known yet when headers are sent) and encodes the actual result as
- * the LAST newline-delimited JSON line, `{"type":"result", success, ...}` —
- * a `status` field on that line carries the LOGICAL status this failure
- * would have had as a plain response (mirrors OpenRouterError.status, or
- * 502), since the real HTTP transport status is stuck at 200. Every
- * `{"type":"heartbeat"}` line in between is inert and skipped. A non-200
- * response (the auth/rate-limit/validation failures earlier in that route,
- * which are NOT streamed) is handled exactly like postJson — transport
- * status is authoritative there, since those never reach the streaming
- * branch at all.
- */
-async function postPartWithHeartbeat(
-  url: string,
-  body: Record<string, unknown>,
-  timeoutMs: number
-): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    if (!res.ok || !res.body) {
-      // An early validation failure (auth/rate-limit/bad request/course
-      // lookup) never reaches the streaming branch — plain JSON, real
-      // transport status is authoritative here, exactly like postJson.
-      const data = await res.json().catch(() => ({}));
-      return { ok: res.ok, status: res.status, data };
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let newlineIndex: number;
-      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (!line) continue;
-        let parsed: Record<string, unknown>;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue; // A malformed/split line — keep reading for the real one.
-        }
-        if (parsed.type === "heartbeat") continue;
-        if (parsed.type === "result") {
-          const status = typeof parsed.status === "number" ? parsed.status : parsed.success === true ? 200 : 502;
-          return { ok: parsed.success === true, status, data: parsed };
-        }
-      }
-    }
-    // Stream ended with no "result" line ever seen — the connection was
-    // dropped (or the server crashed) mid-stream. Same bucket as a network
-    // failure (status 0): isRetryable treats this as retryable.
-    return { ok: false, status: 0, data: {} };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -316,7 +243,7 @@ async function runGenerationInParts(
 
       let outcome: { ok: boolean; status: number; data: Record<string, unknown> };
       try {
-        outcome = await postPartWithHeartbeat("/api/studio/generate/explication-part", { courseId, partIndex, ...extra }, PART_FETCH_TIMEOUT_MS);
+        outcome = await postJsonWithHeartbeat("/api/studio/generate/explication-part", { courseId, partIndex, ...extra }, PART_FETCH_TIMEOUT_MS);
       } catch (error) {
         lastError = error instanceof Error ? error.message : "Erreur réseau.";
         if (attempt < MAX_PART_ATTEMPTS) await wait(PART_RETRY_DELAYS_MS[attempt - 1] ?? 5000);

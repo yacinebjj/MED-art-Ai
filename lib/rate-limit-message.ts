@@ -18,10 +18,22 @@ export function formatRetryAfter(seconds: number): string {
   return `${minutes} minute${minutes > 1 ? "s" : ""}`;
 }
 
+/**
+ * Builds the same ready-to-display message directly from a seconds value —
+ * for callers that don't have the raw `Response` object to read the header
+ * off themselves, e.g. lib/heartbeat-fetch.ts's postJsonWithHeartbeat (a
+ * heartbeat-streamed route's early 429 rejection still happens before any
+ * streaming starts, so its Retry-After header is real, but the caller only
+ * ever sees the parsed outcome, not the Response). Falls back to the
+ * generic message if `seconds` is missing/invalid.
+ */
+export function buildRateLimitMessageFromSeconds(seconds: number | null | undefined, fallback = "Trop de requêtes — réessaie dans quelques minutes."): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return fallback;
+  return `Trop de requêtes — réessaie dans ${formatRetryAfter(seconds)}.`;
+}
+
 /** Reads Retry-After off a 429 Response and builds a ready-to-display message; falls back to the generic one if the header is missing/invalid (e.g. a non-429 error, or an older route that doesn't set it). */
 export function buildRateLimitMessage(res: Response, fallback = "Trop de requêtes — réessaie dans quelques minutes."): string {
   const header = res.headers.get("Retry-After");
-  const seconds = header ? Number(header) : NaN;
-  if (!Number.isFinite(seconds) || seconds <= 0) return fallback;
-  return `Trop de requêtes — réessaie dans ${formatRetryAfter(seconds)}.`;
+  return buildRateLimitMessageFromSeconds(header ? Number(header) : null, fallback);
 }

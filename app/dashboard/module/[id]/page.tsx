@@ -16,9 +16,10 @@ import { useAuth } from "@/providers/AuthProvider";
 import { tModulePage } from "@/lib/translations/modulePage";
 import { getSectionLabel } from "@/lib/translations/studio";
 import { cn } from "@/lib/utils";
-import { buildRateLimitMessage } from "@/lib/rate-limit-message";
+import { buildRateLimitMessage, buildRateLimitMessageFromSeconds } from "@/lib/rate-limit-message";
 import { uploadDocumentDirect, retryUploadWithOcr } from "@/lib/upload-client";
 import { generateExplicationInParts } from "@/lib/studio-explication-client";
+import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
 import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
@@ -942,19 +943,26 @@ export default function ModuleWorkspacePage() {
           // a single narrated episode (studio_podcast_cache), never routed
           // through postStudioGenerate. Real latency is the highest of any
           // Studio tile (a script-writing call plus one streamed ~10-15 min
-          // audio narration, ~1-4 min total) but uses the exact same
-          // fetch/spinner/tracker machinery regardless.
-          const res = await fetch("/api/studio/podcast", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ courseId, dialect: options?.dialect }),
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data.success) {
-            throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");
+          // audio narration, ~1-4 min total). Uses postJsonWithHeartbeat, not
+          // a plain fetch — this route streams a heartbeat while it works
+          // (see lib/heartbeat-fetch.ts's own header comment): a real,
+          // confirmed production incident had this exact feature (alongside
+          // Explication) failing with "échec de génération" specifically on
+          // mobile, because holding one silent request open for minutes is a
+          // known trigger for a cellular carrier's NAT to drop the
+          // connection mid-wait.
+          const outcome = await postJsonWithHeartbeat("/api/studio/podcast", { courseId, dialect: options?.dialect }, 320_000);
+          if (!outcome.ok || outcome.data.success !== true) {
+            throw new Error(
+              outcome.status === 429
+                ? buildRateLimitMessageFromSeconds(outcome.retryAfterSeconds)
+                : typeof outcome.data.error === "string"
+                  ? outcome.data.error
+                  : "La génération a échoué."
+            );
           }
-          resultValue = data.audioUrl;
-          cached = Boolean(data.cached);
+          resultValue = outcome.data.audioUrl;
+          cached = Boolean(outcome.data.cached);
         } else if (id === "explication") {
           // Client-driven, multi-request pipeline — see
           // lib/studio-explication-client.ts's own header comment. Replaces
