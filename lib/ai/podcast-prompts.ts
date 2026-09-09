@@ -1,7 +1,13 @@
 /**
- * Studio "Podcast Audio" tab — a single ~10-15 min narrated episode,
- * openai/gpt-audio-mini via OpenRouter (see app/api/studio/podcast/route.ts
- * and lib/ai/openrouter.ts's generateOpenRouterAudio). Same two-stage shape
+ * Studio "Podcast Audio" tab — a single ~5-6 min narrated episode (SHRUNK
+ * from an original ~10-15 min target after a real production incident: the
+ * longer script pushed the full script+narration+encode+upload pipeline
+ * past this route's platform-enforced time budget often enough that the
+ * episode simply never completed — see app/api/studio/podcast/route.ts's
+ * own maxDuration comment for the full mechanism, and AUDIO_MAX_TOKENS'
+ * comment there for the matching token-budget cut), openai/gpt-audio-mini
+ * via OpenRouter (see app/api/studio/podcast/route.ts and
+ * lib/ai/openrouter.ts's generateOpenRouterAudio). Same two-stage shape
  * as lib/ai/slides-prompts.ts:
  *  1. A cheap TEXT call (CHEAP_MODEL) writes the actual spoken script —
  *     this is what keeps the episode a real structured narrative in the
@@ -88,7 +94,7 @@ MANDATORY STRUCTURE, in this order:
 FORM CONSTRAINTS (the text is READ, never displayed):
 - No markdown, no headers, no bullets, no symbols (*, #, -, |, etc.) — only natural spoken sentences, with oral transitions ("So, let's talk about...", "Now, watch out here, classic trap...", "To recap...").
 - Base yourself STRICTLY on the real course content provided — never invent medical facts absent from the source text.
-- Target length: roughly 1800 to 2200 words — enough for a real 10-15 minute spoken episode, neither rushed nor endless.
+- Target length: roughly 700 to 900 words — enough for a real, focused 5-6 minute spoken episode. Do NOT exceed this — a real production incident showed a longer (1800-2200 word) script pushed the full generation pipeline past its platform time budget and the episode never completed at all; a shorter, reliable episode is far better than a longer one that fails.
 
 Respond ONLY with the raw script, no tags or commentary around it.`
     : `Tu es un professeur de médecine passionné et pédagogue, comme un grand frère qui explique son cours à un étudiant qu'il adore voir réussir. Tu écris le SCRIPT INTÉGRAL d'un épisode de podcast — le texte exact qui sera lu à voix haute par un narrateur, mot pour mot. Ce n'est jamais lu à l'écran, donc chaque mot doit sonner naturel à l'oreille.
@@ -104,7 +110,7 @@ STRUCTURE OBLIGATOIRE, dans cet ordre :
 CONTRAINTES DE FORME (le texte est LU, jamais affiché) :
 - Aucun markdown, aucun titre, aucune puce, aucun symbole (*, #, -, |, etc.) — uniquement des phrases parlées naturelles, avec des transitions orales ("Alors, parlons de...", "Bon, attention ici, piège classique...", "Pour récapituler...").
 - Base-toi STRICTEMENT sur le contenu réel du cours fourni — jamais d'invention de faits médicaux absents du texte source.
-- Longueur cible : environ 1800 à 2200 mots — assez pour un épisode réel de 10 à 15 minutes à l'oral, ni bâclé ni interminable.
+- Longueur cible : environ 700 à 900 mots — assez pour un épisode réel, focalisé, de 5 à 6 minutes à l'oral. NE DÉPASSE PAS cette longueur : un incident réel en production a montré qu'un script plus long (1800-2200 mots) faisait dépasser au pipeline complet son budget de temps sur la plateforme, et l'épisode ne se terminait jamais du tout — un épisode plus court mais fiable vaut largement mieux qu'un épisode plus long qui échoue.
 
 Réponds UNIQUEMENT avec le script brut, sans aucune balise ni commentaire autour.`;
 }

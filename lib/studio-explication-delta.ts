@@ -663,23 +663,26 @@ function tryDecodeJsonString(escaped: string): string | null {
 // DROPS the excess rather than chunking it, so a slice size must stay safely
 // under that ceiling for every slice to be fully covered by its own call.
 //
-// LOWERED 50,000 -> 30,000 after a real, confirmed production incident: a
-// student's Explication came out genuinely INCOMPLETE (stopped mid-content,
-// not a clean error). Root cause (see EXPLICATION_PART_MAX_TOKENS' own
-// comment below for the full mechanism): the Explication system prompt
-// explicitly demands unbounded, exhaustive length ("vise largement plus de
-// 8000 mots, sans plafond réel") per slice, and a 50,000-char slice could
-// genuinely need more visible output than EXPLICATION_PART_MAX_TOKENS
-// allowed — the SAME "exhaustivité maximale" mandate needed maxTokens raised
-// to 65,536 for a full document under the old, pre-chunking architecture,
-// over 3x what one slice was budgeted here. Shrinking the slice (this
-// constant) AND raising the per-slice budget (below) both reduce that risk;
-// shrinking it also shortens each individual OpenRouter round-trip, which
-// independently reduces exposure to the platform's own real per-call latency
-// (confirmed live: ~161s+ even on a clean success) and to a mobile browser
-// suspending a long-running background tab mid-request. 30,000/2,200 ≈ 14
-// chunks, still comfortably under buildSourceChunks' 25-chunk ceiling.
-const CHUNKED_SLICE_CHARS = 30_000;
+// LOWERED AGAIN, 30,000 -> 15,000, after a second real, confirmed production
+// incident directly tied to this route's background-job architecture (see
+// app/api/studio/generate/explication-part/route.ts's own header comment,
+// and lib/studio-job-store.ts's): `waitUntil` does NOT grant extra time
+// beyond that route's own `maxDuration=280` — it only lets an already-running
+// background promise finish within that SAME budget. A larger, denser slice
+// risks needing more generation time than that budget allows, and when the
+// platform hard-kills the invocation mid-flight there is NO chance for any
+// try/catch to run and mark the job "error" — it stays stuck "pending"
+// forever, and every retry (a fresh attempt at the identical slice) hits the
+// identical wall, since this is real generation time, not a random flake.
+// Shrinking the slice further directly shrinks how much output a single
+// part can ever legitimately need, giving much more comfortable margin
+// under both the 280s time budget and EXPLICATION_PART_MAX_TOKENS below —
+// a course with many chapters is now split into more, smaller, individually
+// far more reliable parts rather than fewer, larger, riskier ones (the same
+// principle the earlier 50,000 -> 30,000 cut already established).
+// 15,000/2,200 ≈ 7 chunks, comfortably under buildSourceChunks' 25-chunk
+// ceiling, with real room to spare.
+const CHUNKED_SLICE_CHARS = 15_000;
 
 /**
  * Safe per-part token ceiling for the client-driven, multi-request

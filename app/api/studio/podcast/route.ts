@@ -54,11 +54,29 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const PODCAST_BUCKET = "studio-podcasts";
-// Generous ceiling for a ~15 min episode at the calibrated ~20 audio
-// tokens/second (900s x 20 = 18,000), plus headroom for the model's own
-// hidden text pass alongside the audio (see the calibration test's usage
-// breakdown — completion_tokens included both).
-const AUDIO_MAX_TOKENS = 22_000;
+// CUT 22,000 -> 10,000 alongside shrinking the script's own target length
+// (lib/ai/podcast-prompts.ts, ~1800-2200 words -> ~700-900 words) — the
+// REAL, root fix for the "délai dépassé... sans résultat" production
+// incident (see this file's own maxDuration comment for the full
+// mechanism): `waitUntil` does NOT grant extra time beyond this route's own
+// `maxDuration` — it only lets an already-running background promise finish
+// within that SAME budget. A ~15 min target script's full pipeline
+// (script + narration + mp3 encode + upload) was measured taking 285s+ and
+// STILL not finishing before hitting the old maxDuration=300 ceiling —
+// meaning the platform hard-kills the whole invocation mid-flight, with NO
+// chance for any try/catch to run and mark the job "error"; the job is
+// left stuck "pending" forever, and every retry hits the identical wall
+// (real generation time, not a random flake) — no amount of retrying or
+// better state-management code fixes a background task that structurally
+// cannot finish within its own time budget. The fix has to be making the
+// real work itself smaller: a ~5-6 min episode (~700-900 words) at the
+// calibrated ~20 audio tokens/second, ~3.7x faster than real-time playback,
+// needs roughly 340-460s playback / 3.7 ≈ 90-125s of audio generation —
+// with script-writing + mp3 encode + Storage upload on top, still
+// comfortably under half of the 300s ceiling, real margin instead of
+// running right up against it. 10,000 keeps solid headroom above the
+// ~7,000-8,000 audio tokens that length actually needs.
+const AUDIO_MAX_TOKENS = 10_000;
 
 interface CourseRow {
   id: number;

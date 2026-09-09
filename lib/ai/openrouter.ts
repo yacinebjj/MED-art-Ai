@@ -770,6 +770,14 @@ export async function generateOpenRouterAudio(
   const audioB64Parts: string[] = [];
   const transcriptParts: string[] = [];
   let usage: unknown = null;
+  // Same class of bug already found and fixed in callOpenRouter (see that
+  // function's own comment): finish_reason "length" means the model was cut
+  // off mid-narration by max_tokens — the audio collected so far is real but
+  // genuinely INCOMPLETE, and this function used to have no way to tell that
+  // apart from a clean, complete episode (its only prior check was "is
+  // audioB64Parts non-empty"). A truncated narration would previously have
+  // been silently uploaded and served as if it were the whole episode.
+  let finishReason: string | undefined;
 
   try {
     for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
@@ -791,6 +799,8 @@ export async function generateOpenRouterAudio(
         }
 
         if (json.usage) usage = json.usage;
+        const reason = json?.choices?.[0]?.finish_reason;
+        if (typeof reason === "string") finishReason = reason;
         const delta = json?.choices?.[0]?.delta;
         if (!delta) continue;
         if (delta.audio?.data) audioB64Parts.push(delta.audio.data);
@@ -802,6 +812,13 @@ export async function generateOpenRouterAudio(
   }
 
   logUsage(`generateOpenRouterAudio model=${options?.model ?? AUDIO_MODEL}`, usage);
+
+  if (finishReason === "length") {
+    console.error(
+      `OpenRouter audio generation truncated by max_tokens ceiling (model=${options?.model ?? AUDIO_MODEL}, maxTokens=${options?.maxTokens ?? 8192})`
+    );
+    throw new OpenRouterError("La narration audio a été coupée avant la fin (limite de longueur atteinte). Réessaie — la génération sera relancée.", 502);
+  }
 
   const audioB64 = audioB64Parts.join("");
   if (!audioB64) {
