@@ -288,10 +288,28 @@ export async function openGoogleDrivePicker(): Promise<(DrivePickedFile & { acce
         .setMimeTypes(PICKER_MIME_TYPES)
         .setSelectFolderEnabled(false);
 
-      const picker = new window.google.picker.PickerBuilder()
+      // Explicit origin for the Picker <-> parent-window postMessage
+      // handshake — Google's own documented guard against a real (if rare)
+      // class of cross-origin failure where the widget renders but its
+      // PICKED/CANCEL callback never reaches this page. Costs nothing when
+      // everything is already working.
+      const builder = new window.google.picker.PickerBuilder()
         .addView(view)
         .setOAuthToken(accessToken)
         .setDeveloperKey(GOOGLE_API_KEY)
+        .setOrigin(window.location.origin);
+
+      // Google's Picker defaults to fixed, desktop-oriented dimensions —
+      // on a real phone viewport that renders as a cramped box with
+      // barely-tappable rows. Sizing it to the actual viewport (capped at
+      // a sane minimum so a tiny/foldable screen doesn't get an unusably
+      // small picker either) fixes that without needing any custom
+      // overlay — the Picker's own iframe just fills the space it's given.
+      if (typeof window !== "undefined" && window.innerWidth < 768) {
+        builder.setSize(Math.max(window.innerWidth, 320), Math.max(window.innerHeight, 480));
+      }
+
+      const picker = builder
         .setCallback((data: any) => {
           if (settled) return;
           if (data.action === window.google.picker.Action.PICKED) {
