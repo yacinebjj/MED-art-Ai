@@ -95,10 +95,10 @@ export async function POST(request: NextRequest) {
       }
     }
     console.error("[modules] Échec création module — détail complet:", { code: error.code, message: error.message, details: error.details, hint: error.hint });
-    return NextResponse.json(
-      { success: false, error: `Création du module échouée [${error.code ?? "??"}] : ${error.message}` },
-      { status: 500 }
-    );
+    // SECURITY: was echoing the raw SQLSTATE code + Postgres error message to
+    // the client — internal schema/constraint details any authenticated
+    // student could trigger and see. Full detail already logged above.
+    return NextResponse.json({ success: false, error: "Création du module échouée. Réessaie." }, { status: 500 });
   }
 
   return NextResponse.json({ success: true, module: data });

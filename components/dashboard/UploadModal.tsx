@@ -247,7 +247,20 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
         body: JSON.stringify({ fileId: picked.id, mimeType: picked.mimeType, accessToken, fileName: picked.name }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data.error ?? "L'import depuis Google Drive a échoué.");
+      if (!res.ok || !data.success) {
+        // Distinguish an expired/revoked Drive session from any other import
+        // failure — without this, the student saw the exact same opaque
+        // toast either way and had no hint that closing/reopening the modal
+        // (the only way to clear the stale token today) would actually fix
+        // it. Clearing driveAccessToken here means switching back to the
+        // Drive tab now shows the "Se connecter" screen directly, no modal
+        // reopen needed.
+        if (data.authExpired) {
+          setDriveAccessToken(null);
+          throw new Error(data.error ?? "Ta session Google Drive a expiré. Reconnecte-toi pour réessayer.");
+        }
+        throw new Error(data.error ?? "L'import depuis Google Drive a échoué.");
+      }
 
       const result = await (onSubmitText ?? defaultSubmitText)(data.text, picked.name);
       onUploaded(result);

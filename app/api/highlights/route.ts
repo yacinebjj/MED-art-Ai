@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+
+// Same class of cap as app/api/courses/chat/route.ts's MAX_HIGHLIGHT_CHARS
+// for the same kind of "selected text from a course" data — this route had
+// no cap at all before, letting a script grow course_highlights unbounded.
+const MAX_SELECTED_TEXT_CHARS = 800;
 
 // `course_highlights` (id, user_id, course_slug, selected_text, color,
 // start_offset, end_offset, created_at) — like `studio_courses`/
@@ -60,10 +66,24 @@ export async function POST(request: Request) {
   if (typeof slug !== "string" || !slug || typeof selectedText !== "string" || !selectedText) {
     return NextResponse.json({ error: "Données incomplètes" }, { status: 400 });
   }
+  if (selectedText.length > MAX_SELECTED_TEXT_CHARS) {
+    return NextResponse.json(
+      { error: `Le passage sélectionné est trop long (${selectedText.length} caractères, max ${MAX_SELECTED_TEXT_CHARS}).` },
+      { status: 413 }
+    );
+  }
 
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  }
+
+  const rl = rateLimit(`highlights-create:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
   }
 
   if (!isSupabaseConfigured()) {
@@ -104,6 +124,14 @@ export async function DELETE(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  }
+
+  const rl = rateLimit(`highlights-delete:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
   }
 
   if (!isSupabaseConfigured()) {

@@ -81,7 +81,9 @@ export async function POST(request: NextRequest) {
 
   if (error) {
     console.error("[srs/attempt] Échec enregistrement:", { code: error.code, message: error.message, details: error.details });
-    return NextResponse.json({ error: `Enregistrement échoué [${error.code ?? "??"}] : ${error.message}` }, { status: 500 });
+    // SECURITY: was echoing the raw SQLSTATE code + Postgres error message to
+    // the client — full detail already logged above for real diagnosis.
+    return NextResponse.json({ error: "Enregistrement échoué. Réessaie." }, { status: 500 });
   }
 
   return NextResponse.json({ success: true, leitnerBox: data.leitner_box, nextReviewAt: data.next_review_at });

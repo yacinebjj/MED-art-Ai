@@ -33,6 +33,17 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   "text/plain": "txt",
 };
 
+// SECURITY: same 100 MB ceiling every other document-ingestion route
+// enforces (app/api/upload/route.ts, app/api/study-planner/upload/route.ts)
+// — this route was the one exception, buffering an arbitrarily large Drive
+// file into memory with no size check at all before ever calling
+// extractDocumentText, risking function memory/time exhaustion.
+const MAX_DRIVE_IMPORT_BYTES = 100 * 1024 * 1024;
+
+function formatOversizedFileError(bytes: number): string {
+  return `Fichier trop volumineux (${(bytes / (1024 * 1024)).toFixed(1)} Mo, max ${MAX_DRIVE_IMPORT_BYTES / (1024 * 1024)} Mo).`;
+}
+
 /**
  * Downloads one file the student just picked in the Drive browser (see
  * components/dashboard/DriveBrowser.tsx / lib/google-drive-picker.ts) and
@@ -97,10 +108,34 @@ export async function POST(request: NextRequest) {
   try {
     const driveRes = await fetch(driveUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     if (!driveRes.ok) {
+      // Distinguish an expired/revoked OAuth token from any other Drive
+      // failure — the client can only offer a "Se reconnecter" affordance
+      // (mirroring lib/google-drive-picker.ts's listDriveFiles/
+      // DriveAuthExpiredError handling for the browsing path) if it can
+      // actually tell the two apart, instead of showing this one specific,
+      // recoverable case as an opaque, unlabeled failure.
+      if (driveRes.status === 401) {
+        return NextResponse.json(
+          { success: false, error: "Ta session Google Drive a expiré. Reconnecte-toi pour réessayer.", authExpired: true },
+          { status: 401 }
+        );
+      }
       const detail = await driveRes.text().catch(() => "");
       throw new Error(`Google Drive a répondu ${driveRes.status} : ${detail.slice(0, 200) || "erreur inconnue"}`);
     }
+
+    // Reject on the DECLARED size before ever buffering — a real, malformed,
+    // or hostile response could omit/understate this, so the post-buffer
+    // check just below is the actual authoritative guard.
+    const declaredLength = Number(driveRes.headers.get("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_DRIVE_IMPORT_BYTES) {
+      return NextResponse.json({ success: false, error: formatOversizedFileError(declaredLength) }, { status: 413 });
+    }
+
     buffer = Buffer.from(await driveRes.arrayBuffer());
+    if (buffer.length > MAX_DRIVE_IMPORT_BYTES) {
+      return NextResponse.json({ success: false, error: formatOversizedFileError(buffer.length) }, { status: 413 });
+    }
   } catch (error) {
     console.error("[drive/import] Échec du téléchargement depuis Drive:", error);
     return NextResponse.json({ success: false, error: `Téléchargement depuis Google Drive échoué : ${errorMessage(error)}` }, { status: 502 });

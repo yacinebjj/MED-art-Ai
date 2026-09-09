@@ -123,21 +123,14 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error || !data) {
-    // Was a hardcoded generic message with the real Postgres/PostgREST error
-    // (missing table/column if a schema.sql migration was never run live,
-    // a bad foreign key on moduleIds, a check constraint, etc.) ONLY in the
-    // server console — invisible to whoever's looking at the browser/client
-    // response. Surfaced here too (code + message + hint, the standard
-    // Supabase error shape) so a real schema drift is diagnosable without
-    // needing server log access.
+    // SECURITY: was echoing the raw Postgres/PostgREST error message + SQLSTATE
+    // code straight to the client (missing table/column if a schema.sql
+    // migration was never run live, a bad foreign key on moduleIds, a check
+    // constraint, etc.) — internal schema details any authenticated student
+    // could trigger and see. Full detail (code + message + hint) still goes
+    // to the server console, where it's actually needed for diagnosis.
     console.error("[study-planner/plans:create] Échec insertion Supabase:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error ? `La création du plan a échoué : ${error.message} (code ${error.code ?? "?"}).` : "La création du plan a échoué. Réessaie.",
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: "La création du plan a échoué. Réessaie." }, { status: 500 });
   }
 
   return NextResponse.json({ success: true, plan: toPlan(data as StudyPlanRow) });

@@ -3,6 +3,7 @@ import { createChargilyCheckout } from "@/lib/chargily";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { isPaidPlanId, isPlanId, PLANS } from "@/lib/pricing";
+import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,20 @@ export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ error: "Tu dois être connecté(e) pour continuer." }, { status: 401 });
+  }
+
+  // SECURITY: this hits Chargily's live checkout API and writes a `payments`
+  // row on every call — previously the only authenticated route in this
+  // codebase with a real external side effect and NO rate limit at all,
+  // letting a looped call flood Chargily (risking this app's own API key
+  // being rate-limited/blocked there) and litter `payments` with unbounded
+  // pending rows.
+  const rl = rateLimit(`chargily-checkout:${user.id}`, RATE_LIMITS.mutation);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Trop de requêtes — réessaie dans quelques minutes." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } }
+    );
   }
 
   const body = await request.json().catch(() => null);
