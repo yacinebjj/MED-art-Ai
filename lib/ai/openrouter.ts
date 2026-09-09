@@ -376,7 +376,18 @@ const OPENROUTER_CONNECT_TIMEOUT_MS = 60_000;
 // today (280s, podcast/regenerate) so this Agent-level ceiling is never the
 // binding constraint again — each call's own AbortController timeoutMs
 // remains the real, intended authority.
-const OPENROUTER_DISPATCHER_TIMEOUT_MS = 300_000;
+// LOWERED 300s -> 250s. This is undici's own headers/body timeout — the LAST
+// line of defence on the body-download phase — and at 300s it sat ABOVE
+// every route's real Vercel maxDuration wall (explication-part=280s,
+// podcast=300s), so it could never fire before the platform killed the whole
+// invocation. A backstop above the wall is not a backstop. At 250s it can
+// actually fire, converting "function hard-killed mid-generation, no error
+// ever reaches the student" into a clean, retryable error with ~30s of room
+// left to write and flush it. Deliberately below the LONGEST timeoutMs some
+// callers still configure (podcast/regenerate pass 280s): that 280s was
+// always unachievable under a 280-300s wall anyway, so this makes the real,
+// enforceable ceiling explicit instead of aspirational.
+const OPENROUTER_DISPATCHER_TIMEOUT_MS = 250_000;
 /**
  * FINAL FIX for the underlying hang this whole Agent existed to work around:
  * this used to be ONE module-level Agent instance, its connections pooled
@@ -533,9 +544,30 @@ export async function callOpenRouter(
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
-  let res: Response;
+  // THE TIMEOUT MUST STAY ARMED THROUGH THE BODY READ — this was a real,
+  // confirmed production bug, and the direct cause of the recurring
+  // "flux terminé sans résultat après 280s" failure on Explication
+  // Ultra-Détaillée. `fetch()` resolves as soon as response HEADERS arrive,
+  // which for OpenRouter is a second or two — the model then keeps
+  // generating for MINUTES while the body streams. The previous shape
+  // cleared this timer in a `finally` attached to the fetch alone, so the
+  // AbortController was disarmed ~2s in and `await res.json()` below waited
+  // out the entire generation with NO timeout of any kind. Whatever value
+  // callers passed as `timeoutMs` was therefore irrelevant to the phase
+  // where all the time is actually spent: the request could only ever end
+  // by finishing, or by Vercel hard-killing the whole invocation at its
+  // maxDuration wall — which kills the route mid-flight, so no catch/finally
+  // ever runs and no error line is ever written to the client.
+  //
+  // This also retroactively explains the `waitUntil` mystery this codebase
+  // documented elsewhere ("a real OpenRouter fetch hung 450+ seconds and
+  // never resolved, not even into a clean timeout error"): that timeout was
+  // not unreliable, it was structurally incapable of firing — already
+  // cleared. An architecture was abandoned on the strength of that
+  // misdiagnosis.
+  let data: any;
   try {
-    res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
+    const res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -553,9 +585,26 @@ export async function callOpenRouter(
       }),
       signal: timeoutController.signal,
     });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const detail = extractOpenRouterErrorDetail(body);
+      console.error(`OpenRouter API error (${res.status})`, body.slice(0, 500));
+      // Propagate OpenRouter's own status (400 bad request/model id, 401 bad
+      // key, 429 rate limit, ...) instead of collapsing everything to a
+      // generic 502 — every caller of callOpenRouter already forwards
+      // OpenRouterError.status straight through to its own API response, so
+      // this makes THAT response accurate too, not just the server log.
+      throw new OpenRouterError(`L'appel au modèle IA a échoué : ${detail}`, res.status);
+    }
+
+    data = await res.json();
   } catch (error) {
+    // Re-thrown unchanged so the real upstream status (429/400/401/...) set
+    // just above isn't collapsed into a generic 502 by the catch-all below.
+    if (error instanceof OpenRouterError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
-      console.error(`OpenRouter fetch timed out after ${timeoutMs}ms`);
+      console.error(`OpenRouter call timed out after ${timeoutMs}ms (headers or body phase)`);
       throw new OpenRouterError("Le modèle IA met trop de temps à répondre. Réessaie dans un instant.", 504);
     }
     console.error("OpenRouter fetch failed", error);
@@ -563,20 +612,6 @@ export async function callOpenRouter(
   } finally {
     clearTimeout(timeoutId);
   }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    const detail = extractOpenRouterErrorDetail(body);
-    console.error(`OpenRouter API error (${res.status})`, body.slice(0, 500));
-    // Propagate OpenRouter's own status (400 bad request/model id, 401 bad
-    // key, 429 rate limit, ...) instead of collapsing everything to a
-    // generic 502 — every caller of callOpenRouter already forwards
-    // OpenRouterError.status straight through to its own API response, so
-    // this makes THAT response accurate too, not just the server log.
-    throw new OpenRouterError(`L'appel au modèle IA a échoué : ${detail}`, res.status);
-  }
-
-  const data = await res.json();
 
   // REAL BUG this was silently causing, found while investigating the
   // recurring "the Explication came out incomplete, stopped mid-way"
@@ -662,9 +697,13 @@ export async function generateOpenRouterImage(
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
-  let res: Response;
+  // Timeout stays armed through the body read — see callOpenRouter's own
+  // comment for the full mechanism (fetch resolves on HEADERS, so clearing
+  // the timer there leaves the entire generation-time body download
+  // unguarded).
+  let data: any;
   try {
-    res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
+    const res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -679,9 +718,19 @@ export async function generateOpenRouterImage(
       }),
       signal: timeoutController.signal,
     });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const detail = extractOpenRouterErrorDetail(body);
+      console.error(`OpenRouter image API error (${res.status})`, body.slice(0, 500));
+      throw new OpenRouterError(`La génération de l'image a échoué : ${detail}`, res.status);
+    }
+
+    data = await res.json();
   } catch (error) {
+    if (error instanceof OpenRouterError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
-      console.error(`OpenRouter image generation timed out after ${timeoutMs}ms`);
+      console.error(`OpenRouter image generation timed out after ${timeoutMs}ms (headers or body phase)`);
       throw new OpenRouterError("La génération de l'image met trop de temps. Réessaie dans un instant.", 504);
     }
     console.error("OpenRouter image generation fetch failed", error);
@@ -690,14 +739,6 @@ export async function generateOpenRouterImage(
     clearTimeout(timeoutId);
   }
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    const detail = extractOpenRouterErrorDetail(body);
-    console.error(`OpenRouter image API error (${res.status})`, body.slice(0, 500));
-    throw new OpenRouterError(`La génération de l'image a échoué : ${detail}`, res.status);
-  }
-
-  const data = await res.json();
   logUsage(`generateOpenRouterImage model=${options?.model ?? IMAGE_MODEL}`, data?.usage);
 
   const message = data?.choices?.[0]?.message;
@@ -961,6 +1002,7 @@ export async function transcribeAudioViaOpenRouter(
   };
 
   let res: Response;
+  let data: any;
   try {
     if (useMultipart) {
       const form = new FormData();
@@ -993,9 +1035,24 @@ export async function transcribeAudioViaOpenRouter(
         signal: timeoutController.signal,
       });
     }
+    // Body read stays INSIDE this try so the timeout still covers it — see
+    // callOpenRouter's own comment for why clearing the timer as soon as
+    // headers arrive left the whole download unguarded.
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const detail = extractOpenRouterErrorDetail(body);
+      console.error(`OpenRouter transcription API error (${res.status}, multipart=${useMultipart})`, body.slice(0, 500));
+      // The HTTP status is now ALWAYS in the message the client sees — an
+      // empty `detail` used to silently hide whether this was even a real API
+      // error vs. a bare proxy rejection.
+      throw new OpenRouterError(`La transcription a échoué (HTTP ${res.status}) : ${detail}`, res.status);
+    }
+
+    data = await res.json();
   } catch (error) {
+    if (error instanceof OpenRouterError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
-      console.error(`OpenRouter transcription timed out after ${timeoutMs}ms`);
+      console.error(`OpenRouter transcription timed out after ${timeoutMs}ms (headers or body phase)`);
       throw new OpenRouterError("La transcription met trop de temps. Réessaie dans un instant.", 504);
     }
     console.error("OpenRouter transcription fetch failed", error);
@@ -1004,17 +1061,6 @@ export async function transcribeAudioViaOpenRouter(
     clearTimeout(timeoutId);
   }
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    const detail = extractOpenRouterErrorDetail(body);
-    console.error(`OpenRouter transcription API error (${res.status}, multipart=${useMultipart})`, body.slice(0, 500));
-    // The HTTP status is now ALWAYS in the message the client sees — an
-    // empty `detail` used to silently hide whether this was even a real API
-    // error vs. a bare proxy rejection.
-    throw new OpenRouterError(`La transcription a échoué (HTTP ${res.status}) : ${detail}`, res.status);
-  }
-
-  const data = await res.json();
   logUsage(`transcribeAudioViaOpenRouter model=${TRANSCRIPTION_MODEL}`, data?.usage);
 
   const text = data?.text;
@@ -1220,6 +1266,7 @@ export async function extractPdfTextViaOcr(fileUrl: string, fileName: string, op
   const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
   let res: Response;
+  let data: any;
   try {
     res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
@@ -1250,9 +1297,20 @@ export async function extractPdfTextViaOcr(fileUrl: string, fileName: string, op
       }),
       signal: timeoutController.signal,
     });
+    // Body read stays INSIDE this try so the timeout still covers it — see
+    // callOpenRouter's own comment for the full mechanism.
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const detail = extractOpenRouterErrorDetail(body);
+      console.error(`OpenRouter PDF OCR API error (${res.status})`, body.slice(0, 500));
+      throw new OpenRouterError(`L'extraction OCR a échoué : ${detail}`, res.status);
+    }
+
+    data = await res.json();
   } catch (error) {
+    if (error instanceof OpenRouterError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
-      console.error(`OpenRouter PDF OCR timed out after ${timeoutMs}ms`);
+      console.error(`OpenRouter PDF OCR timed out after ${timeoutMs}ms (headers or body phase)`);
       throw new OpenRouterError("L'extraction OCR met trop de temps. Réessaie dans un instant.", 504);
     }
     console.error("OpenRouter PDF OCR fetch failed", error);
@@ -1261,14 +1319,6 @@ export async function extractPdfTextViaOcr(fileUrl: string, fileName: string, op
     clearTimeout(timeoutId);
   }
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    const detail = extractOpenRouterErrorDetail(body);
-    console.error(`OpenRouter PDF OCR API error (${res.status})`, body.slice(0, 500));
-    throw new OpenRouterError(`L'extraction OCR a échoué : ${detail}`, res.status);
-  }
-
-  const data = await res.json();
   logUsage(`extractPdfTextViaOcr model=${OCR_MODEL}`, data?.usage);
 
   const annotations = data?.choices?.[0]?.message?.annotations;

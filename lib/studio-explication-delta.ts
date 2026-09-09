@@ -684,7 +684,18 @@ function tryDecodeJsonString(escaped: string): string | null {
 // riskier ones (the same principle the earlier 50,000 -> 30,000 -> 15,000
 // cuts already established). 10,000/2,200 ≈ 5 chunks, comfortably under
 // buildSourceChunks' 25-chunk ceiling, with real room to spare.
-const CHUNKED_SLICE_CHARS = 10_000;
+// LOWERED AGAIN, 10,000 -> 6,000. Slice size is the real driver of how long
+// a single part actually generates for (more source to cover = more output
+// tokens = more seconds), so this — not the timeout constant — is the lever
+// that keeps each individual call far away from the platform wall. A 6,000-
+// char slice expands to roughly 5,000-9,000 output tokens of exhaustive
+// explanation, i.e. ~60-180s at real throughput, comfortably inside
+// EXPLICATION_PART_TIMEOUT_MS. The trade is more parts per course (each its
+// own short, independently-retryable HTTP request, already how this pipeline
+// works — see lib/studio-explication-client.ts) rather than fewer, longer,
+// riskier ones. Total wall-clock rises slightly; the odds any single part
+// dies at the wall drop sharply.
+const CHUNKED_SLICE_CHARS = 6_000;
 
 /**
  * Safe per-part token ceiling for the client-driven, multi-request
@@ -740,7 +751,20 @@ const CHUNKED_SLICE_CHARS = 10_000;
  * treat a recurrence as a signal to raise this further or shrink
  * CHUNKED_SLICE_CHARS again, not to re-add tolerance for it.
  */
-const EXPLICATION_PART_MAX_TOKENS = 32_000;
+// LOWERED 32,000 -> 14,000, alongside CHUNKED_SLICE_CHARS 10,000 -> 6,000.
+// 32,000 tokens was never physically generatable inside this route's budget:
+// at DeepSeek V3.2's real throughput (roughly 50-100 tok/s) a 32k-token
+// completion needs 320-640 SECONDS, against a 280s Vercel wall. The ceiling
+// was authorizing an output that could only ever end in a platform kill.
+// This is the OUTPUT-side half of "no single call approaches the ceiling":
+// CHUNKED_SLICE_CHARS bounds how much a part is ASKED to cover (and so how
+// long it actually generates for), while this bounds the worst case. 14,000
+// stays comfortably above what a 6,000-char slice genuinely needs (so
+// finish_reason "length" truncation stays rare) while capping the worst case
+// at ~140-280s — and with callOpenRouter's timeout now correctly covering
+// the body phase, an overrun finally fails CLEANLY and retryably instead of
+// silently killing the invocation.
+const EXPLICATION_PART_MAX_TOKENS = 14_000;
 
 /**
  * Hard abort for a single part's OpenRouter call. LOWERED 260s -> 200s after
