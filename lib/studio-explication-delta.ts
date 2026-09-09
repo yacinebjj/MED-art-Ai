@@ -663,26 +663,28 @@ function tryDecodeJsonString(escaped: string): string | null {
 // DROPS the excess rather than chunking it, so a slice size must stay safely
 // under that ceiling for every slice to be fully covered by its own call.
 //
-// LOWERED AGAIN, 30,000 -> 15,000, after a second real, confirmed production
-// incident directly tied to this route's background-job architecture (see
-// app/api/studio/generate/explication-part/route.ts's own header comment,
-// and lib/studio-job-store.ts's): `waitUntil` does NOT grant extra time
-// beyond that route's own `maxDuration=280` — it only lets an already-running
-// background promise finish within that SAME budget. A larger, denser slice
-// risks needing more generation time than that budget allows, and when the
-// platform hard-kills the invocation mid-flight there is NO chance for any
-// try/catch to run and mark the job "error" — it stays stuck "pending"
-// forever, and every retry (a fresh attempt at the identical slice) hits the
-// identical wall, since this is real generation time, not a random flake.
-// Shrinking the slice further directly shrinks how much output a single
-// part can ever legitimately need, giving much more comfortable margin
-// under both the 280s time budget and EXPLICATION_PART_MAX_TOKENS below —
-// a course with many chapters is now split into more, smaller, individually
-// far more reliable parts rather than fewer, larger, riskier ones (the same
-// principle the earlier 50,000 -> 30,000 cut already established).
-// 15,000/2,200 ≈ 7 chunks, comfortably under buildSourceChunks' 25-chunk
-// ceiling, with real room to spare.
-const CHUNKED_SLICE_CHARS = 15_000;
+// LOWERED AGAIN, 15,000 -> 10,000, after a THIRD real, confirmed production
+// incident: "flux terminé sans résultat après 281s" — the heartbeat stream
+// ended cleanly with zero result line ever written, meaning the whole
+// function was killed before its own catch/finally could run. A live
+// diagnostic (app/api/diagsleep2, deployed with this route's EXACT
+// maxDuration=280, deleted after use) proved this platform enforces that
+// ceiling with real precision, not a fuzzy/early kill: a 277s sleep
+// completed cleanly, a 285s sleep failed with a clean
+// FUNCTION_INVOCATION_TIMEOUT at 280.88s. So the 281s production failure
+// WAS a genuine platform kill, and EXPLICATION_PART_TIMEOUT_MS's old 20s
+// margin below maxDuration (260s abort vs. 280s kill) was not enough to
+// reliably absorb the DB read + slicing + large-response JSON
+// parsing/recovery overhead that also happens inside this same budget,
+// on top of the OpenRouter call itself. Shrinking the slice further
+// directly shrinks how much output a single part can ever legitimately
+// need — reducing how often generation time comes anywhere near either
+// timeout at all — a course with many chapters is now split into more,
+// smaller, individually far more reliable parts rather than fewer, larger,
+// riskier ones (the same principle the earlier 50,000 -> 30,000 -> 15,000
+// cuts already established). 10,000/2,200 ≈ 5 chunks, comfortably under
+// buildSourceChunks' 25-chunk ceiling, with real room to spare.
+const CHUNKED_SLICE_CHARS = 10_000;
 
 /**
  * Safe per-part token ceiling for the client-driven, multi-request
@@ -741,16 +743,27 @@ const CHUNKED_SLICE_CHARS = 15_000;
 const EXPLICATION_PART_MAX_TOKENS = 32_000;
 
 /**
- * Hard abort for a single part's OpenRouter call. 260s — comfortably inside
- * the empirically-measured real ceiling (250s+ confirmed live, see
- * EXPLICATION_PART_MAX_TOKENS's own HISTORY comment for how), with margin
- * under explication-part/route.ts's own maxDuration=280 for JSON parsing/
- * response serialization. Still a real, necessary safety net — a
- * genuinely stuck call fails CLEANLY and retryably instead of the whole
- * function being killed with no response at all — just no longer
- * artificially tight relative to what this platform can actually sustain.
+ * Hard abort for a single part's OpenRouter call. LOWERED 260s -> 200s after
+ * a real, confirmed production failure this exact margin caused: "flux
+ * terminé sans résultat après 281s" — a platform FUNCTION_INVOCATION_TIMEOUT
+ * kill (confirmed via a live diagnostic, see CHUNKED_SLICE_CHARS' own
+ * comment for the precise measurements: maxDuration=280 is enforced with
+ * real precision, not fuzzily), meaning this call's own abort either fired
+ * too close to the wall to let the route's catch/finally flush a result
+ * line in time, or the surrounding overhead (DB read, slicing, large-
+ * response JSON parsing/recovery) that ALSO runs inside the same
+ * maxDuration=280 budget ate further into what used to be a 20s margin.
+ * 200s leaves a real 80s margin under maxDuration=280 for everything else
+ * this route does outside the OpenRouter call itself — still a real,
+ * necessary safety net (a genuinely stuck call still fails CLEANLY and
+ * retryably instead of the whole function being killed with no response at
+ * all), just with enough slack this time to actually survive being that
+ * safety net. If this specific "flux terminé sans résultat" shape is ever
+ * observed again in production, that is direct evidence 200s is STILL not
+ * enough margin — lower it further (and/or shrink CHUNKED_SLICE_CHARS
+ * again) rather than raising it back toward the wall.
  */
-const EXPLICATION_PART_TIMEOUT_MS = 260_000;
+const EXPLICATION_PART_TIMEOUT_MS = 200_000;
 
 /**
  * Deterministic slice plan for a course's full source text — same slicing
