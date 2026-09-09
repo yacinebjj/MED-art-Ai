@@ -104,6 +104,19 @@ async function ensurePodcastBucket(supabase: ReturnType<typeof getSupabaseAdmin>
  * hiccup on what is fundamentally an audio-generation feature. Mirrors
  * app/api/studio/slides/route.ts's planSlideOutline exactly, minus the
  * JSON-schema step — the script IS the raw text, no parsing needed.
+ *
+ * `timeoutMs: 30_000` here is a REAL fix, not decoration: this call used to
+ * have no explicit timeout at all, silently inheriting callOpenRouter's
+ * DEFAULT_TIMEOUT_MS (240 seconds). A slow-but-not-erroring script call
+ * could eat up to 240 of this route's 300-second maxDuration before ever
+ * falling back — leaving almost nothing for the actual narration call that
+ * follows, and directly contributing to the real "délai dépassé... sans
+ * résultat" production incident this whole pipeline was rebuilt around. A
+ * script-writing call is short text output (max 4000 tokens) — it has no
+ * business ever legitimately needing anywhere near 240s, so a tight 30s
+ * timeout costs nothing on a healthy call and, on a slow/degraded one, fails
+ * fast into the fallback script instead of quietly burning the narration's
+ * own time budget.
  */
 async function planPodcastScript(courseTitle: string, explicationExcerpt: string, dialect: PodcastDialect): Promise<string> {
   try {
@@ -112,7 +125,7 @@ async function planPodcastScript(courseTitle: string, explicationExcerpt: string
         { role: "system", content: buildPodcastScriptSystemPrompt(dialect) },
         { role: "user", content: buildPodcastScriptUserMessage(courseTitle, explicationExcerpt) },
       ],
-      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true }
+      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true, timeoutMs: 30_000 }
     );
     return script.trim().length > 100 ? script.trim() : getFallbackPodcastScript(dialect);
   } catch (error) {

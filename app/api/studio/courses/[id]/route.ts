@@ -96,9 +96,25 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   // audioUrl's own comments. A lookup failure (or no Explication yet) just
   // means neither is shown yet, never blocks loading the rest of the course.
   // Same hash computed once, reused for both lookups (both tables are keyed
-  // by the SAME sha256(normalizeText(explication)) — no collision risk,
-  // different tables), run in parallel rather than sequentially.
-  const contentHash = row.explication ? sha256(normalizeText(row.explication)) : null;
+  // by the SAME sha256(normalizeText(...)) — no collision risk, different
+  // tables), run in parallel rather than sequentially.
+  //
+  // REAL BUG this used to have, found via a real production report ("I
+  // generate the Infographie, leave the app, come back — it's gone"):
+  // this used to hash `row.explication` ONLY. app/api/studio/podcast/
+  // route.ts and app/api/studio/infographic/route.ts BOTH generate (and
+  // cache) from `explication ?? raw_text` — a deliberately supported flow,
+  // since a student can generate Podcast/Infographic before ever touching
+  // Explication. Whenever that happened, the cache got written under
+  // hash(raw_text), but this read path computed hash(null) = null and
+  // skipped the lookup entirely — the generated content was never actually
+  // lost (still sitting in Storage and in studio_podcast_cache/
+  // studio_infographic_cache), just permanently unreachable from here.
+  // Mirroring the exact same fallback the generation routes use closes
+  // this — must stay in sync with those two routes' own `sourceText` logic
+  // if either ever changes.
+  const sourceText = row.explication && row.explication.trim().length >= 50 ? row.explication : row.raw_text;
+  const contentHash = sourceText && sourceText.trim().length >= 50 ? sha256(normalizeText(sourceText)) : null;
   const [infographicUrl, audioUrl] = contentHash
     ? await Promise.all([lookupStudioInfographicCache(contentHash), lookupStudioPodcastCache(contentHash)])
     : [null, null];
