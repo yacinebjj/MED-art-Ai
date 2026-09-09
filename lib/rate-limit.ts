@@ -122,22 +122,6 @@ export const RATE_LIMITS = {
   freeAssistant: { limit: 15, windowMs: 60 * 1000 },
   /** app/api/lecture-notes/transcribe-chunk/route.ts — one real billed OpenRouter call PER CHUNK of a single lecture upload (~15 chunks for a 2h recording at 8 min/chunk), genuinely more calls per legitimate use than RATE_LIMITS.ai's single-call-per-feature-use routes. Not individually quota-gated via reserveGeneration (see that route's own comment) — this rate limit is this endpoint's only real cost guardrail. */
   lectureChunk: { limit: 40, windowMs: 10 * 60 * 1000 },
-  /**
-   * The background-job "start-or-check-status" endpoints for Explication
-   * (app/api/studio/generate/explication-part) and Podcast
-   * (app/api/studio/podcast) — see lib/studio-job-store.ts's own header
-   * comment. lib/poll-fetch.ts's startAndPoll calls the SAME endpoint every
-   * ~3 seconds for up to several minutes while a background job runs, which
-   * is legitimately ~100+ requests per generation — RATE_LIMITS.ai's 20/5min
-   * (sized for one-call-per-feature-use routes) would block a normal poll
-   * loop within its first ~60 seconds. This gate covers every request to
-   * these routes (claims AND polls); the actual AI-call-triggering "claim a
-   * new job" branch inside each route ALSO checks RATE_LIMITS.ai separately,
-   * right before kicking off the real generation — so cost-relevant abuse
-   * is still bounded at the original, tighter limit, while routine polling
-   * traffic isn't.
-   */
-  poll: { limit: 150, windowMs: 5 * 60 * 1000 },
 } satisfies Record<string, RateLimitConfig>;
 
 /** Seconds until the window resets, for a Retry-After header. */

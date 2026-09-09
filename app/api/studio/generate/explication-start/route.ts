@@ -1,4 +1,3 @@
-import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -232,15 +231,5 @@ export async function POST(request: NextRequest) {
   // attempted here anymore (see this file's own top-of-file comment) — this
   // response is the whole point of this route being fast: DB work only,
   // no AI call, every single time.
-  //
-  // attemptId — a fresh, random id for THIS specific generation attempt,
-  // re-sent on every subsequent explication-part call (see that route's own
-  // header comment on lib/studio-job-store.ts's background-job pattern).
-  // Without this, a job file keyed only by courseId+partIndex would collide
-  // with a STALE "done" result from an earlier attempt for the same course
-  // (e.g. a different language/customPrompt, or simply trying again after
-  // an unrelated failure) and silently serve the wrong content instead of
-  // running a genuinely fresh generation.
-  const attemptId = randomUUID();
-  return NextResponse.json({ success: true, totalParts, needsFinalize: true, reserved: true, attemptId });
+  return NextResponse.json({ success: true, totalParts, needsFinalize: true, reserved: true });
 }

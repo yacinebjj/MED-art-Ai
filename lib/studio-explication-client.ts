@@ -1,6 +1,6 @@
 "use client";
 
-import { startAndPoll } from "@/lib/poll-fetch";
+import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
 
 /**
  * Browser-side driver for the client-driven, multi-request Explication
@@ -16,23 +16,20 @@ import { startAndPoll } from "@/lib/poll-fetch";
  *  1. POST explication-start EXACTLY ONCE, never retried by this driver.
  *     Either resolves the whole generation immediately (cache hit /
  *     cross-university-delta — `needsFinalize: false`), or reserves quota
- *     and returns `{reserved: true, totalParts, attemptId}`. A code review
+ *     and returns `{reserved: true, totalParts}`. A code review
  *     caught a real quota-integrity bug in an earlier version where this
  *     reservation step WAS retried (bundled with the slow AI call) —
  *     reserving 2-3x courseCap for one delivered generation. Never retrying
  *     this call, and only ever treating a reservation as real when this
  *     call explicitly confirms it, is what closes that.
- *  2. For each part: POST explication-part to kick off (or check on) a
- *     BACKGROUND job (see lib/studio-job-store.ts's own header comment),
- *     then poll that same endpoint every few seconds (lib/poll-fetch.ts's
- *     startAndPoll) until it reports done/error — no single HTTP request
- *     here ever needs to survive the real ~100-260+ second generation time,
- *     which is what actually fixes a real, confirmed mobile-only failure a
- *     held-open (then heartbeat-streamed) request could not. Automatic
- *     retry (a fresh poll loop) on any clean, retryable failure — safe to
- *     retry freely because this route never touches quota (see its own
- *     header comment). Each retry only ever redoes the ONE part that
- *     failed, never the whole generation.
+ *  2. For each part: POST explication-part, which streams a heartbeat over
+ *     one held-open connection for the whole real ~100-260+ second
+ *     generation time (see that route's own header comment for the full,
+ *     three-architecture history behind why this — not a background-job/
+ *     poll design — is the one actually proven reliable). Automatic retry
+ *     on any clean, retryable failure — safe to retry freely because this
+ *     route never touches quota (see its own header comment). Each retry
+ *     only ever redoes the ONE part that failed, never the whole generation.
  *  3. POST explication-finalize once, only if step 1 returned
  *     `needsFinalize: true` — assembles + persists the collected parts.
  *
@@ -69,14 +66,13 @@ const PART_RETRY_DELAYS_MS = [2000, 5000];
 // happened right as it stopped waiting.
 const START_FETCH_TIMEOUT_MS = 70_000;
 const FINALIZE_FETCH_TIMEOUT_MS = 70_000;
-// explication-part is now a background-job endpoint (see
-// lib/studio-job-store.ts's own header comment) — this is how long the
-// CLIENT will keep POLLING for a result, not a request timeout. Kept
-// comfortably above lib/studio-job-store.ts's own STALE_JOB_MS (320_000) so
-// that if a job genuinely never resolves, the server will already consider
-// it stale (and safe to restart) by the time this client gives up and the
-// outer per-part retry loop tries again.
-const PART_POLL_MAX_WAIT_MS = 330_000;
+// explication-part streams heartbeats over one held-open connection for the
+// whole real generation time (see that route's own header comment for why
+// this — not a background-job/poll design — is the architecture actually
+// proven reliable this session). Kept comfortably above the route's own
+// maxDuration=280 so a genuine platform kill (not client impatience) is the
+// only way this client-side timeout fires first.
+const PART_FETCH_TIMEOUT_MS = 300_000;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -147,10 +143,9 @@ async function abandon(courseId: number): Promise<void> {
  * Minimal wrapper around the standard Screen Wake Lock API
  * (https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API) —
  * added defensively after a real production report of "échec de génération"
- * on mobile specifically (not PC), for the exact same course pipeline. Even
- * with the background-job/polling redesign (see this file's header comment
- * and lib/studio-job-store.ts's), the overall flow still spans several
- * minutes to 10+ minutes for a multi-part course while the student waits —
+ * on mobile specifically (not PC), for the exact same course pipeline. The
+ * overall flow still spans several minutes to 10+ minutes for a multi-part
+ * course while the student waits —
  * requesting a wake lock keeps the screen on for that duration, a cheap,
  * well-supported mitigation against a mobile browser throttling a
  * backgrounded tab if the student's screen locks mid-wait. Feature-detected
@@ -233,12 +228,6 @@ async function runGenerationInParts(
   // From here on, a reservation is confirmed to exist — abandon() is now the
   // correct thing to call if the rest of the flow fails.
   const totalParts = typeof startData.totalParts === "number" ? startData.totalParts : 1;
-  // attemptId scopes every part's background-job file to THIS generation
-  // attempt (see explication-start/route.ts's own comment on why) — falls
-  // back to a locally-generated id only if the server response is somehow
-  // missing it (defensive; every real response includes it), so a job path
-  // is never left undefined.
-  const attemptId = typeof startData.attemptId === "string" ? startData.attemptId : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const parts: string[] = [];
 
   for (let partIndex = 0; partIndex < totalParts; partIndex++) {
@@ -248,16 +237,15 @@ async function runGenerationInParts(
     for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !succeeded; attempt++) {
       onProgress?.({ partIndex, totalParts, attempt });
 
-      // startAndPoll never throws — every outcome, including a raw network
-      // failure on some individual poll, comes back as a normal result
-      // carrying a `diagnostic` string (see lib/poll-fetch.ts's own
-      // comment) so a failure surfaced to the student names concretely
-      // what happened, instead of another guess from a bare "échec de
-      // génération".
-      const outcome = await startAndPoll(
+      // postJsonWithHeartbeat never throws — every outcome, including a raw
+      // network failure mid-stream, comes back as a normal result carrying a
+      // `diagnostic` string (see lib/heartbeat-fetch.ts's own comment) so a
+      // failure surfaced to the student names concretely what happened,
+      // instead of another guess from a bare "échec de génération".
+      const outcome = await postJsonWithHeartbeat(
         "/api/studio/generate/explication-part",
-        { courseId, partIndex, attemptId, ...extra },
-        PART_POLL_MAX_WAIT_MS
+        { courseId, partIndex, ...extra },
+        PART_FETCH_TIMEOUT_MS
       );
 
       if (!outcome.ok || outcome.data.success !== true) {

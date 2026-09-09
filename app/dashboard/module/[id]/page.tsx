@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { buildRateLimitMessage, buildRateLimitMessageFromSeconds } from "@/lib/rate-limit-message";
 import { uploadDocumentDirect, retryUploadWithOcr } from "@/lib/upload-client";
 import { generateExplicationInParts } from "@/lib/studio-explication-client";
-import { startAndPoll } from "@/lib/poll-fetch";
+import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
 import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
@@ -942,24 +942,21 @@ export default function ModuleWorkspacePage() {
           // Same dedicated-route pattern as "infographic" above —
           // a single narrated episode (studio_podcast_cache), never routed
           // through postStudioGenerate. Real latency is the highest of any
-          // Studio tile (a script-writing call plus one streamed ~10-15 min
-          // audio narration, ~1-4 min total). Uses startAndPoll, not a plain
-          // fetch — the route kicks off the real work in the background
-          // (see lib/studio-job-store.ts's own header comment) and this
-          // polls for the result every few seconds instead of holding one
-          // request open: a real, confirmed production incident showed this
-          // exact feature (alongside Explication) failing with "échec de
-          // génération" specifically on mobile, and that an EARLIER fix
-          // (heartbeat-streaming a single held-open request) was itself
-          // unreliable on that network path — polling sidesteps the whole
-          // class of problem since no single request here needs to survive
-          // more than a few seconds.
-          // startAndPoll never throws — every outcome carries a
+          // Studio tile (a script-writing call plus one streamed audio
+          // narration, ~1-4 min total). Uses postJsonWithHeartbeat — the
+          // route streams a heartbeat over one held-open connection while it
+          // works (see that route's own header comment for why this, not a
+          // background-job/poll design, is the architecture actually proven
+          // reliable this session: a live diagnostic proved a real
+          // OpenRouter call run via `waitUntil` can hang for 450+ seconds
+          // and never resolve, while the same call directly awaited in the
+          // foreground completes reliably).
+          // postJsonWithHeartbeat never throws — every outcome carries a
           // `diagnostic` string naming concretely what happened (see
-          // lib/poll-fetch.ts's own comment), appended below so a failure
-          // toast is actual forensic evidence, not another bare "échec de
-          // génération".
-          const outcome = await startAndPoll("/api/studio/podcast", { courseId, dialect: options?.dialect }, 820_000);
+          // lib/heartbeat-fetch.ts's own comment), appended below so a
+          // failure toast is actual forensic evidence, not another bare
+          // "échec de génération".
+          const outcome = await postJsonWithHeartbeat("/api/studio/podcast", { courseId, dialect: options?.dialect }, 320_000);
           if (!outcome.ok || outcome.data.success !== true) {
             const baseError =
               outcome.status === 429
