@@ -23,28 +23,35 @@ import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { claimJob, completeJob, failJob } from "@/lib/studio-job-store";
 
 export const runtime = "nodejs";
-// RAISED 300 -> 800 after a real, confirmed production incident: a live
-// test on PC (a stable connection, not the mobile issue this route's
-// job/poll rewrite below targets) ran the full script+narration+encode+
-// upload chain for 300 seconds — 19 heartbeats received, ~15s apart, right
-// up to the cutoff — then the connection just ended with no result ever
-// produced. That is this route's OWN `maxDuration` firing exactly as
-// configured, not a mystery platform ceiling: the real calibration estimate
-// below ("~150-250s... with less headroom than usual") was simply too
-// tight for at least some real episodes. 800 is Vercel's documented Fluid
-// Compute ceiling on the plan tier this project is already confirmed to run
-// on (280-300s ceilings were already being honored, which a bare Hobby/no-
-// Fluid-Compute plan could not do) — real margin, not a guess, though this
-// specific higher number is not yet itself empirically verified against a
-// real multi-hundred-second episode; revisit if a job is ever still
-// "pending" long after this route's own real behavior would allow.
+// REVERTED 800 -> 300: raising this to 800 (reasoning it should match
+// Vercel's documented Fluid Compute ceiling) was itself UNVERIFIED — flagged
+// as such in that same commit's own comment — and it broke real production
+// deploys: the build itself completed cleanly (confirmed from the actual
+// Vercel build log — "Compiled successfully", "Generating static pages",
+// "Build Completed") but the deploy step failed every time, consistent with
+// Vercel validating a route's `maxDuration` against the account's real plan
+// entitlement AFTER a successful build, not during it — a mismatch there
+// fails deployment, not compilation. 300 is the last value CONFIRMED to
+// actually deploy across many prior commits this session.
+//
+// This does NOT fully re-open the original timeout bug: a real PC test
+// showed the script+narration+encode+upload chain needing at least ~285s
+// (19 heartbeats over that span, still not done at the old 300s cutoff),
+// so a genuinely long episode can still exceed this ceiling. But the
+// job/poll architecture below means that's now a WORSE-CASE degradation
+// (the client's own retry loop starts a fresh attempt once
+// lib/studio-job-store.ts's staleness window elapses), not a hard, opaque
+// "échec de génération" — an acceptable trade-off against a completely
+// blocked deployment. Revisit by empirically bisecting this account's real
+// maxDuration ceiling (the same zero-cost sleep-based diagnostic-route
+// technique already used once this session) before raising it again.
 //
 // Real calibration test: ~20 audio tokens/second, generated ~3.7x faster
 // than real-time playback. A full 15 min (900s) episode is ~18,000 audio
 // tokens, which at that same ratio suggests ~150-250s of wall-clock
 // generation, PLUS the script-writing call, mp3 encoding, and Storage
-// upload on top — the actual total that hit the old 300s ceiling.
-export const maxDuration = 800;
+// upload on top — the actual total that hit this ceiling in the real test.
+export const maxDuration = 300;
 
 const PODCAST_BUCKET = "studio-podcasts";
 // Generous ceiling for a ~15 min episode at the calibrated ~20 audio
@@ -267,7 +274,7 @@ export async function POST(request: NextRequest) {
             { role: "system", content: buildPodcastNarrationSystemPrompt(dialect) },
             { role: "user", content: buildPodcastNarrationUserMessage(script) },
           ],
-          { maxTokens: AUDIO_MAX_TOKENS, timeoutMs: 750_000 }
+          { maxTokens: AUDIO_MAX_TOKENS, timeoutMs: 270_000 }
         );
 
         const mp3Buffer = await encodePcm16ToMp3(pcm16, 24_000, 1);
