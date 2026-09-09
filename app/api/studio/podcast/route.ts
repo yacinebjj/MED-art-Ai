@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -19,16 +20,31 @@ import {
 import { encodePcm16ToMp3 } from "@/lib/audio/mp3-encoder";
 import { lookupStudioPodcastCache, recordStudioPodcastCacheHit, storeStudioPodcastCache } from "@/lib/studio-podcast-cache";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { claimJob, completeJob, failJob } from "@/lib/studio-job-store";
 
 export const runtime = "nodejs";
+// RAISED 300 -> 800 after a real, confirmed production incident: a live
+// test on PC (a stable connection, not the mobile issue this route's
+// job/poll rewrite below targets) ran the full script+narration+encode+
+// upload chain for 300 seconds — 19 heartbeats received, ~15s apart, right
+// up to the cutoff — then the connection just ended with no result ever
+// produced. That is this route's OWN `maxDuration` firing exactly as
+// configured, not a mystery platform ceiling: the real calibration estimate
+// below ("~150-250s... with less headroom than usual") was simply too
+// tight for at least some real episodes. 800 is Vercel's documented Fluid
+// Compute ceiling on the plan tier this project is already confirmed to run
+// on (280-300s ceilings were already being honored, which a bare Hobby/no-
+// Fluid-Compute plan could not do) — real margin, not a guess, though this
+// specific higher number is not yet itself empirically verified against a
+// real multi-hundred-second episode; revisit if a job is ever still
+// "pending" long after this route's own real behavior would allow.
+//
 // Real calibration test: ~20 audio tokens/second, generated ~3.7x faster
 // than real-time playback. A full 15 min (900s) episode is ~18,000 audio
 // tokens, which at that same ratio suggests ~150-250s of wall-clock
-// generation — same 300s ceiling as every other Studio generation route, but
-// with less headroom than usual; the first thing to revisit if this route
-// times out in practice is raising this further or trimming the script's
-// target word count.
-export const maxDuration = 300;
+// generation, PLUS the script-writing call, mp3 encoding, and Storage
+// upload on top — the actual total that hit the old 300s ceiling.
+export const maxDuration = 800;
 
 const PODCAST_BUCKET = "studio-podcasts";
 // Generous ceiling for a ~15 min episode at the calibrated ~20 audio
@@ -91,24 +107,28 @@ async function planPodcastScript(courseTitle: string, explicationExcerpt: string
  *     (lib/audio/mp3-encoder.ts — pure JS, no ffmpeg binary needed), uploads
  *     it, and caches the URL BEFORE returning.
  *
- * RESPONSE SHAPE past the cache-hit/quota-gate checks — a STREAMED,
- * newline-delimited JSON body (Content-Type: application/x-ndjson), always
- * HTTP 200, NOT a single JSON object. Same fix, same reason, as
- * app/api/studio/generate/explication-part/route.ts (see that route's own
- * header comment for the full mechanism): this step alone
- * (script + narration + mp3 encode + upload) legitimately takes ~150-250+
- * seconds with ZERO bytes flowing to the browser until the very end — this
- * was the OTHER of only two Studio features (alongside Explication) ever
- * reported failing with "échec de génération" specifically on mobile, never
- * PC, while every other, faster Studio section never showed it. A cellular
- * carrier's NAT commonly drops that long a silent connection; a
- * `{"type":"heartbeat"}\n` line every 15 seconds keeps real bytes flowing so
- * that never happens. The final line is always `{"type":"result", success,
- * ...}` — `success:false` carries a `status` field with the LOGICAL status
- * this failure would have had as a plain response, since the transport
- * status is stuck at 200. The cache-hit and quota-gate-denied paths above
- * return in milliseconds and stay ordinary, non-streamed
- * `NextResponse.json(...)` responses with real HTTP status codes.
+ * RESPONSE SHAPE past the cache-hit/quota-gate checks — a background job,
+ * not a synchronous result: `{success:true, status:"pending"}`,
+ * `{success:true, status:"done", audioUrl, cached:false}`, or
+ * `{success:true, status:"error", error, errorStatus}`, answered almost
+ * instantly every time. See lib/studio-job-store.ts's own header comment
+ * for the full mechanism and why this replaced (in order) a single held-open
+ * request, then a heartbeat-streamed one: this step alone (script +
+ * narration + mp3 encode + upload) legitimately takes 150-250+ seconds, and
+ * this was one of only two Studio features (alongside Explication) ever
+ * reported failing with "échec de génération" specifically on mobile — a
+ * real, confirmed incident showed the earlier heartbeat-streamed attempt at
+ * fixing this ITSELF failed unreliably on mobile (two separate Explication
+ * attempts died within 2-23 seconds having received zero heartbeats, far too
+ * early for an idle-connection theory). The real work now runs via
+ * `waitUntil` while this response returns immediately; the client
+ * (app/dashboard/module/[id]/page.tsx's "audio" branch, via
+ * lib/poll-fetch.ts's startAndPoll) calls this SAME endpoint repeatedly
+ * every few seconds — each individual poll is fast and independently
+ * retryable, so a single flaky mobile request costs nothing. The cache-hit
+ * and quota-gate-denied paths above return in milliseconds and stay
+ * ordinary, non-streamed `NextResponse.json(...)` responses with real HTTP
+ * status codes.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -116,7 +136,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
   }
 
-  const rl = rateLimit(`studio-podcast:${user.id}`, RATE_LIMITS.ai);
+  // RATE_LIMITS.poll, not .ai — this endpoint is now polled every ~3s while
+  // a background job runs (see lib/rate-limit.ts's own comment on `poll`);
+  // the tighter .ai limit is checked separately, only on the branch that
+  // actually kicks off a new (real, billed) generation, below.
+  const rl = rateLimit(`studio-podcast:${user.id}`, RATE_LIMITS.poll);
   if (!rl.allowed) {
     return NextResponse.json(
       { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
@@ -187,90 +211,106 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const quotaGate = await reserveGeneration(user);
-    if (!quotaGate.allowed) {
-      return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+    // Job path deliberately keyed by courseId+dialect only (no per-attempt
+    // nonce, unlike Explication's — see lib/studio-job-store.ts's own
+    // comment on this route's job): Podcast has no "Régénérer" action, so a
+    // "done" job here has the exact same lifetime/validity semantics as
+    // studio_podcast_cache's own permanent cache entry above — reusing the
+    // most recent completed result for this exact course+dialect is
+    // correct, not stale.
+    const jobPath = `podcast/${courseId}/${dialect}.json`;
+    const claim = await claimJob<{ audioUrl: string }>(supabase, jobPath);
+
+    if (!claim.claimed) {
+      const existing = claim.existing;
+      if (existing.status === "done") {
+        return NextResponse.json({ success: true, status: "done", audioUrl: existing.result?.audioUrl, cached: false });
+      }
+      if (existing.status === "error") {
+        return NextResponse.json({ success: true, status: "error", error: existing.error, errorStatus: existing.errorStatus });
+      }
+      return NextResponse.json({ success: true, status: "pending" });
     }
 
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        // See this route's own header comment for why this exists: keeps
-        // real bytes flowing over the connection for the ~150-250+ seconds
-        // the script+narration+encode+upload chain can legitimately take, so
-        // a mobile carrier's NAT never sees this connection as idle long
-        // enough to drop it.
-        const heartbeatInterval = setInterval(() => {
-          try {
-            controller.enqueue(encoder.encode(`${JSON.stringify({ type: "heartbeat" })}\n`));
-          } catch {
-            clearInterval(heartbeatInterval);
+    // We won the claim — about to kick off a genuinely NEW, real, billed AI
+    // call, so this is where the tighter RATE_LIMITS.ai gate belongs (see
+    // this route's top-of-function rl check for why the general request
+    // volume is gated separately, more loosely, via RATE_LIMITS.poll).
+    const aiRl = rateLimit(`studio-podcast-ai:${user.id}`, RATE_LIMITS.ai);
+    if (!aiRl.allowed) {
+      const reason = "Trop de requêtes — réessaie dans quelques minutes.";
+      await failJob(supabase, jobPath, reason, 429);
+      return NextResponse.json({ success: true, status: "error", error: reason, errorStatus: 429 });
+    }
+
+    // Reserve quota NOW, exactly once (claimJob's own atomicity guarantees
+    // this branch runs for only one caller per job).
+    const quotaGate = await reserveGeneration(user);
+    if (!quotaGate.allowed) {
+      await failJob(supabase, jobPath, quotaGate.reason, 403);
+      return NextResponse.json({ success: true, status: "error", error: quotaGate.reason, errorStatus: 403 });
+    }
+
+    // Kick off the real (slow, billed) generation in the background and
+    // answer immediately — see lib/studio-job-store.ts's own header comment
+    // for why: `waitUntil` keeps this invocation alive (bound by this
+    // route's own `maxDuration`) to let the promise finish, but the CLIENT
+    // never needs its own connection to survive that long — it just polls
+    // this same endpoint again in a few seconds.
+    waitUntil(
+      (async () => {
+        const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_PODCAST);
+        const script = await planPodcastScript(course.title, excerpt, dialect);
+
+        const { pcm16 } = await generateOpenRouterAudio(
+          [
+            { role: "system", content: buildPodcastNarrationSystemPrompt(dialect) },
+            { role: "user", content: buildPodcastNarrationUserMessage(script) },
+          ],
+          { maxTokens: AUDIO_MAX_TOKENS, timeoutMs: 750_000 }
+        );
+
+        const mp3Buffer = await encodePcm16ToMp3(pcm16, 24_000, 1);
+
+        await ensurePodcastBucket(supabase);
+        // Non-default variants get their own path (dialect suffix) — never
+        // overwrite the shared default-variant file at `${contentHash}.mp3`,
+        // and never collide with each other (a student generating "en" then
+        // "en-darija" for the same course must get 2 distinct files).
+        const path = isDefaultVariant ? `${contentHash}.mp3` : `${contentHash}-${dialect}.mp3`;
+        const { error: uploadError } = await supabase.storage
+          .from(PODCAST_BUCKET)
+          .upload(path, mp3Buffer, { contentType: "audio/mpeg", upsert: true });
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage.from(PODCAST_BUCKET).getPublicUrl(path);
+        const audioUrl = publicUrlData.publicUrl;
+
+        // Store BEFORE returning — the next student to hit this content_hash
+        // benefits immediately. Fail-open: storeStudioPodcastCache logs its
+        // own errors and never throws, so a caching hiccup can't block this
+        // student's own successful generation. Only the default variant is
+        // ever written to the shared cross-student cache — see this route's
+        // own comment on `isDefaultVariant` above.
+        if (isDefaultVariant) {
+          await storeStudioPodcastCache(contentHash, audioUrl);
+        }
+
+        return { audioUrl };
+      })()
+        .then(({ audioUrl }) => completeJob(supabase, jobPath, { audioUrl }))
+        .catch(async (error) => {
+          await refundGeneration(user.id);
+          const status = error instanceof OpenRouterError ? error.status : 502;
+          const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
+          if (!(error instanceof OpenRouterError)) {
+            console.error("[studio/podcast] Échec génération/upload:", error);
           }
-        }, 15_000);
+          await failJob(supabase, jobPath, message, status);
+        })
+    );
 
-        (async () => {
-          const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_PODCAST);
-          const script = await planPodcastScript(course.title, excerpt, dialect);
-
-          const { pcm16 } = await generateOpenRouterAudio(
-            [
-              { role: "system", content: buildPodcastNarrationSystemPrompt(dialect) },
-              { role: "user", content: buildPodcastNarrationUserMessage(script) },
-            ],
-            { maxTokens: AUDIO_MAX_TOKENS, timeoutMs: 280_000 }
-          );
-
-          const mp3Buffer = await encodePcm16ToMp3(pcm16, 24_000, 1);
-
-          await ensurePodcastBucket(supabase);
-          // Non-default variants get their own path (dialect suffix) — never
-          // overwrite the shared default-variant file at `${contentHash}.mp3`,
-          // and never collide with each other (a student generating "en" then
-          // "en-darija" for the same course must get 2 distinct files).
-          const path = isDefaultVariant ? `${contentHash}.mp3` : `${contentHash}-${dialect}.mp3`;
-          const { error: uploadError } = await supabase.storage
-            .from(PODCAST_BUCKET)
-            .upload(path, mp3Buffer, { contentType: "audio/mpeg", upsert: true });
-          if (uploadError) throw uploadError;
-
-          const { data: publicUrlData } = supabase.storage.from(PODCAST_BUCKET).getPublicUrl(path);
-          const audioUrl = publicUrlData.publicUrl;
-
-          // Store BEFORE returning — the next student to hit this content_hash
-          // benefits immediately. Fail-open: storeStudioPodcastCache logs its
-          // own errors and never throws, so a caching hiccup can't block this
-          // student's own successful generation. Only the default variant is
-          // ever written to the shared cross-student cache — see this route's
-          // own comment on `isDefaultVariant` above.
-          if (isDefaultVariant) {
-            await storeStudioPodcastCache(contentHash, audioUrl);
-          }
-
-          return { audioUrl };
-        })()
-          .then(({ audioUrl }) => {
-            controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", success: true, audioUrl, cached: false })}\n`));
-          })
-          .catch(async (error) => {
-            await refundGeneration(user.id);
-            const status = error instanceof OpenRouterError ? error.status : 502;
-            const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
-            if (!(error instanceof OpenRouterError)) {
-              console.error("[studio/podcast] Échec génération/upload:", error);
-            }
-            controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", success: false, error: message, status })}\n`));
-          })
-          .finally(() => {
-            clearInterval(heartbeatInterval);
-            controller.close();
-          });
-      },
-    });
-
-    return new NextResponse(stream, {
-      status: 200,
-      headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" },
-    });
+    return NextResponse.json({ success: true, status: "pending" });
   } catch (error) {
     console.error("[studio/podcast] Erreur non gérée:", error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 });

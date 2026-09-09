@@ -1,6 +1,6 @@
 "use client";
 
-import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
+import { startAndPoll } from "@/lib/poll-fetch";
 
 /**
  * Browser-side driver for the client-driven, multi-request Explication
@@ -16,15 +16,21 @@ import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
  *  1. POST explication-start EXACTLY ONCE, never retried by this driver.
  *     Either resolves the whole generation immediately (cache hit /
  *     cross-university-delta — `needsFinalize: false`), or reserves quota
- *     and returns `{reserved: true, totalParts}`. A code review caught a
- *     real quota-integrity bug in an earlier version where this reservation
- *     step WAS retried (bundled with the slow AI call) — reserving 2-3x
- *     courseCap for one delivered generation. Never retrying this call, and
- *     only ever treating a reservation as real when this call explicitly
- *     confirms it, is what closes that.
- *  2. POST explication-part sequentially, one bounded (~60s) HTTP request
- *     per part, with automatic retry on any clean, retryable failure — safe
- *     to retry freely because this route never touches quota (see its own
+ *     and returns `{reserved: true, totalParts, attemptId}`. A code review
+ *     caught a real quota-integrity bug in an earlier version where this
+ *     reservation step WAS retried (bundled with the slow AI call) —
+ *     reserving 2-3x courseCap for one delivered generation. Never retrying
+ *     this call, and only ever treating a reservation as real when this
+ *     call explicitly confirms it, is what closes that.
+ *  2. For each part: POST explication-part to kick off (or check on) a
+ *     BACKGROUND job (see lib/studio-job-store.ts's own header comment),
+ *     then poll that same endpoint every few seconds (lib/poll-fetch.ts's
+ *     startAndPoll) until it reports done/error — no single HTTP request
+ *     here ever needs to survive the real ~100-260+ second generation time,
+ *     which is what actually fixes a real, confirmed mobile-only failure a
+ *     held-open (then heartbeat-streamed) request could not. Automatic
+ *     retry (a fresh poll loop) on any clean, retryable failure — safe to
+ *     retry freely because this route never touches quota (see its own
  *     header comment). Each retry only ever redoes the ONE part that
  *     failed, never the whole generation.
  *  3. POST explication-finalize once, only if step 1 returned
@@ -53,25 +59,24 @@ export interface ExplicationGenerationProgress {
 
 const MAX_PART_ATTEMPTS = 3;
 const PART_RETRY_DELAYS_MS = [2000, 5000];
-// Each client-side timeout is kept ABOVE its route's own `maxDuration`
-// (explication-start=15s, explication-part=280s, explication-finalize=60s —
-// see each route's own file for why) — deliberately, and not merely
-// generous headroom: explication-start is never retried by this driver (see
-// this file's header comment), so if the client gave up BEFORE the server
-// could possibly finish, it would have no way to know whether a reservation
-// happened right as it stopped waiting, exactly the kind of ambiguous-
-// outcome window this whole redesign exists to minimize. Letting the client
-// always wait at least as long as the server's own hard ceiling means a
-// genuine platform kill (not a client-side impatience) is the only way this
-// ambiguity can still occur. PART_FETCH_TIMEOUT_MS in particular was a real,
-// repeated production bug when it sat at 70s while explication-part could
-// legitimately run close to that — an empirical test proved this project's
-// real Vercel ceiling is 250s+, so explication-part's own maxDuration was
-// raised to 280s, and this must stay comfortably above THAT, not the old
-// value.
+// explication-start/-finalize are still plain, synchronous request/response
+// calls (fast — DB reads/writes only, no AI call) — each client-side
+// timeout is kept ABOVE its route's own `maxDuration` (explication-start=
+// 15s, explication-finalize=60s), same margin discipline as everywhere else
+// in this app: explication-start is never retried by this driver (see this
+// file's header comment), so if the client gave up BEFORE the server could
+// possibly finish, it would have no way to know whether a reservation
+// happened right as it stopped waiting.
 const START_FETCH_TIMEOUT_MS = 70_000;
-const PART_FETCH_TIMEOUT_MS = 290_000;
 const FINALIZE_FETCH_TIMEOUT_MS = 70_000;
+// explication-part is now a background-job endpoint (see
+// lib/studio-job-store.ts's own header comment) — this is how long the
+// CLIENT will keep POLLING for a result, not a request timeout. Kept
+// comfortably above lib/studio-job-store.ts's own STALE_JOB_MS (320_000) so
+// that if a job genuinely never resolves, the server will already consider
+// it stale (and safe to restart) by the time this client gives up and the
+// outer per-part retry loop tries again.
+const PART_POLL_MAX_WAIT_MS = 330_000;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -142,20 +147,16 @@ async function abandon(courseId: number): Promise<void> {
  * Minimal wrapper around the standard Screen Wake Lock API
  * (https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API) —
  * added defensively after a real production report of "échec de génération"
- * on mobile specifically (not PC), for the exact same course pipeline. This
- * flow is a SEQUENTIAL chain of several multi-minute HTTP round-trips (real,
- * measured per-call latency is 100s of seconds even on a clean success — see
- * PART_FETCH_TIMEOUT_MS's own comment), easily totaling several minutes to
- * 10+ minutes for a multi-part course — a well-documented risk window for a
- * mobile browser to suspend/throttle a backgrounded tab's JS/network the
- * moment the student's screen locks, which no amount of server-side retrying
- * can help once the WHOLE page execution context is suspended, not just one
- * request. Requesting a wake lock keeps the screen on for the duration of
- * this call, removing the single most common reason a student's screen would
- * lock during a long wait. Feature-detected and best-effort throughout: a
- * browser without support (or a user who denies it) just gets no wake lock,
- * never an error — this is a defensive improvement, not a load-bearing
- * requirement for correctness.
+ * on mobile specifically (not PC), for the exact same course pipeline. Even
+ * with the background-job/polling redesign (see this file's header comment
+ * and lib/studio-job-store.ts's), the overall flow still spans several
+ * minutes to 10+ minutes for a multi-part course while the student waits —
+ * requesting a wake lock keeps the screen on for that duration, a cheap,
+ * well-supported mitigation against a mobile browser throttling a
+ * backgrounded tab if the student's screen locks mid-wait. Feature-detected
+ * and best-effort throughout: a browser without support (or a user who
+ * denies it) just gets no wake lock, never an error — this is a defensive
+ * improvement, not a load-bearing requirement for correctness.
  */
 async function acquireWakeLock(): Promise<{ release: () => Promise<void> } | null> {
   try {
@@ -232,6 +233,12 @@ async function runGenerationInParts(
   // From here on, a reservation is confirmed to exist — abandon() is now the
   // correct thing to call if the rest of the flow fails.
   const totalParts = typeof startData.totalParts === "number" ? startData.totalParts : 1;
+  // attemptId scopes every part's background-job file to THIS generation
+  // attempt (see explication-start/route.ts's own comment on why) — falls
+  // back to a locally-generated id only if the server response is somehow
+  // missing it (defensive; every real response includes it), so a job path
+  // is never left undefined.
+  const attemptId = typeof startData.attemptId === "string" ? startData.attemptId : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const parts: string[] = [];
 
   for (let partIndex = 0; partIndex < totalParts; partIndex++) {
@@ -241,12 +248,17 @@ async function runGenerationInParts(
     for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !succeeded; attempt++) {
       onProgress?.({ partIndex, totalParts, attempt });
 
-      // postJsonWithHeartbeat never throws — every outcome, including a raw
-      // network failure, comes back as a normal result carrying a
-      // `diagnostic` string (see lib/heartbeat-fetch.ts's own comment) so a
-      // failure surfaced to the student names concretely what happened,
-      // instead of another guess from a bare "échec de génération".
-      const outcome = await postJsonWithHeartbeat("/api/studio/generate/explication-part", { courseId, partIndex, ...extra }, PART_FETCH_TIMEOUT_MS);
+      // startAndPoll never throws — every outcome, including a raw network
+      // failure on some individual poll, comes back as a normal result
+      // carrying a `diagnostic` string (see lib/poll-fetch.ts's own
+      // comment) so a failure surfaced to the student names concretely
+      // what happened, instead of another guess from a bare "échec de
+      // génération".
+      const outcome = await startAndPoll(
+        "/api/studio/generate/explication-part",
+        { courseId, partIndex, attemptId, ...extra },
+        PART_POLL_MAX_WAIT_MS
+      );
 
       if (!outcome.ok || outcome.data.success !== true) {
         const baseError = typeof outcome.data.error === "string" ? outcome.data.error : `Erreur ${outcome.status}.`;

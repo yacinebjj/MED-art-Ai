@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -6,6 +7,7 @@ import { STUDIO_PROMPT_CONFIG } from "@/lib/ai/studio-prompts";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { computeExplicationSlices, generateExplicationPart } from "@/lib/studio-explication-delta";
+import { claimJob, completeJob, failJob } from "@/lib/studio-job-store";
 
 export const runtime = "nodejs";
 // 280s — comfortably inside this project's REAL enforced ceiling, which an
@@ -39,47 +41,33 @@ export const maxDuration = 280;
  * now completely safe from a quota standpoint since this route never
  * reserves or refunds anything.
  *
- * Body: `{ courseId, partIndex, language?, customPrompt? }` — language/
- * customPrompt are re-sent on every part (not just part 0) since each part
- * is its own independent generation call needing the full system prompt.
+ * Body: `{ courseId, partIndex, attemptId, language?, customPrompt? }` —
+ * `attemptId` comes from explication-start's own response for THIS
+ * generation attempt (see that route's own comment on why it exists).
+ * language/customPrompt are re-sent on every part (not just part 0) since
+ * each part is its own independent generation call needing the full system
+ * prompt.
  *
- * RESPONSE SHAPE — deliberately a STREAMED, newline-delimited JSON body
- * (Content-Type: application/x-ndjson), always HTTP 200, NOT a single JSON
- * object — added after a real, confirmed production report of "échec de
- * génération" specifically on MOBILE (never on PC/desktop, for the exact
- * same course). Root cause: this route's real generation call
- * (generateExplicationPart) legitimately takes anywhere from ~100 to 260+
- * seconds, and the PREVIOUS implementation held one plain request/response
- * open that entire time with ZERO bytes flowing in either direction until
- * the very end. A cellular carrier's carrier-grade NAT (every mobile data
- * connection sits behind one) commonly drops an idle TCP mapping after as
- * little as 30-120 seconds of total silence — a well-documented mobile-
- * network reality that has nothing to do with screen locking, tab
- * backgrounding, or this app's own code, and would fail IDENTICALLY on
- * every one of lib/studio-explication-client.ts's 3 retries for the exact
- * same course/part, since it's a deterministic property of the network
- * path, not a random flake. Home/office WiFi and wired connections
- * typically tolerate a MUCH longer idle window (or none at all) on an
- * already-established TCP connection, which is exactly why this class of
- * failure would show up on mobile and not PC for the identical request.
- *
- * Fix: emit a `{"type":"heartbeat"}\n` line every 15 seconds for the entire
- * duration generateExplicationPart is in flight, so real bytes keep flowing
- * over the connection continuously — this defeats an idle-timeout drop
- * entirely, independent of how long the actual generation takes. The final
- * line is always `{"type":"result", success, ...}` — `success:true` carries
- * `partIndex, totalParts, isLastPart, partMarkdown` (exactly the old
- * response's fields); `success:false` carries `error` and a `status`
- * field holding the LOGICAL status this failure would have had as a plain
- * response (mirrors OpenRouterError.status, or 502) — since real HTTP
- * status can't change after streaming has already started with a 200,
- * lib/studio-explication-client.ts's postPartWithHeartbeat reads THIS
- * field, not the transport status, to decide retryability. Heartbeat lines
- * are otherwise inert and ignored by the client's line parser. Every
- * validation failure BEFORE generation starts (auth/rate-limit/body/course
- * lookup below) is completely unaffected — those return in milliseconds, so
- * they stay plain, ordinary `NextResponse.json(...)` responses with their
- * real HTTP status codes, exactly as before.
+ * RESPONSE SHAPE — a background job, not a synchronous result. This route
+ * ALWAYS answers almost instantly with `{success:true, status:"pending"}`,
+ * `{success:true, status:"done", partIndex, totalParts, isLastPart,
+ * partMarkdown}`, or `{success:true, status:"error", error, errorStatus}` —
+ * see lib/studio-job-store.ts's own header comment for the full mechanism
+ * and WHY this replaced (in order) a single held-open request, then a
+ * heartbeat-streamed one: generateExplicationPart legitimately takes
+ * ~100-260+ seconds, and TWO separate real production attempts on mobile
+ * both failed within 2-23 SECONDS having received zero heartbeats — far too
+ * early for an idle-timeout theory, and inconsistent between attempts,
+ * pointing at a fundamentally unreliable long-lived connection on that
+ * network path rather than a fixable timing issue. The real work now runs
+ * via `waitUntil` (bound by this route's own `maxDuration`, exactly as
+ * before) while this response returns immediately; lib/studio-explication-
+ * client.ts's startAndPoll calls this SAME endpoint repeatedly every few
+ * seconds — each individual poll is fast and independently retryable, so a
+ * single flaky mobile request costs nothing. Every validation failure
+ * BEFORE the job is claimed (auth/rate-limit/body/course lookup below) is
+ * unaffected — those still return in milliseconds as plain, ordinary
+ * `NextResponse.json(...)` responses with their real HTTP status codes.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -87,7 +75,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
   }
 
-  const rl = rateLimit(`studio-generate-explication-part:${user.id}`, RATE_LIMITS.ai);
+  // RATE_LIMITS.poll, not .ai — this endpoint is now polled every ~3s while
+  // a background job runs (see lib/rate-limit.ts's own comment on `poll`);
+  // the tighter .ai limit is checked separately, only on the branch that
+  // actually kicks off a new (real, billed) generation, below.
+  const rl = rateLimit(`studio-generate-explication-part:${user.id}`, RATE_LIMITS.poll);
   if (!rl.allowed) {
     return NextResponse.json(
       { success: false, error: "Trop de requêtes — réessaie dans quelques minutes." },
@@ -102,9 +94,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { courseId, partIndex, language: languageRaw, customPrompt: customPromptRaw } = (body ?? {}) as {
+  const {
+    courseId,
+    partIndex,
+    attemptId,
+    language: languageRaw,
+    customPrompt: customPromptRaw,
+  } = (body ?? {}) as {
     courseId?: unknown;
     partIndex?: unknown;
+    attemptId?: unknown;
     language?: unknown;
     customPrompt?: unknown;
   };
@@ -113,6 +112,9 @@ export async function POST(request: NextRequest) {
   }
   if (typeof partIndex !== "number" || !Number.isInteger(partIndex) || partIndex < 0) {
     return NextResponse.json({ success: false, error: "'partIndex' est requis et doit être un entier ≥ 0." }, { status: 400 });
+  }
+  if (typeof attemptId !== "string" || !attemptId) {
+    return NextResponse.json({ success: false, error: "'attemptId' est requis." }, { status: 400 });
   }
 
   const language: "fr" | "en" = languageRaw === "en" ? "en" : "fr";
@@ -154,46 +156,58 @@ export async function POST(request: NextRequest) {
   }
 
   const systemPrompt = STUDIO_PROMPT_CONFIG.explication.systemPrompt + languageInstruction + customPromptInstruction;
+  const isLastPart = partIndex === totalParts - 1;
+  const jobPath = `explication/${courseId}/${attemptId}/${partIndex}.json`;
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      // See this route's own header comment for why this exists: keeps real
-      // bytes flowing over the connection for the ~100-260+ seconds
-      // generateExplicationPart can legitimately take, so a mobile carrier's
-      // NAT never sees this connection as idle long enough to drop it.
-      const heartbeatInterval = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(`${JSON.stringify({ type: "heartbeat" })}\n`));
-        } catch {
-          clearInterval(heartbeatInterval);
+  const claim = await claimJob<{ partMarkdown: string }>(supabase, jobPath);
+  if (!claim.claimed) {
+    const existing = claim.existing;
+    if (existing.status === "done") {
+      return NextResponse.json({
+        success: true,
+        status: "done",
+        partIndex,
+        totalParts,
+        isLastPart,
+        partMarkdown: existing.result?.partMarkdown ?? "",
+      });
+    }
+    if (existing.status === "error") {
+      return NextResponse.json({ success: true, status: "error", error: existing.error, errorStatus: existing.errorStatus });
+    }
+    return NextResponse.json({ success: true, status: "pending" });
+  }
+
+  // We won the claim — about to kick off a genuinely NEW, real, billed AI
+  // call, so this is where the tighter RATE_LIMITS.ai gate belongs (see
+  // this route's top-of-function rl check for why the general request
+  // volume is gated separately, more loosely, via RATE_LIMITS.poll).
+  const aiRl = rateLimit(`studio-generate-explication-part-ai:${user.id}`, RATE_LIMITS.ai);
+  if (!aiRl.allowed) {
+    const reason = "Trop de requêtes — réessaie dans quelques minutes.";
+    await failJob(supabase, jobPath, reason, 429);
+    return NextResponse.json({ success: true, status: "error", error: reason, errorStatus: 429 });
+  }
+
+  // Kick off the real (slow, billed) generation in the background and
+  // answer immediately. See lib/studio-job-store.ts's own header comment
+  // for why this replaced a held-open request: `waitUntil` keeps this
+  // invocation alive (bound by this route's own `maxDuration`, exactly as
+  // before) to let the promise finish, but the CLIENT never needs its own
+  // connection to survive that long — it just polls this same endpoint
+  // again in a few seconds.
+  waitUntil(
+    generateExplicationPart(slices[partIndex], systemPrompt, partIndex + 1, totalParts)
+      .then((partMarkdown) => completeJob(supabase, jobPath, { partMarkdown }))
+      .catch((error) => {
+        const status = error instanceof OpenRouterError ? error.status : 502;
+        const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
+        if (!(error instanceof OpenRouterError)) {
+          console.error(`[explication-part] Échec génération partie ${partIndex + 1}/${totalParts}:`, error);
         }
-      }, 15_000);
+        return failJob(supabase, jobPath, message, status);
+      })
+  );
 
-      generateExplicationPart(slices[partIndex], systemPrompt, partIndex + 1, totalParts)
-        .then((partMarkdown) => {
-          const isLastPart = partIndex === totalParts - 1;
-          controller.enqueue(
-            encoder.encode(`${JSON.stringify({ type: "result", success: true, partIndex, totalParts, isLastPart, partMarkdown })}\n`)
-          );
-        })
-        .catch((error) => {
-          const status = error instanceof OpenRouterError ? error.status : 502;
-          const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
-          if (!(error instanceof OpenRouterError)) {
-            console.error(`[explication-part] Échec génération partie ${partIndex + 1}/${totalParts}:`, error);
-          }
-          controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", success: false, error: message, status })}\n`));
-        })
-        .finally(() => {
-          clearInterval(heartbeatInterval);
-          controller.close();
-        });
-    },
-  });
-
-  return new NextResponse(stream, {
-    status: 200,
-    headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" },
-  });
+  return NextResponse.json({ success: true, status: "pending" });
 }
