@@ -170,6 +170,23 @@ function scopeToActiveCourse(byKey: Set<string>, activeCourseId: number | null):
  * renderer.
  */
 
+// Color-coded by real file extension (this app's own lucide set has no
+// brand-specific PDF/Word/PowerPoint glyphs, so the honest way to visually
+// distinguish source types — matching the request's "distinct file type
+// badges" ask — is by color + a short type label, not a fake per-format
+// icon). A course's title IS its original filename (see the upload flow),
+// so its own extension is real, not inferred/guessed.
+const FILE_TYPE_STYLES: Record<string, { label: string; className: string }> = {
+  pdf: { label: "PDF", className: "bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400" },
+  docx: { label: "DOCX", className: "bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400" },
+  pptx: { label: "PPTX", className: "bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400" },
+  txt: { label: "TXT", className: "bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400" },
+};
+function fileTypeStyleFor(title: string): { label: string; className: string } {
+  const ext = title.split(".").pop()?.toLowerCase() ?? "";
+  return FILE_TYPE_STYLES[ext] ?? { label: "DOC", className: "bg-primary-50 text-primary-600 dark:bg-primary-950/30 dark:text-primary-400" };
+}
+
 // React.memo — the caller (ModuleWorkspacePage below) passes every handler
 // prop here as a useCallback-stabilized reference specifically so this skips
 // re-rendering on unrelated state changes (a chat-input keystroke, a note
@@ -383,7 +400,15 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                     disabled={isSwitchingCourse}
                     className="flex min-w-0 flex-1 items-start gap-3 text-left disabled:cursor-wait"
                   >
-                    <FileText className={cn("mt-0.5 h-4 w-4 shrink-0", isActive ? "text-primary-500" : "text-muted-foreground")} />
+                    <span
+                      className={cn(
+                        "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[9px] font-bold tracking-wide",
+                        fileTypeStyleFor(course.title).className
+                      )}
+                      aria-hidden
+                    >
+                      {fileTypeStyleFor(course.title).label}
+                    </span>
                     <div className="min-w-0 flex-1">
                       <p className={cn("truncate text-sm font-medium", isActive ? "text-primary-900 dark:text-primary-200" : "text-foreground")}>
                         {course.title}

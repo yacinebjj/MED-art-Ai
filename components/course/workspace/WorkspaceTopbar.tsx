@@ -81,7 +81,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
         <Button
           variant="ghost"
           size="sm"
-          className="gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:px-3"
+          className="gap-1.5 rounded-full border border-border/60 px-2 text-muted-foreground transition-colors duration-200 hover:border-border hover:text-foreground sm:px-3"
           aria-label={tWorkspaceTopbar("copyLinkAriaLabel", language)}
           onClick={handleCopyLink}
         >
@@ -92,7 +92,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
         <Button
           variant="ghost"
           size="sm"
-          className="gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:px-3"
+          className="gap-1.5 rounded-full border border-border/60 px-2 text-muted-foreground transition-colors duration-200 hover:border-border hover:text-foreground sm:px-3"
           aria-label={
             isDark
               ? tWorkspaceTopbar("switchToLightMode", language)
@@ -115,7 +115,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
             <Button
               variant="ghost"
               size="sm"
-              className="gap-1.5 rounded-full px-2 text-muted-foreground hover:text-foreground sm:px-3"
+              className="gap-1.5 rounded-full border border-border/60 px-2 text-muted-foreground transition-colors duration-200 hover:border-border hover:text-foreground sm:px-3"
               aria-label={tWorkspaceTopbar("settings", language)}
             >
               <Settings className="h-4 w-4" />

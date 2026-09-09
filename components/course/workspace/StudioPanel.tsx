@@ -747,7 +747,7 @@ export function StudioPanel({
                           // p-3/md:p-4 + text-sm/md:text-base, reading as
                           // oversized blocks instead of an elegant, dense
                           // tool list.
-                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.02] hover:border-primary/50 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-none md:text-sm",
+                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-primary/50 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-none md:text-sm",
                           isGenerating && "disabled:cursor-wait",
                           isLocked && "opacity-50 saturate-[0.4] hover:translate-y-0 hover:shadow-none",
                           // Fixed h-14 (uncollapsed) — CSS Grid rows stretch
@@ -780,13 +780,23 @@ export function StudioPanel({
                         {isGenerating ? (
                           <Loader2 className={cn("shrink-0 animate-spin text-muted-foreground", isCollapsed ? "h-6 w-6" : "h-4 w-4")} />
                         ) : (
-                          <Icon
-                            className={cn(
-                              "shrink-0 transition-transform duration-300 group-hover:scale-110",
-                              isCollapsed ? "h-6 w-6" : "h-4 w-4",
-                              tint.icon
+                          <span className="flex shrink-0 items-center gap-1">
+                            <Icon
+                              className={cn(
+                                "shrink-0 transition-transform duration-300 group-hover:scale-110",
+                                isCollapsed ? "h-6 w-6" : "h-4 w-4",
+                                tint.icon
+                              )}
+                            />
+                            {/* Subtle interactivity hint, revealed on hover —
+                                only for a not-yet-generated tile: a "done"
+                                tile already communicates clickability via its
+                                mastery ring/dot in the opposite corner, and
+                                the collapsed rail has no room for it. */}
+                            {!isCollapsed && !isDone && (
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50 opacity-0 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100" />
                             )}
-                          />
+                          </span>
                         )}
                         {/* A quiet "already generated" tell (no separate label,
                             no layout shift) so a returning student can tell
