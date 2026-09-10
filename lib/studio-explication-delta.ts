@@ -829,9 +829,9 @@ const BOUNDARY_SEARCH_WINDOW_CHARS = 2000;
  * source of genuinely ambiguous, badly-bounded input the model was ever
  * asked to make sense of.
  */
-function findSliceBoundary(text: string, idealEnd: number): number {
+function findSliceBoundary(text: string, idealEnd: number, searchWindowChars: number = BOUNDARY_SEARCH_WINDOW_CHARS): number {
   if (idealEnd >= text.length) return text.length;
-  const windowStart = Math.max(0, idealEnd - BOUNDARY_SEARCH_WINDOW_CHARS);
+  const windowStart = Math.max(0, idealEnd - searchWindowChars);
   const window = text.slice(windowStart, idealEnd);
   const paragraphBreak = window.lastIndexOf("\n\n");
   if (paragraphBreak !== -1) return windowStart + paragraphBreak + 2;
@@ -840,6 +840,46 @@ function findSliceBoundary(text: string, idealEnd: number): number {
   const sentenceBreak = window.lastIndexOf(". ");
   if (sentenceBreak !== -1) return windowStart + sentenceBreak + 2;
   return idealEnd;
+}
+
+/**
+ * Splits ONE already-computed slice into `count` smaller, boundary-aware
+ * pieces — the escalation path for a part that proved too slow to generate
+ * inside its time budget (see lib/studio-explication-client.ts: on a 504
+ * timeout the client stops re-requesting the identical doomed slice and
+ * asks for its halves, then quarters, instead).
+ *
+ * Reuses findSliceBoundary so a sub-slice still ends on a real paragraph/
+ * line/sentence break rather than mid-word, with a window scaled DOWN to the
+ * sub-target (a fixed 2,000-char backward search against a e.g. 3,000-char
+ * target could otherwise drag a boundary so far back that the pieces come
+ * out wildly uneven, defeating the point of splitting at all).
+ *
+ * Pure function of (slice, count) — the server recomputes it per request
+ * from the same raw_text + partIndex, so nothing about the split has to be
+ * persisted or round-tripped.
+ */
+export function splitSliceIntoSubSlices(slice: string, count: number): string[] {
+  if (count <= 1 || slice.length === 0) return [slice];
+
+  const target = Math.ceil(slice.length / count);
+  const searchWindow = Math.max(200, Math.min(BOUNDARY_SEARCH_WINDOW_CHARS, Math.floor(target / 4)));
+  const out: string[] = [];
+  let start = 0;
+
+  // count - 1 boundary-aware cuts, then whatever remains is the last piece —
+  // guarantees exactly `count` pieces at most and never an empty/backwards one.
+  while (start < slice.length && out.length < count - 1) {
+    const idealEnd = Math.min(start + target, slice.length);
+    const end = findSliceBoundary(slice, idealEnd, searchWindow);
+    const safeEnd = end > start ? end : idealEnd;
+    out.push(slice.slice(start, safeEnd));
+    start = safeEnd;
+  }
+  if (start < slice.length) out.push(slice.slice(start));
+
+  const nonEmpty = out.filter((piece) => piece.length > 0);
+  return nonEmpty.length > 0 ? nonEmpty : [slice];
 }
 
 export function computeExplicationSlices(fullSourceText: string): string[] {

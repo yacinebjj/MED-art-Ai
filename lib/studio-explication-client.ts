@@ -51,11 +51,37 @@ export interface ExplicationGenerationResult {
 export interface ExplicationGenerationProgress {
   partIndex: number; // 0-based, the part currently in flight
   totalParts: number;
-  attempt: number; // 1-based attempt number for THIS part
+  attempt: number; // 1-based attempt number for THIS sub-part
+  /** 0-based index of the sub-piece in flight, when a part has been subdivided after a timeout (see generateOnePart). */
+  subPartIndex: number;
+  /** How many pieces this part is currently split into — 1 means "not subdivided". */
+  subPartCount: number;
+  /** True while this is a RETRY (attempt > 1) or a post-timeout subdivision — lets the UI say "je réessaie" instead of looking frozen. */
+  isRecovering: boolean;
 }
 
 const MAX_PART_ATTEMPTS = 3;
-const PART_RETRY_DELAYS_MS = [2000, 5000];
+// Exponential backoff (2s, 6s, 18s) rather than the previous near-flat
+// 2s/5s — a retry that fires while the upstream provider is still degraded
+// just burns another full attempt against the same condition.
+const PART_RETRY_BASE_DELAY_MS = 2000;
+const PART_RETRY_BACKOFF_FACTOR = 3;
+
+/**
+ * How far a single part may be subdivided after timing out: 1 (whole) -> 2
+ * (halves) -> 4 (quarters). A 504 means the model could not finish THIS much
+ * source inside the time budget, so re-requesting the identical slice is
+ * very likely to hit the identical wall — this codebase learned that the
+ * hard way ("every retry, a fresh attempt at the identical slice, hits the
+ * identical wall, since this is real generation time, not a random flake").
+ * Asking for strictly less work per invocation is the only retry that
+ * actually changes the odds.
+ */
+const MAX_SUBDIVISION = 4;
+
+function backoffDelayMs(attempt: number): number {
+  return PART_RETRY_BASE_DELAY_MS * Math.pow(PART_RETRY_BACKOFF_FACTOR, attempt - 1);
+}
 // explication-start/-finalize are still plain, synchronous request/response
 // calls (fast — DB reads/writes only, no AI call) — each client-side
 // timeout is kept ABOVE its route's own `maxDuration` (explication-start=
@@ -163,6 +189,131 @@ async function acquireWakeLock(): Promise<{ release: () => Promise<void> } | nul
   }
 }
 
+type OnePartOutcome = { ok: true; markdown: string } | { ok: false; error: string };
+
+/**
+ * Generates ONE part, with two distinct recovery strategies chosen by what
+ * actually went wrong — this is the "make the frontend actually resilient"
+ * layer, and the distinction matters more than the retry count:
+ *
+ *  - A TIMEOUT (504, the server's own AbortController firing because the
+ *    model could not finish this much source in time) is NOT retried
+ *    identically. Re-sending the same slice hits the same wall for the same
+ *    reason — it is real generation time, not a flake. Instead the part is
+ *    subdivided (whole -> halves -> quarters) and the pieces are generated
+ *    sequentially and concatenated. Each piece is strictly less work, so
+ *    each is strictly likelier to land inside the budget.
+ *  - Any OTHER retryable failure (network drop, 5xx, the single-use-refresh-
+ *    token 401 race) IS retried identically, with exponential backoff —
+ *    those genuinely are transient and the same request can succeed.
+ *
+ * Every attempt reports through onProgress with `isRecovering` set, so the
+ * UI can show "je réessaie…" instead of sitting frozen for minutes. The
+ * error returned on final give-up names how many attempts were actually
+ * burned, so a future report can never again be ambiguous about whether
+ * retries happened at all.
+ */
+async function generateOnePart(
+  courseId: number,
+  partIndex: number,
+  totalParts: number,
+  extra: { language?: string; customPrompt?: string },
+  previousPartMarkdown: string | undefined,
+  onProgress?: (progress: ExplicationGenerationProgress) => void
+): Promise<OnePartOutcome> {
+  let subPartCount = 1;
+  let lastError = "La génération a échoué.";
+  let totalAttempts = 0;
+
+  for (;;) {
+    const collected: string[] = [];
+    let timedOut = false;
+    let gaveUp = false;
+
+    for (let subPartIndex = 0; subPartIndex < subPartCount && !timedOut && !gaveUp; subPartIndex++) {
+      let subSucceeded = false;
+
+      for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !subSucceeded; attempt++) {
+        totalAttempts++;
+        onProgress?.({
+          partIndex,
+          totalParts,
+          attempt,
+          subPartIndex,
+          subPartCount,
+          isRecovering: attempt > 1 || subPartCount > 1,
+        });
+
+        // postJsonWithHeartbeat never throws — every outcome, including a raw
+        // network failure mid-stream, comes back as a normal result carrying a
+        // `diagnostic` string (see lib/heartbeat-fetch.ts's own comment) so a
+        // failure surfaced to the student names concretely what happened,
+        // instead of another guess from a bare "échec de génération".
+        //
+        // previousPartTail — continuity context so a part doesn't restart a
+        // chapter mid-stream (fixes the real "chapters get mixed up" report).
+        // Within a subdivided part the previous SUB-piece is the truer
+        // immediate context; only the first piece falls back to the previous
+        // whole part.
+        const previousPartTail = collected.length > 0 ? collected[collected.length - 1] : previousPartMarkdown;
+        const outcome = await postJsonWithHeartbeat(
+          "/api/studio/generate/explication-part",
+          {
+            courseId,
+            partIndex,
+            ...(subPartCount > 1 ? { subPartIndex, subPartCount } : {}),
+            previousPartTail,
+            ...extra,
+          },
+          PART_FETCH_TIMEOUT_MS
+        );
+
+        if (outcome.ok && outcome.data.success === true) {
+          collected.push(String(outcome.data.partMarkdown ?? ""));
+          subSucceeded = true;
+          break;
+        }
+
+        const baseError = typeof outcome.data.error === "string" ? outcome.data.error : `Erreur ${outcome.status}.`;
+        lastError = `${baseError} [${outcome.diagnostic}]`;
+
+        // 504 = the server's own generation timeout. Subdividing is the only
+        // retry that changes anything here, so break out and escalate rather
+        // than burning the remaining identical attempts.
+        if (outcome.status === 504) {
+          timedOut = true;
+          break;
+        }
+
+        if (isRetryable(outcome.status) && attempt < MAX_PART_ATTEMPTS) {
+          await wait(backoffDelayMs(attempt));
+          continue;
+        }
+
+        gaveUp = true;
+        break;
+      }
+    }
+
+    if (!timedOut && !gaveUp && collected.length > 0) {
+      return { ok: true, markdown: collected.join("\n\n") };
+    }
+    if (gaveUp || !timedOut) {
+      return { ok: false, error: `${lastError} (${totalAttempts} tentative(s))` };
+    }
+
+    // Timed out — escalate to smaller pieces, or stop if already at the floor.
+    if (subPartCount >= MAX_SUBDIVISION) {
+      return {
+        ok: false,
+        error: `${lastError} (${totalAttempts} tentative(s), découpage jusqu'à ${subPartCount} sous-parties)`,
+      };
+    }
+    subPartCount *= 2;
+    await wait(backoffDelayMs(1));
+  }
+}
+
 export async function generateExplicationInParts(
   courseId: number,
   extra: { language?: string; customPrompt?: string } = {},
@@ -231,47 +382,20 @@ async function runGenerationInParts(
   const parts: string[] = [];
 
   for (let partIndex = 0; partIndex < totalParts; partIndex++) {
-    let lastError = "La génération a échoué.";
-    let succeeded = false;
+    const outcome = await generateOnePart(
+      courseId,
+      partIndex,
+      totalParts,
+      extra,
+      parts[parts.length - 1],
+      onProgress
+    );
 
-    for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !succeeded; attempt++) {
-      onProgress?.({ partIndex, totalParts, attempt });
-
-      // postJsonWithHeartbeat never throws — every outcome, including a raw
-      // network failure mid-stream, comes back as a normal result carrying a
-      // `diagnostic` string (see lib/heartbeat-fetch.ts's own comment) so a
-      // failure surfaced to the student names concretely what happened,
-      // instead of another guess from a bare "échec de génération".
-      //
-      // previousPartTail — the tail of the LAST SUCCESSFULLY GENERATED part
-      // (parts[parts.length-1], never undefined once partIndex > 0, since a
-      // part only gets pushed after succeeding) — fixes a real reported bug
-      // ("chapters get mixed up, the topic changes completely"); see
-      // generateExplicationPart's own comment for the full mechanism.
-      const outcome = await postJsonWithHeartbeat(
-        "/api/studio/generate/explication-part",
-        { courseId, partIndex, previousPartTail: parts[parts.length - 1], ...extra },
-        PART_FETCH_TIMEOUT_MS
-      );
-
-      if (!outcome.ok || outcome.data.success !== true) {
-        const baseError = typeof outcome.data.error === "string" ? outcome.data.error : `Erreur ${outcome.status}.`;
-        lastError = `${baseError} [${outcome.diagnostic}]`;
-        if (isRetryable(outcome.status) && attempt < MAX_PART_ATTEMPTS) {
-          await wait(PART_RETRY_DELAYS_MS[attempt - 1] ?? 5000);
-          continue;
-        }
-        break;
-      }
-
-      succeeded = true;
-      parts.push(String(outcome.data.partMarkdown ?? ""));
-    }
-
-    if (!succeeded) {
+    if (!outcome.ok) {
       await abandon(courseId);
-      return { success: false, error: lastError };
+      return { success: false, error: outcome.error };
     }
+    parts.push(outcome.markdown);
   }
 
   // Every part succeeded via genuine fresh generation — assemble + persist.
@@ -289,7 +413,7 @@ async function runGenerationInParts(
       if (finalizeOutcome.ok && finalizeOutcome.data.success === true) break;
       finalizeError = typeof finalizeOutcome.data.error === "string" ? finalizeOutcome.data.error : `Erreur ${finalizeOutcome.status}.`;
       if (isRetryable(finalizeOutcome.status) && attempt < MAX_PART_ATTEMPTS) {
-        await wait(PART_RETRY_DELAYS_MS[attempt - 1] ?? 5000);
+        await wait(backoffDelayMs(attempt));
         continue;
       }
       break;

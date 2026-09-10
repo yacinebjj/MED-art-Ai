@@ -23,7 +23,26 @@ const EXPLICATION_WORKING_MESSAGES: { fr: string; en: string }[] = [
   { fr: "Vérification et assemblage du contenu...", en: "Checking and assembling the content..." },
 ];
 
-export function ExplicationGeneratingLabel({ className }: { className?: string }) {
+/**
+ * Live per-part progress, when the caller has it. Purely additive: with no
+ * `progress` prop this behaves exactly as before (rotating working
+ * messages). It exists because a real production report — "the client did
+ * NOT auto-retry, it just halted" — turned out to be unfalsifiable from the
+ * UI: retries WERE structurally implemented, but nothing surfaced them, so
+ * a part quietly retrying for minutes was indistinguishable from a frozen
+ * app. Showing the part/attempt makes recovery visible instead of leaving
+ * the student staring at an unchanging spinner.
+ */
+export interface ExplicationProgressView {
+  partIndex: number;
+  totalParts: number;
+  attempt: number;
+  subPartIndex: number;
+  subPartCount: number;
+  isRecovering: boolean;
+}
+
+export function ExplicationGeneratingLabel({ className, progress }: { className?: string; progress?: ExplicationProgressView | null }) {
   const [index, setIndex] = useState(0);
   const { language } = useLanguage();
 
@@ -34,5 +53,28 @@ export function ExplicationGeneratingLabel({ className }: { className?: string }
     return () => clearInterval(interval);
   }, []);
 
-  return <span className={className}>{EXPLICATION_WORKING_MESSAGES[index][language]}</span>;
+  const partLabel = progress
+    ? language === "en"
+      ? `Part ${progress.partIndex + 1}/${progress.totalParts}`
+      : `Partie ${progress.partIndex + 1}/${progress.totalParts}`
+    : null;
+
+  const recoveryLabel =
+    progress && progress.isRecovering
+      ? progress.subPartCount > 1
+        ? language === "en"
+          ? `finer split ${progress.subPartIndex + 1}/${progress.subPartCount} — attempt ${progress.attempt}`
+          : `découpage plus fin ${progress.subPartIndex + 1}/${progress.subPartCount} — tentative ${progress.attempt}`
+        : language === "en"
+          ? `retrying — attempt ${progress.attempt}`
+          : `nouvelle tentative — essai ${progress.attempt}`
+      : null;
+
+  return (
+    <span className={className}>
+      {EXPLICATION_WORKING_MESSAGES[index][language]}
+      {partLabel ? ` · ${partLabel}` : ""}
+      {recoveryLabel ? ` · ${recoveryLabel}` : ""}
+    </span>
+  );
 }

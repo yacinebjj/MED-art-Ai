@@ -49,7 +49,7 @@ import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROS
 import { DEMO_SECTIONS, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
 import { getInFlightGeneration, trackGeneration } from "@/lib/studio-generation-tracker";
 import { PodcastGeneratingLabel } from "@/components/course/workspace/PodcastGeneratingLabel";
-import { ExplicationGeneratingLabel } from "@/components/course/workspace/ExplicationGeneratingLabel";
+import { ExplicationGeneratingLabel, type ExplicationProgressView } from "@/components/course/workspace/ExplicationGeneratingLabel";
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
@@ -652,6 +652,9 @@ export default function ModuleWorkspacePage() {
   const activeCourseIdForSections = activeCourse?.id ?? null;
   const generatingSections = useMemo(() => scopeToActiveCourse(generatingByKey, activeCourseIdForSections), [generatingByKey, activeCourseIdForSections]);
   const regeneratingSections = useMemo(() => scopeToActiveCourse(regeneratingByKey, activeCourseIdForSections), [regeneratingByKey, activeCourseIdForSections]);
+  // Live per-part progress for the multi-request Explication pipeline — see
+  // the onProgress call site below for why surfacing this matters.
+  const [explicationProgress, setExplicationProgress] = useState<ExplicationProgressView | null>(null);
   // "Afficher le cours" — a self-contained modal (FileViewerModal), decoupled
   // from the isSplitScreen/studioPanel system entirely, showing whichever
   // course's file was requested from the Sources list.
@@ -1003,10 +1006,17 @@ export default function ModuleWorkspacePage() {
           // truncation reported in production). Retries happen per-part,
           // automatically, inside generateExplicationInParts — a toast here
           // only fires on genuine, fully-exhausted failure.
-          const result = await generateExplicationInParts(courseId, {
-            language: options?.language,
-            customPrompt: options?.customPrompt,
-          });
+          // onProgress is what makes the per-part retry/subdivision recovery
+          // VISIBLE. It used to be omitted entirely, so a part quietly
+          // retrying for minutes looked identical to a frozen app — which is
+          // exactly how a real production report concluded "the client did
+          // NOT auto-retry" about logic that was in fact retrying.
+          const result = await generateExplicationInParts(
+            courseId,
+            { language: options?.language, customPrompt: options?.customPrompt },
+            (progress) => setExplicationProgress(progress)
+          );
+          setExplicationProgress(null);
           if (!result.success) {
             throw new Error(result.error ?? "La génération a échoué.");
           }
@@ -1076,6 +1086,10 @@ export default function ModuleWorkspacePage() {
           next.delete(key);
           return next;
         });
+        // Cleared here too (not only on the success path) so a failed
+        // Explication never leaves a stale "Partie 3/7 — tentative 2" label
+        // behind for the next generation to inherit.
+        setExplicationProgress(null);
       }
     })();
 
@@ -1566,7 +1580,7 @@ export default function ModuleWorkspacePage() {
           {openedSection === "audio" ? (
             <PodcastGeneratingLabel className="text-sm text-muted-foreground" />
           ) : openedSection === "explication" ? (
-            <ExplicationGeneratingLabel className="text-sm text-muted-foreground" />
+            <ExplicationGeneratingLabel className="text-sm text-muted-foreground" progress={explicationProgress} />
           ) : (
             <p className="text-sm text-muted-foreground">Génération en cours...</p>
           )}

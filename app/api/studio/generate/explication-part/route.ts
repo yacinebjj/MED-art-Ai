@@ -5,7 +5,7 @@ import { OpenRouterError } from "@/lib/ai/openrouter";
 import { STUDIO_PROMPT_CONFIG } from "@/lib/ai/studio-prompts";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { computeExplicationSlices, generateExplicationPart } from "@/lib/studio-explication-delta";
+import { computeExplicationSlices, generateExplicationPart, splitSliceIntoSubSlices } from "@/lib/studio-explication-delta";
 
 export const runtime = "nodejs";
 // 280s — comfortably inside this project's REAL enforced ceiling, which an
@@ -112,12 +112,16 @@ export async function POST(request: NextRequest) {
   const {
     courseId,
     partIndex,
+    subPartIndex: subPartIndexRaw,
+    subPartCount: subPartCountRaw,
     previousPartTail: previousPartTailRaw,
     language: languageRaw,
     customPrompt: customPromptRaw,
   } = (body ?? {}) as {
     courseId?: unknown;
     partIndex?: unknown;
+    subPartIndex?: unknown;
+    subPartCount?: unknown;
     previousPartTail?: unknown;
     language?: unknown;
     customPrompt?: unknown;
@@ -172,6 +176,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "'partIndex' hors limites." }, { status: 400 });
   }
 
+  // SUB-PART ESCALATION — optional, defaults to "the whole part" so the
+  // happy path is byte-for-byte unchanged. When a part proves too slow to
+  // generate inside the time budget, the client stops re-requesting the
+  // identical doomed slice and asks for its halves (then quarters) instead:
+  // strictly less work per invocation, and the pieces are concatenated
+  // client-side into the same final document. Bounded at 8 defensively —
+  // this is a client-supplied number and must never be able to explode the
+  // split loop.
+  const subPartCount =
+    typeof subPartCountRaw === "number" && Number.isInteger(subPartCountRaw) && subPartCountRaw > 1
+      ? Math.min(subPartCountRaw, 8)
+      : 1;
+  const requestedSubPartIndex =
+    typeof subPartIndexRaw === "number" && Number.isInteger(subPartIndexRaw) && subPartIndexRaw >= 0 ? subPartIndexRaw : 0;
+
+  const subSlices = subPartCount > 1 ? splitSliceIntoSubSlices(slices[partIndex], subPartCount) : [slices[partIndex]];
+  // splitSliceIntoSubSlices can legitimately return FEWER pieces than asked
+  // (a short slice with no usable boundaries), so clamp rather than trust
+  // the client's index against an assumed length.
+  const subPartIndex = Math.min(requestedSubPartIndex, subSlices.length - 1);
+  const slice = subSlices[subPartIndex];
+
   const systemPrompt = STUDIO_PROMPT_CONFIG.explication.systemPrompt + languageInstruction + customPromptInstruction;
 
   const encoder = new TextEncoder();
@@ -189,9 +215,9 @@ export async function POST(request: NextRequest) {
         }
       }, 15_000);
 
-      generateExplicationPart(slices[partIndex], systemPrompt, partIndex + 1, totalParts, previousPartTail)
+      generateExplicationPart(slice, systemPrompt, partIndex + 1, totalParts, previousPartTail)
         .then((partMarkdown) => {
-          const isLastPart = partIndex === totalParts - 1;
+          const isLastPart = partIndex === totalParts - 1 && subPartIndex === subSlices.length - 1;
           controller.enqueue(
             encoder.encode(`${JSON.stringify({ type: "result", success: true, partIndex, totalParts, isLastPart, partMarkdown })}\n`)
           );
