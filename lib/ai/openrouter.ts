@@ -263,10 +263,27 @@ function findSystemText(messages: ChatMessageInput[]): string {
 
 export class OpenRouterError extends Error {
   status: number;
+  /**
+   * True ONLY for the `finish_reason: "length"` case — the model was cut off
+   * by the max_tokens ceiling, so the response is genuinely incomplete.
+   *
+   * Carried as an explicit flag rather than inferred from the status code or
+   * the message text, because callers must be able to tell it apart from an
+   * ordinary 502 to recover correctly: retrying an identical request against
+   * a deterministic token ceiling truncates identically every time, whereas
+   * asking for LESS work (a smaller slice — see
+   * lib/studio-explication-client.ts's subdivision escalation) actually
+   * fixes it. A real production near-miss: truncation was thrown as a plain
+   * 502, the client's escalation only triggered on 504, so a truncated part
+   * burned all 3 identical retries and then abandoned the whole multi-part
+   * generation — discarding every already-completed, already-billed part.
+   */
+  truncated: boolean;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, options?: { truncated?: boolean }) {
     super(message);
     this.status = status;
+    this.truncated = options?.truncated ?? false;
   }
 }
 
@@ -640,7 +657,8 @@ export async function callOpenRouter(
     );
     throw new OpenRouterError(
       "La réponse de l'IA a été coupée avant la fin (limite de longueur atteinte). Réessaie — la génération sera automatiquement redécoupée si besoin.",
-      502
+      502,
+      { truncated: true }
     );
   }
 

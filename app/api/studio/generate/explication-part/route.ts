@@ -225,10 +225,18 @@ export async function POST(request: NextRequest) {
         .catch((error) => {
           const status = error instanceof OpenRouterError ? error.status : 502;
           const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
+          // Forwarded so the client can tell a TRUNCATED part (cut off by the
+          // max_tokens ceiling) apart from an ordinary 502. Both arrive as
+          // status 502, but only truncation is fixed by asking for a smaller
+          // slice instead of retrying the identical request — see
+          // OpenRouterError.truncated's own comment.
+          const truncated = error instanceof OpenRouterError && error.truncated;
           if (!(error instanceof OpenRouterError)) {
             console.error(`[explication-part] Échec génération partie ${partIndex + 1}/${totalParts}:`, error);
           }
-          controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", success: false, error: message, status })}\n`));
+          controller.enqueue(
+            encoder.encode(`${JSON.stringify({ type: "result", success: false, error: message, status, truncated })}\n`)
+          );
         })
         .finally(() => {
           clearInterval(heartbeatInterval);

@@ -69,15 +69,24 @@ const PART_RETRY_BACKOFF_FACTOR = 3;
 
 /**
  * How far a single part may be subdivided after timing out: 1 (whole) -> 2
- * (halves) -> 4 (quarters). A 504 means the model could not finish THIS much
- * source inside the time budget, so re-requesting the identical slice is
- * very likely to hit the identical wall — this codebase learned that the
- * hard way ("every retry, a fresh attempt at the identical slice, hits the
- * identical wall, since this is real generation time, not a random flake").
- * Asking for strictly less work per invocation is the only retry that
- * actually changes the odds.
+ * -> 4 -> 8.
+ *
+ * IMPORTANT, so this isn't mistaken for the primary defence: live evidence
+ * proved subdivision alone does NOT fix a timeout here. A part timed out at
+ * ~200s, its half timed out at ~200s, and its quarter (≈1,500 chars of
+ * source) timed out at ~200s too — because generation time was bounded by
+ * the max_tokens ceiling, not by input size (the system prompt orders the
+ * model never to stop for length, so it generated flat out to the ceiling
+ * whatever it was given). That is fixed at the source now: a concrete
+ * per-part word budget plus a much lower EXPLICATION_PART_MAX_TOKENS (see
+ * lib/studio-explication-delta.ts).
+ *
+ * Subdivision stays as a genuine safety net for the case where one slice
+ * really does carry more content than its budget can cover — raised to 8 so
+ * that net is deeper — but it is no longer load-bearing, and going wider
+ * would not have helped on its own.
  */
-const MAX_SUBDIVISION = 4;
+const MAX_SUBDIVISION = 8;
 
 function backoffDelayMs(attempt: number): number {
   return PART_RETRY_BASE_DELAY_MS * Math.pow(PART_RETRY_BACKOFF_FACTOR, attempt - 1);
@@ -227,10 +236,10 @@ async function generateOnePart(
 
   for (;;) {
     const collected: string[] = [];
-    let timedOut = false;
+    let needsSmallerSlice = false;
     let gaveUp = false;
 
-    for (let subPartIndex = 0; subPartIndex < subPartCount && !timedOut && !gaveUp; subPartIndex++) {
+    for (let subPartIndex = 0; subPartIndex < subPartCount && !needsSmallerSlice && !gaveUp; subPartIndex++) {
       let subSucceeded = false;
 
       for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !subSucceeded; attempt++) {
@@ -277,11 +286,19 @@ async function generateOnePart(
         const baseError = typeof outcome.data.error === "string" ? outcome.data.error : `Erreur ${outcome.status}.`;
         lastError = `${baseError} [${outcome.diagnostic}]`;
 
-        // 504 = the server's own generation timeout. Subdividing is the only
-        // retry that changes anything here, so break out and escalate rather
-        // than burning the remaining identical attempts.
-        if (outcome.status === 504) {
-          timedOut = true;
+        // Two DIFFERENT failures, one correct response: ask for less work.
+        //  - 504: the server's own generation timeout (too slow for the budget).
+        //  - truncated: the model hit the max_tokens ceiling mid-answer
+        //    (too LONG for the budget). Arrives as status 502 like any other
+        //    upstream error, which is exactly why it needs its own explicit
+        //    flag — a verification pass caught that matching on 504 alone
+        //    left truncation burning all 3 identical retries against a
+        //    deterministic ceiling and then abandoning the whole
+        //    generation, discarding every already-billed completed part.
+        // Both are systematic, not flaky: an identical retry reproduces them
+        // identically. Subdividing is the only retry that changes the odds.
+        if (outcome.status === 504 || outcome.data.truncated === true) {
+          needsSmallerSlice = true;
           break;
         }
 
@@ -295,10 +312,10 @@ async function generateOnePart(
       }
     }
 
-    if (!timedOut && !gaveUp && collected.length > 0) {
+    if (!needsSmallerSlice && !gaveUp && collected.length > 0) {
       return { ok: true, markdown: collected.join("\n\n") };
     }
-    if (gaveUp || !timedOut) {
+    if (gaveUp || !needsSmallerSlice) {
       return { ok: false, error: `${lastError} (${totalAttempts} tentative(s))` };
     }
 
