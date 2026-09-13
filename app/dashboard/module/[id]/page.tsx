@@ -116,22 +116,58 @@ function getSectionValue(course: StudioCourseFull, section: DemoSectionId): unkn
   }
 }
 
-function withSectionValue(course: StudioCourseFull, section: DemoSectionId, value: any): StudioCourseFull {
+/**
+ * Every real shape a generated section's value can take — one member per
+ * StudioCourseFull field this function can write to. Not a per-`section`
+ * discriminated match (that would need the CALLER's `resultValue`, which
+ * comes from more than one generation pathway, to already be narrowed by
+ * section — a larger change than this function's own scope) but still a
+ * real, closed type: it rejects anything that isn't a genuine section value
+ * shape, which a bare `any` did not.
+ */
+type StudioSectionValue =
+  | StudioCourseFull["explication"]
+  | StudioCourseFull["resume"]
+  | StudioCourseFull["casClinique"]
+  | StudioCourseFull["qcms"]
+  | StudioCourseFull["exemplesAnalogies"]
+  | StudioCourseFull["infographicUrl"]
+  | StudioCourseFull["audioUrl"];
+
+/** The `{success, data, error, cached}` shape /api/studio/generate actually returns — `data` stays `unknown` deliberately, since its real shape depends on which `actionType` was requested; it only becomes a `StudioSectionValue` once withSectionValue's own explicit cast is applied, at the one call site that already knows which section it is. */
+interface StudioGenerateResponse {
+  success: boolean;
+  error?: string;
+  data?: unknown;
+  cached?: boolean;
+}
+
+function withSectionValue(course: StudioCourseFull, section: DemoSectionId, value: StudioSectionValue): StudioCourseFull {
+  // A per-case cast is still needed here: TS narrows `section` inside each
+  // branch, but has no way to correlate that with `value`'s type, since
+  // `value` isn't itself a member of a union discriminated by `section` (see
+  // StudioSectionValue's own comment for why — that would need the CALLER's
+  // return value, which comes from more than one generation pathway, to
+  // already be tagged by section). Each cast asserts exactly the single
+  // field type that case writes to — narrower than the last `any` was, and
+  // it's what actually catches a wrong TYPE FAMILY (e.g. a bare number, or
+  // an object shape matching none of the seven real sections) at the call
+  // site below, which `any` did not.
   switch (section) {
     case "explication":
-      return { ...course, explication: value };
+      return { ...course, explication: value as StudioCourseFull["explication"] };
     case "resume":
-      return { ...course, resume: value };
+      return { ...course, resume: value as StudioCourseFull["resume"] };
     case "cas_clinique":
-      return { ...course, casClinique: value };
+      return { ...course, casClinique: value as StudioCourseFull["casClinique"] };
     case "qcm":
-      return { ...course, qcms: value };
+      return { ...course, qcms: value as StudioCourseFull["qcms"] };
     case "exemples_analogies":
-      return { ...course, exemplesAnalogies: value };
+      return { ...course, exemplesAnalogies: value as StudioCourseFull["exemplesAnalogies"] };
     case "infographic":
-      return { ...course, infographicUrl: value };
+      return { ...course, infographicUrl: value as StudioCourseFull["infographicUrl"] };
     case "audio":
-      return { ...course, audioUrl: value };
+      return { ...course, audioUrl: value as StudioCourseFull["audioUrl"] };
   }
 }
 
@@ -1069,7 +1105,18 @@ export default function ModuleWorkspacePage() {
           // /api/studio/generate just did server-side, so the "Récemment
           // généré" list's relative-time label reflects this generation
           // immediately, without waiting for a refetch.
-          const updated = { ...withSectionValue(baseCourse, id, resultValue), updatedAt: new Date().toISOString() };
+          // `resultValue` is genuinely `unknown` here — it's assigned from
+          // one of several different generation call sites above
+          // (postStudioGenerate, the Explication pipeline, the podcast
+          // route), each with its own real response shape, and none of them
+          // narrow it by `id`/`section` before this point. This cast is the
+          // one place that trust boundary is crossed, made explicit instead
+          // of silent — see withSectionValue's own comment for the rest of
+          // the story.
+          const updated = {
+            ...withSectionValue(baseCourse, id, resultValue as StudioSectionValue),
+            updatedAt: new Date().toISOString(),
+          };
           courseCacheRef.current.set(courseId, updated);
           // Only apply to the visible state if the student hasn't switched to a different course while this was generating.
           setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
@@ -1161,7 +1208,11 @@ export default function ModuleWorkspacePage() {
    * bill either way — Anthropic's cache_control only ever discounts what
    * the SERVER sends to the model, not where the server got it from).
    */
-  async function requestStudioGeneration(actionType: DemoSectionId, courseId: number, extra?: Record<string, unknown>) {
+  async function requestStudioGeneration(
+    actionType: DemoSectionId,
+    courseId: number,
+    extra?: Record<string, unknown>
+  ): Promise<{ res: Response; data: StudioGenerateResponse }> {
     const res = await fetch("/api/studio/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1170,7 +1221,7 @@ export default function ModuleWorkspacePage() {
       // of whether the caller went through the ChevronDown options menu.
       body: JSON.stringify({ actionType, courseId, studyYear, ...extra }),
     });
-    const data = await res.json().catch(() => ({}));
+    const data = (await res.json().catch(() => ({}))) as StudioGenerateResponse;
     return { res, data };
   }
 
@@ -1190,7 +1241,7 @@ export default function ModuleWorkspacePage() {
    *     logged out" error mid-generation.
    */
   async function postStudioGenerate(actionType: DemoSectionId, courseId: number, extra?: Record<string, unknown>) {
-    let attempt: { res: Response; data: any };
+    let attempt: { res: Response; data: StudioGenerateResponse };
     try {
       attempt = await requestStudioGeneration(actionType, courseId, extra);
     } catch {

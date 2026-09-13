@@ -16,6 +16,21 @@ function getSecretKey(): string {
   return key;
 }
 
+/**
+ * Exact shape this app puts into (and reads back out of) a checkout's
+ * metadata — see app/api/chargily/checkout/route.ts for the write side and
+ * app/api/chargily/webhook/route.ts for the read side. Chargily's own API
+ * only requires string values and echoes whatever object it's given back
+ * unchanged, so this is our own contract, not Chargily's — narrowed from a
+ * bare `Record<string, string>` because exactly these three fields, and no
+ * others, are ever written or read anywhere in this codebase.
+ */
+export interface ChargilyCheckoutMetadata {
+  userId: string;
+  plan: string;
+  email: string;
+}
+
 export interface ChargilyCheckout {
   id: string;
   entity: "checkout";
@@ -23,7 +38,15 @@ export interface ChargilyCheckout {
   currency: string;
   status: string;
   checkout_url: string;
-  metadata: Record<string, string> | null;
+  /**
+   * Optional (not `| null`) rather than genuinely nullable: Chargily always
+   * echoes back exactly what was sent at creation, and every checkout this
+   * app creates always sends `metadata` (see CreateCheckoutParams below) —
+   * so in practice this is only ever absent if a webhook payload has been
+   * hand-crafted or corrupted, which the signature check upstream of every
+   * read already guards against.
+   */
+  metadata?: ChargilyCheckoutMetadata;
 }
 
 export interface CreateCheckoutParams {
@@ -34,7 +57,7 @@ export interface CreateCheckoutParams {
   webhookEndpoint?: string;
   description?: string;
   locale?: "ar" | "en" | "fr";
-  metadata?: Record<string, string>;
+  metadata?: ChargilyCheckoutMetadata;
 }
 
 export async function createChargilyCheckout(

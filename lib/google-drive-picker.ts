@@ -365,7 +365,19 @@ export async function listDriveFiles(accessToken: string, opts: ListDriveFilesOp
     throw new Error(`Google Drive a répondu ${res.status}${detail ? ` : ${detail.slice(0, 200)}` : ""}.`);
   }
 
-  const data = (await res.json()) as { files?: any[]; nextPageToken?: string };
+  // Only the fields this app actually reads — Drive's real files.list
+  // response carries dozens more (permissions, capabilities, thumbnails…)
+  // that this app has no use for and deliberately never requests (see the
+  // `fields` param built above), so there is nothing to gain from typing
+  // fields this code never touches.
+  interface DriveApiFile {
+    id: string;
+    name: string;
+    mimeType: string;
+    iconLink?: string;
+    modifiedTime?: string;
+  }
+  const data = (await res.json()) as { files?: DriveApiFile[]; nextPageToken?: string };
   const files: DriveListItem[] = (data.files ?? []).map((f) => ({
     id: f.id,
     name: f.name,

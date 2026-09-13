@@ -1,6 +1,12 @@
 import { Agent } from "undici";
 import dns from "dns";
 import { detectMockPayload } from "@/lib/ai/mock-data";
+import type {
+  OpenRouterChatCompletionResponse,
+  OpenRouterStreamChunk,
+  OpenRouterTranscriptionResponse,
+  OpenRouterUsage,
+} from "@/lib/ai/openrouter-types";
 
 /**
  * THE REAL, EMPIRICALLY-CONFIRMED ROOT CAUSE of the "Erreur 504" that kept
@@ -582,7 +588,7 @@ export async function callOpenRouter(
   // not unreliable, it was structurally incapable of firing — already
   // cleared. An architecture was abandoned on the strength of that
   // misdiagnosis.
-  let data: any;
+  let data: OpenRouterChatCompletionResponse | undefined;
   try {
     const res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
@@ -719,7 +725,7 @@ export async function generateOpenRouterImage(
   // comment for the full mechanism (fetch resolves on HEADERS, so clearing
   // the timer there leaves the entire generation-time body download
   // unguarded).
-  let data: any;
+  let data: OpenRouterChatCompletionResponse | undefined;
   try {
     const res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
@@ -856,7 +862,7 @@ export async function generateOpenRouterAudio(
   let buffer = "";
   const audioB64Parts: string[] = [];
   const transcriptParts: string[] = [];
-  let usage: unknown = null;
+  let usage: OpenRouterUsage | null = null;
   // Same class of bug already found and fixed in callOpenRouter (see that
   // function's own comment): finish_reason "length" means the model was cut
   // off mid-narration by max_tokens — the audio collected so far is real but
@@ -878,7 +884,7 @@ export async function generateOpenRouterAudio(
         const payload = trimmed.slice(5).trim();
         if (!payload || payload === "[DONE]") continue;
 
-        let json: any;
+        let json: OpenRouterStreamChunk;
         try {
           json = JSON.parse(payload);
         } catch {
@@ -1020,7 +1026,7 @@ export async function transcribeAudioViaOpenRouter(
   };
 
   let res: Response;
-  let data: any;
+  let data: OpenRouterTranscriptionResponse | undefined;
   try {
     if (useMultipart) {
       const form = new FormData();
@@ -1284,7 +1290,7 @@ export async function extractPdfTextViaOcr(fileUrl: string, fileName: string, op
   const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
   let res: Response;
-  let data: any;
+  let data: OpenRouterChatCompletionResponse | undefined;
   try {
     res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
       method: "POST",
@@ -1341,7 +1347,7 @@ export async function extractPdfTextViaOcr(fileUrl: string, fileName: string, op
 
   const annotations = data?.choices?.[0]?.message?.annotations;
   const fileContent = Array.isArray(annotations)
-    ? annotations.find((a: unknown) => (a as { type?: string })?.type === "file")?.file?.content
+    ? annotations.find((a) => a?.type === "file")?.file?.content
     : undefined;
 
   if (!Array.isArray(fileContent)) {
@@ -1349,7 +1355,7 @@ export async function extractPdfTextViaOcr(fileUrl: string, fileName: string, op
     throw new OpenRouterError("Le service OCR n'a renvoyé aucun contenu exploitable pour ce document.", 502);
   }
 
-  const textBlocks = fileContent.filter((block: unknown) => (block as { type?: string })?.type === "text") as { text?: string }[];
+  const textBlocks = fileContent.filter((block) => block?.type === "text");
   const text = textBlocks
     .map((block) => (typeof block.text === "string" ? block.text : ""))
     .join("\n\n")
