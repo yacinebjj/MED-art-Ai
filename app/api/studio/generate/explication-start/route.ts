@@ -231,5 +231,17 @@ export async function POST(request: NextRequest) {
   // attempted here anymore (see this file's own top-of-file comment) — this
   // response is the whole point of this route being fast: DB work only,
   // no AI call, every single time.
-  return NextResponse.json({ success: true, totalParts, needsFinalize: true, reserved: true });
+  // `sourceFingerprint` binds the client's crash-resume checkpoint to THIS
+  // exact source text (see lib/studio-explication-resume.ts). Without it the
+  // client cannot tell a resumable run apart from one whose course has been
+  // re-uploaded or edited since — and resuming across that boundary would
+  // splice chapters from two different versions of a course together. Reuses
+  // the contentHash already computed above; no extra work.
+  return NextResponse.json({
+    success: true,
+    totalParts,
+    needsFinalize: true,
+    reserved: true,
+    sourceFingerprint: contentHash,
+  });
 }

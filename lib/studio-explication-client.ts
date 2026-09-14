@@ -1,6 +1,13 @@
 "use client";
 
 import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
+import {
+  buildVariantKey,
+  clearResumableRun,
+  loadResumableParts,
+  saveResumableParts,
+  type ResumeIdentity,
+} from "@/lib/studio-explication-resume";
 
 /**
  * Browser-side driver for the client-driven, multi-request Explication
@@ -38,6 +45,24 @@ import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
  * explicitly confirmed `reserved: true` — never when step 1 itself failed
  * (nothing to refund) or was never reached (a pure network failure before
  * any response arrived).
+ *
+ * CRASH-RESUME across step 2. Completed parts used to live ONLY in an
+ * in-memory array here, so anything that killed this driver mid-run — a part
+ * exhausting its retries, a reload, mobile Chrome evicting a backgrounded tab
+ * — destroyed every part already generated and forced the next attempt to
+ * start again from part 0, re-billing work that had already succeeded. Each
+ * completed part is now checkpointed (see lib/studio-explication-resume.ts)
+ * and a later run resumes from the first MISSING part. The checkpoint is
+ * bound to explication-start's `sourceFingerprint`, so it is silently
+ * discarded — never partially reused — if the course's source text, language
+ * or custom prompt changed in the meantime.
+ *
+ * Note this does NOT reuse the original quota reservation: a resumed run
+ * calls explication-start again and so reserves again, exactly as a plain
+ * retry always has. Resume is therefore never more expensive in quota than
+ * the retry it replaces, and is dramatically cheaper in time and tokens.
+ * Reusing the original reservation needs server-side part storage, which
+ * needs a schema migration — see the resume module's own header comment.
  */
 
 export interface ExplicationGenerationResult {
@@ -385,7 +410,9 @@ async function runGenerationInParts(
   }
   if (startData.needsFinalize === false) {
     // Fully resolved by start itself (cache hit / cross-university-delta) —
-    // nothing left to do.
+    // nothing left to do. Any checkpoint left over from an earlier failed
+    // run of this course is now permanently unreachable: drop it.
+    clearResumableRun(courseId);
     return {
       success: true,
       data: startData.partMarkdown,
@@ -396,9 +423,30 @@ async function runGenerationInParts(
   // From here on, a reservation is confirmed to exist — abandon() is now the
   // correct thing to call if the rest of the flow fails.
   const totalParts = typeof startData.totalParts === "number" ? startData.totalParts : 1;
-  const parts: string[] = [];
 
-  for (let partIndex = 0; partIndex < totalParts; partIndex++) {
+  // CRASH-RESUME. Parts already generated for this exact course+source+options
+  // are reloaded from the previous, failed or interrupted run instead of being
+  // regenerated — see lib/studio-explication-resume.ts for why this exists and
+  // why it is bound to a fingerprint. `resume` is null when the server did not
+  // send a fingerprint (an older deployment): with nothing to bind a
+  // checkpoint to, this driver does not read or write one at all rather than
+  // risk reusing parts across a changed course.
+  const resume: ResumeIdentity | null =
+    typeof startData.sourceFingerprint === "string" && startData.sourceFingerprint.length > 0
+      ? {
+          courseId,
+          fingerprint: startData.sourceFingerprint,
+          totalParts,
+          variant: buildVariantKey(extra),
+        }
+      : null;
+
+  const parts: string[] = resume ? loadResumableParts(resume) : [];
+
+  // Starts at parts.length, so a resumed run regenerates only what is missing.
+  // When a previous run completed every part but died during finalize, this
+  // loop body simply never executes and the flow goes straight to finalize.
+  for (let partIndex = parts.length; partIndex < totalParts; partIndex++) {
     const outcome = await generateOnePart(
       courseId,
       partIndex,
@@ -409,10 +457,17 @@ async function runGenerationInParts(
     );
 
     if (!outcome.ok) {
+      // Deliberately does NOT clear the checkpoint: everything generated so
+      // far is exactly what makes the student's next attempt cheap, and it
+      // stays valid as long as the course's source text does not change
+      // (which the fingerprint independently enforces on read).
       await abandon(courseId);
       return { success: false, error: outcome.error };
     }
     parts.push(outcome.markdown);
+    // Checkpoint after every part, not once at the end — the whole point is
+    // to survive a process that never reaches the end.
+    if (resume) saveResumableParts(resume, parts);
   }
 
   // Every part succeeded via genuine fresh generation — assemble + persist.
@@ -439,6 +494,10 @@ async function runGenerationInParts(
       await abandon(courseId);
       return { success: false, error: finalizeError };
     }
+    // Persisted server-side — the checkpoint has done its job and must not
+    // outlive the run that needed it. (The failure paths above deliberately
+    // leave it in place instead.)
+    clearResumableRun(courseId);
     return {
       success: true,
       data: finalizeOutcome.data.data,
