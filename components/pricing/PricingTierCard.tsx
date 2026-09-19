@@ -25,7 +25,8 @@ export function PricingTierCard({ plan, children, ctaSlot }: PricingTierCardProp
   return (
     <MotionCard
       className={cn(
-        "relative flex h-full flex-col overflow-hidden p-6 sm:p-8",
+        "relative flex h-full flex-col overflow-visible p-6 sm:p-8",
+        plan.featured && "pt-9 sm:pt-10",
         plan.featured && "border-primary-400 shadow-[0_0_50px_rgba(20,184,166,0.25)] dark:border-primary-500"
       )}
     >
@@ -38,7 +39,7 @@ export function PricingTierCard({ plan, children, ctaSlot }: PricingTierCardProp
             aria-hidden
             className="absolute inset-x-0 top-0 h-1 animate-shimmer bg-[length:200%_100%] bg-gradient-to-r from-primary-400 via-secondary-400 to-primary-400"
           />
-          <span className="absolute -top-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-gradient-to-r from-primary-500 to-secondary-600 px-4 py-1 text-xs font-semibold text-white shadow-soft">
+          <span className="absolute left-1/2 top-3 inline-flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-gradient-to-r from-primary-500 to-secondary-600 px-4 py-1 text-xs font-semibold text-white shadow-soft">
             <Sparkles className="h-3 w-3" />
             {language === "fr" ? "Recommandé" : "Recommended"}
           </span>
