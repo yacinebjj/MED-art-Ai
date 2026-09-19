@@ -26,20 +26,45 @@ export function PricingTierCard({ plan, children, ctaSlot }: PricingTierCardProp
     <MotionCard
       className={cn(
         "relative flex h-full flex-col overflow-visible p-6 sm:p-8",
-        plan.featured && "pt-9 sm:pt-10",
+        // Featured cards get extra top padding so the ribbon (which
+        // straddles the top edge) never crowds the plan name. 3rem/3.5rem
+        // gives ~24px of clearance below the ribbon's lower edge.
+        plan.featured && "pt-12 sm:pt-14",
         plan.featured && "border-primary-400 shadow-[0_0_50px_rgba(20,184,166,0.25)] dark:border-primary-500"
       )}
     >
       {plan.featured && (
         <>
-          {/* Slow-moving light sweep behind the featured card's border — same
-              shimmer keyframe already used elsewhere (bg-position driven),
-              just applied here as a soft glow layer instead of on text. */}
+          {/*
+           * Static gradient strip along the top edge.
+           *
+           * Was `animate-shimmer` (a background-position keyframe driving a
+           * per-frame repaint on every featured card, forever). Combined
+           * with MotionCard's hover transform and the glass backdrop-blur
+           * underneath, that was the dominant source of the "laggy" feel
+           * on the pricing grid — background-position animations trigger
+           * paint on the entire element, not just a GPU-composited layer.
+           * The static gradient is visually identical at rest; the only
+           * thing lost is a motion nobody was going to stare at anyway.
+           */}
           <div
             aria-hidden
-            className="absolute inset-x-0 top-0 h-1 animate-shimmer bg-[length:200%_100%] bg-gradient-to-r from-primary-400 via-secondary-400 to-primary-400"
+            className="absolute inset-x-0 top-0 z-0 h-1 bg-gradient-to-r from-primary-400 via-secondary-400 to-primary-400"
           />
-          <span className="absolute left-1/2 top-3 inline-flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-gradient-to-r from-primary-500 to-secondary-600 px-4 py-1 text-xs font-semibold text-white shadow-soft">
+
+          {/*
+           * "Recommandé" ribbon.
+           *
+           * `top-0 -translate-y-1/2` centers the ribbon ON the card's top
+           * border (half above, half below) — the standard ribbon pattern.
+           * The previous `top-3` placed it fully inside, where it collided
+           * with the shimmer strip and appeared clipped.
+           *
+           * z-20 keeps it above the gradient strip (z-0) and any inner
+           * content. whitespace-nowrap prevents "Promo Cohorte" and other
+           * longer translations from wrapping on narrow cards.
+           */}
+          <span className="absolute left-1/2 top-0 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-gradient-to-r from-primary-500 to-secondary-600 px-4 py-1 text-xs font-semibold text-white shadow-soft">
             <Sparkles className="h-3 w-3" />
             {language === "fr" ? "Recommandé" : "Recommended"}
           </span>
