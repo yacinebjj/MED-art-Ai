@@ -751,40 +751,23 @@ const CHUNKED_SLICE_CHARS = 6_000;
  * treat a recurrence as a signal to raise this further or shrink
  * CHUNKED_SLICE_CHARS again, not to re-add tolerance for it.
  */
-// LOWERED AGAIN, 14,000 -> 6,500, after live production evidence that
-// killed the previous theory outright: with slices at 6,000 chars, a part
-// timed out at ~200s, then its HALF timed out at ~200s, then its QUARTER
-// (≈1,500 chars of source) ALSO timed out at ~200s. Generation time was
-// therefore NOT proportional to input size — subdividing the input could
-// never have fixed it.
-//
-// The arithmetic says why, exactly: 14,000 tokens ÷ 200s = 70 tok/s, which
-// IS DeepSeek V3.2's real throughput. The model was generating flat out to
-// the max_tokens ceiling on every single call, so duration was a CONSTANT
-// (≈ maxTokens / throughput) regardless of how much source it was given.
-// It did that because the Explication system prompt explicitly orders it to
-// (lib/ai/studio-prompts.ts: "ne t'arrête JAMAIS par souci de longueur…
-// vise largement plus de 8000 mots, sans plafond réel — plus long est
-// toujours strictement préférable"), and the old per-part correction only
-// asked it not to "inflate artificially" without ever naming a ceiling.
-//
-// So the operative lever is the OUTPUT budget, not the input size. 8,000
-// tokens sits ~2,300 tokens ABOVE the worst-case length
-// buildPartLengthBudget authorizes per part (see its own comment for the
-// full arithmetic at a realistic French tokenization ratio) — roughly
-// 60-81s of real generation, with genuine margin both under
-// EXPLICATION_PART_TIMEOUT_MS and under this ceiling, so an overshoot
-// costs seconds rather than truncating the part outright.
-//
-// This does NOT shorten the finished document: total length is
-// (parts × per-part budget), and a long course simply has more parts. A
-// 60,000-char course now targets ~27,000 words overall — far past the
-// 8,000-word mandate — where before it produced nothing at all because
-// every part died at the wall.
-const EXPLICATION_PART_MAX_TOKENS = 8_000;
+// ALIGNED WITH THE PROMPT-LEVEL CAP — see lib/ai/studio-prompts.ts's
+// STUDIO_PROMPT_CONFIG.explication.maxTokens (also 10,000). The two must
+// stay in sync: this constant is what the per-part OpenRouter call itself
+// uses, while STUDIO_PROMPT_CONFIG is what the base system prompt and the
+// upstream route use to describe the same cap. 10,000 tokens is the
+// deliberate middle ground after two rounds of overcorrection: at 65,536,
+// the prompt's "sans plafond réel" mandate produced 200s+ generations that
+// raced the platform kill; at 8,000, dense slices on rich courses were
+// approaching truncation. The prompt has since been rewritten to cap
+// output at a realistic proportion of source (see STUDIO_EXPLICATION_
+// SYSTEM_PROMPT), so 10,000 is a ceiling the model will never actually
+// approach in normal use — it exists as insurance against a genuinely
+// rich slice, not as a target to fill.
+const EXPLICATION_PART_MAX_TOKENS = 10_000;
 
 /**
- * Hard abort for a single part's OpenRouter call. LOWERED 260s -> 200s after
+ * Hard abort for a single part's OpenRouter call. RAISED 200s -> 180s after
  * a real, confirmed production failure this exact margin caused: "flux
  * terminé sans résultat après 281s" — a platform FUNCTION_INVOCATION_TIMEOUT
  * kill (confirmed via a live diagnostic, see CHUNKED_SLICE_CHARS' own
@@ -794,17 +777,21 @@ const EXPLICATION_PART_MAX_TOKENS = 8_000;
  * line in time, or the surrounding overhead (DB read, slicing, large-
  * response JSON parsing/recovery) that ALSO runs inside the same
  * maxDuration=280 budget ate further into what used to be a 20s margin.
- * 200s leaves a real 80s margin under maxDuration=280 for everything else
- * this route does outside the OpenRouter call itself — still a real,
- * necessary safety net (a genuinely stuck call still fails CLEANLY and
+ *
+ * Recalibrated to 180s now that EXPLICATION_PART_MAX_TOKENS is 10,000 (see
+ * its own comment): at DeepSeek V3.2's measured ~70 tok/s, a fully-exhausted
+ * 10,000-token generation takes ~143s — 180s leaves a real ~37s slack against
+ * that ceiling, and a real ~100s margin under the 280s Vercel wall for the
+ * route's own DB read + slicing + JSON parsing + response write. Still a
+ * real, necessary safety net (a genuinely stuck call still fails CLEANLY and
  * retryably instead of the whole function being killed with no response at
  * all), just with enough slack this time to actually survive being that
  * safety net. If this specific "flux terminé sans résultat" shape is ever
- * observed again in production, that is direct evidence 200s is STILL not
+ * observed again in production, that is direct evidence 180s is STILL not
  * enough margin — lower it further (and/or shrink CHUNKED_SLICE_CHARS
  * again) rather than raising it back toward the wall.
  */
-const EXPLICATION_PART_TIMEOUT_MS = 200_000;
+const EXPLICATION_PART_TIMEOUT_MS = 180_000;
 
 /**
  * Deterministic slice plan for a course's full source text — same slicing
@@ -967,30 +954,23 @@ const PREVIOUS_PART_TAIL_CHARS = 800;
  * explicit target range, and saying plainly that it REPLACES the global
  * figure for this part, is what actually bounds generation time.
  *
- * ~0.45 words per source char ≈ a 3x expansion at French's ~6.5 chars/word
- * — genuinely exhaustive exposition, not a summary. Clamped so a tiny
+ * ~0.22 words per source char ≈ a 2.5-3x expansion at French's ~6.5 chars/
+ * word — genuinely exhaustive exposition, not a summary. Clamped so a tiny
  * trailing slice still gets a real minimum, and no single part can blow the
  * token budget.
+ *
+ * CALIBRATED against a REALISTIC French tokenization ratio (~1.9 tokens per
+ * word for medical French — long technical terms tokenize worse than
+ * everyday English, and the JSON wrapper escapes every newline on top).
+ * With EXPLICATION_PART_MAX_TOKENS = 10,000 and a 6,000-char slice:
+ *   target  1,320 words ≈ 2,508 tokens
+ *   ceiling 1,782 words ≈ 3,386 tokens   (≈6,600 tokens of headroom)
+ * Both land far inside EXPLICATION_PART_TIMEOUT_MS, with real room for the
+ * model to overshoot its target without ever hitting the hard cap.
  */
-// CALIBRATED against a REALISTIC French tokenization ratio (~1.9 tokens per
-// word for medical French — long technical terms tokenize worse than
-// everyday English, and the JSON wrapper escapes every newline on top).
-// An earlier pass used an optimistic ~1.44 (an English-ish ratio) and a
-// verification pass caught that it made the authorized ceiling
-// (3,645 words ≈ 6,900 tokens) EXCEED the 6,500-token cap — i.e. the prompt
-// was handing the model a permitted length it could not finish without
-// being truncated, which would have swapped the timeout bug for a
-// truncation bug.
-//
-// Current arithmetic, at 1.9 tokens/word against EXPLICATION_PART_MAX_TOKENS
-// = 8,000, for the standard 6,000-char slice:
-//   target  2,220 words ≈ 4,218 tokens ≈ 60s at 70 tok/s
-//   ceiling 2,997 words ≈ 5,694 tokens ≈ 81s   (2,300 tokens of headroom)
-// Both land far inside EXPLICATION_PART_TIMEOUT_MS, with real room for the
-// model to overshoot its target without ever hitting the hard cap.
-const OUTPUT_WORDS_PER_SOURCE_CHAR = 0.37;
-const MIN_PART_TARGET_WORDS = 700;
-const MAX_PART_TARGET_WORDS = 2600;
+const OUTPUT_WORDS_PER_SOURCE_CHAR = 0.22;
+const MIN_PART_TARGET_WORDS = 550;
+const MAX_PART_TARGET_WORDS = 1_800;
 
 function buildPartLengthBudget(sliceLength: number): { target: number; ceiling: number } {
   const raw = Math.round(sliceLength * OUTPUT_WORDS_PER_SOURCE_CHAR);
@@ -1028,24 +1008,27 @@ export async function generateExplicationPart(
   const chunks = buildSourceChunks(slice);
   const numberedExtraits = chunks.map((content, j) => `Extrait ${j + 1}:\n${content}`).join("\n\n");
   const lengthBudget = buildPartLengthBudget(slice.length);
-  // Applies even when totalParts === 1. A short course (under
-  // CHUNKED_SLICE_CHARS) is a SINGLE part, and without this it would inherit
-  // the bare "8000+ mots, sans plafond réel" mandate against a 6,500-token
-  // ceiling — i.e. guaranteed finish_reason "length" truncation on every
-  // attempt, trading the timeout bug for a truncation bug. The multi-part
-  // framing below is what's conditional; the budget itself never is.
-  const soloLengthBudget = `\n\n---\nBUDGET DE LONGUEUR OBLIGATOIRE — CETTE CONSIGNE REMPLACE TOUTE CONSIGNE DE LONGUEUR CI-DESSUS (y compris "vise largement plus de 8000 mots", "sans plafond réel" et "plus long est toujours préférable") :\nCe cours source est court : rédige environ ${lengthBudget.target} mots, et n'aille JAMAIS au-delà de ${lengthBudget.ceiling} mots. Dépasser n'est pas "plus complet", c'est un échec technique qui fait perdre la génération entière. À l'intérieur de ce budget, garde exactement les mêmes exigences de fond : exhaustivité réelle sur le contenu source fourni, simplicité pédagogique niveau zéro prérequis, redondance utile, aucun raccourci. Il y a simplement MOINS de contenu source à couvrir ici — ce n'est pas une raison de gonfler artificiellement le texte.`;
   const continuityInstruction = previousPartTail
     ? `\n\nCONTEXTE DE CONTINUITÉ — voici comment se terminait la partie précédente (${partNumber - 1}/${totalParts}), déjà écrite et déjà montrée à l'étudiant, pour que tu juges correctement si le contenu source ci-dessous continue le MÊME chapitre ou en commence un nouveau :\n"""\n[...] ${tailForContinuity(previousPartTail)}\n"""\nSi les extraits numérotés ci-dessous continuent visiblement ce même chapitre (même sujet, suite logique), CONTINUE-LE directement, sans répéter ni réécrire ce qui précède, et sans ajouter un nouveau titre "## " pour ce même chapitre. N'ouvre un nouveau "## Titre" que lorsque le contenu source aborde un sujet réellement différent.`
     : "";
+
+  // The base prompt (STUDIO_EXPLICATION_SYSTEM_PROMPT in lib/ai/studio-prompts.ts)
+  // now states the length rule directly: proportional to source, no artificial
+  // inflation. This per-part instruction therefore only needs to do two things
+  // the base prompt can't know about on its own: (1) tell the model it's
+  // writing ONE part of N, and (2) provide the continuity tail so the model
+  // knows whether to continue or start a new chapter. No more "BUDGET DE
+  // LONGUEUR OBLIGATOIRE — CETTE CONSIGNE REMPLACE TOUTE CONSIGNE DE LONGUEUR
+  // CI-DESSUS" — that framing was fighting a base prompt that no longer needs
+  // fighting, and confusing the model with redundant contradictory messages.
   const partInstruction =
     totalParts > 1
-      ? `\n\n---\nMODIFICATION DE FORMAT POUR CETTE GÉNÉRATION — s'ajoute à tout ce qui précède, ne le remplace pas :\nCe cours source est traité en ${totalParts} parties consécutives (contrainte technique de plateforme, invisible pour l'étudiant qui verra un seul document continu). Tu rédiges ICI la PARTIE ${partNumber}/${totalParts} (les extraits numérotés ci-dessous couvrent UNIQUEMENT cette partie, dans l'ordre du cours). Continue directement le contenu, structuré en chapitres Markdown ("## Titre du chapitre") comme d'habitude. N'écris NI introduction générale du cours NI conclusion récapitulative dans cette partie — seulement le corps des chapitres qu'elle couvre ; les autres parties seront concaténées à la suite.\n\nBUDGET DE LONGUEUR OBLIGATOIRE POUR CETTE PARTIE — CETTE CONSIGNE REMPLACE, POUR CETTE PARTIE UNIQUEMENT, TOUTE CONSIGNE DE LONGUEUR CI-DESSUS (y compris "vise largement plus de 8000 mots", "sans plafond réel" et "plus long est toujours préférable") :\n- Rédige cette partie en VISANT environ ${lengthBudget.target} mots, et n'aille JAMAIS au-delà de ${lengthBudget.ceiling} mots. Ce plafond est ferme : dépasser n'est pas "plus complet", c'est un échec technique qui fait perdre la partie entière.\n- Le chiffre de 8000+ mots s'applique au DOCUMENT COMPLET cumulé sur les ${totalParts} parties, JAMAIS à cette partie seule. Le document final sera long parce qu'il y a ${totalParts} parties, pas parce que chaque partie est illimitée.\n- À l'intérieur de ce budget, garde exactement les mêmes exigences de fond : exhaustivité clinique réelle sur le contenu source de CETTE partie, simplicité pédagogique niveau zéro prérequis, redondance utile, aucun raccourci. Tu couvres MOINS de contenu source ici, pas le même contenu en moins de mots — c'est la quantité de source attribuée à cette partie qui est petite, pas la profondeur exigée.\n- Si tu sens que tu approches le plafond avant d'avoir couvert tous les extraits ci-dessous, termine proprement le chapitre en cours et arrête-toi : le reste du cours est couvert par les autres parties, jamais par un débordement de celle-ci.${continuityInstruction}`
-      : soloLengthBudget;
+      ? `\n\n---\nCe cours source est traité en ${totalParts} parties consécutives (contrainte technique de plateforme, invisible pour l'étudiant qui verra un seul document continu). Tu rédiges ICI la PARTIE ${partNumber}/${totalParts} — les extraits numérotés ci-dessous couvrent UNIQUEMENT cette partie, dans l'ordre du cours. Continue directement le contenu, structuré en chapitres Markdown ("## Titre du chapitre") comme d'habitude. N'écris NI introduction générale du cours NI conclusion récapitulative dans cette partie — seulement le corps des chapitres qu'elle couvre ; les autres parties seront concaténées à la suite.\n\nRepère de longueur pour cette partie : environ ${lengthBudget.target} mots, plafond absolu ${lengthBudget.ceiling} mots. Le document final sera long parce qu'il y a ${totalParts} parties, pas parce que chaque partie est illimitée.${continuityInstruction}`
+      : `\n\n---\nRepère de longueur pour ce cours : environ ${lengthBudget.target} mots, plafond absolu ${lengthBudget.ceiling} mots.`;
 
   const raw = await callOpenRouter(
     [
-      { role: "system", content: explicationSystemPrompt + partInstruction },
+      { role: "system", content: partInstruction + "\n\n---\n\n" + explicationSystemPrompt },
       {
         role: "user",
         content: `Voici le contenu source${totalParts > 1 ? ` (partie ${partNumber}/${totalParts})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
