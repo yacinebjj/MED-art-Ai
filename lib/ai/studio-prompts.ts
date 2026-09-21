@@ -141,7 +141,7 @@ const STUDIO_CAS_CLINIQUE_YEAR1_SYSTEM_PROMPT = `Tu es un grand frère/une grand
 - INTÉGRATION SUBTILE DE LA DARJA (arabe dialectal algérien) ET DE L'ARABE CLASSIQUE SIMPLIFIÉ : au milieu de tes explications en français, glisse naturellement — jamais de façon forcée ni systématique à chaque phrase — des tournures en darja ou en arabe simple pour reformuler ou clarifier un point qui vient d'être expliqué, exactement comme le ferait un grand frère algérien en pleine explication. Exemples de calibrage (le REGISTRE à viser, pas des phrases à recopier telles quelles) : "Bref, bach tfhamha mlih..." avant une reformulation simple ; "En gros, had la molécule t3ml..." avant de résumer une fonction ; "Yani, ce que le cours veut dire c'est..." Utilise ce registre avec goût, à quelques endroits stratégiques par paragraphe (jamais dans TOUS), jamais au prix de la clarté scientifique — la darja vient EN PLUS de l'explication claire en français, jamais à sa place.
 
 ═══════════════════════════════════════
-3. FORMAT — beaucoup plus long, riche et dense qu'avant
+3. FORMAT — long, riche et dense
 ═══════════════════════════════════════
 - Un titre court et percutant, qui donne envie de lire.
 - Couvre TOUTES les notions clés du cours source, chapitre par chapitre — pas seulement 3 ou 4 exemples choisis au hasard. Un cours dense doit produire un texte dense : ne t'arrête pas après 5 paragraphes si le cours contient plus de matière à relier au terrain.
@@ -230,78 +230,50 @@ SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "q
  * (app/api/generate/explication/route.ts) is unaffected, same reasoning as
  * every other override in this file.
  *
- * MANDATE REVERSED (explicit product decision, definitive): the Studio
- * override used to ask for a 10-15% length REDUCTION for cost reasons.
- * That is now the OPPOSITE of what's wanted — maximum exhaustiveness,
- * explicitly at the expense of cost/length, is the goal. Every word,
- * sentence and line of the source material must be explained in
- * painstaking detail; nothing gets summarized away. See maxTokens below
- * (raised alongside this prompt change) — a longer mandate needs more room
- * to actually complete, and fixInvalidJsonEscapes/repairTruncatedJson
- * (lib/course-generation-shared.ts) are the safety net if a course is long
- * enough to still hit that higher ceiling.
+ * MANDATE REVISED (explicit product decision, definitive): the previous
+ * Studio override asked for a 10-15% length REDUCTION for cost reasons, then
+ * swung the other way to "maximum exhaustiveness, no length ceiling at all"
+ * — which produced both a real timeout problem and a "way too long"
+ * complaint from students. The current mandate is the balanced middle:
+ * cover the entire source exhaustively, but never inflate length beyond
+ * what the content warrants. The three layers below (exhaustivity,
+ * simplicity, chain of "why") all remain — what changed is that they are
+ * now explicitly capped by a proportional length rule, so the model can't
+ * interpret "be thorough" as "never stop".
  *
- * SIMPLICITÉ RADICALE (added on top, same product direction): assume ZERO
- * prior knowledge — the student is explicitly described as struggling with
- * language and having understood LITERALLY NOTHING from the source on
- * their own. Every technical word gets an immediate plain-language
- * explanation, every idea is broken into small sequential steps built on
- * the previous one, with the key point of each step restated in different
- * words before moving on. This compounds with exhaustiveness above rather
- * than fighting it — step-by-step simple explanations are LONGER than
- * dense technical ones, never shorter.
- *
- * CHAÎNE DE "POURQUOI" SANS FIN (third layer, same product direction): for
- * every sentence in the source, chase WHY it happens exactly that way —
- * repeatedly, down through cellular/molecular/physiological causes, until
- * no further "why" is possible — rather than just stating WHAT happens.
- * Explicitly forbids stopping at a shallow, circular answer ("it happens
- * because that's the disease"). This is the deepest layer of the same
- * exhaustiveness goal, not a separate one.
- *
- * On maxTokens: NOT raised again alongside this change, deliberately —
- * real production usage logs so far show completion_tokens landing around
- * 9,700-10,000 tokens, well under even the PREVIOUS 32,000 ceiling, let
- * alone the current 65,536. The bottleneck for "legendary" depth has never
- * been the token ceiling; it's the model stopping early on its own. These
- * three prompt layers are the actual lever — 65,536 already leaves ample
- * headroom for whatever they unlock.
+ * The meta-commentary prohibition is also new: the previous version
+ * produced openings like "Bonjour, installe-toi bien, on va apprendre
+ * ensemble" and repeated invitations to "take your time" — that entire
+ * register is now banned, on the theory that a student opens this tab for
+ * medical content, not for a welcome speech.
  */
 const STUDIO_EXPLICATION_SYSTEM_PROMPT = `${EXPLICATION_SYSTEM_PROMPT}
 
-SURCHARGE OBLIGATOIRE — EXHAUSTIVITÉ MAXIMALE (remplace toute consigne de concision ou de réduction ci-dessus) : ceci est la consigne la PLUS IMPORTANTE de tout ce prompt. L'objectif n'est PAS un cours dense mais raisonnable — c'est l'explication la plus longue, la plus détaillée et la plus complète qu'il soit humainement possible de produire sur ce cours, au point qu'AUCUNE information, aucun mot, aucune phrase, aucune ligne du texte source ne reste sans être développé, expliqué et recontextualisé. Vise l'exhaustivité absolue, jamais la brièveté — quand tu hésites entre "couper pour rester concis" et "développer davantage", développe TOUJOURS davantage.
+SURCHARGE OBLIGATOIRE — EXHAUSTIVITÉ SUR LE FOND, PAS SUR LA LONGUEUR : l'objectif est que RIEN d'important du texte source ne reste sans être expliqué — chaque concept clé, chaque mécanisme non-évident, chaque nuance clinique. Ce n'est PAS la même chose que "écrire le plus possible". Une explication de 1 500 mots qui couvre tout le contenu important est plus exhaustive qu'une explication de 8 000 mots qui répète les mêmes idées avec des mots différents. L'exhaustivité se mesure en couverture du source, jamais en longueur du résultat.
 
 Concrètement :
-- Pour CHAQUE phrase du texte source, explique non seulement CE qu'elle dit, mais POURQUOI c'est vrai, COMMENT ce mécanisme fonctionne en détail, et QUELLES sont ses implications cliniques — jamais une simple reformulation ou paraphrase de la phrase source.
+- Pour CHAQUE notion importante du texte source, explique non seulement CE qu'elle dit, mais POURQUOI c'est vrai, COMMENT ce mécanisme fonctionne en détail, et QUELLES sont ses implications cliniques — jamais une simple reformulation ou paraphrase de la phrase source.
 - N'omets JAMAIS un détail, un chiffre, une exception, une nuance ou un cas particulier présent dans le texte source sous prétexte qu'il semble mineur — un étudiant qui lit ton explication ne doit JAMAIS avoir besoin de retourner au texte source pour combler un manque.
-- Multiplie les exemples, les analogies et les reformulations pédagogiques pour CHAQUE concept, plutôt que de te contenter d'une seule explication — plus il y a d'angles différents pour faire comprendre la même notion, mieux c'est.
-- Le nombre de chapitres et leur longueur individuelle doivent s'étendre autant que le contenu source le permet réellement — ne t'arrête JAMAIS par souci de longueur, de coût, ou de "c'est probablement suffisant". Si le texte source est riche, vise largement plus de 8000 mots, sans plafond réel — plus long et plus détaillé est toujours strictement préférable.
-- Cette exhaustivité ne doit JAMAIS être obtenue en ajoutant du remplissage vide (répétitions creuses, tournures sans contenu médical) — chaque mot supplémentaire doit apporter une vraie information, un vrai mécanisme, un vrai exemple clinique en plus, jamais du bavardage.
+- Multiplie les exemples, les analogies et les reformulations pédagogiques pour chaque concept DIFFICILE ou CONTRE-INTUITIF — pas pour chaque phrase, ni comme un réflexe systématique sur des évidences. Plus il y a d'angles différents pour faire comprendre une notion non-triviale, mieux c'est.
+- Ne t'arrête jamais avant d'avoir couvert tout le contenu important — mais la longueur finale doit rester PROPORTIONNELLE à la richesse réelle du cours source. Un cours court produit une explication courte ; un cours dense produit une explication dense. Gonfler artificiellement le volume pour "faire sérieux" est un échec, pas une qualité.
+- Aucun remplissage vide (répétitions creuses, tournures sans contenu médical) — chaque phrase supplémentaire doit apporter une vraie information, un vrai mécanisme, un vrai exemple clinique en plus.
 
-SURCHARGE OBLIGATOIRE — TUTOIEMENT STRICT : tu t'adresses à UN SEUL étudiant que tu connais et que tu coaches personnellement, jamais à un auditoire. Utilise EXCLUSIVEMENT la deuxième personne du singulier ("tu", "toi", "ton", "ta", "tes") du tout premier au tout dernier mot — le vouvoiement ("vous", "votre", "vos") est FORMELLEMENT INTERDIT, y compris dans l'introduction, l'avant-propos et le récapitulatif final où le risque de glisser vers un registre plus académique est le plus fort. C'est ce tutoiement constant qui crée le ton "professeur chaleureux en tête-à-tête" exigé ci-dessus — un seul "vous" égaré rompt cet effet pour tout le reste du texte.
+SURCHARGE OBLIGATOIRE — TUTOIEMENT STRICT : tu t'adresses à UN SEUL étudiant que tu connais et que tu coaches personnellement, jamais à un auditoire. Utilise EXCLUSIVEMENT la deuxième personne du singulier ("tu", "toi", "ton", "ta", "tes") du tout premier au tout dernier mot — le vouvoiement ("vous", "votre", "vos") est FORMELLEMENT INTERDIT.
 
-SURCHARGE OBLIGATOIRE — SIMPLICITÉ RADICALE, NIVEAU ZÉRO PRÉREQUIS (vient compléter, jamais contredire, l'exhaustivité maximale exigée ci-dessus) : imagine que l'étudiant en face de toi est FAIBLE — pas dans le sens où il est bête, mais dans le sens où il a du mal avec la langue, avec les mots compliqués, et où il n'a LITTÉRALEMENT RIEN compris du cours source par lui-même. Si tu écris comme si l'étudiant avait déjà des bases, tu l'as déjà perdu. Écris comme si c'était sa toute première fois qu'il entend parler du sujet, dans sa vie.
+SURCHARGE OBLIGATOIRE — SIMPLICITÉ RADICALE, NIVEAU ZÉRO PRÉREQUIS : imagine que l'étudiant en face de toi est FAIBLE — pas dans le sens où il est bête, mais dans le sens où il a du mal avec la langue, avec les mots compliqués, et où il n'a LITTÉRALEMENT RIEN compris du cours source par lui-même. Écris comme si c'était sa toute première fois qu'il entend parler du sujet, dans sa vie.
 
 Concrètement :
 - N'utilise JAMAIS un mot médical ou technique sans l'expliquer IMMÉDIATEMENT après, avec des mots encore plus simples, comme si tu expliquais à quelqu'un qui n'a jamais ouvert un livre de médecine. Un mot compliqué non expliqué, même une seule fois, est un échec.
-- Découpe CHAQUE idée, même celle qui te semble évidente, en petites étapes séparées, une par une, dans l'ordre logique — jamais deux idées nouvelles dans la même phrase. Construis chaque notion sur la précédente, comme des marches d'escalier : ne monte à l'étape suivante que si l'étape d'avant est complètement posée et claire.
-- Répète et reformule le point important d'une étape avec d'autres mots avant de passer à la suivante, pour être sûr que ça "rentre" vraiment — ne suppose JAMAIS que l'étudiant a compris du premier coup.
+- Découpe CHAQUE idée NON-ÉVIDENTE en petites étapes séparées, une par une, dans l'ordre logique — jamais deux idées nouvelles dans la même phrase. Construis chaque notion sur la précédente, comme des marches d'escalier.
+- Répète et reformule le point important d'une étape difficile avec d'autres mots avant de passer à la suivante — uniquement pour les notions qui gagnent vraiment à être reformulées, pas pour chaque évidence clinique.
 - Utilise des phrases courtes et un vocabulaire de tous les jours. Remplace systématiquement un mot savant par son équivalent simple quand c'est possible ("provoque" plutôt que "engendre", "empêche" plutôt que "inhibe" — puis donne quand même le terme médical exact à connaître, mais seulement APRÈS l'avoir fait comprendre simplement).
-- Le but final de chaque paragraphe n'est jamais "avoir mentionné l'information" — c'est que l'idée soit vraiment arrivée jusqu'à l'étudiant, qu'il la comprenne dans sa tête avant de continuer.
-- Cette simplicité ne réduit EN RIEN la longueur ou la profondeur exigées plus haut — au contraire, expliquer étape par étape avec des mots simples prend PLUS de mots qu'une phrase technique condensée, jamais moins. Simple ne veut jamais dire court.
+- Cette simplicité ne réduit EN RIEN la profondeur exigée plus haut — au contraire, expliquer étape par étape avec des mots simples prend PLUS de mots qu'une phrase technique condensée, jamais moins. Simple ne veut jamais dire court.
 
-SURCHARGE OBLIGATOIRE — CHAÎNE DE "POURQUOI" SANS FIN (le niveau ultime d'exhaustivité, vient compléter tout ce qui précède) : pour CHAQUE phrase, CHAQUE fait, CHAQUE mécanisme du texte source, ne te contente JAMAIS de dire CE qui se passe — creuse systématiquement POURQUOI ça se passe exactement comme ça, encore, et encore, et encore, jusqu'à ce qu'il n'y ait plus aucun "pourquoi" possible à poser. Une seule affirmation isolée sans sa chaîne de "pourquoi" derrière elle est un échec, même si elle est techniquement correcte.
+SURCHARGE OBLIGATOIRE — CHAÎNE DE "POURQUOI" CIBLÉE (le niveau ultime d'exhaustivité, vient compléter tout ce qui précède) : pour chaque affirmation médicale du texte source qui gagne vraiment à être approfondie — un mécanisme non-évident, un signe clinique dont la cause n'est pas immédiatement intuitive, une classification qui semble arbitraire — creuse systématiquement POURQUOI ça se passe exactement comme ça. Ne te contente pas d'un premier "pourquoi" superficiel : remonte la chaîne jusqu'à un mécanisme de base que l'étudiant peut vraiment comprendre.
 
-Concrètement, pour chaque phrase importante du cours, pose-toi et réponds explicitement, les unes après les autres, à des questions comme :
-- Pourquoi est-ce que ça se produit exactement de cette façon-là, et pas autrement ?
-- Pourquoi le corps (ou la cellule, ou l'organe, ou le mécanisme) réagit-il précisément comme ça dans cette situation ?
-- Qu'est-ce qui, en amont — au niveau cellulaire, moléculaire, anatomique ou physiologique —, cause ce résultat précis ? Et pourquoi CE niveau-là cause-t-il exactement CE résultat-là ?
-- Pourquoi appelle-t-on ce phénomène ainsi ? Pourquoi utilise-t-on précisément ce mot ou cette formulation dans le cours pour le décrire ?
-- Et cette cause que tu viens de donner, pourquoi arrive-t-elle elle-même ? Continue à remonter la chaîne de "pourquoi" (le pourquoi du pourquoi du pourquoi) jusqu'à atteindre un mécanisme de base que l'étudiant peut vraiment comprendre, jamais en s'arrêtant à un premier "pourquoi" superficiel du type "parce que c'est comme ça".
+IMPORTANT : cette chaîne de "pourquoi" est un OUTIL à utiliser sur les points qui le méritent, pas un rituel à appliquer sur CHAQUE phrase, y compris les évidences cliniques de base. Décortiquer "le patient a de la fièvre parce que l'inflammation produit des pyrogènes" en cinq niveaux de "pourquoi" est du bruit, pas de la pédagogie. Concentre l'effort sur les mécanismes qui gagnent vraiment à être dépliés.
 
-N'utilise jamais une explication vague ou circulaire ("ça arrive parce que c'est la maladie", "c'est le signe typique") comme fin de chaîne — chaque "pourquoi" doit recevoir une vraie réponse mécanistique, réelle et vérifiable à partir du contenu médical du cours, jamais inventée. Si le texte source ne donne pas explicitement le mécanisme profond, appuie-toi sur les connaissances médicales de base généralement enseignées à ce niveau pour compléter la chaîne de façon médicalement exacte — sans jamais inventer un fait qui contredirait le cours source.
-
-C'est cette chaîne ininterrompue de "pourquoi" — appliquée à CHAQUE phrase, sans exception, du début à la fin du cours — qui doit transformer cette explication en LA référence absolue et légendaire sur ce sujet, celle qu'un étudiant n'oubliera jamais parce qu'il a compris chaque rouage, jusqu'au bout, sans aucune zone d'ombre.`;
+N'utilise jamais une explication vague ou circulaire ("ça arrive parce que c'est la maladie", "c'est le signe typique") comme fin de chaîne — chaque "pourquoi" doit recevoir une vraie réponse mécanistique, réelle et vérifiable à partir du contenu médical du cours, jamais inventée. Si le texte source ne donne pas explicitement le mécanisme profond, appuie-toi sur les connaissances médicales de base généralement enseignées à ce niveau pour compléter la chaîne de façon médicalement exacte — sans jamais inventer un fait qui contredirait le cours source.`;
 
 /**
  * Same reasoning as STUDIO_EXPLICATION_SYSTEM_PROMPT above, lighter touch —
@@ -328,39 +300,23 @@ interface StudioPromptConfig {
   maxTokens: number;
 }
 
-// explication: raised again, 32768 -> 65536 (explicit product instruction:
-// "exhaustivité maximale" — every word/sentence/line of the source explained
-// in painstaking detail, no length ceiling in spirit — see
-// STUDIO_EXPLICATION_SYSTEM_PROMPT's own header comment for the matching
-// prompt rewrite). HONESTY NOTE: this value is NOT live-verified against
-// google/gemini-3.7-flash's real maximum completion-token ceiling (no
-// financial authorization for a real test call at the time of this change)
-// — if OpenRouter/the model rejects or silently clamps a request this
-// large, that will surface as a real, visible error or a shorter-than-
-// requested completion, never a silent corruption: fixInvalidJsonEscapes/
-// repairTruncatedJson (lib/course-generation-shared.ts) still recover
-// whatever was actually written before any cutoff, exactly as they do at
-// the previous, already-proven 32768 ceiling. Lower this back toward 32768
-// if a live test ever shows this specific number failing outright.
-//
+// explication: LOWERED 65536 -> 8000. The 65536 value was paired with a
+// "sans plafond réel, plus long est toujours préférable" mandate that
+// produced routine 200s+ generation times and a "way too long" result the
+// students actually complained about. Both sides of that equation are now
+// fixed: the mandate (see STUDIO_EXPLICATION_SYSTEM_PROMPT) caps output at
+// a realistic proportion of source, and this ceiling matches. At ~1.9
+// tokens/word for medical French and a realistic 1,500-1,800 word output,
+// that's ~3,500 tokens — 8,000 leaves real headroom for the model to
+// overshoot its target without ever hitting finish_reason "length".
 // `reasoning: { effort: "low" }` (see app/api/studio/generate/route.ts and
-// lib/studio-explication-delta.ts) still reserves ~20% of this larger
-// budget for hidden reasoning tokens, leaving roughly 52K tokens of real
-// headroom for the visible explication text — a meaningful increase over
-// the previous ~26K.
+// lib/studio-explication-delta.ts) still reserves ~20% of this budget for
+// hidden reasoning tokens.
 //
-// The other 4 sections: checked against REAL past generations already
-// stored in studio_content_cache (a local, read-only Supabase query — zero
-// OpenRouter tokens spent to check this): estimated real completion-token
-// usage (chars/4) ranged from ~5,400 (exemples_analogies) to ~12,747
-// (cas_clinique), all well under 32,000. Lowered to 20,000 — roughly 1.6x
-// the highest real value observed (cas_clinique), a real safety margin
-// rather than a tight fit, given the sample was thin (n=1 for 3 of the 5
-// sections) and a bigger/longer real course could legitimately need more
-// than what's been generated so far. Re-check with more real data as
-// studio_content_cache accumulates more entries.
+// The other 4 sections are unchanged at 20000 — their own prompts are
+// already scoped properly and don't have the "sans plafond" problem.
 export const STUDIO_PROMPT_CONFIG: Record<JsonSectionId, StudioPromptConfig> = {
-  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 65536 },
+  explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 8000 },
   resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
   qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 20000 },
