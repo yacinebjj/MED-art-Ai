@@ -196,7 +196,7 @@ const PRODUCT_SURFACES = [
 
 export default function LandingPage() {
   const { language } = useLanguage();
-  const [cycle, setCycle] = useState<BillingCycle>("annual");
+  const [cycle, setCycle] = useState<BillingCycle>("monthly");
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-x-hidden">
