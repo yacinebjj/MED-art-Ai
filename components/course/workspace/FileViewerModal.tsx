@@ -90,18 +90,26 @@ function PdfReader({ fileUrl, title }: { fileUrl: string; title: string }) {
       </div>
 
       <div ref={readerRef} className="min-h-0 flex-1 overflow-auto p-3 sm:p-6">
-        <Document
-          file={fileUrl}
-          onLoadSuccess={({ numPages: loadedPages }) => {
-            setNumPages(loadedPages);
-            setPageNumber((current) => Math.min(current, loadedPages));
-          }}
-          onLoadError={() => setError(true)}
-          loading={<p className="py-12 text-center text-sm text-muted-foreground">Chargement du PDF...</p>}
-          error={<p className="py-12 text-center text-sm text-destructive">Impossible d’afficher ce PDF.</p>}
-          className="flex min-h-full flex-col items-center gap-4"
-        >
-          {error ? null : (
+        {error ? (
+          <iframe
+            src={fileUrl}
+            title={title || "Lecteur PDF"}
+            className="h-full min-h-[24rem] w-full rounded-lg border border-border bg-white"
+          />
+        ) : (
+          <Document
+            file={fileUrl}
+            onLoadSuccess={({ numPages: loadedPages }) => {
+              setNumPages(loadedPages);
+              setPageNumber((current) => Math.min(current, loadedPages));
+            }}
+            onLoadError={(loadError) => {
+              console.error("[pdf-reader] PDF.js failed to load the document:", loadError);
+              setError(true);
+            }}
+            loading={<p className="py-12 text-center text-sm text-muted-foreground">Chargement du PDF...</p>}
+            className="flex min-h-full flex-col items-center gap-4"
+          >
             <Page
               pageNumber={pageNumber}
               width={pageWidth}
@@ -111,8 +119,8 @@ function PdfReader({ fileUrl, title }: { fileUrl: string; title: string }) {
               loading={<p className="py-12 text-center text-sm text-muted-foreground">Rendu de la page...</p>}
               className="max-w-none overflow-hidden rounded-sm bg-white shadow-md"
             />
-          )}
-        </Document>
+          </Document>
+        )}
       </div>
       <span className="sr-only">Lecteur PDF pour {title}</span>
     </div>
