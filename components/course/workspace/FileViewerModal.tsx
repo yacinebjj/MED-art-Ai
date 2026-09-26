@@ -15,17 +15,23 @@ function getExtension(value: string): string {
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
+/** How many pages on either side of the current one get an actual <Page> canvas — the rest render as a same-sized placeholder so a 100+ page course doesn't mount 100 canvases at once. */
+const RENDER_BUFFER = 3;
+/** A4-ish placeholder ratio for pages that haven't loaded yet, so the scrollbar doesn't jump once the real (usually near-identical) per-document ratio comes in from the first page. */
+const DEFAULT_ASPECT_RATIO = 1.414;
 
 /**
- * Full-bleed page canvas on a dark backdrop with a floating pill toolbar —
- * the OneDrive/Google-Drive PDF viewer look, instead of a cramped reader
- * squeezed into a small dialog.
+ * Full-bleed, continuously-scrollable page stack on a dark backdrop with a
+ * floating pill toolbar — the OneDrive/Google-Drive PDF viewer look (one
+ * long scrollable document, not a "book" you flip page by page).
  */
 function PdfReader({ fileUrl, title }: { fileUrl: string; title: string }) {
   const readerRef = useRef<HTMLDivElement | null>(null);
+  const pageNodes = useRef<Map<number, HTMLDivElement>>(new Map());
   const [containerWidth, setContainerWidth] = useState(0);
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
+  const [pageAspectRatio, setPageAspectRatio] = useState(DEFAULT_ASPECT_RATIO);
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState(false);
 
@@ -79,25 +85,57 @@ function PdfReader({ fileUrl, title }: { fileUrl: string; title: string }) {
   }, []);
 
   useEffect(() => {
+    pageNodes.current.clear();
     setNumPages(0);
     setPageNumber(1);
+    setPageAspectRatio(DEFAULT_ASPECT_RATIO);
     setZoom(1);
     setError(false);
   }, [fileUrl]);
 
+  function scrollToPage(page: number) {
+    pageNodes.current.get(page)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "ArrowRight") setPageNumber((current) => Math.min(numPages || current, current + 1));
-      if (event.key === "ArrowLeft") setPageNumber((current) => Math.max(1, current - 1));
+      if (event.key === "ArrowRight") scrollToPage(Math.min(numPages || pageNumber, pageNumber + 1));
+      if (event.key === "ArrowLeft") scrollToPage(Math.max(1, pageNumber - 1));
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [numPages, pageNumber]);
+
+  // Tracks which page is most visible in the scroll container so the
+  // toolbar's "x / y" indicator (and the render window below) follow what
+  // the user is actually reading, instead of a page picked once at load.
+  useEffect(() => {
+    const container = readerRef.current;
+    if (!container || !numPages) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let bestPage: number | null = null;
+        let bestRatio = 0;
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.intersectionRatio > bestRatio) {
+            bestRatio = entry.intersectionRatio;
+            bestPage = Number((entry.target as HTMLElement).dataset.page);
+          }
+        }
+        if (bestPage) setPageNumber(bestPage);
+      },
+      { root: container, threshold: [0.1, 0.25, 0.5, 0.75, 1] }
+    );
+    pageNodes.current.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
   }, [numPages]);
 
   // Full-screen container, so this can stretch far wider than the old 960px
   // modal cap — 1400 keeps very large monitors from rendering a blurry
   // over-stretched page while still reading as "big".
   const pageWidth = containerWidth > 0 ? Math.min(1400, Math.max(280, containerWidth - 64)) * zoom : undefined;
+  const placeholderHeight = pageWidth ? pageWidth * pageAspectRatio : undefined;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-neutral-900">
@@ -130,17 +168,42 @@ function PdfReader({ fileUrl, title }: { fileUrl: string; title: string }) {
               setError(true);
             }}
             loading={<p className="py-20 text-center text-sm text-neutral-400">Chargement du PDF...</p>}
-            className="flex min-h-full flex-col items-center"
+            className="flex min-h-full flex-col items-center gap-4"
           >
-            <Page
-              pageNumber={pageNumber}
-              width={pageWidth}
-              scale={pageWidth ? undefined : zoom}
-              renderTextLayer
-              renderAnnotationLayer
-              loading={<p className="py-20 text-center text-sm text-neutral-400">Rendu de la page...</p>}
-              className="max-w-none overflow-hidden rounded-sm bg-white shadow-2xl"
-            />
+            {Array.from({ length: numPages }, (_, index) => {
+              const page = index + 1;
+              const isNearViewport = Math.abs(page - pageNumber) <= RENDER_BUFFER;
+              return (
+                <div
+                  key={page}
+                  data-page={page}
+                  ref={(node) => {
+                    if (node) pageNodes.current.set(page, node);
+                    else pageNodes.current.delete(page);
+                  }}
+                >
+                  {isNearViewport ? (
+                    <Page
+                      pageNumber={page}
+                      width={pageWidth}
+                      scale={pageWidth ? undefined : zoom}
+                      renderTextLayer
+                      renderAnnotationLayer
+                      onLoadSuccess={(loadedPage) => {
+                        if (page === 1) setPageAspectRatio(loadedPage.originalHeight / loadedPage.originalWidth);
+                      }}
+                      loading={<p className="py-20 text-center text-sm text-neutral-400">Rendu de la page...</p>}
+                      className="max-w-none overflow-hidden rounded-sm bg-white shadow-2xl"
+                    />
+                  ) : (
+                    <div
+                      style={{ width: pageWidth, height: placeholderHeight }}
+                      className="rounded-sm bg-white/5"
+                    />
+                  )}
+                </div>
+              );
+            })}
           </Document>
         )}
       </div>
@@ -151,7 +214,7 @@ function PdfReader({ fileUrl, title }: { fileUrl: string; title: string }) {
             <div className="flex items-center gap-1" aria-label="Contrôles de page">
               <button
                 type="button"
-                onClick={() => setPageNumber((current) => Math.max(1, current - 1))}
+                onClick={() => scrollToPage(Math.max(1, pageNumber - 1))}
                 disabled={pageNumber <= 1 || !numPages}
                 className="rounded-full p-2 text-neutral-300 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30"
                 aria-label="Page précédente"
@@ -163,7 +226,7 @@ function PdfReader({ fileUrl, title }: { fileUrl: string; title: string }) {
               </span>
               <button
                 type="button"
-                onClick={() => setPageNumber((current) => Math.min(numPages, current + 1))}
+                onClick={() => scrollToPage(Math.min(numPages, pageNumber + 1))}
                 disabled={!numPages || pageNumber >= numPages}
                 className="rounded-full p-2 text-neutral-300 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30"
                 aria-label="Page suivante"
