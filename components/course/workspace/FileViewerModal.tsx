@@ -6,7 +6,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/Dialog";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-/** Formats Google Docs Viewer can render that a bare iframe can't (no native browser PDF-style rendering). */
+/** Formats a bare iframe can't render natively (no native browser support for Office formats). */
 const OFFICE_VIEWER_EXTENSIONS = ["doc", "docx", "ppt", "pptx", "xls", "xlsx"];
 
 function getExtension(value: string): string {
@@ -283,8 +283,9 @@ interface FileViewerModalProps {
  * raw extracted text, full-screen (OneDrive/Google-Drive style) rather than
  * a small centered popup — the cramped version was unusable on phones and
  * showed the page far too small on desktop. PDFs render directly via
- * react-pdf; DOCX/PPTX/XLS(X) route through Google Docs Viewer, which knows
- * how to render Office formats a bare iframe can't. Falls back to the raw
+ * react-pdf; DOCX/PPTX/XLS(X) route through Microsoft's Office Online viewer,
+ * which knows how to render Office formats a bare iframe can't and does so
+ * at far higher fidelity than Google Docs Viewer. Falls back to the raw
  * extracted text whenever there's no original file to show — pasted-text
  * courses have no `fileUrl` at all, and courses uploaded before this feature
  * existed have `sourceFileUrl: null`.
@@ -300,7 +301,12 @@ export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }:
   const isPdf = extension === "pdf";
   const iframeSrc = fileUrl && !isPdf
     ? OFFICE_VIEWER_EXTENSIONS.includes(extension)
-      ? `https://docs.google.com/gview?url=${encodeURIComponent(fileUrl)}&embedded=true`
+      ? // Microsoft's own viewer renders Office formats at noticeably higher
+        // fidelity than Google Docs Viewer (gview), which is the blur
+        // reported for .pptx/.docx/.xlsx files — gview downsamples slide
+        // content to a low fixed-size raster before scaling it back up to
+        // fill the iframe.
+        `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`
       : fileUrl
     : null;
 
