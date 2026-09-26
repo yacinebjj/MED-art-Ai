@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowRight, GraduationCap, Lock, Mail, MailCheck, User } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, GraduationCap, Lock, Mail, MailCheck, User } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
@@ -66,6 +66,7 @@ export function RegisterForm() {
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
   const [error, setError] = useState<string | null>(null);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -227,6 +228,9 @@ export function RegisterForm() {
     toast({ variant: "info", title: INTERN_YEAR_LOCKED_MESSAGE });
   }
 
+  // Derived from form.password — always in sync, no duplicate state.
+  const hasPassword = form.password.length > 0;
+
   // Purely cosmetic grouping/stagger — no step logic, every field still
   // submits together in one handleSubmit call above. Splits the previously
   // flat 6-field list into two labeled sections ("Tes informations" / "Ton
@@ -278,17 +282,32 @@ export function RegisterForm() {
           onChange={(e) => update("email", e.target.value)}
         />
 
-        <Input
-          icon={<Lock className="h-4 w-4" />}
-          label={tAuth("passwordLabel", language)}
-          name="password"
-          type="password"
-          placeholder="8 caractères minimum"
-          required
-          minLength={8}
-          value={form.password}
-          onChange={(e) => update("password", e.target.value)}
-        />
+        <div className="relative">
+          <Input
+            icon={<Lock className="h-4 w-4" />}
+            label={tAuth("passwordLabel", language)}
+            name="password"
+            type={showPassword ? "text" : "password"}
+            placeholder="8 caractères minimum"
+            required
+            minLength={8}
+            value={form.password}
+            onChange={(e) => update("password", e.target.value)}
+            className="pr-10"
+          />
+
+          {hasPassword && (
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+              className="absolute bottom-0 right-3 h-11 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-200"
+              tabIndex={-1}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
       </motion.div>
 
       <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="space-y-4">
