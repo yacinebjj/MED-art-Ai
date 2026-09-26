@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
@@ -19,6 +20,7 @@ export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -45,6 +47,9 @@ export function LoginForm() {
     router.refresh();
   }
 
+  // Derived from `password` — always in sync, no extra state needed.
+  const hasPassword = password.length > 0;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {error && (
@@ -63,15 +68,30 @@ export function LoginForm() {
         onChange={(e) => setEmail(e.target.value)}
       />
 
-      <Input
-        label={tAuth("passwordLabel", language)}
-        name="password"
-        type="password"
-        placeholder="••••••••"
-        required
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+      <div className="relative">
+        <Input
+          label={tAuth("passwordLabel", language)}
+          name="password"
+          type={showPassword ? "text" : "password"}
+          placeholder="••••••••"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="pr-10"
+        />
+
+        {hasPassword && (
+          <button
+            type="button"
+            onClick={() => setShowPassword((prev) => !prev)}
+            aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+            className="absolute bottom-0 right-3 h-11 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-200"
+            tabIndex={-1}
+          >
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        )}
+      </div>
 
       <div className="flex items-center justify-between text-sm">
         <label className="flex cursor-pointer items-center gap-2 text-slate-600 dark:text-slate-400">
