@@ -63,11 +63,19 @@ export const DialogContent = forwardRef<
       )}
       {...props}
     >
-      {/* Purely for the spring entrance — deliberately unstyled otherwise
-          (no width/border/padding here) so it never fights the sizing/chrome
-          classes callers pass via `className` above, which stay on Content
-          itself exactly as before this animation was added. */}
+      {/* Mostly unstyled (no width/border/padding here) so it never fights
+          the sizing/chrome classes callers pass via `className` above,
+          which stay on Content itself exactly as before this animation was
+          added. `flex h-full min-h-0 flex-col` is the one addition: it lets
+          a caller's own flex-height content (e.g. FileViewerModal's
+          full-screen layout) actually stretch to fill Content — without it,
+          this div's height falls back to fitting its children instead of
+          Content's explicit height. It's a no-op for every other caller,
+          since Content only has an explicit height when the caller sets
+          one; otherwise Content sizes to content and percentage heights
+          here just resolve to auto. */}
       <motion.div
+        className="flex h-full min-h-0 flex-col"
         initial={{ opacity: 0, scale: 0.95, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
