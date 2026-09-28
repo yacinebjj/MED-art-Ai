@@ -678,16 +678,13 @@ export default function ModuleWorkspacePage() {
   // made Course B's OWN "Résumé" tile show as generating too (same section
   // id, no course scoping at all), and could even silently swallow a click
   // on Course B's "Résumé" — `if (generatingSections.has(id)) return;` saw
-  // the id as already "generating" globally and did nothing. `generatingSections`/
-  // `regeneratingSections` below are the derived, ACTIVE-course-scoped views
-  // StudioPanel/MobileStudioCards actually consume — their own
-  // Set<DemoSectionId> contract is unchanged, only this page's bookkeeping
-  // became course-aware.
+  // the id as already "generating" globally and did nothing. `generatingSections`
+  // below is the derived, ACTIVE-course-scoped view StudioPanel/MobileStudioCards
+  // actually consume — their own Set<DemoSectionId> contract is unchanged,
+  // only this page's bookkeeping became course-aware.
   const [generatingByKey, setGeneratingByKey] = useState<Set<string>>(() => new Set());
-  const [regeneratingByKey, setRegeneratingByKey] = useState<Set<string>>(() => new Set());
   const activeCourseIdForSections = activeCourse?.id ?? null;
   const generatingSections = useMemo(() => scopeToActiveCourse(generatingByKey, activeCourseIdForSections), [generatingByKey, activeCourseIdForSections]);
-  const regeneratingSections = useMemo(() => scopeToActiveCourse(regeneratingByKey, activeCourseIdForSections), [regeneratingByKey, activeCourseIdForSections]);
   // Live per-part progress for the multi-request Explication pipeline — see
   // the onProgress call site below for why surfacing this matters.
   const [explicationProgress, setExplicationProgress] = useState<ExplicationProgressView | null>(null);
@@ -1351,93 +1348,20 @@ export default function ModuleWorkspacePage() {
     if (course) setFileViewerCourse(course);
   }, [handleSelectCourse]);
 
-  /** "Regénérer" — see app/api/studio/regenerate/route.ts's own doc comment for why this deliberately never resends the source document. */
-  async function handleRegenerateSection(id: DemoSectionId) {
-    // Same relaxation as handleStudioItemClick — only THIS id's own
-    // regenerate/generate state, on THIS course, blocks it, not an
-    // unrelated tile's or the same tile on a different course.
-    if (!activeCourse || regeneratingSections.has(id) || generatingSections.has(id)) return;
-
-    const courseId = activeCourse.id;
-    const key = sectionKey(courseId, id);
-    // "regen:" prefix — a separate tracker namespace from handleStudioItemClick's
-    // own generations, since a section can be freshly-generating and
-    // regenerating at different points in time but never both at once
-    // (guarded above); keeping them distinct avoids one's tracked promise
-    // ever being mistaken for the other's.
-    const trackerSection = `regen:${id}`;
-    setRegeneratingByKey((prev) => new Set(prev).add(key));
-
-    // Same trackGeneration treatment as handleStudioItemClick — see
-    // lib/studio-generation-tracker.ts's own comment for the real bug this
-    // fixes (the request already survives navigation server-side; only this
-    // component's own "is it still running" knowledge didn't, risking a
-    // second paid regenerate call).
-    const regenerationPromise = (async () => {
-      try {
-        const res = await fetch("/api/studio/regenerate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ courseId, section: id }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) {
-          throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La régénération a échoué.");
-        }
-
-        // UX ILLUSION (product direction) — see handleStudioItemClick's own
-        // identical comment above. A variation served from
-        // studio_content_variations without a real OpenRouter call is still a
-        // "cache hit" in spirit.
-        if (data.cached) {
-          await wait(randomFakeDelayMs());
-        }
-
-        const baseCourse = courseCacheRef.current.get(courseId);
-        if (baseCourse) {
-          // updatedAt bumped to now — same reasoning as handleStudioItemClick's own comment above.
-          const updated = { ...withSectionValue(baseCourse, id, data.data), updatedAt: new Date().toISOString() };
-          courseCacheRef.current.set(courseId, updated);
-          setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
-        }
-        toast({
-          variant: "success",
-          title: "Contenu régénéré",
-          description: `${DEMO_SECTIONS.find((s) => s.id === id)?.label ?? "Le contenu"} a été régénéré.`,
-        });
-      } catch (error) {
-        toast({
-          variant: "error",
-          title: "Échec de la régénération",
-          description: error instanceof Error ? error.message : "Erreur inconnue.",
-        });
-      } finally {
-        setRegeneratingByKey((prev) => {
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
-        });
-      }
-    })();
-
-    trackGeneration(courseId, trackerSection, regenerationPromise);
-    await regenerationPromise;
-  }
-
   /**
-   * Point 6 fix, other half — reconciles this page's own "generating"/
-   * "regenerating" state against lib/studio-generation-tracker.ts whenever a
-   * course becomes active (mount, or switching back to a course). Covers
-   * exactly the case handleStudioItemClick's own registration can't: a
-   * generation started by a PREVIOUS mount of this same page (before a
-   * navigation away) that's still running now. Re-shows the spinner
-   * immediately (so a re-click is correctly blocked instead of firing a
-   * second paid call) and, once the tracked promise settles, refetches this
-   * course fresh from Supabase — the ORIGINAL closure that will eventually
-   * update ITS OWN activeCourse/courseCacheRef belongs to that previous,
-   * now-unmounted instance, so THIS instance needs its own refresh to pick
-   * up the result. Idempotent/harmless for the common case (nothing tracked
-   * for this course): every check below is a no-op.
+   * Point 6 fix, other half — reconciles this page's own "generating"
+   * state against lib/studio-generation-tracker.ts whenever a course becomes
+   * active (mount, or switching back to a course). Covers exactly the case
+   * handleStudioItemClick's own registration can't: a generation started by a
+   * PREVIOUS mount of this same page (before a navigation away) that's still
+   * running now. Re-shows the spinner immediately (so a re-click is
+   * correctly blocked instead of firing a second paid call) and, once the
+   * tracked promise settles, refetches this course fresh from Supabase — the
+   * ORIGINAL closure that will eventually update ITS OWN activeCourse/
+   * courseCacheRef belongs to that previous, now-unmounted instance, so THIS
+   * instance needs its own refresh to pick up the result. Idempotent/harmless
+   * for the common case (nothing tracked for this course): every check below
+   * is a no-op.
    */
   useEffect(() => {
     if (!activeCourse) return;
@@ -1449,13 +1373,6 @@ export default function ModuleWorkspacePage() {
         const key = sectionKey(courseId, section.id);
         setGeneratingByKey((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
         generating.then(() => refreshCourseFromServer(courseId));
-      }
-
-      const regenerating = getInFlightGeneration(courseId, `regen:${section.id}`);
-      if (regenerating) {
-        const key = sectionKey(courseId, section.id);
-        setRegeneratingByKey((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-        regenerating.then(() => refreshCourseFromServer(courseId));
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1595,8 +1512,6 @@ export default function ModuleWorkspacePage() {
       onCloseSection={() => setOpenedSection(null)}
       getSectionStatus={getSectionStatus}
       generatingSections={generatingSections}
-      regeneratingSections={regeneratingSections}
-      onRegenerateSection={handleRegenerateSection}
       lastGeneratedAt={activeCourse?.updatedAt ?? null}
       isNoteOpen={isNoteOpen}
       onOpenNote={() => setIsNoteOpen(true)}
