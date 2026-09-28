@@ -51,7 +51,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   }
 
   return (
-    <header className="glass-panel relative z-20 flex h-14 shrink-0 items-center justify-between rounded-b-3xl px-2 py-1 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6 sm:py-2">
+    <header className="glass-panel relative z-20 flex min-h-14 shrink-0 items-center justify-between rounded-b-3xl px-2 py-1 shadow-glass dark:shadow-glass-dark sm:min-h-16 sm:px-6 sm:py-2">
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
         {/* Explicit back control — distinct from the logo below, which reads
             as branding rather than navigation to a hurried student. Neither
@@ -71,7 +71,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
           <Logo size="sm" />
         </Link>
         <span className="hidden h-6 w-px shrink-0 bg-border sm:block" />
-        <h1 className="truncate bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-sm font-bold tracking-tight text-transparent sm:text-lg">
+        <h1 className="min-w-0 flex-1 break-words bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-sm font-bold tracking-tight text-transparent sm:text-lg">
           <span className="hidden text-muted-foreground/70 font-medium md:inline">MedArt Workspace — </span>
           {title || tWorkspaceTopbar("courseFallbackTitle", language)}
         </h1>
