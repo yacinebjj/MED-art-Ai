@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Check, Columns2, Copy, Info, MoreVertical, Pin, Quote, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { ArrowUp, Check, Columns2, Copy, Info, MoreVertical, Pin, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import {
@@ -58,9 +58,6 @@ interface ChatDocumentPanelProps {
   /** Split-screen is a wide-viewport-only concept (there's no room for it on the mobile tabbed layout) — the mobile ChatDocumentPanel instance hides this button entirely rather than wiring it to a no-op, which would be a dead/confusing control. Defaults to true so every existing (desktop) caller is unaffected. */
   showSplitScreenToggle?: boolean;
   dark: boolean;
-  /** The passage "Ask MedArt" inserted as a citation above the composer — shown as a dismissible blockquote-style chip, prepended to the actual message (as real markdown "> ...") only when the student sends. */
-  quotedText: string | null;
-  onClearQuote: () => void;
   /** Every course in the current module, for the composer's source-selector badge — lets the student switch which one they're chatting with without leaving the Chat tab. Optional: omitted, the badge stays a plain read-only count (its original behavior). */
   sources?: { id: number; title: string }[];
   activeSourceId?: number | null;
@@ -111,8 +108,6 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     onToggleSplitScreen,
     showSplitScreenToggle = true,
     dark,
-    quotedText,
-    onClearQuote,
     sources,
     activeSourceId,
     onSelectSource,
@@ -172,7 +167,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if ((input.trim().length === 0 && !quotedText) || isTyping) return;
+    if (input.trim().length === 0 || isTyping) return;
     onSend();
   }
 
@@ -388,20 +383,6 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       )}
 
       <div className="border-t border-border bg-card p-4">
-        {quotedText && (
-          <div className="animate-fade-in mb-2 flex items-start gap-2 rounded-xl border-l-4 border-primary-400 bg-accent px-3 py-2 dark:border-primary-500">
-            <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <p className="line-clamp-2 flex-1 text-xs italic text-muted-foreground">{quotedText}</p>
-            <button
-              type="button"
-              onClick={onClearQuote}
-              aria-label="Retirer la citation"
-              className="shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-accent-foreground/10 hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2 rounded-3xl bg-muted p-2 transition-shadow duration-300 focus-within:shadow-glow"
@@ -465,7 +446,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           <Button
             type="submit"
             size="icon"
-            disabled={(input.trim().length === 0 && !quotedText) || isTyping}
+            disabled={input.trim().length === 0 || isTyping}
             className="shrink-0 rounded-full"
             aria-label="Envoyer"
           >

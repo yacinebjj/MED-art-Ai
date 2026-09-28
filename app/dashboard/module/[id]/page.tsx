@@ -640,13 +640,6 @@ export default function ModuleWorkspacePage() {
 
   const chatPanelRef = useRef<ChatDocumentPanelHandle>(null);
   const [isSplitScreen, setIsSplitScreen] = useState(false);
-  const [quotedText, setQuotedText] = useState<string | null>(null);
-  // Which quick action staged `quotedText` — Ask MedArt and Translate share
-  // the exact same "citation chip + review before sending" composer flow,
-  // but need different server-side flags on actual send (concise vs.
-  // translate, see handleSend below), so this is the one bit of state that
-  // tells them apart. Cleared alongside quotedText everywhere it's cleared.
-  const [quotedMode, setQuotedMode] = useState<"ask" | "translate" | null>(null);
 
   const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
@@ -1292,55 +1285,70 @@ export default function ModuleWorkspacePage() {
 
   function handleSend() {
     const text = chatInput.trim();
-    if (!text && !quotedText) return;
+    if (!text) return;
     if (isTyping) return;
 
-    const isQuoted = quotedText !== null;
-    const isTranslate = quotedMode === "translate";
-    const fullMessage = buildQuotedChatMessage(quotedText, text);
     setChatInput("");
-    setQuotedText(null);
-    setQuotedMode(null);
-    sendChatMessage(fullMessage, {
-      sourceText: buildSelectedSourceText(),
-      // "Ask MedArt" and "Translate" are both quick actions staged the same
-      // way (see handleAskSelection/handleTranslateSelection below) — short
-      // answer for Ask MedArt (concise), the dedicated translator persona
-      // for Translate (translate), never both. Either way the quote/reply
-      // must never resend in later requests' history (see
-      // ChatMessage.excludeFromHistory). selectedText puts the server in
-      // strict highlight isolation (no course text, no history, forced onto
-      // the cheap model) — sourceText above is ignored server-side whenever
-      // this is set, kept only for the plain (non-highlight) send path.
-      concise: isQuoted && !isTranslate,
-      translate: isTranslate,
-      excludeFromHistory: isQuoted,
-      selectedText: quotedText ?? undefined,
-    });
+    sendChatMessage(text, { sourceText: buildSelectedSourceText() });
   }
 
-  /** Shared by Ask MedArt and Translate — both insert the selection as a citation chip above the composer and let the student review/edit before sending, rather than firing immediately. Opens split-screen so the chat is visible alongside whatever Studio tile (or the sidebar) was open. */
-  function stageQuotedSelection(text: string, mode: "ask" | "translate") {
-    setQuotedText(text);
-    setQuotedMode(mode);
-    // Split-screen is a desktop-only concept — on mobile, "seeing the chat
-    // alongside what you selected" instead means switching to the Chat tab.
+  /**
+   * Shared by "Ask MedArt" and "Translate". These USED to only stage the
+   * selection as a quote (setQuotedText/setQuotedMode) and silently wait for
+   * the student to notice the citation chip and press Send themselves — from
+   * a student's perspective that read as "I clicked the button and nothing
+   * happened", which is exactly the "doesn't work / inconsistent" complaint
+   * this was rewritten to fix. Both quick actions now send immediately: the
+   * quote + question appear as a real chat bubble right away and the reply
+   * starts streaming in, with no extra manual step required on either
+   * desktop or mobile.
+   *
+   * Still switches to the chat view first (split-screen on desktop, the Chat
+   * tab on mobile) so the new message/reply is actually visible the instant
+   * it's sent — this is the one part of the old staging behavior worth
+   * keeping, and keeping it identical on both layouts is what makes the two
+   * platforms behave consistently instead of diverging here.
+   */
+  function sendSelectionQuickAction(text: string, mode: "ask" | "translate") {
+    // Mirrors handleSend's own guard — never fire a second overlapping
+    // request while one is still streaming in.
+    if (isTyping) {
+      toast({ variant: "error", title: "MedArt répond déjà", description: "Attends la fin de la réponse en cours." });
+      return;
+    }
+
     if (isDesktop) {
       setIsSplitScreen(true);
     } else {
       setMobileTab("chat");
     }
-    chatPanelRef.current?.focusInput();
+
+    const isTranslate = mode === "translate";
+    // Any question the student had already been typing before selecting
+    // text is preserved as their question/instruction alongside the quote,
+    // exactly as the old manual-Send flow would have combined them —
+    // switching to instant-send must not silently discard it.
+    const typedText = chatInput.trim();
+    const fullMessage = buildQuotedChatMessage(
+      text,
+      typedText || (isTranslate ? "Traduis ce texte médical sélectionné." : "")
+    );
+    setChatInput("");
+    sendChatMessage(fullMessage, {
+      sourceText: buildSelectedSourceText(),
+      concise: !isTranslate,
+      translate: isTranslate,
+      excludeFromHistory: true,
+      selectedText: text,
+    });
   }
 
   function handleAskSelection(text: string) {
-    stageQuotedSelection(text, "ask");
+    sendSelectionQuickAction(text, "ask");
   }
 
-  /** Used to send immediately with no review step — now mirrors Ask MedArt exactly: stages the citation chip and pre-fills the composer with a translate instruction the student can still edit before sending. */
   function handleTranslateSelection(text: string) {
-    stageQuotedSelection(text, "translate");
-    setChatInput("Traduis ce texte : ");
+    sendSelectionQuickAction(text, "translate");
   }
 
   const handleDeleteCourse = useCallback(async (courseId: number) => {
@@ -1466,11 +1474,6 @@ export default function ModuleWorkspacePage() {
       isSplitScreen={isSplitScreen}
       onToggleSplitScreen={() => setIsSplitScreen((prev) => !prev)}
       dark={isDark}
-      quotedText={quotedText}
-      onClearQuote={() => {
-        setQuotedText(null);
-        setQuotedMode(null);
-      }}
       sources={courses.map((c) => ({ id: c.id, title: c.title }))}
       selectedSourceIds={selectedSourceIds}
       onToggleSource={handleToggleSelectedSource}
@@ -1505,11 +1508,6 @@ export default function ModuleWorkspacePage() {
       onToggleSplitScreen={() => {}}
       showSplitScreenToggle={false}
       dark={isDark}
-      quotedText={quotedText}
-      onClearQuote={() => {
-        setQuotedText(null);
-        setQuotedMode(null);
-      }}
       sources={courses.map((c) => ({ id: c.id, title: c.title }))}
       activeSourceId={activeCourse?.id ?? null}
       onSelectSource={handleSelectCourse}

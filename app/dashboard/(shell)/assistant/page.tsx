@@ -43,6 +43,7 @@ import { useAssistantConversations, type ChatMessage } from "@/hooks/useAssistan
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { ConversationSidebar, ConversationSidebarCollapsedToggle } from "@/components/assistant/ConversationSidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { useToast } from "@/components/ui/Toast";
 
 interface HistoryTurn {
   role: "user" | "assistant";
@@ -511,35 +512,6 @@ const ChatBubble = memo(function ChatBubble({
   );
 });
 
-interface MinimalSpeechRecognitionResult {
-  0: { transcript: string };
-  isFinal: boolean;
-}
-interface MinimalSpeechRecognitionEvent {
-  resultIndex: number;
-  results: { length: number; [index: number]: MinimalSpeechRecognitionResult };
-}
-interface MinimalSpeechRecognition {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((event: MinimalSpeechRecognitionEvent) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-type SpeechRecognitionConstructor = new () => MinimalSpeechRecognition;
-
-function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as typeof window & {
-    SpeechRecognition?: SpeechRecognitionConstructor;
-    webkitSpeechRecognition?: SpeechRecognitionConstructor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
-
 const ATTACHMENT_ITEMS = [
   { kind: "image" as const, icon: ImageIcon, label: "Importer une image" },
   { kind: "pdf" as const, icon: FileText, label: "Importer un PDF" },
@@ -647,9 +619,18 @@ export default function AssistantPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  // isListening: mic is actively recording (MediaRecorder running).
+  // isTranscribing: recording just stopped and the clip is being uploaded to
+  // /api/assistant/transcribe — a distinct state so the mic button can show
+  // a clear "working on it" spinner instead of silently doing nothing for
+  // the second or two a Whisper call takes (the old SpeechRecognition path
+  // gave NO feedback at all during its equivalent window, which is a big
+  // part of why it read as "broken").
   const [isListening, setIsListening] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [micSupported, setMicSupported] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const { toast } = useToast();
   // Covers the async window between picking a file and the resulting message
   // actually being appended (image resize + the /api/upload extraction round
   // trip for a PDF) — distinct from `isTyping` (the AI reply itself
@@ -679,7 +660,12 @@ export default function AssistantPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<MinimalSpeechRecognition | null>(null);
+  // MediaRecorder-based dictation (replaces the old browser SpeechRecognition
+  // path, which silently died whenever the browser's remote recognition
+  // service was unreachable post-permission — see toggleListening below).
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const dictationBaseRef = useRef("");
 
   // Guards streamAssistantReply's loop below against setState on an unmounted
@@ -708,7 +694,11 @@ export default function AssistantPage() {
   const isEmpty = messages.length === 0;
 
   useEffect(() => {
-    setSpeechSupported(getSpeechRecognitionConstructor() !== null);
+    setMicSupported(
+      typeof navigator !== "undefined" &&
+        typeof navigator.mediaDevices?.getUserMedia === "function" &&
+        typeof MediaRecorder !== "undefined"
+    );
   }, []);
 
   // Drawer-vs-column breakpoint for the history rail. Reads matchMedia only
@@ -752,8 +742,14 @@ export default function AssistantPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }
 
+  // Unmount safety net — a student navigating away mid-dictation must never
+  // leave the mic indicator stuck on (an open MediaStream track keeps the
+  // browser/OS "microphone in use" light lit until every track is stopped).
   useEffect(() => {
-    return () => { recognitionRef.current?.stop(); };
+    return () => {
+      mediaRecorderRef.current?.stop();
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
   }, []);
 
   useEffect(() => {
@@ -1007,54 +1003,103 @@ export default function AssistantPage() {
     }
   }
 
-  function toggleListening() {
-    const Ctor = getSpeechRecognitionConstructor();
-    if (!Ctor) return;
-
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
+  /**
+   * Uploads the just-recorded clip to /api/assistant/transcribe and appends
+   * the returned text onto whatever was already typed (dictationBaseRef —
+   * same "append to existing composer content" contract the old
+   * SpeechRecognition path had). Any failure (network, empty/silent clip,
+   * rate limit, OpenRouter error) surfaces as a toast — the old path had
+   * NO equivalent feedback at all, which was the core of the reported bug.
+   */
+  const transcribeRecording = useCallback(async (blob: Blob) => {
+    if (blob.size === 0) {
+      setIsTranscribing(false);
       return;
     }
-
+    setIsTranscribing(true);
     try {
-      const recognition = new Ctor();
-      recognition.lang = "fr-FR";
-      recognition.continuous = true;
-      recognition.interimResults = true;
+      const extension = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : blob.type.includes("wav") ? "wav" : "webm";
+      const formData = new FormData();
+      formData.append("file", blob, `dictation.${extension}`);
 
+      const res = await fetch("/api/assistant/transcribe", { method: "POST", body: formData });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data?.success) {
+        throw new Error(typeof data?.error === "string" ? data.error : "La transcription a échoué.");
+      }
+
+      const transcript = typeof data.text === "string" ? data.text.trim() : "";
+      if (!transcript) {
+        toast({
+          variant: "error",
+          title: "Rien entendu",
+          description: "Aucune parole détectée dans l'enregistrement — réessaie en parlant un peu plus fort.",
+        });
+        return;
+      }
+
+      if (!isMountedRef.current) return;
+      const base = dictationBaseRef.current.trim();
+      const merged = base ? `${base} ${transcript}`.trim() : transcript;
+      dictationBaseRef.current = merged;
+      setInput(merged);
+    } catch (error) {
+      toast({
+        variant: "error",
+        title: "Transcription impossible",
+        description: error instanceof Error ? error.message : "La dictée vocale a échoué. Réessaie.",
+      });
+    } finally {
+      if (isMountedRef.current) setIsTranscribing(false);
+    }
+  }, [toast]);
+
+  async function startDictation() {
+    if (!micSupported) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordedChunksRef.current = [];
       dictationBaseRef.current = input;
 
-      recognition.onresult = (event) => {
-        let finalChunk = "";
-        let interimChunk = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          const transcript = result[0]?.transcript ?? "";
-          if (result.isFinal) finalChunk += transcript;
-          else interimChunk += transcript;
-        }
-
-        if (finalChunk) {
-          dictationBaseRef.current = dictationBaseRef.current ? `${dictationBaseRef.current} ${finalChunk}`.trim() : finalChunk.trim();
-        }
-
-        const preview = interimChunk
-          ? dictationBaseRef.current
-            ? `${dictationBaseRef.current} ${interimChunk}`
-            : interimChunk
-          : dictationBaseRef.current;
-
-        setInput(preview);
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
       };
-      recognition.onend = () => setIsListening(false);
-      recognition.onerror = () => setIsListening(false);
-      recognitionRef.current = recognition;
-      recognition.start();
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+        recordedChunksRef.current = [];
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        void transcribeRecording(blob);
+      };
+
+      recorder.start();
       setIsListening(true);
-    } catch {
+    } catch (error) {
       setIsListening(false);
+      toast({
+        variant: "error",
+        title: "Micro inaccessible",
+        description: error instanceof Error ? error.message : "Autorise l'accès au micro pour dicter ta question.",
+      });
     }
+  }
+
+  function stopDictation() {
+    mediaRecorderRef.current?.stop();
+    setIsListening(false);
+  }
+
+  function toggleListening() {
+    if (isListening) {
+      stopDictation();
+      return;
+    }
+    void startDictation();
   }
 
   const canSend = input.trim().length > 0 && !isTyping && !isAttachmentBusy;
@@ -1263,21 +1308,33 @@ export default function AssistantPage() {
                   <button
                     type="button"
                     onClick={toggleListening}
-                    disabled={!speechSupported}
+                    disabled={!micSupported || isTranscribing}
                     aria-label={isListening ? tAssistant("stopDictation", language) : tAssistant("startDictation", language)}
                     className={cn(
                       "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
                       isListening
                         ? "animate-pulse bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      !speechSupported && "cursor-not-allowed opacity-40"
+                      (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40"
                     )}
                   >
-                    {isListening ? <Square className="h-4 w-4" /> : <Mic className="h-5 w-5" />}
+                    {isTranscribing ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : isListening ? (
+                      <Square className="h-4 w-4" />
+                    ) : (
+                      <Mic className="h-5 w-5" />
+                    )}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {!speechSupported ? "Dictée vocale indisponible sur ce navigateur" : isListening ? tAssistant("stopDictation", language) : tAssistant("startDictation", language)}
+                  {!micSupported
+                    ? "Dictée vocale indisponible sur ce navigateur"
+                    : isTranscribing
+                      ? "Transcription en cours…"
+                      : isListening
+                        ? tAssistant("stopDictation", language)
+                        : tAssistant("startDictation", language)}
                 </TooltipContent>
               </Tooltip>
 

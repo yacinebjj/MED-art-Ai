@@ -63,7 +63,7 @@ const AUDIO_MAX_TOKENS = 15_000;
 // whenever a future prompt/length change should invalidate every existing
 // cached episode — cheap and migration-free (no schema change: it just makes
 // old rows permanently unreachable by a fresh hash, not deleted).
-const PODCAST_PROMPT_VERSION = "v2-9to10min";
+const PODCAST_PROMPT_VERSION = "v3-longer-fallback";
 
 interface CourseRow {
   id: number;
@@ -92,16 +92,46 @@ async function ensurePodcastBucket(supabase: ReturnType<typeof getSupabaseAdmin>
  * app/api/studio/slides/route.ts's planSlideOutline exactly, minus the
  * JSON-schema step — the script IS the raw text, no parsing needed.
  *
- * `timeoutMs: 30_000` here is a REAL fix, not decoration: this call used to
- * have no explicit timeout at all, silently inheriting callOpenRouter's
- * DEFAULT_TIMEOUT_MS (240 seconds). A slow-but-not-erroring script call
- * could eat up to 240 of this route's 300-second maxDuration before ever
- * falling back — leaving almost nothing for the actual narration call that
- * follows. A script-writing call is short text output (max 4000 tokens) —
- * it has no business ever legitimately needing anywhere near 240s, so a
- * tight 30s timeout costs nothing on a healthy call and, on a slow/degraded
- * one, fails fast into the fallback script instead of quietly burning the
- * narration's own time budget.
+ * `timeoutMs: 60_000` — RAISED from an original 30_000 after a real
+ * production incident (2026-09-28): students were reliably getting the
+ * ~3-minute FALLBACK script (not the intended ~9-10 minute episode), which
+ * traced back to this timeout being tighter than this app's OWN documented
+ * OpenRouter behavior. lib/ai/openrouter.ts's OPENROUTER_CONNECT_TIMEOUT_MS
+ * grants every OpenRouter call up to 60 SECONDS just for a slow-but-healthy
+ * TCP/TLS connect phase (a real, previously-confirmed failure mode on this
+ * exact API, see that constant's own comment) — a 30s abort here could fire
+ * before the model ever received the request, let alone started writing,
+ * on a day with nothing actually wrong. Sibling CHEAP_MODEL call sites with
+ * comparable output size give it far more room relative to their own route
+ * budget (e.g. app/api/flashcards/generate: maxTokens 8000, timeoutMs
+ * 50_000 inside a 60s route; app/api/study/remediation-plan/generate:
+ * maxTokens 8000, timeoutMs 110_000 inside a 120s route) — 30s for 6000
+ * tokens was an outlier low, not a considered budget.
+ *
+ * 60s was NOT picked to fill the same fraction of this route's 300s budget
+ * those single-call routes use (this route also has to run the narration
+ * call after this one) — it was picked to comfortably clear the 60s
+ * connect-phase allowance plus real generation time for ~6000 tokens, while
+ * still leaving a deliberately reduced-but-ample ceiling for narration (see
+ * this route's own narration call below, timeoutMs lowered 270_000 ->
+ * 225_000 to keep the two calls' worst-case sum comfortably under this
+ * route's 300s maxDuration, with real margin left for mp3 encode + upload +
+ * bucket check — the previous 30_000 + 270_000 = 300_000 summed to EXACTLY
+ * the platform ceiling with zero margin for anything after narration).
+ * 225_000 still sits well above the ~162s of real narration generation time
+ * the 9-10 min target needs (see AUDIO_MAX_TOKENS's own comment) — this is
+ * not the real bottleneck, the script call's own timeout was.
+ *
+ * Deliberately still a SINGLE attempt, no app-level retry: a retry would
+ * double this call's own worst case (now up to 120s instead of 60s),
+ * eating directly into the same narration budget this comment just spent a
+ * paragraph protecting — this codebase's own git history (see PODCAST route
+ * header comment and this repo's platform-timeout incidents) is full of
+ * exactly this class of "assumed cheap operation quietly outgrows its
+ * budget" bug. If the fallback script is ever actually served, it's now
+ * lengthened to independently clear the product's 7-minute floor on its own
+ * (see FALLBACK_PODCAST_SCRIPT_BY_DIALECT's own comment) — the retry's
+ * marginal reliability gain isn't worth reintroducing that risk.
  */
 async function planPodcastScript(courseTitle: string, explicationExcerpt: string, dialect: PodcastDialect): Promise<string> {
   try {
@@ -113,13 +143,22 @@ async function planPodcastScript(courseTitle: string, explicationExcerpt: string
       // 4000 -> 6000: the script's own target moved from ~700-900 to
       // ~1300-1500 words (see lib/ai/podcast-prompts.ts) — real headroom
       // above the ~2,500-3,200 tokens that length needs (mixed
-      // français/darija tokenizes worse than plain prose), still nowhere
-      // near the 30s timeout below since this is short text output either way.
-      { model: CHEAP_MODEL, maxTokens: 6000, bypassMock: true, timeoutMs: 30_000 }
+      // français/darija tokenizes worse than plain prose).
+      { model: CHEAP_MODEL, maxTokens: 6000, bypassMock: true, timeoutMs: 60_000 }
     );
-    return script.trim().length > 100 ? script.trim() : getFallbackPodcastScript(dialect);
+    if (script.trim().length > 100) return script.trim();
+    // Distinctly tagged (not just the generic catch below) so this is
+    // greppable in production logs on its own — this branch produced NO log
+    // line at all before, which is exactly how the fallback going out far
+    // more often than expected went unnoticed until a student reported it.
+    console.error(
+      `[studio/podcast][FALLBACK_SCRIPT_USED] Réponse trop courte (${script.trim().length} caractères) — repli sur le script par défaut.`
+    );
+    return getFallbackPodcastScript(dialect);
   } catch (error) {
-    console.error("[studio/podcast] Échec écriture du script, repli sur le script par défaut:", errorMessage(error));
+    console.error(
+      `[studio/podcast][FALLBACK_SCRIPT_USED] Échec écriture du script (${errorMessage(error)}) — repli sur le script par défaut.`
+    );
     return getFallbackPodcastScript(dialect);
   }
 }
@@ -261,12 +300,19 @@ export async function POST(request: NextRequest) {
         const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_PODCAST);
         const script = await planPodcastScript(course.title, excerpt, dialect);
 
+        // timeoutMs LOWERED 270_000 -> 225_000 alongside planPodcastScript's
+        // own timeout being raised 30_000 -> 60_000 — see that function's own
+        // comment for the full budget math. Still comfortably above the
+        // ~162s of real narration generation time the 9-10 min script target
+        // needs (see AUDIO_MAX_TOKENS's own comment above), just no longer
+        // summing with the script call's worst case to exactly this route's
+        // 300s maxDuration with zero margin left for mp3 encode/upload.
         const { pcm16 } = await generateOpenRouterAudio(
           [
             { role: "system", content: buildPodcastNarrationSystemPrompt(dialect) },
             { role: "user", content: buildPodcastNarrationUserMessage(script) },
           ],
-          { maxTokens: AUDIO_MAX_TOKENS, timeoutMs: 270_000 }
+          { maxTokens: AUDIO_MAX_TOKENS, timeoutMs: 225_000 }
         );
 
         const mp3Buffer = await encodePcm16ToMp3(pcm16, 24_000, 1);

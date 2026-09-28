@@ -101,13 +101,12 @@ export function LoginForm() {
           />
           Se souvenir de moi
         </label>
-        <a
-          href="#"
-          onClick={(e) => e.preventDefault()}
+        <Link
+          href="/forgot-password"
           className="font-medium text-primary-600 transition-colors hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300"
         >
           Mot de passe oublié ?
-        </a>
+        </Link>
       </div>
 
       <Button type="submit" className="w-full" size="lg" isLoading={isLoading}>

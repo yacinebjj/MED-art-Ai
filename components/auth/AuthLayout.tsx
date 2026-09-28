@@ -23,16 +23,30 @@ import { tAuth } from "@/lib/translations/auth";
  * unreferenced, left alone — it's a user-provided asset, not one to delete
  * without being asked).
  */
+const TITLE_KEY_BY_VARIANT = {
+  login: "loginTitle",
+  register: "registerTitle",
+  "forgot-password": "forgotPasswordTitle",
+  "update-password": "updatePasswordTitle",
+} as const;
+
+const SUBTITLE_KEY_BY_VARIANT = {
+  login: "loginSubtitle",
+  register: "registerSubtitle",
+  "forgot-password": "forgotPasswordSubtitle",
+  "update-password": "updatePasswordSubtitle",
+} as const;
+
 export function AuthLayout({
   children,
   variant,
 }: {
   children: React.ReactNode;
-  variant: "login" | "register";
+  variant: "login" | "register" | "forgot-password" | "update-password";
 }) {
   const { language } = useLanguage();
-  const title = tAuth(variant === "login" ? "loginTitle" : "registerTitle", language);
-  const subtitle = tAuth(variant === "login" ? "loginSubtitle" : "registerSubtitle", language);
+  const title = tAuth(TITLE_KEY_BY_VARIANT[variant], language);
+  const subtitle = tAuth(SUBTITLE_KEY_BY_VARIANT[variant], language);
 
   return (
     // items-start on mobile, only centering vertically from sm: up — a
