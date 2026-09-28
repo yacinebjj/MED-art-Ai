@@ -24,22 +24,28 @@ const EXPLICATION_WORKING_MESSAGES: { fr: string; en: string }[] = [
 ];
 
 /**
- * Live per-part progress, when the caller has it. Purely additive: with no
+ * Live aggregate progress, when the caller has it. Purely additive: with no
  * `progress` prop this behaves exactly as before (rotating working
  * messages). It exists because a real production report — "the client did
  * NOT auto-retry, it just halted" — turned out to be unfalsifiable from the
  * UI: retries WERE structurally implemented, but nothing surfaced them, so
  * a part quietly retrying for minutes was indistinguishable from a frozen
- * app. Showing the part/attempt makes recovery visible instead of leaving
- * the student staring at an unchanging spinner.
+ * app. Showing progress makes recovery visible instead of leaving the
+ * student staring at an unchanging spinner.
+ *
+ * Aggregate, not per-part (unlike the single-part view this replaced): every
+ * missing part now generates CONCURRENTLY (see
+ * lib/studio-explication-client.ts's runGenerationInParts), so there is no
+ * longer one "current" part/attempt/sub-part to name — `isRecovering` is
+ * true whenever ANY of the parts currently in flight is on a retry or a
+ * post-timeout subdivision, not a single tracked one.
  */
 export interface ExplicationProgressView {
-  partIndex: number;
+  completedParts: number;
   totalParts: number;
-  attempt: number;
-  subPartIndex: number;
-  subPartCount: number;
+  inFlightParts: number;
   isRecovering: boolean;
+  phase: "generating" | "stitching";
 }
 
 export function ExplicationGeneratingLabel({ className, progress }: { className?: string; progress?: ExplicationProgressView | null }) {
@@ -53,21 +59,22 @@ export function ExplicationGeneratingLabel({ className, progress }: { className?
     return () => clearInterval(interval);
   }, []);
 
-  const partLabel = progress
-    ? language === "en"
-      ? `Part ${progress.partIndex + 1}/${progress.totalParts}`
-      : `Partie ${progress.partIndex + 1}/${progress.totalParts}`
-    : null;
+  const partLabel =
+    progress && progress.phase === "generating"
+      ? language === "en"
+        ? `${progress.completedParts}/${progress.totalParts} parts done — ${progress.inFlightParts} in progress`
+        : `${progress.completedParts}/${progress.totalParts} parties terminées — ${progress.inFlightParts} en cours`
+      : progress && progress.phase === "stitching"
+        ? language === "en"
+          ? "Smoothing transitions between parts..."
+          : "Fusion des transitions entre les parties..."
+        : null;
 
   const recoveryLabel =
-    progress && progress.isRecovering
-      ? progress.subPartCount > 1
-        ? language === "en"
-          ? `finer split ${progress.subPartIndex + 1}/${progress.subPartCount} — attempt ${progress.attempt}`
-          : `découpage plus fin ${progress.subPartIndex + 1}/${progress.subPartCount} — tentative ${progress.attempt}`
-        : language === "en"
-          ? `retrying — attempt ${progress.attempt}`
-          : `nouvelle tentative — essai ${progress.attempt}`
+    progress && progress.phase === "generating" && progress.isRecovering
+      ? language === "en"
+        ? "retrying one or more parts..."
+        : "nouvelle tentative sur une ou plusieurs parties..."
       : null;
 
   return (

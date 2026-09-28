@@ -171,6 +171,44 @@ Schéma exact :
 }`;
 }
 
+/**
+ * Repairs a single seam between two INDEPENDENTLY-generated Explication
+ * parts — needed because parts now generate fully CONCURRENTLY (see
+ * lib/studio-explication-client.ts's runGenerationInParts), so a part can no
+ * longer see what the immediately-preceding part actually wrote before it is
+ * itself generated. That removed the `previousPartTail` continuity signal
+ * that used to let a part judge "does the source below continue the same
+ * chapter, or start a new one" — a real, hard-won fix for a confirmed
+ * production bug ("chapters get mixed up, the topic changes completely").
+ * This is the safety net that replaces it: a small, cheap, AFTER-THE-FACT
+ * pass over just the boundary text (never the whole document) that detects
+ * and fixes a duplicated/restarted heading at exactly one seam.
+ *
+ * Deliberately narrow in scope: only ever touches the given `tail`/`head`
+ * excerpts themselves (the last/first ~1,500 chars of two adjacent parts —
+ * see SEAM_WINDOW_CHARS in lib/studio-explication-client.ts), never anything
+ * further into either part. Most seams (computeExplicationSlices already
+ * tries hard to cut on a real chapter/paragraph boundary) should hit exactly
+ * the no-op path this prompt asks for first — this is a correction pass, not
+ * a rewrite pass.
+ */
+export function buildExplicationSeamStitchPrompt(): string {
+  return `Tu reçois la FIN d'une partie d'un cours de médecine ("avant") et le DÉBUT de la partie suivante ("après"). Ces deux parties ont été rédigées INDÉPENDAMMENT par deux appels séparés à un modèle d'IA, à partir du même document source découpé en tranches — il est donc possible qu'un chapitre soit accidentellement redémarré (nouveau titre "## ..." pour un sujet déjà en cours) ou dupliqué à cette jonction précise.
+
+${JSON_ONLY_RULES}
+
+Ta seule mission : lis "avant" et "après" à la suite l'un de l'autre, comme si c'était un seul texte continu.
+- Si tout s'enchaîne déjà naturellement (pas de titre dupliqué, pas de sujet redémarré depuis le début), renvoie "avant" et "après" EXACTEMENT tels quels, caractère pour caractère, sans la moindre modification.
+- Si un chapitre est visiblement redémarré ou dupliqué, corrige UNIQUEMENT ce qui est nécessaire pour que la transition soit fluide (fusionner les deux titres en un seul, supprimer une phrase d'introduction redondante, etc.), en conservant tout le contenu médical réel des deux extraits — ne raccourcis jamais le contenu, ne résume rien, ne réécris que le strict minimum autour de la jonction.
+- Ne touche jamais au DÉBUT de "avant" ni à la FIN de "après" — seule la jonction, au milieu, peut changer.
+
+Schéma exact :
+{
+  "tail": "Le texte corrigé (ou inchangé) de 'avant'.",
+  "head": "Le texte corrigé (ou inchangé) de 'après'."
+}`;
+}
+
 export const RESUME_SYSTEM_PROMPT = `Tu es un professeur de médecine expert. Un étudiant te donne le contenu brut d'un cours. Génère le contenu du "Résumé" : 6 modes de révision (Smart Summary, Exam Summary, Cheat Sheet, Guideline Summary, Professor Notes, Astuces).
 
 ${JSON_ONLY_RULES}

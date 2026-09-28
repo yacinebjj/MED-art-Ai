@@ -19,7 +19,7 @@ import {
  * reliably survive Vercel's own real serverless duration ceiling, which can
  * be far tighter than this app's own `maxDuration` config).
  *
- * Three-step contract, in order:
+ * Four-step contract, in order:
  *  1. POST explication-start EXACTLY ONCE, never retried by this driver.
  *     Either resolves the whole generation immediately (cache hit /
  *     cross-university-delta — `needsFinalize: false`), or reserves quota
@@ -29,18 +29,30 @@ import {
  *     reserving 2-3x courseCap for one delivered generation. Never retrying
  *     this call, and only ever treating a reservation as real when this
  *     call explicitly confirms it, is what closes that.
- *  2. For each part: POST explication-part, which streams a heartbeat over
- *     one held-open connection for the whole real ~100-260+ second
- *     generation time (see that route's own header comment for the full,
+ *  2. Every part: POST explication-part, CONCURRENTLY — every missing
+ *     partIndex fired at once instead of one-at-a-time, bounded by
+ *     MAX_CONCURRENT_REQUESTS (see its own comment for why this isn't
+ *     unbounded) — see runGenerationInParts. Each streams a heartbeat over
+ *     one held-open connection for the whole real ~30-150+ second generation
+ *     time (see that route's own header comment for the full,
  *     three-architecture history behind why this — not a background-job/
  *     poll design — is the one actually proven reliable). Automatic retry
  *     on any clean, retryable failure — safe to retry freely because this
  *     route never touches quota (see its own header comment). Each retry
  *     only ever redoes the ONE part that failed, never the whole generation.
- *  3. POST explication-finalize once, only if step 1 returned
- *     `needsFinalize: true` — assembles + persists the collected parts.
+ *  3. Once every part has succeeded: POST explication-stitch, once per SEAM
+ *     between two adjacent parts, same bounded concurrency — see
+ *     stitchSeams. Product decision, explicitly accepting the trade-off this
+ *     creates (see stitchSeams' own comment): concurrent generation means a
+ *     part can no longer see the immediately-preceding part's actual text
+ *     while it's being written, so this is an after-the-fact repair pass
+ *     instead of the old in-flight `previousPartTail` continuity signal.
+ *     Best-effort — a failed stitch call never fails the whole generation,
+ *     it just leaves that one seam unrepaired.
+ *  4. POST explication-finalize once, only if step 1 returned
+ *     `needsFinalize: true` — assembles + persists the (stitched) parts.
  *
- * If the whole flow gives up (step 1 failed, or step 2/3 exhausted every
+ * If the whole flow gives up (step 1 failed, or step 2/4 exhausted every
  * retry), calls explication-abandon EXACTLY ONCE, but ONLY when step 1
  * explicitly confirmed `reserved: true` — never when step 1 itself failed
  * (nothing to refund) or was never reached (a pure network failure before
@@ -52,10 +64,12 @@ import {
  * — destroyed every part already generated and forced the next attempt to
  * start again from part 0, re-billing work that had already succeeded. Each
  * completed part is now checkpointed (see lib/studio-explication-resume.ts)
- * and a later run resumes from the first MISSING part. The checkpoint is
+ * and a later run resumes only the parts still missing. The checkpoint is
  * bound to explication-start's `sourceFingerprint`, so it is silently
  * discarded — never partially reused — if the course's source text, language
- * or custom prompt changed in the meantime.
+ * or custom prompt changed in the meantime. The checkpoint is SPARSE (an
+ * index can complete out of order now that generation is concurrent), unlike
+ * the old sequential-prefix shape — see that module's own v2 comment.
  *
  * Note this does NOT reuse the original quota reservation: a resumed run
  * calls explication-start again and so reserves again, exactly as a plain
@@ -73,16 +87,22 @@ export interface ExplicationGenerationResult {
   error?: string;
 }
 
+/**
+ * Aggregate progress across every part CURRENTLY in flight — replaces the
+ * old single-part view (partIndex/attempt/subPart...) now that parts
+ * generate concurrently instead of one at a time, so there is no longer one
+ * "current" part to describe. `isRecovering` is true whenever ANY in-flight
+ * part is on a retry or a post-timeout subdivision, so the UI can still show
+ * "je réessaie" instead of looking frozen.
+ */
 export interface ExplicationGenerationProgress {
-  partIndex: number; // 0-based, the part currently in flight
+  completedParts: number;
   totalParts: number;
-  attempt: number; // 1-based attempt number for THIS sub-part
-  /** 0-based index of the sub-piece in flight, when a part has been subdivided after a timeout (see generateOnePart). */
-  subPartIndex: number;
-  /** How many pieces this part is currently split into — 1 means "not subdivided". */
-  subPartCount: number;
-  /** True while this is a RETRY (attempt > 1) or a post-timeout subdivision — lets the UI say "je réessaie" instead of looking frozen. */
+  /** How many parts are actively generating right now (0 once every part has succeeded). */
+  inFlightParts: number;
   isRecovering: boolean;
+  /** "generating" while parts are being produced, "stitching" during the post-pass that repairs seams between independently-generated parts. */
+  phase: "generating" | "stitching";
 }
 
 const MAX_PART_ATTEMPTS = 3;
@@ -116,16 +136,17 @@ const MAX_SUBDIVISION = 8;
 function backoffDelayMs(attempt: number): number {
   return PART_RETRY_BASE_DELAY_MS * Math.pow(PART_RETRY_BACKOFF_FACTOR, attempt - 1);
 }
-// explication-start/-finalize are still plain, synchronous request/response
-// calls (fast — DB reads/writes only, no AI call) — each client-side
-// timeout is kept ABOVE its route's own `maxDuration` (explication-start=
-// 15s, explication-finalize=60s), same margin discipline as everywhere else
-// in this app: explication-start is never retried by this driver (see this
-// file's header comment), so if the client gave up BEFORE the server could
-// possibly finish, it would have no way to know whether a reservation
-// happened right as it stopped waiting.
+// explication-start/-finalize/-stitch are still plain, synchronous
+// request/response calls (fast — DB reads/writes only, or a tiny two-excerpt
+// AI call, never a fresh long-form generation) — each client-side timeout is
+// kept ABOVE its route's own `maxDuration`, same margin discipline as
+// everywhere else in this app: explication-start is never retried by this
+// driver (see this file's header comment), so if the client gave up BEFORE
+// the server could possibly finish, it would have no way to know whether a
+// reservation happened right as it stopped waiting.
 const START_FETCH_TIMEOUT_MS = 70_000;
 const FINALIZE_FETCH_TIMEOUT_MS = 70_000;
+const STITCH_FETCH_TIMEOUT_MS = 70_000;
 // explication-part streams heartbeats over one held-open connection for the
 // whole real generation time (see that route's own header comment for why
 // this — not a background-job/poll design — is the architecture actually
@@ -134,8 +155,71 @@ const FINALIZE_FETCH_TIMEOUT_MS = 70_000;
 // only way this client-side timeout fires first.
 const PART_FETCH_TIMEOUT_MS = 300_000;
 
+// How much of each side of a seam is shown to explication-stitch — long
+// enough to reliably include a full heading + its opening paragraph on
+// either side (what a duplicated/restarted chapter actually looks like),
+// short and cheap enough that firing one of these per seam, all concurrently,
+// is negligible next to the parts they stitch together. See
+// buildExplicationSeamStitchPrompt (lib/prompts/public-course-sections.ts)
+// for the full rationale on why this pass exists at all.
+const SEAM_WINDOW_CHARS = 1500;
+
+/**
+ * Concurrency ceiling for BOTH the part fan-out and the seam-stitch fan-out
+ * below — deliberately NOT "fire every part/seam at once" despite generation
+ * itself being fully concurrent now. Two independent reasons this cap exists,
+ * not one:
+ *
+ *  1. THIS APP'S OWN PER-USER RATE LIMIT. explication-part and
+ *     explication-stitch each enforce RATE_LIMITS.ai (20 requests/5min) PER
+ *     ROUTE PER USER (lib/rate-limit.ts). computeExplicationSlices runs on
+ *     the FULL raw_text, uncapped by MAX_SOURCE_CHARS (see
+ *     app/api/studio/generate/explication-start/route.ts) — a genuinely
+ *     large upload can produce well over 20 parts, so firing literally every
+ *     missing part at once could trip the student's OWN rate limit against
+ *     their OWN generation, which unbounded concurrency would make worse,
+ *     not better.
+ *  2. OpenRouter/DeepSeek's real per-account concurrency tolerance for a
+ *     sudden burst from ONE course has never been measured live (every call
+ *     site in this app was one-at-a-time until this pipeline). A bounded
+ *     pool is the conservative first real-world test of concurrent calls
+ *     from this account — raise this once that's confirmed safe in
+ *     production, per this codebase's standing "confirm it live, don't
+ *     assume" discipline (see lib/ai/openrouter.ts's own model-choice
+ *     comments for the same discipline applied elsewhere).
+ *
+ * A pool this size still gives close to the full speedup for the common
+ * case (totalParts ⩽ this constant generates in one wave, i.e. wall-clock ≈
+ * one part's generation time instead of totalParts × that time) and degrades
+ * gracefully — never catastrophically — for an unusually large course.
+ */
+const MAX_CONCURRENT_REQUESTS = 8;
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Runs `fn` over every item, at most `limit` in flight at once — a simple
+ * worker-pool, not a library dependency, since this is the only place in the
+ * app that needs bounded fan-out. Order-preserving in the RETURNED array
+ * (`results[i]` always corresponds to `items[i]`) even though completion
+ * order is not guaranteed, so callers can safely zip results back against
+ * their inputs.
+ */
+async function mapWithConcurrencyLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
 }
 
 async function postJson(
@@ -185,6 +269,10 @@ async function postJson(
  * 401 as a hard, permanent stop (the previous behavior) meant losing the
  * WHOLE multi-minute generation to a one-time, self-resolving race that a
  * single retry would have survived.
+ *
+ * This race is now MORE likely, not less, now that every part fires
+ * concurrently instead of one at a time — exactly the scenario this
+ * exception already exists for, just at higher odds.
  */
 function isRetryable(status: number): boolean {
   return status === 0 || status === 401 || status >= 500;
@@ -204,14 +292,13 @@ async function abandon(courseId: number): Promise<void> {
  * (https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API) —
  * added defensively after a real production report of "échec de génération"
  * on mobile specifically (not PC), for the exact same course pipeline. The
- * overall flow still spans several minutes to 10+ minutes for a multi-part
- * course while the student waits —
- * requesting a wake lock keeps the screen on for that duration, a cheap,
- * well-supported mitigation against a mobile browser throttling a
- * backgrounded tab if the student's screen locks mid-wait. Feature-detected
- * and best-effort throughout: a browser without support (or a user who
- * denies it) just gets no wake lock, never an error — this is a defensive
- * improvement, not a load-bearing requirement for correctness.
+ * overall flow still spans several minutes for a multi-part course while the
+ * student waits — requesting a wake lock keeps the screen on for that
+ * duration, a cheap, well-supported mitigation against a mobile browser
+ * throttling a backgrounded tab if the student's screen locks mid-wait.
+ * Feature-detected and best-effort throughout: a browser without support (or
+ * a user who denies it) just gets no wake lock, never an error — this is a
+ * defensive improvement, not a load-bearing requirement for correctness.
  */
 async function acquireWakeLock(): Promise<{ release: () => Promise<void> } | null> {
   try {
@@ -224,6 +311,13 @@ async function acquireWakeLock(): Promise<{ release: () => Promise<void> } | nul
 }
 
 type OnePartOutcome = { ok: true; markdown: string } | { ok: false; error: string };
+
+interface PartStatus {
+  attempt: number;
+  subPartIndex: number;
+  subPartCount: number;
+  isRecovering: boolean;
+}
 
 /**
  * Generates ONE part, with two distinct recovery strategies chosen by what
@@ -241,19 +335,26 @@ type OnePartOutcome = { ok: true; markdown: string } | { ok: false; error: strin
  *    token 401 race) IS retried identically, with exponential backoff —
  *    those genuinely are transient and the same request can succeed.
  *
- * Every attempt reports through onProgress with `isRecovering` set, so the
- * UI can show "je réessaie…" instead of sitting frozen for minutes. The
- * error returned on final give-up names how many attempts were actually
- * burned, so a future report can never again be ambiguous about whether
- * retries happened at all.
+ * Every attempt reports through onStatus, so the caller can aggregate a
+ * cross-part view for the UI ("je réessaie…" instead of a frozen spinner)
+ * instead of sitting frozen for minutes. The error returned on final give-up
+ * names how many attempts were actually burned, so a future report can never
+ * again be ambiguous about whether retries happened at all.
+ *
+ * Deliberately does NOT accept cross-part continuity context anymore (the
+ * old `previousPartTail` param) — parts now generate concurrently, so the
+ * immediately-preceding part's real text is not necessarily available yet
+ * when this one starts. See stitchSeams for what replaces that signal.
+ * Continuity WITHIN this part's own timeout-driven subdivision (a sub-piece
+ * still sees the previous sub-piece's real text) is unaffected — that
+ * sequencing is internal to one part and unrelated to cross-part ordering.
  */
 async function generateOnePart(
   courseId: number,
   partIndex: number,
   totalParts: number,
   extra: { language?: string; customPrompt?: string },
-  previousPartMarkdown: string | undefined,
-  onProgress?: (progress: ExplicationGenerationProgress) => void
+  onStatus?: (status: PartStatus) => void
 ): Promise<OnePartOutcome> {
   let subPartCount = 1;
   let lastError = "La génération a échoué.";
@@ -269,9 +370,7 @@ async function generateOnePart(
 
       for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !subSucceeded; attempt++) {
         totalAttempts++;
-        onProgress?.({
-          partIndex,
-          totalParts,
+        onStatus?.({
           attempt,
           subPartIndex,
           subPartCount,
@@ -284,12 +383,10 @@ async function generateOnePart(
         // failure surfaced to the student names concretely what happened,
         // instead of another guess from a bare "échec de génération".
         //
-        // previousPartTail — continuity context so a part doesn't restart a
-        // chapter mid-stream (fixes the real "chapters get mixed up" report).
-        // Within a subdivided part the previous SUB-piece is the truer
-        // immediate context; only the first piece falls back to the previous
-        // whole part.
-        const previousPartTail = collected.length > 0 ? collected[collected.length - 1] : previousPartMarkdown;
+        // previousPartTail — continuity context WITHIN this part's own
+        // subdivision only (the previous SUB-piece's real text). No longer
+        // carries cross-part context — see this function's own doc comment.
+        const previousPartTail = collected.length > 0 ? collected[collected.length - 1] : undefined;
         const outcome = await postJsonWithHeartbeat(
           "/api/studio/generate/explication-part",
           {
@@ -354,6 +451,57 @@ async function generateOnePart(
     subPartCount *= 2;
     await wait(backoffDelayMs(1));
   }
+}
+
+/**
+ * Post-generation repair pass — see buildExplicationSeamStitchPrompt's own
+ * doc comment (lib/prompts/public-course-sections.ts) for the full
+ * rationale. Fires one request PER SEAM (N-1 seams for N parts), bounded
+ * concurrently (see MAX_CONCURRENT_REQUESTS), each touching only the
+ * last/first SEAM_WINDOW_CHARS of two adjacent parts.
+ *
+ * Best-effort by design: a network failure, a timeout, or a malformed
+ * response on any one seam just leaves that seam's original (unstitched)
+ * text in place — it can never fail or retry-loop the overall generation,
+ * since the underlying content is already complete and valid, just possibly
+ * carrying an un-repaired duplicate/restarted heading at that one boundary.
+ *
+ * KNOWN, ACCEPTED EDGE CASE: if a part's own length is shorter than
+ * 2×SEAM_WINDOW_CHARS, the seam before it and the seam after it both see
+ * (and may both want to rewrite) overlapping — in the extreme, identical —
+ * spans of that same part. The two writes are applied independently and the
+ * later one wins outright for the overlapping span; a real but rare case
+ * (parts target 550-1800 words, i.e. comfortably longer than 2×1,500 chars
+ * in practice — see buildPartLengthBudget in lib/studio-explication-delta.ts)
+ * not worth the extra complexity of a proper merge for.
+ */
+async function stitchSeams(parts: string[]): Promise<string[]> {
+  if (parts.length < 2) return parts;
+
+  const seamIndices = parts.slice(0, -1).map((_, i) => i);
+  const fixes = await mapWithConcurrencyLimit(seamIndices, MAX_CONCURRENT_REQUESTS, async (seamIndex) => {
+    const tail = parts[seamIndex].slice(-SEAM_WINDOW_CHARS);
+    const head = parts[seamIndex + 1].slice(0, SEAM_WINDOW_CHARS);
+    try {
+      const outcome = await postJson("/api/studio/generate/explication-stitch", { tail, head }, STITCH_FETCH_TIMEOUT_MS);
+      if (!outcome.ok || outcome.data.success !== true) return null;
+      const fixedTail = typeof outcome.data.tail === "string" ? outcome.data.tail : null;
+      const fixedHead = typeof outcome.data.head === "string" ? outcome.data.head : null;
+      if (fixedTail === null || fixedHead === null) return null;
+      return { seamIndex, fixedTail, fixedHead };
+    } catch {
+      return null;
+    }
+  });
+
+  const stitched = [...parts];
+  for (const fix of fixes) {
+    if (!fix) continue;
+    const { seamIndex, fixedTail, fixedHead } = fix;
+    stitched[seamIndex] = stitched[seamIndex].slice(0, -SEAM_WINDOW_CHARS) + fixedTail;
+    stitched[seamIndex + 1] = fixedHead + stitched[seamIndex + 1].slice(SEAM_WINDOW_CHARS);
+  }
+  return stitched;
 }
 
 export async function generateExplicationInParts(
@@ -441,47 +589,91 @@ async function runGenerationInParts(
         }
       : null;
 
-  const parts: string[] = resume ? loadResumableParts(resume) : [];
+  // Sparse — see lib/studio-explication-resume.ts's v2 comment: an index can
+  // complete out of order now that every missing part fires concurrently.
+  const parts: (string | null)[] = resume ? loadResumableParts(resume) : new Array(totalParts).fill(null);
+  const missingIndices: number[] = [];
+  for (let i = 0; i < totalParts; i++) if (parts[i] === null) missingIndices.push(i);
 
-  // Starts at parts.length, so a resumed run regenerates only what is missing.
-  // When a previous run completed every part but died during finalize, this
-  // loop body simply never executes and the flow goes straight to finalize.
-  for (let partIndex = parts.length; partIndex < totalParts; partIndex++) {
-    const outcome = await generateOnePart(
-      courseId,
-      partIndex,
-      totalParts,
-      extra,
-      parts[parts.length - 1],
-      onProgress
-    );
+  if (missingIndices.length > 0) {
+    const completedFromResume = totalParts - missingIndices.length;
+    let completedCount = completedFromResume;
+    const activeStatusByPart = new Map<number, PartStatus>();
+    let firstFailure: string | null = null;
 
-    if (!outcome.ok) {
+    const emitProgress = () => {
+      onProgress?.({
+        completedParts: completedCount,
+        totalParts,
+        inFlightParts: activeStatusByPart.size,
+        isRecovering: [...activeStatusByPart.values()].some((s) => s.isRecovering),
+        phase: "generating",
+      });
+    };
+
+    // CONCURRENT (bounded — see MAX_CONCURRENT_REQUESTS' own comment) rather
+    // than sequential. See this file's header comment for the trade-off this
+    // creates (no more in-flight `previousPartTail` continuity between
+    // parts) and stitchSeams below for the repair pass that replaces it.
+    // A part's own failure does not cancel its siblings — every already
+    // in-flight part is left to finish (its work is real and already
+    // billed), and only once everything has settled does a real failure
+    // stop the generation, so nothing already-succeeded is ever discarded.
+    await mapWithConcurrencyLimit(missingIndices, MAX_CONCURRENT_REQUESTS, async (partIndex) => {
+      activeStatusByPart.set(partIndex, { attempt: 1, subPartIndex: 0, subPartCount: 1, isRecovering: false });
+      emitProgress();
+
+      const outcome = await generateOnePart(courseId, partIndex, totalParts, extra, (status) => {
+        activeStatusByPart.set(partIndex, status);
+        emitProgress();
+      });
+
+      activeStatusByPart.delete(partIndex);
+      if (outcome.ok) {
+        parts[partIndex] = outcome.markdown;
+        completedCount++;
+        // Checkpoint after every part, not once at the end — the whole
+        // point is to survive a process that never reaches the end.
+        if (resume) saveResumableParts(resume, parts);
+      } else {
+        firstFailure = firstFailure ?? outcome.error;
+      }
+      emitProgress();
+    });
+
+    if (firstFailure) {
       // Deliberately does NOT clear the checkpoint: everything generated so
       // far is exactly what makes the student's next attempt cheap, and it
       // stays valid as long as the course's source text does not change
       // (which the fingerprint independently enforces on read).
       await abandon(courseId);
-      return { success: false, error: outcome.error };
+      return { success: false, error: firstFailure };
     }
-    parts.push(outcome.markdown);
-    // Checkpoint after every part, not once at the end — the whole point is
-    // to survive a process that never reaches the end.
-    if (resume) saveResumableParts(resume, parts);
   }
 
-  // Every part succeeded via genuine fresh generation — assemble + persist.
-  // Retried on the same terms as a part (see isRetryable's own comment,
-  // 401 included) — this is the single most expensive point to lose the
-  // whole flow to a transient failure, since every part's real, billed
-  // generation work is already done; finalize is a pure DB write + a
-  // re-send of already-collected text, so retrying it is always safe
-  // (never re-runs any AI call, never re-reserves quota).
+  // Every part succeeded — every index is now a real string.
+  const finishedParts = parts as string[];
+
+  // Step 3 — repair the seams between independently-generated parts. See
+  // stitchSeams' own comment: best-effort, never fails the run.
+  onProgress?.({ completedParts: totalParts, totalParts, inFlightParts: 0, isRecovering: false, phase: "stitching" });
+  const stitchedParts = await stitchSeams(finishedParts);
+
+  // Assemble + persist. Retried on the same terms as a part (see
+  // isRetryable's own comment, 401 included) — this is the single most
+  // expensive point to lose the whole flow to a transient failure, since
+  // every part's real, billed generation work is already done; finalize is a
+  // pure DB write + a re-send of already-collected text, so retrying it is
+  // always safe (never re-runs any AI call, never re-reserves quota).
   try {
     let finalizeOutcome: { ok: boolean; status: number; data: Record<string, unknown> } | null = null;
     let finalizeError = "La finalisation a échoué.";
     for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS; attempt++) {
-      finalizeOutcome = await postJson("/api/studio/generate/explication-finalize", { courseId, parts, ...extra }, FINALIZE_FETCH_TIMEOUT_MS);
+      finalizeOutcome = await postJson(
+        "/api/studio/generate/explication-finalize",
+        { courseId, parts: stitchedParts, ...extra },
+        FINALIZE_FETCH_TIMEOUT_MS
+      );
       if (finalizeOutcome.ok && finalizeOutcome.data.success === true) break;
       finalizeError = typeof finalizeOutcome.data.error === "string" ? finalizeOutcome.data.error : `Erreur ${finalizeOutcome.status}.`;
       if (isRetryable(finalizeOutcome.status) && attempt < MAX_PART_ATTEMPTS) {
