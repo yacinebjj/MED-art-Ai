@@ -44,6 +44,7 @@ import { MobileWorkspaceTabBar, type MobileWorkspaceTab } from "@/components/cou
 import { MobileStudioCards } from "@/components/course/workspace/MobileStudioCards";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useCourseChat } from "@/hooks/useCourseChat";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { MAX_LEITNER_BOX } from "@/lib/srs";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
 import { DEMO_SECTIONS, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
@@ -619,6 +620,23 @@ export default function ModuleWorkspacePage() {
   // sitting in the DOM (and vice versa on desktop).
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const [mobileTab, setMobileTab] = useState<MobileWorkspaceTab>("chat");
+
+  // Mobile keyboard handling for the Chat tab — same two-part fix already
+  // proven on app/dashboard/(shell)/assistant/page.tsx (this page renders its
+  // own standalone shell instead of the dashboard (shell) layout, so it never
+  // got either half of that fix "for free"):
+  //  1. useKeyboardInset() — iOS Safari doesn't shrink `h-dvh` for the
+  //     on-screen keyboard at all, so without this the keyboard simply
+  //     overlaid the bottom of the page with nothing reflowing underneath it.
+  //     Applied as bottom padding on the mobile column below (see its own
+  //     comment for why padding, not a replacement height).
+  //  2. isMobileChatInputFocused — hides MobileWorkspaceTabBar the instant
+  //     the composer is focused (mirroring MobileBottomNav's identical
+  //     focus-driven hide in the shell layout), so the tab bar never sits
+  //     uselessly underneath the keyboard and the composer gets the reclaimed
+  //     space instead.
+  const keyboardInset = useKeyboardInset();
+  const [isMobileChatInputFocused, setIsMobileChatInputFocused] = useState(false);
 
   const chatPanelRef = useRef<ChatDocumentPanelHandle>(null);
   const [isSplitScreen, setIsSplitScreen] = useState(false);
@@ -1481,6 +1499,7 @@ export default function ModuleWorkspacePage() {
       onClearHistory={clearMessages}
       onAskSelection={handleAskSelection}
       onTranslateSelection={handleTranslateSelection}
+      onInputFocusChange={setIsMobileChatInputFocused}
       pendingThinkingLabel={null}
       isSplitScreen={false}
       onToggleSplitScreen={() => {}}
@@ -1714,7 +1733,10 @@ export default function ModuleWorkspacePage() {
           large-card treatment (MobileStudioCards) instead of duplicating the
           markdown/GastriteXXXStudio rendering logic a second time. */}
       {!isDesktop && (
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div
+          className="flex flex-1 flex-col overflow-hidden transition-[padding-bottom] duration-200 ease-out"
+          style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
+        >
           <div className={cn(panelShellClasses, "m-2 flex-1")}>
             {mobileTab === "sources" && (
               <ModuleSourcesPanel
@@ -1748,7 +1770,13 @@ export default function ModuleWorkspacePage() {
               ))}
           </div>
 
-          <MobileWorkspaceTabBar active={mobileTab} onChange={handleMobileTabChange} />
+          {/* Hidden while the chat composer is focused — see
+              isMobileChatInputFocused's own comment above: keeps this tab bar
+              from sitting uselessly underneath the on-screen keyboard, and
+              hands the reclaimed space to the composer instead. */}
+          {!(mobileTab === "chat" && isMobileChatInputFocused) && (
+            <MobileWorkspaceTabBar active={mobileTab} onChange={handleMobileTabChange} />
+          )}
         </div>
       )}
 

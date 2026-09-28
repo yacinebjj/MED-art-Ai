@@ -2,14 +2,35 @@ import type { Components } from "react-markdown";
 import { CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Medium-article treatment (product ask: AI-generated long-form content —
+ * Explication, Exemples & Analogies, chat replies — read as "one big ass
+ * article" that overwhelms students, especially on a phone). Two structural
+ * changes from the previous "flashy gradient hero text, full-bleed width"
+ * look, on top of the same sans-serif (Inter, via `font-sans` — never
+ * inherited by accident, stated explicitly here) this app already uses
+ * everywhere:
+ *  1. A real reading measure: `max-w-none` on mobile (a narrow phone screen
+ *     already IS a comfortable line length, no constraint needed) but capped
+ *     to ~75 characters/line from `md:` up — the previous `max-w-none` at
+ *     every breakpoint let a line stretch the FULL width of a wide desktop
+ *     Studio panel, which is the single biggest reason dense prose reads as
+ *     an intimidating wall of text rather than a real article.
+ *  2. Formal, SMALL, single-color titles instead of a large rainbow
+ *     gradient-clipped h1/h2 — h2 additionally gets a left accent bar + a
+ *     top rule + real top margin, so every new "## Chapitre" reads as a
+ *     genuine new section a student can visually latch onto while
+ *     scrolling/skimming, not just another paragraph in an undifferentiated
+ *     scroll.
+ */
 export const PROSE_CLASSES = [
-  "prose prose-slate prose-lg md:prose-xl max-w-none",
-  "prose-headings:font-bold prose-headings:tracking-tight",
-  "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-600 prose-h1:to-emerald-600",
-  "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-600 prose-h2:to-emerald-600",
-  "prose-h3:text-indigo-600",
+  "prose prose-slate font-sans prose-lg md:prose-xl max-w-none md:max-w-[75ch] md:mx-auto",
+  "prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-slate-900",
+  "prose-h1:text-2xl prose-h1:font-bold prose-h1:pb-4 prose-h1:mb-8 prose-h1:border-b prose-h1:border-b-slate-200",
+  "prose-h2:text-xl prose-h2:mt-14 prose-h2:border-t prose-h2:border-t-slate-200 prose-h2:pt-8 prose-h2:pl-4 prose-h2:border-l-4 prose-h2:border-l-emerald-500",
+  "prose-h3:text-lg prose-h3:text-indigo-600 prose-h3:mt-8",
   "prose-a:text-blue-600",
-  "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
+  "prose-p:leading-[1.85] prose-li:leading-[1.85] prose-p:my-5",
   "prose-ul:list-none prose-ul:pl-0 prose-ol:list-none prose-ol:pl-0",
   "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",
   "prose-th:bg-blue-600 prose-th:text-white prose-th:font-semibold prose-th:p-3 prose-th:text-left",
@@ -19,12 +40,12 @@ export const PROSE_CLASSES = [
 ].join(" ");
 
 export const DARK_PROSE_CLASSES = [
-  "prose prose-invert prose-lg md:prose-xl max-w-none",
-  "prose-headings:font-bold prose-headings:tracking-wide",
-  "prose-p:leading-relaxed prose-li:leading-relaxed prose-p:my-6",
-  "prose-h1:bg-clip-text prose-h1:text-transparent prose-h1:bg-gradient-to-r prose-h1:from-cyan-400 prose-h1:to-emerald-400",
-  "prose-h2:bg-clip-text prose-h2:text-transparent prose-h2:bg-gradient-to-r prose-h2:from-cyan-400 prose-h2:to-emerald-400",
-  "prose-h3:text-cyan-300",
+  "prose prose-invert font-sans prose-lg md:prose-xl max-w-none md:max-w-[75ch] md:mx-auto",
+  "prose-headings:font-semibold prose-headings:tracking-tight",
+  "prose-p:leading-[1.85] prose-li:leading-[1.85] prose-p:my-5",
+  "prose-h1:text-2xl prose-h1:font-bold prose-h1:pb-4 prose-h1:mb-8 prose-h1:border-b prose-h1:border-b-white/10",
+  "prose-h2:text-xl prose-h2:mt-14 prose-h2:border-t prose-h2:border-t-white/10 prose-h2:pt-8 prose-h2:pl-4 prose-h2:border-l-4 prose-h2:border-l-emerald-400",
+  "prose-h3:text-lg prose-h3:text-cyan-300 prose-h3:mt-8",
   "prose-a:text-cyan-400",
   "prose-ul:list-none prose-ul:pl-0 prose-ol:list-none prose-ol:pl-0",
   "[&_blockquote_p]:before:content-none [&_blockquote_p]:after:content-none",

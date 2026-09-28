@@ -83,6 +83,8 @@ interface ChatDocumentPanelProps {
   courseSlug?: string;
   /** Length (characters) of the active course's raw source text, if the caller has it client-side. The server hard-truncates context at CHAT_MAX_CONTEXT_CHARS with zero indication to the student (see app/api/courses/chat/route.ts) — when this is provided and exceeds that cap, a banner surfaces that truncation instead of leaving it silent. Optional: omitted by callers without a cheap client-side source length (e.g. the legacy demo pipeline, which never loads the full raw text into the browser). */
   sourceTextLength?: number;
+  /** Fires on the composer input's own focus/blur — lets the mobile caller hide its bottom tab bar and reserve keyboard clearance exactly while this panel's own input is what's focused (see app/dashboard/module/[id]/page.tsx's isMobileChatInputFocused), the same mechanism app/dashboard/(shell)/layout.tsx already uses for MobileBottomNav, just scoped to this one input instead of a global focusin/focusout listener since this panel already owns the ref. Optional: omitted by callers with no such chrome to hide (desktop). */
+  onInputFocusChange?: (focused: boolean) => void;
 }
 
 /**
@@ -120,6 +122,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     courseTitle,
     courseSlug,
     sourceTextLength,
+    onInputFocusChange,
   },
   ref
 ) {
@@ -407,6 +410,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             ref={inputRef}
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
+            onFocus={() => onInputFocusChange?.(true)}
+            onBlur={() => onInputFocusChange?.(false)}
             placeholder="Type..."
             className="flex-1 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />

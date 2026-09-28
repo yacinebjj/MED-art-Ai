@@ -426,6 +426,21 @@
 .prose,
 [data-selectable] {
   -webkit-touch-callout: default;
+  /* Explicit, not relying on the initial/inherited value — a real reported
+     symptom this addresses: single-WORD selection (the tap/double-tap
+     gesture, as opposed to a click-drag range) failing on mobile specifically.
+     `user-select` was never set to `none` anywhere (see the comment above),
+     so this shouldn't be strictly necessary per spec — but several mobile
+     WebKit/Chromium builds are documented to behave inconsistently for the
+     single-word-select gesture when a container only ever relies on the
+     inherited default rather than declaring `text` explicitly on the actual
+     reading surface. Costs nothing on browsers where it was already a no-op,
+     and directly targets the one gesture still reported broken after the
+     touch-callout fix above. Both prefixes: `-webkit-user-select` is what
+     older iOS Safari actually reads; unprefixed `user-select` covers
+     everything current. */
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 @media print {
