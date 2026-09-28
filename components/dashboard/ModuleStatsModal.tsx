@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { AlertTriangle, BarChart3, CircleCheck, Sparkles, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,18 +59,36 @@ function StatBar({ pct, tone }: { pct: number; tone: "primary" | "amber" | "mute
  * insight line computed purely from the real per-course numbers already in
  * hand — never a new call, never a guess) layered over the exact same data
  * contract as before.
+ *
+ * Also doubles as a Teaching Unit's "Voir statistiques" (a UE groups several
+ * modules, not courses directly) — `moduleIds` fetches
+ * /api/studio/courses/stats once per id (that route only ever accepted a
+ * single moduleId; no backend change needed to aggregate) and merges the
+ * results client-side, recomputing `needsReview` over the combined course
+ * list so it reads exactly as if it came from one bigger module. The
+ * original single-module call sites are untouched: `moduleId` alone still
+ * works, internally normalized to a one-element list.
  */
 export function ModuleStatsModal({
   open,
   onOpenChange,
   moduleTitle,
   moduleId,
+  moduleIds,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   moduleTitle: string;
-  moduleId: number;
+  moduleId?: number;
+  moduleIds?: number[];
 }) {
+  const ids = useMemo(
+    () => moduleIds ?? (moduleId !== undefined ? [moduleId] : []),
+    [moduleIds, moduleId]
+  );
+  const isAggregate = ids.length > 1;
+  const cacheKey = ids.slice().sort((a, b) => a - b).join(",");
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ModuleStatsResponse | null>(null);
   // Distinct from `data === null && !loading` (genuinely 0 courses) — a
@@ -78,15 +96,16 @@ export function ModuleStatsModal({
   // state, silently telling a student they have no data when the request
   // actually failed. Found during a security audit.
   const [loadError, setLoadError] = useState(false);
-  // Keyed by moduleId — re-opening this same module's stats within the page
-  // visit (e.g. closing then reopening the dropdown) is then instant.
-  const cacheRef = useRef<Map<number, ModuleStatsResponse>>(new Map());
+  // Keyed by the sorted, comma-joined id list — re-opening the same
+  // module/unit's stats within the page visit (e.g. closing then reopening
+  // the dropdown) is then instant.
+  const cacheRef = useRef<Map<string, ModuleStatsResponse>>(new Map());
   const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || ids.length === 0) return;
 
-    const cached = cacheRef.current.get(moduleId);
+    const cached = cacheRef.current.get(cacheKey);
     if (cached) {
       setData(cached);
       setLoading(false);
@@ -99,16 +118,31 @@ export function ModuleStatsModal({
     setData(null);
     setLoadError(false);
 
-    fetch(`/api/studio/courses/stats?moduleId=${moduleId}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((body: ModuleStatsResponse) => {
+    Promise.all(
+      ids.map((id) =>
+        fetch(`/api/studio/courses/stats?moduleId=${id}`).then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json() as Promise<ModuleStatsResponse>;
+        })
+      )
+    )
+      .then((bodies) => {
         if (cancelled) return;
-        if (!body.success) throw new Error("La réponse indique un échec.");
-        cacheRef.current.set(moduleId, body);
-        setData(body);
+        if (bodies.some((body) => !body.success)) throw new Error("La réponse indique un échec.");
+
+        const courses = bodies.flatMap((body) => body.courses);
+        // Recomputed over the MERGED list (not concatenated per-module
+        // needsReview) so the ordering/threshold logic is identical to a
+        // real single bigger module — mirrors
+        // app/api/studio/courses/stats/route.ts's own needsReview logic
+        // exactly.
+        const needsReview = courses
+          .filter((c) => c.progressPct < 50 || (c.qcmSuccessPct !== undefined && c.qcmSuccessPct < 50))
+          .sort((a, b) => (a.qcmSuccessPct ?? a.progressPct) - (b.qcmSuccessPct ?? b.progressPct));
+
+        const merged: ModuleStatsResponse = { success: true, courseCount: courses.length, courses, needsReview };
+        cacheRef.current.set(cacheKey, merged);
+        setData(merged);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -122,7 +156,7 @@ export function ModuleStatsModal({
     return () => {
       cancelled = true;
     };
-  }, [open, moduleId, retryToken]);
+  }, [open, cacheKey, retryToken]);
 
   // Every number below is derived straight from `data.courses` — no new
   // fetch, no fabricated fallback. `coursesWithMastery` only ever includes
@@ -162,7 +196,9 @@ export function ModuleStatsModal({
         <DialogHeader className="relative">
           <div className="mb-1 flex items-center gap-2 text-primary-600 dark:text-primary-400">
             <TrendingUp className="h-4 w-4" />
-            <p className="text-xs font-bold uppercase tracking-wider">Statistiques du module</p>
+            <p className="text-xs font-bold uppercase tracking-wider">
+              {isAggregate ? "Statistiques de l'unité" : "Statistiques du module"}
+            </p>
           </div>
           <DialogTitle className="line-clamp-2">{moduleTitle}</DialogTitle>
         </DialogHeader>
@@ -180,7 +216,9 @@ export function ModuleStatsModal({
             <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
               <BarChart3 className="h-8 w-8 text-muted-foreground/50" />
             </motion.div>
-            <p className="max-w-[220px] text-sm text-muted-foreground">Aucun cours ajouté dans ce module pour l'instant.</p>
+            <p className="max-w-[220px] text-sm text-muted-foreground">
+              {isAggregate ? "Aucun cours ajouté dans cette unité pour l'instant." : "Aucun cours ajouté dans ce module pour l'instant."}
+            </p>
           </div>
         ) : (
           <div className="relative space-y-6">

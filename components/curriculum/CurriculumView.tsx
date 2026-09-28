@@ -17,6 +17,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import { ModuleStatsModal } from "@/components/dashboard/ModuleStatsModal";
@@ -263,13 +266,28 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
   unit,
   expanded,
   onToggle,
+  activeFlashcardModuleIds,
+  onToggleFlashcardsBulk,
+  activeWeaknessModuleIds,
+  onToggleWeaknessesBulk,
 }: {
   unit: TeachingUnitWithModules;
   expanded: boolean;
   onToggle: () => void;
+  activeFlashcardModuleIds: Set<number>;
+  onToggleFlashcardsBulk: (moduleIds: number[], nextActive: boolean) => void;
+  activeWeaknessModuleIds: Set<number>;
+  onToggleWeaknessesBulk: (moduleIds: number[], nextActive: boolean) => void;
 }) {
   const { language } = useLanguage();
   const illustration = getCartoonIllustration(unit.title);
+  const [statsOpen, setStatsOpen] = useState(false);
+
+  const moduleIds = unit.modules.map((mod) => mod.id);
+  const flashcardsAllActive = moduleIds.length > 0 && moduleIds.every((id) => activeFlashcardModuleIds.has(id));
+  const flashcardsAnyActive = moduleIds.some((id) => activeFlashcardModuleIds.has(id));
+  const weaknessesAllActive = moduleIds.length > 0 && moduleIds.every((id) => activeWeaknessModuleIds.has(id));
+  const weaknessesAnyActive = moduleIds.some((id) => activeWeaknessModuleIds.has(id));
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter" || e.key === " ") {
@@ -280,16 +298,93 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
 
   return (
     // A <div role="button"> rather than a real <button> — it contains its
-    // own nested, independently-clickable <button> pills once expanded, and
-    // a <button> can never legally contain another <button>.
+    // own nested, independently-clickable <button> pills once expanded (plus
+    // the ⋮ options menu below), and a <button> can never legally contain
+    // another <button>.
     <div role="button" tabIndex={0} onClick={onToggle} onKeyDown={handleKeyDown} className={BENTO_CARD_WRAPPER_CLASSES}>
       <div className={BENTO_CARD_CLASSES}>
-      <ChevronDown
-        className={cn(
-          "absolute right-3 top-3 h-4 w-4 text-muted-foreground transition-transform duration-300 sm:right-4 sm:top-4 sm:h-5 sm:w-5",
-          expanded && "rotate-180"
-        )}
-      />
+      {/* ⋮ options menu — same actions as <IndependentModuleCard>'s own menu
+          above, applied across every module in this Teaching Unit at once
+          (see handleToggleFlashcardsBulk/handleToggleWeaknessesBulk's own
+          comments for why that's safe with zero backend changes). Résumé/
+          examen generation stays genuinely per-module server-side (courses
+          are scoped to one curriculum_module_id, not a whole UE), so those
+          two open a submenu to pick which of the unit's modules to generate
+          for, instead of silently guessing one. */}
+      <div className="absolute right-2 top-2 z-10 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-slate-500 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-700 dark:bg-slate-800/80 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-100"
+            aria-label="Options de l'unité"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
+              <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              Voir statistiques
+            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <BookOpenText className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                Générer un résumé
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {unit.modules.map((mod) => (
+                  <DropdownMenuItem key={mod.id} asChild>
+                    <Link href={`/dashboard/workspace/module/${mod.id}`}>{translateCurriculumName(mod.title, language)}</Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <FileQuestion className="h-4 w-4 text-primary-600 dark:text-primary-400" />
+                Générer un examen
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {unit.modules.map((mod) => (
+                  <DropdownMenuItem key={mod.id} asChild>
+                    <Link href={`/dashboard/module/${mod.id}/exam`}>{translateCurriculumName(mod.title, language)}</Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem onSelect={() => onToggleFlashcardsBulk(moduleIds, !flashcardsAllActive)}>
+              <Brain className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+              {flashcardsAllActive ? "Désactiver les Flashcards" : "Activer les Flashcards"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onToggleWeaknessesBulk(moduleIds, !weaknessesAllActive)}>
+              <Target className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+              {weaknessesAllActive ? tDiscovery("disableWeaknesses", language) : tDiscovery("enableWeaknesses", language)}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-300 sm:h-5 sm:w-5",
+            expanded && "rotate-180"
+          )}
+        />
+      </div>
+
+      {(flashcardsAnyActive || weaknessesAnyActive) && (
+        <div className="absolute left-2 top-2 z-10 flex flex-col items-start gap-1">
+          {flashcardsAnyActive && (
+            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700 shadow-sm dark:bg-violet-900/50 dark:text-violet-300">
+              <Brain className="h-3 w-3" />
+              Flashcards actives
+            </span>
+          )}
+          {weaknessesAnyActive && (
+            <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700 shadow-sm dark:bg-rose-900/50 dark:text-rose-300">
+              <Target className="h-3 w-3" />
+              Points faibles actifs
+            </span>
+          )}
+        </div>
+      )}
 
       {/* TODO: Remplacer le bloc div ci-dessous par
           <img src={`/illustrations/unit-${unit.id}.png`} className="w-24 h-24 object-contain mb-4" alt={unit.title} />
@@ -317,6 +412,10 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div onClick={(e) => e.stopPropagation()}>
+        <ModuleStatsModal open={statsOpen} onOpenChange={setStatsOpen} moduleTitle={unit.title} moduleIds={moduleIds} />
+      </div>
       </div>
     </div>
   );
@@ -424,6 +523,52 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
     }
   }
 
+  /**
+   * A Teaching Unit's "Activer/Désactiver les Flashcards" — applies the same
+   * per-module PATCH as handleToggleFlashcards above, to every module in the
+   * unit at once. No backend change needed: activation is already additive
+   * per-module (profiles.flashcard_active_module_ids, an array — see
+   * app/api/modules/[id]/flashcards/route.ts), so "activate this whole UE"
+   * is genuinely just "activate each of its modules". Promise.allSettled so
+   * one module's failed PATCH doesn't block the others from succeeding;
+   * only the ones that actually failed get reverted, with a toast naming
+   * how many.
+   */
+  async function handleToggleFlashcardsBulk(moduleIds: number[], nextActive: boolean) {
+    setActiveFlashcardModuleIds((prev) => {
+      const next = new Set(prev);
+      moduleIds.forEach((id) => (nextActive ? next.add(id) : next.delete(id)));
+      return next;
+    });
+
+    const results = await Promise.allSettled(
+      moduleIds.map((id) =>
+        fetch(`/api/modules/${id}/flashcards`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ active: nextActive }),
+        }).then(async (res) => {
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || !body?.success) throw new Error(body?.error ?? "Erreur inconnue.");
+        })
+      )
+    );
+
+    const failedIds = moduleIds.filter((_, i) => results[i].status === "rejected");
+    if (failedIds.length > 0) {
+      setActiveFlashcardModuleIds((prev) => {
+        const reverted = new Set(prev);
+        failedIds.forEach((id) => (nextActive ? reverted.delete(id) : reverted.add(id)));
+        return reverted;
+      });
+      toast({
+        variant: "error",
+        title: tDiscovery("updateFailed", language),
+        description: `${failedIds.length}/${moduleIds.length} module(s) non mis à jour.`,
+      });
+    }
+  }
+
   /** Mirrors handleToggleFlashcards exactly, for the "points faibles" toggle. */
   async function handleToggleWeaknesses(moduleId: number, nextActive: boolean) {
     setActiveWeaknessModuleIds((prev) => {
@@ -456,6 +601,42 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
     }
   }
 
+  /** Mirrors handleToggleFlashcardsBulk exactly, for the "points faibles" toggle. */
+  async function handleToggleWeaknessesBulk(moduleIds: number[], nextActive: boolean) {
+    setActiveWeaknessModuleIds((prev) => {
+      const next = new Set(prev);
+      moduleIds.forEach((id) => (nextActive ? next.add(id) : next.delete(id)));
+      return next;
+    });
+
+    const results = await Promise.allSettled(
+      moduleIds.map((id) =>
+        fetch(`/api/modules/${id}/weaknesses`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ active: nextActive }),
+        }).then(async (res) => {
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || !body?.success) throw new Error(body?.error ?? "Erreur inconnue.");
+        })
+      )
+    );
+
+    const failedIds = moduleIds.filter((_, i) => results[i].status === "rejected");
+    if (failedIds.length > 0) {
+      setActiveWeaknessModuleIds((prev) => {
+        const reverted = new Set(prev);
+        failedIds.forEach((id) => (nextActive ? reverted.delete(id) : reverted.add(id)));
+        return reverted;
+      });
+      toast({
+        variant: "error",
+        title: tDiscovery("updateFailed", language),
+        description: `${failedIds.length}/${moduleIds.length} module(s) non mis à jour.`,
+      });
+    }
+  }
+
   return (
     <div className="space-y-10">
       {hasTeachingUnits && (
@@ -470,6 +651,10 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
                   unit={unit}
                   expanded={expandedUnitId === unit.id}
                   onToggle={() => setExpandedUnitId((prev) => (prev === unit.id ? null : unit.id))}
+                  activeFlashcardModuleIds={activeFlashcardModuleIds}
+                  onToggleFlashcardsBulk={handleToggleFlashcardsBulk}
+                  activeWeaknessModuleIds={activeWeaknessModuleIds}
+                  onToggleWeaknessesBulk={handleToggleWeaknessesBulk}
                 />
               </motion.div>
             ))}

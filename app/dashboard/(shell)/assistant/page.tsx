@@ -609,6 +609,38 @@ function toHistoryTurns(msgs: ChatMessage[]): HistoryTurn[] {
 // image message a student sent BEFORE this switch, still sitting in their
 // saved conversation history.
 
+/**
+ * getUserMedia rejects with a DOMException whose `.name` is one of a fixed
+ * set of spec'd values — but `.message` is NOT standardized across browsers:
+ * Firefox's generic text for NotFoundError is the terse, English "The object
+ * can not be found here.", which a student saw verbatim in a French UI with
+ * no idea what it meant. Branching on `.name` (stable across browsers, unlike
+ * `.message`) gives an actually actionable, translated reason instead of
+ * whatever string a given browser happens to use internally.
+ */
+function describeMicError(error: unknown): string {
+  if (error instanceof DOMException) {
+    switch (error.name) {
+      case "NotFoundError":
+      case "DevicesNotFoundError":
+        return "Aucun microphone détecté sur cet appareil. Vérifie qu'un micro est branché et sélectionné comme périphérique par défaut.";
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+      case "SecurityError":
+        return "Accès au micro refusé. Autorise le micro pour ce site dans les réglages de ton navigateur, puis réessaie.";
+      case "NotReadableError":
+      case "TrackStartError":
+        return "Le micro est déjà utilisé par une autre application. Ferme-la puis réessaie.";
+      case "OverconstrainedError":
+      case "ConstraintNotSatisfiedError":
+        return "Le microphone détecté ne convient pas. Réessaie avec un autre micro si possible.";
+      default:
+        break;
+    }
+  }
+  return error instanceof Error ? error.message : "Autorise l'accès au micro pour dicter ta question.";
+}
+
 export default function AssistantPage() {
   const { isDesktopSidebarOpen, toggleDesktopSidebar } = useSidebarState();
   const { language } = useLanguage();
@@ -1084,7 +1116,7 @@ export default function AssistantPage() {
       toast({
         variant: "error",
         title: "Micro inaccessible",
-        description: error instanceof Error ? error.message : "Autorise l'accès au micro pour dicter ta question.",
+        description: describeMicError(error),
       });
     }
   }
