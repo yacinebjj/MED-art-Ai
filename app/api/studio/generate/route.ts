@@ -412,7 +412,23 @@ export async function POST(request: NextRequest) {
       // gets the identical cap.
       const reasoningOption = { effort: "low" } as const;
 
-      const MAX_GENERIC_ATTEMPTS = 2;
+      // RAISED 2 -> 3 after a real, reported production symptom: an
+      // occasional "ne respecte pas le schéma attendu" failure on Résumé
+      // specifically, which then generated CLEANLY the very next time the
+      // student manually retried (a brand new, independent call). That
+      // pattern — fails once or twice in a row, then a fresh attempt
+      // succeeds — points at stochastic model variance, not a systematic
+      // token-budget or prompt problem: StudioResumeSchema requires EVERY
+      // one of its 6 modes to carry every structural field (hero, sections,
+      // ddx_table, pieges, cards, steps, quotes, perles, items — see
+      // lib/ai/studio-schemas.ts), even the placeholder-empty ones a given
+      // mode doesn't conceptually use, which is a lot of required surface
+      // area for the model to occasionally drop one field on. The existing
+      // corrective re-prompt (feeding Zod's exact fieldErrors back to the
+      // model) already works — it just didn't get enough chances before
+      // this route gave up and surfaced a failure the student's own next
+      // click would have resolved anyway.
+      const MAX_GENERIC_ATTEMPTS = 3;
       let correctiveNote: string | null = null;
       let succeeded = false;
 
@@ -453,7 +469,7 @@ export async function POST(request: NextRequest) {
         if (attempt === MAX_GENERIC_ATTEMPTS) {
           await refundGeneration(user.id);
           return NextResponse.json(
-            { success: false, error: `La réponse de l'IA pour "${actionType}" ne respecte pas le schéma attendu, même après une nouvelle tentative.` },
+            { success: false, error: `La réponse de l'IA pour "${actionType}" ne respecte pas le schéma attendu, même après ${MAX_GENERIC_ATTEMPTS - 1} nouvelles tentatives.` },
             { status: 502 }
           );
         }
