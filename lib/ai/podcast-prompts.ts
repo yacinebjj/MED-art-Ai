@@ -1,13 +1,25 @@
 /**
- * Studio "Podcast Audio" tab — a single ~5-6 min narrated episode (SHRUNK
- * from an original ~10-15 min target after a real production incident: the
- * longer script pushed the full script+narration+encode+upload pipeline
- * past this route's platform-enforced time budget often enough that the
- * episode simply never completed — see app/api/studio/podcast/route.ts's
- * own maxDuration comment for the full mechanism, and AUDIO_MAX_TOKENS'
- * comment there for the matching token-budget cut), openai/gpt-audio-mini
- * via OpenRouter (see app/api/studio/podcast/route.ts and
- * lib/ai/openrouter.ts's generateOpenRouterAudio). Same two-stage shape
+ * Studio "Podcast Audio" tab — a single ~9-10 min narrated episode. RAISED
+ * from a ~5-6 min target (SHRUNK, in turn, from an original ~10-15 min
+ * target after a real production incident: that longer script pushed the
+ * full script+narration+encode+upload pipeline past this route's
+ * platform-enforced time budget often enough that the episode simply never
+ * completed — see app/api/studio/podcast/route.ts's own maxDuration comment
+ * for the full mechanism). Product feedback on the 5-6 min cut: too short to
+ * feel like a real study session, and it forced the script into recap-only
+ * mode rather than genuinely teaching anything. ~9-10 min was chosen
+ * specifically because it sits comfortably BELOW the ~15 min point that
+ * actually failed (a ~15 min episode's narration alone, at this model's
+ * calibrated ~20 audio-tokens/second output rate and ~3.7x-faster-than-
+ * real-time generation speed, needs ≈243s of generation time against a
+ * 270s per-call timeout and a 300s route-wide platform ceiling — almost no
+ * margin left for the script call, mp3 encode, and upload that also share
+ * that budget; ~10 min's narration needs only ≈162s, leaving real margin).
+ * See app/api/studio/podcast/route.ts's AUDIO_MAX_TOKENS comment for the
+ * exact token-budget math this length target is paired with.
+ *
+ * openai/gpt-audio-mini via OpenRouter (see app/api/studio/podcast/route.ts
+ * and lib/ai/openrouter.ts's generateOpenRouterAudio). Same two-stage shape
  * as lib/ai/slides-prompts.ts:
  *  1. A cheap TEXT call (CHEAP_MODEL) writes the actual spoken script —
  *     this is what keeps the episode a real structured narrative in the
@@ -27,8 +39,12 @@ import { z } from "zod";
 
 // Higher ceiling than MAX_EXPLICATION_CHARS_FOR_SLIDES (20_000) — a podcast
 // script draws on more of the course's real depth (mechanisms, clinical
-// pitfalls) than a 6-slide outline needs to gesture at.
-export const MAX_EXPLICATION_CHARS_FOR_PODCAST = 24_000;
+// pitfalls) than a 6-slide outline needs to gesture at. RAISED 24_000 ->
+// 32_000 alongside the script's own length target moving from ~700-900 to
+// ~1300-1500 words — the script writer needs proportionally more real
+// source material to teach genuinely NEW content at that length instead of
+// padding/repeating the same handful of points it was given.
+export const MAX_EXPLICATION_CHARS_FOR_PODCAST = 32_000;
 
 export const PodcastScriptSchema = z.object({
   script: z.string().min(200),
@@ -86,15 +102,15 @@ export function buildPodcastScriptSystemPrompt(dialect: PodcastDialect): string 
 LANGUAGE STYLE (the most important rule): ${LANGUAGE_STYLE_BY_DIALECT[dialect]}
 
 MANDATORY STRUCTURE, in this order:
-1. ${labels.intro} — a lively hook, why this topic matters, what will be covered.
-2. ${labels.points} — the heart of the course: mechanisms, clinical signs, what really needs to be understood (not just recited).
+1. ${labels.intro} — a SHORT, direct hook (2-3 sentences, no more): why this topic matters, what's coming next. NEVER a long greeting, self-introduction, or "welcome to the show" preamble — that's dead airtime, not teaching, and the single laziest way a script pads itself out to hit a target length.
+2. ${labels.points} — the heart of the episode, and where most of its length should genuinely live: walk through each major mechanism/concept from the course, and for EACH one, actually TEACH it — the underlying reasoning, why it happens physiologically, a concrete clinical example or analogy that makes it click. Don't just name a concept and move on to the next one. A student who already read the written course should still come away understanding something more deeply, or noticing something they'd glossed over, from hearing this — not just hear the same headline points read aloud back at them.
 3. ${labels.pitfalls} — classic mistakes, differential diagnoses not to miss, what trips students up on exams or on call.
 4. ${labels.conclusion} — a short, punchy recap, the one or two things to absolutely remember.
 
 FORM CONSTRAINTS (the text is READ, never displayed):
 - No markdown, no headers, no bullets, no symbols (*, #, -, |, etc.) — only natural spoken sentences, with oral transitions ("So, let's talk about...", "Now, watch out here, classic trap...", "To recap...").
 - Base yourself STRICTLY on the real course content provided — never invent medical facts absent from the source text.
-- Target length: roughly 700 to 900 words — enough for a real, focused 5-6 minute spoken episode. Do NOT exceed this — a real production incident showed a longer (1800-2200 word) script pushed the full generation pipeline past its platform time budget and the episode never completed at all; a shorter, reliable episode is far better than a longer one that fails.
+- Target length: roughly 1300 to 1500 words — enough for a real, substantial 9-10 minute spoken episode that actually teaches something, not a rushed recap. This length must come from genuinely covering more real content in more depth, NEVER from stretching: no repeating the same idea in different words, no restating what was "just said" every few sentences, no filler transitions, no padding through a long greeting or self-introduction (see point 1 above). If the course genuinely doesn't have enough real substance to reach this length while staying dense and useful, a shorter but genuinely substantive episode is ALWAYS better than an artificially padded one — never pad just to hit a number. Do NOT exceed roughly 1500-1600 words either — a real production incident showed a much longer (1800-2200 word) script pushed the full generation pipeline past its platform time budget and the episode never completed at all.
 
 Respond ONLY with the raw script, no tags or commentary around it.`
     : `Tu es un professeur de médecine passionné et pédagogue, comme un grand frère qui explique son cours à un étudiant qu'il adore voir réussir. Tu écris le SCRIPT INTÉGRAL d'un épisode de podcast — le texte exact qui sera lu à voix haute par un narrateur, mot pour mot. Ce n'est jamais lu à l'écran, donc chaque mot doit sonner naturel à l'oreille.
@@ -102,15 +118,15 @@ Respond ONLY with the raw script, no tags or commentary around it.`
 STYLE DE LANGUE (règle la plus importante) : ${LANGUAGE_STYLE_BY_DIALECT[dialect]}
 
 STRUCTURE OBLIGATOIRE, dans cet ordre :
-1. ${labels.intro} — accroche vivante, pourquoi ce sujet compte, ce qu'on va couvrir.
-2. ${labels.points} — le cœur du cours : mécanismes, signes cliniques, ce qu'il faut vraiment comprendre (pas juste réciter).
+1. ${labels.intro} — accroche COURTE et directe (2-3 phrases maximum) : pourquoi ce sujet compte, ce qu'on va couvrir. JAMAIS de longue salutation, d'auto-présentation ou de "bienvenue dans cet épisode" à rallonge — c'est du temps mort, pas de l'enseignement, et c'est la façon la plus paresseuse de gonfler artificiellement un script pour atteindre une longueur cible.
+2. ${labels.points} — le cœur de l'épisode, là où doit vraiment vivre l'essentiel de la longueur : reprends chaque mécanisme/concept important du cours, et pour CHACUN, explique-le vraiment — le raisonnement sous-jacent, pourquoi ça se produit physiologiquement, un exemple clinique concret ou une analogie qui fait vraiment comprendre. Ne te contente jamais de nommer un concept pour passer au suivant. Un étudiant qui a déjà lu le cours écrit doit quand même repartir en comprenant quelque chose plus en profondeur, ou en remarquant un point qu'il avait survolé — pas juste entendre les mêmes points clés lus à voix haute.
 3. ${labels.pitfalls} — les erreurs classiques, les diagnostics différentiels à ne pas manquer, ce qui piège les étudiants à l'examen ou en garde.
 4. ${labels.conclusion} — récapitulatif court et percutant, le(s) message(s) à retenir absolument.
 
 CONTRAINTES DE FORME (le texte est LU, jamais affiché) :
 - Aucun markdown, aucun titre, aucune puce, aucun symbole (*, #, -, |, etc.) — uniquement des phrases parlées naturelles, avec des transitions orales ("Alors, parlons de...", "Bon, attention ici, piège classique...", "Pour récapituler...").
 - Base-toi STRICTEMENT sur le contenu réel du cours fourni — jamais d'invention de faits médicaux absents du texte source.
-- Longueur cible : environ 700 à 900 mots — assez pour un épisode réel, focalisé, de 5 à 6 minutes à l'oral. NE DÉPASSE PAS cette longueur : un incident réel en production a montré qu'un script plus long (1800-2200 mots) faisait dépasser au pipeline complet son budget de temps sur la plateforme, et l'épisode ne se terminait jamais du tout — un épisode plus court mais fiable vaut largement mieux qu'un épisode plus long qui échoue.
+- Longueur cible : environ 1300 à 1500 mots — assez pour un épisode réel et substantiel de 9 à 10 minutes à l'oral qui enseigne vraiment quelque chose, pas un simple récapitulatif expédié. Cette longueur doit venir de couvrir réellement plus de contenu, plus en profondeur — JAMAIS d'étirement artificiel : pas de répétition de la même idée avec d'autres mots, pas de reformulation de ce qui vient d'être dit toutes les deux phrases, pas de transitions creuses, pas de longue salutation/auto-présentation pour gagner du temps (voir point 1 ci-dessus). Si le cours n'a vraiment pas assez de matière réelle pour atteindre cette longueur en restant dense et utile, un épisode plus court mais réellement substantiel vaut TOUJOURS mieux qu'un épisode artificiellement gonflé — n'étire jamais juste pour atteindre un chiffre. NE DÉPASSE PAS non plus environ 1500-1600 mots : un incident réel en production a montré qu'un script bien plus long (1800-2200 mots) faisait dépasser au pipeline complet son budget de temps sur la plateforme, et l'épisode ne se terminait jamais du tout.
 
 Réponds UNIQUEMENT avec le script brut, sans aucune balise ni commentaire autour.`;
 }
@@ -151,7 +167,7 @@ export function buildPodcastNarrationUserMessage(script: string): string {
  * un-parseable — a real (if generic) episode beats the whole "Podcast Audio"
  * tab failing outright over a text model hiccup on what's otherwise a pure
  * audio-generation feature. Deliberately short (~350 words, well under the
- * real 1800-2200 target) — a degraded fallback, not a full episode. One
+ * real 1300-1500 word target) — a degraded fallback, not a full episode. One
  * variant per dialect — none of these mention specific medical facts (a
  * fallback has no course content to draw from), so writing all 4 by hand is
  * safe and doesn't risk inventing anything.

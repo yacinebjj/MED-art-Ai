@@ -1,11 +1,16 @@
 /**
- * Cross-student cache for the Studio "Podcast Audio" tab — a single ~10-15
+ * Cross-student cache for the Studio "Podcast Audio" tab — a single ~9-10
  * min narrated episode, openai/gpt-audio-mini via OpenRouter, streamed
  * pcm16 then encoded to mp3 server-side (see app/api/studio/podcast/route.ts
  * and lib/audio/mp3-encoder.ts). Confirmed live (2026-09-02, real minimal
  * calibration test): ~20 audio tokens/second at gpt-audio-mini's completion
  * rate, so a real episode costs roughly $0.02-0.04 — paid ONCE per distinct
  * course across the whole shared catalog, never per student.
+ *
+ * `content_hash` is the source text hash WITH app/api/studio/podcast/
+ * route.ts's PODCAST_PROMPT_VERSION folded in (see that constant's own
+ * comment) — a prompt/length change there deliberately misses this cache for
+ * episodes generated under the old rules, rather than serving them stale.
  *
  * Same shape/philosophy as lib/studio-infographic-cache.ts: keyed by
  * sha256(normalizeText(explication text)) — the SAME hash function that

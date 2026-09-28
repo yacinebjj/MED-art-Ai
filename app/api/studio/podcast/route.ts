@@ -31,17 +31,39 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const PODCAST_BUCKET = "studio-podcasts";
-// CUT 22,000 -> 10,000 alongside shrinking the script's own target length
-// (lib/ai/podcast-prompts.ts, ~1800-2200 words -> ~700-900 words) — a real
-// ~15 min target script's full pipeline (script + narration + mp3 encode +
-// upload) was measured taking 285s+ and still not finishing. A ~5-6 min
-// episode (~700-900 words) at the calibrated ~20 audio tokens/second, ~3.7x
-// faster than real-time playback, needs roughly 340-460s playback / 3.7 ≈
-// 90-125s of audio generation — with script-writing + mp3 encode + Storage
-// upload on top, still comfortably under half of the 300s ceiling. 10,000
-// keeps solid headroom above the ~7,000-8,000 audio tokens that length
-// actually needs.
-const AUDIO_MAX_TOKENS = 10_000;
+// RAISED 10,000 -> 15,000 alongside the script's own target length moving
+// from ~700-900 words (~5-6 min) to ~1300-1500 words (~9-10 min) — product
+// feedback that the 5-6 min cut felt too short/recap-only for real studying.
+// Recalibrated against the SAME measured numbers that caused the original
+// 22,000 -> 10,000 cut (see git history), not a fresh guess: a real ~15 min
+// target previously measured 285s+ for the full script+narration+encode+
+// upload pipeline and never finished — at this model's calibrated ~20 audio
+// tokens/second output and ~3.7x-faster-than-real-time generation speed,
+// that's ≈900s playback / 3.7 ≈ 243s of narration generation alone, against
+// a 270s per-call timeout and a 300s route-wide platform ceiling — almost no
+// margin left for anything else sharing that budget. A ~10 min target needs
+// only ≈600s / 3.7 ≈ 162s of narration generation, leaving ~100s+ of real
+// margin for the script call, mp3 encode, and upload. 15,000 tokens covers
+// up to ~750s (12.5 min) of narration with room to spare above the ~10,800-
+// 12,000 tokens a 9-10 min episode actually needs, without reapproaching the
+// ~15 min failure point. NOT yet re-verified with a fresh live timing test at
+// this exact length (the 5-6 min config's own real-world reliability is the
+// only live confirmation this recalibration leans on) — watch production
+// logs for "flux terminé sans résultat" after this ships, the same signal
+// that caught the original incident.
+const AUDIO_MAX_TOKENS = 15_000;
+
+// Folded into studio_podcast_cache's content_hash below — content_hash is a
+// PLAIN hash of the source text alone, with no dimension for "which script
+// length/rules generated this episode". Without this, every course that
+// already had a podcast generated under the old ~5-6 min script would keep
+// serving that stale, cached mp3 forever (content_hash never changes just
+// because the PROMPT changed), and the length/quality fix below would only
+// ever reach brand-new courses. Bumping this string is the one line to touch
+// whenever a future prompt/length change should invalidate every existing
+// cached episode — cheap and migration-free (no schema change: it just makes
+// old rows permanently unreachable by a fresh hash, not deleted).
+const PODCAST_PROMPT_VERSION = "v2-9to10min";
 
 interface CourseRow {
   id: number;
@@ -88,7 +110,12 @@ async function planPodcastScript(courseTitle: string, explicationExcerpt: string
         { role: "system", content: buildPodcastScriptSystemPrompt(dialect) },
         { role: "user", content: buildPodcastScriptUserMessage(courseTitle, explicationExcerpt) },
       ],
-      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true, timeoutMs: 30_000 }
+      // 4000 -> 6000: the script's own target moved from ~700-900 to
+      // ~1300-1500 words (see lib/ai/podcast-prompts.ts) — real headroom
+      // above the ~2,500-3,200 tokens that length needs (mixed
+      // français/darija tokenizes worse than plain prose), still nowhere
+      // near the 30s timeout below since this is short text output either way.
+      { model: CHEAP_MODEL, maxTokens: 6000, bypassMock: true, timeoutMs: 30_000 }
     );
     return script.trim().length > 100 ? script.trim() : getFallbackPodcastScript(dialect);
   } catch (error) {
@@ -195,7 +222,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Ce cours n'a pas assez de contenu source pour générer un podcast." }, { status: 400 });
   }
 
-  const contentHash = sha256(normalizeText(sourceText));
+  // PODCAST_PROMPT_VERSION folded into the hash — see its own comment: bumping
+  // it deliberately misses the cache for content already cached under an
+  // older script length/rules, without a schema migration to add a real
+  // version column.
+  const contentHash = sha256(`${normalizeText(sourceText)}|${PODCAST_PROMPT_VERSION}`);
 
   if (isDefaultVariant) {
     const cachedUrl = await lookupStudioPodcastCache(contentHash);
