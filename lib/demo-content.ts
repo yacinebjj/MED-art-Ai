@@ -87,7 +87,9 @@ export function buildDemoTranslatePrompt(selectedText: string): string {
 export function buildQuotedChatMessage(quotedText: string | null, typedText: string): string {
   const text = typedText.trim();
   if (!quotedText) return text;
-  const question = text || "Explique ce passage médical sélectionné, en te concentrant précisément dessus.";
+  const question =
+    text ||
+    "Agis comme un professeur de médecine expert. L'étudiant n'a pas compris cette partie du cours. Explique ce passage en détail, de manière pédagogique, très précise et professionnelle, en te basant strictement sur le passage sélectionné ci-dessus.";
   return `> ${quotedText}\n\n${question}`;
 }
 

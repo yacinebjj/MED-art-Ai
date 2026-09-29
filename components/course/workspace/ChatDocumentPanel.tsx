@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Check, Columns2, Copy, Info, MoreVertical, Pin, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ArrowUp, Check, Columns2, Copy, Info, MoreVertical, Pin, ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import {
@@ -210,10 +210,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   return (
     <>
       <div className="flex items-center justify-between border-b border-border p-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 text-white">
-            <Sparkles className="h-3.5 w-3.5" />
-          </span>
+        <h2 className="text-sm font-semibold tracking-tight text-foreground">
           MedArt Assistant
         </h2>
         <div className="flex items-center gap-1">
@@ -251,7 +248,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
         </div>
       </div>
 
-      <div ref={setMessagesRef} className="flex-1 space-y-8 overflow-y-auto p-6">
+      <div ref={setMessagesRef} className="flex-1 space-y-8 overflow-y-auto p-6 font-sans antialiased leading-[1.7] tracking-normal text-foreground md:text-[15px]">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -275,7 +272,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
 
         {messages.map((message, index) =>
           message.role === "user" ? (
-            <p key={message.id} className="text-base font-medium leading-relaxed text-foreground md:text-lg">
+            <p key={message.id} className="text-base font-semibold leading-[1.6] tracking-tight text-foreground antialiased md:text-lg">
               {message.content}
             </p>
           ) : (

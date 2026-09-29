@@ -631,11 +631,18 @@ export function StudioPanel({
             )}
           </button>
         ) : (
-          // Browse-grid header — per explicit product direction, this slot
-          // is deliberately left EMPTY now (was a filter/sliders button +
-          // "Studio" heading). The collapse/expand toggle on the right
-          // (below) is the only thing that remains in this header state.
-          <div />
+          // Browse-grid header: the "Studio" title, aligned with the middle
+          // column's "MedArt Assistant" header (same top border + p-4 header
+          // bar), so both columns read as titled panels. Hidden in the w-20
+          // collapsed rail, matching the other header controls' !isCollapsed
+          // guards below.
+          !isCollapsed ? (
+            <h2 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
+              {tStudio("studioHeading", language)}
+            </h2>
+          ) : (
+            <div />
+          )
         )}
 
         <div className="flex items-center gap-1">
