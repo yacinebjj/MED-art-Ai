@@ -4,7 +4,7 @@ import { memo, useEffect, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpenText, Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Target, Trash2, TrendingUp } from "lucide-react";
+import { BookOpenText, Brain, ChevronDown, FileQuestion, FolderOpen, MoreVertical, Trash2, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tDiscovery } from "@/lib/translations/discovery";
@@ -112,14 +112,10 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
   module: mod,
   isFlashcardsActive,
   onToggleFlashcards,
-  isWeaknessesActive,
-  onToggleWeaknesses,
 }: {
   module: CurriculumModule;
   isFlashcardsActive: boolean;
   onToggleFlashcards: (moduleId: number, nextActive: boolean) => void;
-  isWeaknessesActive: boolean;
-  onToggleWeaknesses: (moduleId: number, nextActive: boolean) => void;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -199,10 +195,6 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
               <Brain className="h-4 w-4 text-violet-600 dark:text-violet-400" />
               {isFlashcardsActive ? "Désactiver les Flashcards" : "Activer les Flashcards"}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onToggleWeaknesses(mod.id, !isWeaknessesActive)}>
-              <Target className="h-4 w-4 text-rose-600 dark:text-rose-400" />
-              {isWeaknessesActive ? tDiscovery("disableWeaknesses", language) : tDiscovery("enableWeaknesses", language)}
-            </DropdownMenuItem>
             <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
               Supprimer toutes les sources
@@ -211,20 +203,12 @@ const IndependentModuleCard = memo(function IndependentModuleCard({
         </DropdownMenu>
       </div>
 
-      {(isFlashcardsActive || isWeaknessesActive) && (
+      {isFlashcardsActive && (
         <div className="absolute left-2 top-2 z-10 flex flex-col items-start gap-1">
-          {isFlashcardsActive && (
-            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700 shadow-sm dark:bg-violet-900/50 dark:text-violet-300">
-              <Brain className="h-3 w-3" />
-              Flashcards actives
-            </span>
-          )}
-          {isWeaknessesActive && (
-            <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700 shadow-sm dark:bg-rose-900/50 dark:text-rose-300">
-              <Target className="h-3 w-3" />
-              Points faibles actifs
-            </span>
-          )}
+          <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700 shadow-sm dark:bg-violet-900/50 dark:text-violet-300">
+            <Brain className="h-3 w-3" />
+            Flashcards actives
+          </span>
         </div>
       )}
 
@@ -268,16 +252,12 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
   onToggle,
   activeFlashcardModuleIds,
   onToggleFlashcardsBulk,
-  activeWeaknessModuleIds,
-  onToggleWeaknessesBulk,
 }: {
   unit: TeachingUnitWithModules;
   expanded: boolean;
   onToggle: () => void;
   activeFlashcardModuleIds: Set<number>;
   onToggleFlashcardsBulk: (moduleIds: number[], nextActive: boolean) => void;
-  activeWeaknessModuleIds: Set<number>;
-  onToggleWeaknessesBulk: (moduleIds: number[], nextActive: boolean) => void;
 }) {
   const { language } = useLanguage();
   const illustration = getCartoonIllustration(unit.title);
@@ -286,8 +266,6 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
   const moduleIds = unit.modules.map((mod) => mod.id);
   const flashcardsAllActive = moduleIds.length > 0 && moduleIds.every((id) => activeFlashcardModuleIds.has(id));
   const flashcardsAnyActive = moduleIds.some((id) => activeFlashcardModuleIds.has(id));
-  const weaknessesAllActive = moduleIds.length > 0 && moduleIds.every((id) => activeWeaknessModuleIds.has(id));
-  const weaknessesAnyActive = moduleIds.some((id) => activeWeaknessModuleIds.has(id));
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter" || e.key === " ") {
@@ -354,10 +332,6 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
               <Brain className="h-4 w-4 text-violet-600 dark:text-violet-400" />
               {flashcardsAllActive ? "Désactiver les Flashcards" : "Activer les Flashcards"}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onToggleWeaknessesBulk(moduleIds, !weaknessesAllActive)}>
-              <Target className="h-4 w-4 text-rose-600 dark:text-rose-400" />
-              {weaknessesAllActive ? tDiscovery("disableWeaknesses", language) : tDiscovery("enableWeaknesses", language)}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -369,20 +343,12 @@ const TeachingUnitCard = memo(function TeachingUnitCard({
         />
       </div>
 
-      {(flashcardsAnyActive || weaknessesAnyActive) && (
+      {flashcardsAnyActive && (
         <div className="absolute left-2 top-2 z-10 flex flex-col items-start gap-1">
-          {flashcardsAnyActive && (
-            <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700 shadow-sm dark:bg-violet-900/50 dark:text-violet-300">
-              <Brain className="h-3 w-3" />
-              Flashcards actives
-            </span>
-          )}
-          {weaknessesAnyActive && (
-            <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700 shadow-sm dark:bg-rose-900/50 dark:text-rose-300">
-              <Target className="h-3 w-3" />
-              Points faibles actifs
-            </span>
-          )}
+          <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700 shadow-sm dark:bg-violet-900/50 dark:text-violet-300">
+            <Brain className="h-3 w-3" />
+            Flashcards actives
+          </span>
         </div>
       )}
 
@@ -458,7 +424,6 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
   // flashcards at once (see app/api/modules/[id]/flashcards/route.ts's
   // header comment) — the study deck pools and shuffles across all of them.
   const [activeFlashcardModuleIds, setActiveFlashcardModuleIds] = useState<Set<number>>(new Set());
-  const [activeWeaknessModuleIds, setActiveWeaknessModuleIds] = useState<Set<number>>(new Set());
   const hasTeachingUnits = data.teachingUnits.length > 0;
 
   // One fetch for the whole grid, not one per card — GET /api/modules/flashcards
@@ -469,21 +434,6 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
       .then((res) => (res.ok ? res.json() : null))
       .then((body) => {
         if (!cancelled && body?.success) setActiveFlashcardModuleIds(new Set(body.activeModuleIds as number[]));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Same one-fetch-for-the-whole-grid pattern as flashcards above, for
-  // "Points Faibles & Plan de Remédiation" (GET /api/modules/weaknesses).
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/modules/weaknesses")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (!cancelled && body?.success) setActiveWeaknessModuleIds(new Set(body.activeModuleIds as number[]));
       })
       .catch(() => {});
     return () => {
@@ -569,74 +519,6 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
     }
   }
 
-  /** Mirrors handleToggleFlashcards exactly, for the "points faibles" toggle. */
-  async function handleToggleWeaknesses(moduleId: number, nextActive: boolean) {
-    setActiveWeaknessModuleIds((prev) => {
-      const next = new Set(prev);
-      if (nextActive) next.add(moduleId);
-      else next.delete(moduleId);
-      return next;
-    });
-
-    try {
-      const res = await fetch(`/api/modules/${moduleId}/weaknesses`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: nextActive }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body?.success) throw new Error(body?.error ?? "Erreur inconnue.");
-    } catch (error) {
-      setActiveWeaknessModuleIds((prev) => {
-        const reverted = new Set(prev);
-        if (nextActive) reverted.delete(moduleId);
-        else reverted.add(moduleId);
-        return reverted;
-      });
-      toast({
-        variant: "error",
-        title: tDiscovery("updateFailed", language),
-        description: error instanceof Error ? error.message : "Impossible de contacter le serveur.",
-      });
-    }
-  }
-
-  /** Mirrors handleToggleFlashcardsBulk exactly, for the "points faibles" toggle. */
-  async function handleToggleWeaknessesBulk(moduleIds: number[], nextActive: boolean) {
-    setActiveWeaknessModuleIds((prev) => {
-      const next = new Set(prev);
-      moduleIds.forEach((id) => (nextActive ? next.add(id) : next.delete(id)));
-      return next;
-    });
-
-    const results = await Promise.allSettled(
-      moduleIds.map((id) =>
-        fetch(`/api/modules/${id}/weaknesses`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ active: nextActive }),
-        }).then(async (res) => {
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok || !body?.success) throw new Error(body?.error ?? "Erreur inconnue.");
-        })
-      )
-    );
-
-    const failedIds = moduleIds.filter((_, i) => results[i].status === "rejected");
-    if (failedIds.length > 0) {
-      setActiveWeaknessModuleIds((prev) => {
-        const reverted = new Set(prev);
-        failedIds.forEach((id) => (nextActive ? reverted.delete(id) : reverted.add(id)));
-        return reverted;
-      });
-      toast({
-        variant: "error",
-        title: tDiscovery("updateFailed", language),
-        description: `${failedIds.length}/${moduleIds.length} module(s) non mis à jour.`,
-      });
-    }
-  }
-
   return (
     <div className="space-y-10">
       {hasTeachingUnits && (
@@ -653,8 +535,6 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
                   onToggle={() => setExpandedUnitId((prev) => (prev === unit.id ? null : unit.id))}
                   activeFlashcardModuleIds={activeFlashcardModuleIds}
                   onToggleFlashcardsBulk={handleToggleFlashcardsBulk}
-                  activeWeaknessModuleIds={activeWeaknessModuleIds}
-                  onToggleWeaknessesBulk={handleToggleWeaknessesBulk}
                 />
               </motion.div>
             ))}
@@ -674,8 +554,6 @@ export const CurriculumView = memo(function CurriculumView({ data }: { data: Cur
                   module={mod}
                   isFlashcardsActive={activeFlashcardModuleIds.has(mod.id)}
                   onToggleFlashcards={handleToggleFlashcards}
-                  isWeaknessesActive={activeWeaknessModuleIds.has(mod.id)}
-                  onToggleWeaknesses={handleToggleWeaknesses}
                 />
               </motion.div>
             ))}

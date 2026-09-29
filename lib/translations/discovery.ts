@@ -39,8 +39,6 @@ export const DISCOVERY_TRANSLATIONS = {
   modulesHeading: { fr: "Modules", en: "Modules" },
   sourcesDeleted: { fr: "Sources supprimées", en: "Sources deleted" },
   deleteSourcesFailed: { fr: "Échec de la suppression", en: "Deletion failed" },
-  enableWeaknesses: { fr: "Activer les points faibles", en: "Enable weak points" },
-  disableWeaknesses: { fr: "Désactiver les points faibles", en: "Disable weak points" },
   updateFailed: { fr: "Échec de la mise à jour", en: "Update failed" },
 
   // components/dashboard/GlobalSummaryModal.tsx

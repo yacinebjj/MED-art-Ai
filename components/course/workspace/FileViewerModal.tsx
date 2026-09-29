@@ -9,6 +9,25 @@ pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 /** Formats a bare iframe can't render natively (no native browser support for Office formats). */
 const OFFICE_VIEWER_EXTENSIONS = ["doc", "docx", "ppt", "pptx", "xls", "xlsx"];
 
+/**
+ * PowerPoint is rendered as its EXTRACTED TEXT (the crisp in-app reader
+ * below), never through Microsoft's Office Online embed. Two real, reported
+ * problems with that embed for .pptx specifically:
+ *   1. Blur — Office Online rasterizes each slide server-side and the result
+ *      looks soft/downsampled once scaled to fill the iframe, with no zoom
+ *      control to compensate (unlike the react-pdf reader).
+ *   2. "File error" — the embed needs the source to be a publicly fetchable
+ *      URL and otherwise shows Microsoft's own remote error page, which we
+ *      can't catch or restyle.
+ * There is no browser-native or lightweight React library that renders a
+ * .pptx to true visual slides (react-pptx only *builds* pptx files), so the
+ * reliable, dependency-free fix is to show the slide text the server already
+ * extracted (officeparser). DOCX/XLSX aren't included — they weren't reported
+ * as broken and render acceptably in the embed (and a spreadsheet as flat
+ * text would be worse, not better).
+ */
+const TEXT_VIEW_EXTENSIONS = ["ppt", "pptx"];
+
 function getExtension(value: string): string {
   return value.split(/[?#]/)[0].split(".").pop()?.toLowerCase() ?? "";
 }
@@ -283,12 +302,12 @@ interface FileViewerModalProps {
  * raw extracted text, full-screen (OneDrive/Google-Drive style) rather than
  * a small centered popup — the cramped version was unusable on phones and
  * showed the page far too small on desktop. PDFs render directly via
- * react-pdf; DOCX/PPTX/XLS(X) route through Microsoft's Office Online viewer,
- * which knows how to render Office formats a bare iframe can't and does so
- * at far higher fidelity than Google Docs Viewer. Falls back to the raw
- * extracted text whenever there's no original file to show — pasted-text
- * courses have no `fileUrl` at all, and courses uploaded before this feature
- * existed have `sourceFileUrl: null`.
+ * react-pdf; DOCX/XLS(X) route through Microsoft's Office Online viewer;
+ * PPTX renders as its extracted text in the crisp in-app reader (see
+ * TEXT_VIEW_EXTENSIONS for why the embed is wrong for slides). Falls back to
+ * the raw extracted text whenever there's no original file to show —
+ * pasted-text courses have no `fileUrl` at all, and courses uploaded before
+ * this feature existed have `sourceFileUrl: null`.
  */
 export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }: FileViewerModalProps) {
   // Prefer the extension baked into the Storage path itself — it's derived
@@ -299,13 +318,14 @@ export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }:
   // defensive) case where `fileUrl` itself has none.
   const extension = fileUrl ? getExtension(fileUrl) || getExtension(title) : "";
   const isPdf = extension === "pdf";
-  const iframeSrc = fileUrl && !isPdf
+  // PowerPoint is deliberately routed to the extracted-text reader (see
+  // TEXT_VIEW_EXTENSIONS) — no iframe at all, which is what removes both the
+  // blur and the Office-Online "file error" for .pptx.
+  const forceTextView = TEXT_VIEW_EXTENSIONS.includes(extension);
+  const iframeSrc = fileUrl && !isPdf && !forceTextView
     ? OFFICE_VIEWER_EXTENSIONS.includes(extension)
-      ? // Microsoft's own viewer renders Office formats at noticeably higher
-        // fidelity than Google Docs Viewer (gview), which is the blur
-        // reported for .pptx/.docx/.xlsx files — gview downsamples slide
-        // content to a low fixed-size raster before scaling it back up to
-        // fill the iframe.
+      ? // Microsoft's own viewer renders the remaining Office formats
+        // (DOCX/XLSX) at higher fidelity than Google Docs Viewer.
         `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`
       : fileUrl
     : null;

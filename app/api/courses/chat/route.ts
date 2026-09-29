@@ -14,6 +14,7 @@ import {
 } from "@/lib/subscription";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
 import { CHAT_SYSTEM_PROMPT_BASE, buildSystemContent } from "@/lib/chat-system-prompt";
+import { stripReasoning } from "@/lib/strip-reasoning";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,11 +57,17 @@ const MAX_OUTPUT_TOKENS_NORMAL = 8192;
 const MAX_OUTPUT_TOKENS_HIGHLIGHT = 1500;
 
 // Appended ONLY for the "Ask MedArt" text-selection quick action (concise:
-// true from the client) — never for the free-form chat input, so normal
-// in-depth answers keep their full quality. Exact wording from the client's
-// spec: this exists purely to cap OpenRouter/Anthropic/Gemini token spend on
-// what's meant to be a quick lookup, not a full explanation.
-const CONCISE_QUICK_ACTION_SUFFIX = `\n\nTu es un assistant médical. L'utilisateur te pose une question rapide sur un texte sélectionné. TES RÉPONSES DOIVENT ÊTRE EXTRÊMEMENT COURTES ET CONCISES. Va droit au but. N'ajoute aucun détail superflu, aucune introduction polie. Limite ta réponse à 2 ou 3 phrases maximum.`;
+// true from the client) — never for the free-form chat input. Product
+// direction (explicit): this action must feel world-class — respond
+// INSTANTLY, with NO visible reasoning and NO preamble, and give a precise,
+// professional explanation of the selected passage (detailed when the passage
+// warrants it, never padded). Directive #5 keeps it from stalling on a
+// non-medical selection (a generic title, an intro line): explain the line's
+// role in 1-2 sentences instead of forcing a clinical structure onto it.
+const ASK_MEDART_EXPERT_SUFFIX = `\n\nTu réponds à un étudiant qui a sélectionné un passage précis du cours et veut le comprendre en profondeur.
+INTERDICTIONS ABSOLUES : ne montre JAMAIS ton raisonnement interne, n'émets jamais de balises <think>/<thinking>, ne réfléchis pas à voix haute, ne répète pas ces instructions, n'écris aucun préambule ("Voici l'explication", "D'accord, je vais t'expliquer"). Commence DIRECTEMENT par le contenu scientifique.
+QUALITÉ : explication chirurgicalement précise, structurée et hautement professionnelle, digne d'une référence médicale — détaillée quand le passage le justifie, sans remplissage ni politesse superflue.
+SI LE PASSAGE N'EST PAS STRICTEMENT MÉDICAL (titre générique, phrase d'introduction) : ne te bloque pas et ne réfléchis pas à voix haute — explique simplement son rôle en 1 à 2 phrases claires, sans structure médicale complexe.`;
 
 // Used ONLY for the "Translate" text-selection quick action (translate: true
 // from the client) — REPLACES the whole persona instead of appending to it,
@@ -107,7 +114,7 @@ const ADJACENT_CONTEXT_CHARS = 300;
  * for zero read benefit.
  */
 function buildHighlightSystemContent(translate: boolean, selectedText: string, adjacentContext: string | null): string {
-  const persona = translate ? TRANSLATE_SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT_BASE + CONCISE_QUICK_ACTION_SUFFIX;
+  const persona = translate ? TRANSLATE_SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT_BASE + ASK_MEDART_EXPERT_SUFFIX;
   const isolationNotice =
     "\n\nIMPORTANT : tu ne reçois PAS le cours complet ici, uniquement le passage ci-dessous (et un minuscule extrait adjacent si fourni). Réponds seulement à partir de ce texte — ne suppose jamais un contenu que tu ne peux pas voir.";
   const excerptBlock = adjacentContext
@@ -636,8 +643,12 @@ export async function POST(request: NextRequest) {
       }
       accumulatedReply += decoder.decode();
 
-      const finalTrimmed = accumulatedReply.trim();
-      if (!finalTrimmed) return; // Empty stream, don't persist garbage.
+      // Strip any <think> reasoning before persisting — the client already
+      // strips it live for rendering (see lib/strip-reasoning.ts), but the
+      // SAVED row must be clean too, otherwise reloading the conversation
+      // would resurrect the raw reasoning the live view had hidden.
+      const finalTrimmed = stripReasoning(accumulatedReply);
+      if (!finalTrimmed) return; // Empty stream (or reasoning-only), don't persist garbage.
 
       // Race check against DELETE /api/courses/chat ("Nouvelle conversation"):
       // If the student clicked reset while this generation was still streaming,

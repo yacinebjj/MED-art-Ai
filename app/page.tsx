@@ -104,10 +104,6 @@ const COMPARISON_ROWS = [
     modern: { fr: "QCM basés sur TES propres cours", en: "MCQs based on YOUR own courses" },
   },
   {
-    traditional: { fr: "Aucun retour sur tes points faibles", en: "No feedback on your weak points" },
-    modern: { fr: "Suivi en temps réel de tes points faibles", en: "Real-time tracking of your weak points" },
-  },
-  {
     traditional: { fr: "Notes éparpillées entre plusieurs apps", en: "Notes scattered across multiple apps" },
     modern: { fr: "Tout centralisé dans un seul Studio", en: "Everything centralized in one Studio" },
   },

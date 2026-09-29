@@ -3,14 +3,15 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Check, Columns2, Copy, Info, MoreVertical, Pin, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ArrowUp, Check, Columns2, Copy, Info, MoreVertical, NotebookPen, Pin, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { stripReasoning } from "@/lib/strip-reasoning";
 import { useLanguage } from "@/providers/LanguageProvider";
 import {
-  PROSE_CLASSES,
-  DARK_PROSE_CLASSES,
-  MARKDOWN_COMPONENTS,
-  DARK_MARKDOWN_COMPONENTS,
+  CHAT_PROSE_CLASSES,
+  DARK_CHAT_PROSE_CLASSES,
+  CHAT_MARKDOWN_COMPONENTS,
+  DARK_CHAT_MARKDOWN_COMPONENTS,
   normalizeCallouts,
 } from "@/lib/markdown";
 import { CHAT_MAX_CONTEXT_CHARS } from "@/lib/chat-constants";
@@ -82,6 +83,10 @@ interface ChatDocumentPanelProps {
   sourceTextLength?: number;
   /** Fires on the composer input's own focus/blur — lets the mobile caller hide its bottom tab bar and reserve keyboard clearance exactly while this panel's own input is what's focused (see app/dashboard/module/[id]/page.tsx's isMobileChatInputFocused), the same mechanism app/dashboard/(shell)/layout.tsx already uses for MobileBottomNav, just scoped to this one input instead of a global focusin/focusout listener since this panel already owns the ref. Optional: omitted by callers with no such chrome to hide (desktop). */
   onInputFocusChange?: (focused: boolean) => void;
+  /** "Regenerate" in each assistant message's hover toolbar — re-runs the user turn that produced this reply (see useCourseChat's regenerateFrom). Optional: omitted, the Regenerate button isn't rendered. */
+  onRegenerate?: (assistantId: string) => void;
+  /** "Save to Notes" in each assistant message's hover toolbar — receives the cleaned reply text. Optional: omitted, the button isn't rendered. */
+  onSaveToNotes?: (content: string) => void;
 }
 
 /**
@@ -118,6 +123,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     courseSlug,
     sourceTextLength,
     onInputFocusChange,
+    onRegenerate,
+    onSaveToNotes,
   },
   ref
 ) {
@@ -126,20 +133,13 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
   const { language } = useLanguage();
 
-  // Per-message reaction/pin/copy state for the action row below each
-  // assistant reply. Keyed by message.id (not a flat boolean) so a new
-  // reply never inherits the previous one's "liked"/"pinned"/"copied"
-  // look — only that row is ever shown at once (index === last message),
-  // but keying by id keeps this correct even if that changes later.
-  // Session-local only: no feedback API exists yet for message reactions
-  // (checked app/api/**) and no pinned-messages store exists elsewhere in
-  // this component or its callers, so this mirrors the same session-local
-  // pattern already shipped for the assistant page's chat toolbar
-  // (app/dashboard/(shell)/assistant/page.tsx) instead of inventing a
-  // parallel persistence mechanism.
-  const [messageReactions, setMessageReactions] = useState<Record<string, "up" | "down">>({});
-  const [pinnedMessageIds, setPinnedMessageIds] = useState<Set<string>>(() => new Set());
+  // Which assistant message's "Copy" was last pressed — keyed by message.id
+  // (not a flat boolean) so the transient check-mark shows only on the row
+  // actually copied, never bleeding onto another reply.
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  // Which assistant message's "Save to Notes" was last pressed — same
+  // per-id transient confirmation as copy above.
+  const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
   const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useImperativeHandle(ref, () => ({
@@ -183,28 +183,10 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       .catch(() => {});
   }
 
-  function toggleReaction(messageId: string, value: "up" | "down") {
-    setMessageReactions((prev) => {
-      const next = { ...prev };
-      if (next[messageId] === value) {
-        delete next[messageId];
-      } else {
-        next[messageId] = value;
-      }
-      return next;
-    });
-  }
-
-  function togglePinned(messageId: string) {
-    setPinnedMessageIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(messageId)) {
-        next.delete(messageId);
-      } else {
-        next.add(messageId);
-      }
-      return next;
-    });
+  function handleSaveToNotes(messageId: string, content: string) {
+    onSaveToNotes?.(content);
+    setSavedMessageId(messageId);
+    setTimeout(() => setSavedMessageId((prev) => (prev === messageId ? null : prev)), 1500);
   }
 
   return (
@@ -270,43 +252,46 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           <p className="text-sm text-muted-foreground">{EMPTY_CHAT_PLACEHOLDER[language]}</p>
         )}
 
-        {messages.map((message, index) =>
-          message.role === "user" ? (
-            <p key={message.id} className="text-base font-semibold leading-[1.6] tracking-tight text-foreground antialiased md:text-lg">
-              {message.content}
-            </p>
-          ) : (
-            <div key={message.id} className="animate-fade-in space-y-3">
-              <article className={cn(dark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none")}>
+        {messages.map((message, index) => {
+          const isLast = index === messages.length - 1;
+          if (message.role === "user") {
+            return (
+              <p
+                key={message.id}
+                className="animate-in fade-in slide-in-from-bottom-2 text-base font-semibold leading-[1.6] tracking-tight text-foreground antialiased duration-300 ease-out md:text-lg"
+              >
+                {message.content}
+              </p>
+            );
+          }
+
+          // CRITICAL: strip any completed OR still-streaming <think> reasoning
+          // block before it ever reaches the DOM — a reasoning model's internal
+          // monologue must never render (see lib/strip-reasoning.ts). Computed
+          // per render so it also hides reasoning WHILE it streams, not just
+          // once the reply is done.
+          const cleanContent = stripReasoning(message.content);
+          // The hover toolbar is meaningful only on a settled reply — never on
+          // the bubble that's still actively streaming in.
+          const showToolbar = cleanContent.length > 0 && !(isLast && isTyping);
+
+          return (
+            <div key={message.id} className="group animate-in fade-in slide-in-from-bottom-2 space-y-2 duration-300 ease-out">
+              <article className={cn(dark ? DARK_CHAT_PROSE_CLASSES : CHAT_PROSE_CLASSES, "max-w-none")}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
-                  components={dark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}
+                  components={dark ? DARK_CHAT_MARKDOWN_COMPONENTS : CHAT_MARKDOWN_COMPONENTS}
                 >
-                  {normalizeCallouts(message.content || "…")}
+                  {normalizeCallouts(cleanContent || "…")}
                 </ReactMarkdown>
               </article>
-              {message.content && index === messages.length - 1 && !isTyping ? (
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={pinnedMessageIds.has(message.id) ? "Retirer l'épingle" : "Épingler ce message"}
-                    aria-pressed={pinnedMessageIds.has(message.id)}
-                    onClick={() => togglePinned(message.id)}
-                  >
-                    <Pin
-                      className={cn(
-                        "h-4 w-4 transition-colors",
-                        pinnedMessageIds.has(message.id) ? "text-primary-600 dark:text-primary-400" : "text-muted-foreground"
-                      )}
-                      fill={pinnedMessageIds.has(message.id) ? "currentColor" : "none"}
-                    />
-                  </Button>
+              {showToolbar && (
+                <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100">
                   <Button
                     variant="ghost"
                     size="icon"
                     aria-label={copiedMessageId === message.id ? "Copié" : "Copier"}
-                    onClick={() => handleCopy(message.id, message.content)}
+                    onClick={() => handleCopy(message.id, cleanContent)}
                   >
                     {copiedMessageId === message.id ? (
                       <Check className="h-4 w-4 text-emerald-500" />
@@ -314,39 +299,36 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                       <Copy className="h-4 w-4 text-muted-foreground" />
                     )}
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Bonne réponse"
-                    aria-pressed={messageReactions[message.id] === "up"}
-                    onClick={() => toggleReaction(message.id, "up")}
-                  >
-                    <ThumbsUp
-                      className={cn(
-                        "h-4 w-4 transition-colors",
-                        messageReactions[message.id] === "up" ? "text-emerald-500" : "text-muted-foreground"
+                  {onRegenerate && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Régénérer la réponse"
+                      disabled={isTyping}
+                      onClick={() => onRegenerate(message.id)}
+                    >
+                      <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  )}
+                  {onSaveToNotes && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={savedMessageId === message.id ? "Enregistré dans les notes" : "Enregistrer dans les notes"}
+                      onClick={() => handleSaveToNotes(message.id, cleanContent)}
+                    >
+                      {savedMessageId === message.id ? (
+                        <Check className="h-4 w-4 text-emerald-500" />
+                      ) : (
+                        <NotebookPen className="h-4 w-4 text-muted-foreground" />
                       )}
-                    />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Mauvaise réponse"
-                    aria-pressed={messageReactions[message.id] === "down"}
-                    onClick={() => toggleReaction(message.id, "down")}
-                  >
-                    <ThumbsDown
-                      className={cn(
-                        "h-4 w-4 transition-colors",
-                        messageReactions[message.id] === "down" ? "text-rose-500" : "text-muted-foreground"
-                      )}
-                    />
-                  </Button>
+                    </Button>
+                  )}
                 </div>
-              ) : null}
+              )}
             </div>
-          )
-        )}
+          );
+        })}
 
         {isTyping && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">

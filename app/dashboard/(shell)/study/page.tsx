@@ -2,9 +2,8 @@
 
 import { Suspense, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Apple, BrainCircuit, Layers, Play, Pause, RotateCcw, Sparkles, Timer } from "lucide-react";
+import { Apple, Layers, Play, Pause, RotateCcw, Sparkles, Timer } from "lucide-react";
 import { StudyDashboard } from "@/components/study/StudyDashboard";
-import { WeaknessRemediationPlan } from "@/components/study/WeaknessRemediationPlan";
 import { ActiveFlashcardsDeck } from "@/components/study/ActiveFlashcardsDeck";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { PushOptInButton } from "@/components/push/PushOptInButton";
@@ -26,7 +25,7 @@ function StudyPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const initialTab = tabParam === "session" ? "session" : tabParam === "flashcards" ? "flashcards" : "revision";
+  const initialTab = tabParam === "session" ? "session" : "flashcards";
   const [activeTab, setActiveTab] = useState(initialTab);
   const [isPending, startTransition] = useTransition();
   const { language } = useLanguage();
@@ -100,10 +99,6 @@ function StudyPageContent() {
 
       <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList>
-          <TabsTrigger value="revision">
-            <BrainCircuit className="h-4 w-4" />
-            <span className="hidden sm:inline">{tStudy("weakPoints", language)}</span>
-          </TabsTrigger>
           <TabsTrigger value="flashcards">
             <Layers className="h-4 w-4" />
             <span className="hidden sm:inline">{tStudy("flashcards", language)}</span>
@@ -121,10 +116,6 @@ function StudyPageContent() {
               which is visible), and StudyDashboard/ActiveFlashcardsDeck both
               hold real local/session state that must survive switching away
               and back, so a remount-on-switch would silently reset it. */}
-          <TabsContent value="revision" className="space-y-6">
-            <WeaknessRemediationPlan />
-          </TabsContent>
-
           <TabsContent value="flashcards">
             <ActiveFlashcardsDeck />
           </TabsContent>

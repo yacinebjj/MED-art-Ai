@@ -72,6 +72,29 @@ interface CourseRow {
   raw_text: string | null;
 }
 
+/**
+ * Persists the generated podcast URL onto the student's OWN studio_courses
+ * row, so it reloads deterministically regardless of which dialect was
+ * generated or what the cross-student cache holds — the real fix for the
+ * "podcast disappears on refresh" bug (see this column's own comment in
+ * supabase/schema.sql). Best-effort: a write failure is logged, never thrown.
+ */
+async function persistAudioUrl(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  courseId: number,
+  userId: string,
+  audioUrl: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("studio_courses")
+    .update({ audio_url: audioUrl })
+    .eq("id", courseId)
+    .eq("user_id", userId);
+  if (error) {
+    console.error("[studio/podcast] Persistance audio_url échouée (non bloquant):", error.message);
+  }
+}
+
 /** Mirrors app/api/studio/infographic/route.ts's ensureInfographicBucket exactly — a concurrent request can win the race to create the bucket, which is not a real failure. */
 async function ensurePodcastBucket(supabase: ReturnType<typeof getSupabaseAdmin>): Promise<void> {
   const { data: buckets } = await supabase.storage.listBuckets();
@@ -271,6 +294,9 @@ export async function POST(request: NextRequest) {
     const cachedUrl = await lookupStudioPodcastCache(contentHash);
     if (cachedUrl) {
       await recordStudioPodcastCacheHit(contentHash);
+      // Persist even on a cache hit — this student's row may not yet point at
+      // it, and the reload path now reads audio_url directly.
+      await persistAudioUrl(supabase, courseId, user.id, cachedUrl);
       return NextResponse.json({ success: true, audioUrl: cachedUrl, cached: true });
     }
   }
@@ -340,6 +366,10 @@ export async function POST(request: NextRequest) {
         if (isDefaultVariant) {
           await storeStudioPodcastCache(contentHash, audioUrl);
         }
+
+        // Persist onto this student's own course row — the deterministic,
+        // per-course, every-variant source of truth the reload path reads.
+        await persistAudioUrl(supabase, courseId, user.id, audioUrl);
 
         return { audioUrl };
       })()

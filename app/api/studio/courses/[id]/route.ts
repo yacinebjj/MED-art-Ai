@@ -41,6 +41,8 @@ interface StudioCourseFullRow {
   exemples_analogies: string | null;
   source_file_url: string | null;
   updated_at: string | null;
+  infographic_url: string | null;
+  audio_url: string | null;
 }
 
 function toFullCourse(row: StudioCourseFullRow, infographicUrl: string | null, audioUrl: string | null): StudioCourseFull {
@@ -79,7 +81,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("studio_courses")
-    .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url, updated_at")
+    .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url, updated_at, infographic_url, audio_url")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -93,32 +95,36 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   }
 
   const row = data as StudioCourseFullRow;
-  // Derived, not stored on this row — see StudioCourseFull.infographicUrl's/
-  // audioUrl's own comments. A lookup failure (or no Explication yet) just
-  // means neither is shown yet, never blocks loading the rest of the course.
-  // Same hash computed once, reused for both lookups (both tables are keyed
-  // by the SAME sha256(normalizeText(...)) — no collision risk, different
-  // tables), run in parallel rather than sequentially.
-  //
-  // REAL BUG this used to have, found via a real production report ("I
-  // generate the Infographie, leave the app, come back — it's gone"):
-  // this used to hash `row.explication` ONLY. app/api/studio/podcast/
-  // route.ts and app/api/studio/infographic/route.ts BOTH generate (and
-  // cache) from `explication ?? raw_text` — a deliberately supported flow,
-  // since a student can generate Podcast/Infographic before ever touching
-  // Explication. Whenever that happened, the cache got written under
-  // hash(raw_text), but this read path computed hash(null) = null and
-  // skipped the lookup entirely — the generated content was never actually
-  // lost (still sitting in Storage and in studio_podcast_cache/
-  // studio_infographic_cache), just permanently unreachable from here.
-  // Mirroring the exact same fallback the generation routes use closes
-  // this — must stay in sync with those two routes' own `sourceText` logic
-  // if either ever changes.
-  const sourceText = row.explication && row.explication.trim().length >= 50 ? row.explication : row.raw_text;
-  const contentHash = sourceText && sourceText.trim().length >= 50 ? sha256(normalizeText(sourceText)) : null;
-  const [infographicUrl, audioUrl] = contentHash
-    ? await Promise.all([lookupStudioInfographicCache(contentHash), lookupStudioPodcastCache(contentHash)])
-    : [null, null];
+
+  // SOURCE OF TRUTH: the URL persisted directly on this student's own row
+  // (studio_courses.infographic_url / audio_url — see their own comment in
+  // supabase/schema.sql). Written for EVERY variant on every successful
+  // generation, so a refresh reloads them deterministically — this is the
+  // real fix for the reported "Infographie/Podcast disappears on reload,
+  // inconsistently" bug. The previous approach re-derived a content hash and
+  // looked them up in the cross-student caches, which structurally could not
+  // find a non-default variant (the read path has no idea which the student
+  // picked) and broke whenever the hash basis (explication ?? raw_text)
+  // changed after generation.
+  let infographicUrl = row.infographic_url;
+  let audioUrl = row.audio_url;
+
+  // LEGACY FALLBACK, only for a column still null — a course whose media was
+  // generated before infographic_url/audio_url existed. Mirrors the exact
+  // explication ?? raw_text hash basis those older cache writes used, and
+  // only runs the lookup for whichever URL isn't already on the row.
+  if (infographicUrl === null || audioUrl === null) {
+    const sourceText = row.explication && row.explication.trim().length >= 50 ? row.explication : row.raw_text;
+    const contentHash = sourceText && sourceText.trim().length >= 50 ? sha256(normalizeText(sourceText)) : null;
+    if (contentHash) {
+      const [cachedInfographic, cachedAudio] = await Promise.all([
+        infographicUrl === null ? lookupStudioInfographicCache(contentHash) : Promise.resolve(null),
+        audioUrl === null ? lookupStudioPodcastCache(contentHash) : Promise.resolve(null),
+      ]);
+      infographicUrl = infographicUrl ?? cachedInfographic;
+      audioUrl = audioUrl ?? cachedAudio;
+    }
+  }
 
   return NextResponse.json({ success: true, course: toFullCourse(row, infographicUrl, audioUrl) });
 }

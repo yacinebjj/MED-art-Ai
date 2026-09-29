@@ -731,7 +731,7 @@ export default function ModuleWorkspacePage() {
   }, [activeCourse?.id]);
 
   const courseChatSlug = activeCourse ? `studio-course-${activeCourse.id}` : undefined;
-  const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, clearMessages } = useCourseChat(courseChatSlug);
+  const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, regenerateFrom, clearMessages } = useCourseChat(courseChatSlug);
 
   useEffect(() => {
     if (!Number.isFinite(moduleId)) return;
@@ -1404,6 +1404,32 @@ export default function ModuleWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCourse?.id]);
 
+  /** "Save to Notes" under an assistant reply — persists that message straight to /api/notes (Mes notes), titled after the active course/module and tagged with the course when there is one. Toast-only feedback; the panel shows its own inline check-mark. */
+  async function handleSaveMessageToNotes(content: string) {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `MedArt — ${activeCourse?.title ?? moduleTitle}`,
+          content: trimmed,
+          ...(activeCourse ? { moduleId, courseTitle: activeCourse.title } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
+      toast({ variant: "success", title: "Réponse enregistrée", description: "Retrouve-la dans « Mes notes »." });
+    } catch (error) {
+      toast({
+        variant: "error",
+        title: "Échec de l'enregistrement",
+        description: error instanceof Error ? error.message : "Erreur inconnue.",
+      });
+    }
+  }
+
   /** Studio's "Add note" panel real save — posts to /api/notes (Mes notes), defaulting the title to the active course's own title. */
   async function handleSaveNote() {
     const content = noteContent.trim();
@@ -1470,6 +1496,8 @@ export default function ModuleWorkspacePage() {
       onClearHistory={clearMessages}
       onAskSelection={handleAskSelection}
       onTranslateSelection={handleTranslateSelection}
+      onRegenerate={regenerateFrom}
+      onSaveToNotes={handleSaveMessageToNotes}
       pendingThinkingLabel={null}
       isSplitScreen={isSplitScreen}
       onToggleSplitScreen={() => setIsSplitScreen((prev) => !prev)}
@@ -1502,6 +1530,8 @@ export default function ModuleWorkspacePage() {
       onClearHistory={clearMessages}
       onAskSelection={handleAskSelection}
       onTranslateSelection={handleTranslateSelection}
+      onRegenerate={regenerateFrom}
+      onSaveToNotes={handleSaveMessageToNotes}
       onInputFocusChange={setIsMobileChatInputFocused}
       pendingThinkingLabel={null}
       isSplitScreen={false}

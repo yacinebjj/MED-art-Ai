@@ -77,45 +77,6 @@ export const STUDY_TOOLS_TRANSLATIONS = {
   ariaNextCard: { fr: "Carte suivante", en: "Next card" },
   reviewAgain: { fr: "À revoir", en: "Review again" },
   correctLabel: { fr: "Correct", en: "Correct" },
-
-  // components/study/WeaknessRemediationPlan.tsx
-  priorityHigh: { fr: "Priorité haute", en: "High priority" },
-  priorityMedium: { fr: "Priorité moyenne", en: "Medium priority" },
-  priorityLow: { fr: "Priorité basse", en: "Low priority" },
-  loadFailed: { fr: "Échec du chargement.", en: "Failed to load." },
-  generationFailed: { fr: "Échec de la génération.", en: "Failed to generate." },
-  unknownError: { fr: "Erreur inconnue.", en: "Unknown error." },
-  loadingRemediationPlan: {
-    fr: "Chargement de ton plan de remédiation...",
-    en: "Loading your remediation plan...",
-  },
-  signInForWeakPoints: { fr: "Connecte-toi pour voir tes points faibles.", en: "Sign in to see your weak points." },
-  noActiveModulesRemediationSubtitle: {
-    fr: "Activez « Points Faibles & Plan de Remédiation » depuis votre tableau de bord (menu ⋮ d'un module).",
-    en: "Activate \"Weak Points & Remediation Plan\" from your dashboard (⋮ menu on a module).",
-  },
-  cardTitle: { fr: "Points Faibles & Plan de Remédiation", en: "Weak Points & Remediation Plan" },
-  generatedOn: { fr: "Généré le", en: "Generated on" },
-  regenerateReminder: {
-    fr: "(Pensez à régénérer ce plan si vous avez récemment terminé de nouveaux QCMs)",
-    en: "(Remember to regenerate this plan if you've recently completed new QCMs)",
-  },
-  regenerateButton: { fr: "Régénérer", en: "Regenerate" },
-  notEnoughDataTitle: { fr: "Pas encore assez de données.", en: "Not enough data yet." },
-  notEnoughDataSubtitle: {
-    fr: "Réponds à quelques QCM dans les cours de tes modules actifs — le plan se construit à partir de tes vraies erreurs.",
-    en: "Answer a few QCMs in the courses of your active modules — the plan is built from your real mistakes.",
-  },
-  noPlanYetTitle: {
-    fr: "Ton plan de remédiation n'a pas encore été généré.",
-    en: "Your remediation plan hasn't been generated yet.",
-  },
-  noPlanYetSubtitle: {
-    fr: "L'IA analyse tes QCM ratés ou fragiles dans tes modules actifs pour identifier tes points faibles réels, triés par priorité clinique.",
-    en: "The AI analyzes your failed or shaky QCMs in your active modules to identify your real weak points, sorted by clinical priority.",
-  },
-  generatePlanButton: { fr: "Générer mon plan de remédiation", en: "Generate my remediation plan" },
-  howToImprove: { fr: "Comment progresser", en: "How to improve" },
 } satisfies Record<string, Record<Language, string>>;
 
 export function tStudyTools(key: keyof typeof STUDY_TOOLS_TRANSLATIONS, language: Language): string {

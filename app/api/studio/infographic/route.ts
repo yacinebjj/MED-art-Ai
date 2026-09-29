@@ -47,6 +47,30 @@ async function ensureInfographicBucket(supabase: ReturnType<typeof getSupabaseAd
   }
 }
 
+/**
+ * Persists the generated infographie URL onto the student's OWN
+ * studio_courses row, so it reloads deterministically regardless of which
+ * variant was generated or what the cross-student cache holds — the real fix
+ * for the "infographie disappears on refresh" bug (see this column's own
+ * comment in supabase/schema.sql). Best-effort: a write failure is logged,
+ * never thrown, so it can never fail an otherwise-successful generation.
+ */
+async function persistInfographicUrl(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  courseId: number,
+  userId: string,
+  imageUrl: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("studio_courses")
+    .update({ infographic_url: imageUrl })
+    .eq("id", courseId)
+    .eq("user_id", userId);
+  if (error) {
+    console.error("[studio/infographic] Persistance infographic_url échouée (non bloquant):", error.message);
+  }
+}
+
 /** `data:image/png;base64,AAAA...` -> { buffer, contentType }. Throws if the shape doesn't match — a malformed data URL here means the model response parsing (lib/ai/openrouter.ts) already found something wrong. */
 function decodeImageDataUrl(dataUrl: string): { buffer: Buffer; contentType: string } {
   const match = /^data:(image\/\w+);base64,([\s\S]+)$/.exec(dataUrl);
@@ -147,6 +171,10 @@ export async function POST(request: NextRequest) {
       const cachedUrl = await lookupStudioInfographicCache(contentHash);
       if (cachedUrl) {
         await recordStudioInfographicCacheHit(contentHash);
+        // Persist even on a cache hit — this student's row may not yet point
+        // at it (e.g. another student generated it first), and the reload
+        // path now reads infographic_url directly.
+        await persistInfographicUrl(supabase, courseId, user.id, cachedUrl);
         return NextResponse.json({ success: true, imageUrl: cachedUrl, cached: true });
       }
     }
@@ -191,6 +219,10 @@ export async function POST(request: NextRequest) {
       if (isDefaultVariant) {
         await storeStudioInfographicCache(contentHash, imageUrl);
       }
+
+      // Persist onto this student's own course row — the deterministic,
+      // per-course, every-variant source of truth the reload path reads.
+      await persistInfographicUrl(supabase, courseId, user.id, imageUrl);
 
       return NextResponse.json({ success: true, imageUrl, cached: false });
     } catch (error) {

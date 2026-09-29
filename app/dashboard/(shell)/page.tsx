@@ -6,7 +6,6 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import { Mic, Settings, Sparkles } from "lucide-react";
 import { DashboardHero } from "@/components/dashboard/DashboardHero";
-import { DashboardSearchBar } from "@/components/dashboard/DashboardSearchBar";
 import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcons";
 import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -119,13 +118,13 @@ export default function DashboardPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
-        className="mb-3 grid grid-cols-2 gap-2 sm:mb-6 sm:gap-4 md:grid-cols-4 lg:mb-8 xl:grid-cols-5"
+        className="mb-3 grid grid-cols-1 gap-2 sm:mb-6 sm:grid-cols-3 sm:gap-4 lg:mb-8"
       >
         {/* Remplace l'ancienne entrée "Importer un cours indépendant" — même
             emplacement, même prééminence visuelle, nouvelle destination. */}
         <Link
           href="/dashboard/audio-workspace"
-          className="glass-card group col-span-2 flex items-center gap-3 rounded-2xl p-3 text-left shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-orange-500/20 dark:shadow-glass-dark sm:gap-5 sm:rounded-3xl sm:p-6 xl:col-span-3"
+          className="glass-card group flex items-center gap-3 rounded-2xl p-3 text-left shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-orange-500/20 dark:shadow-glass-dark sm:col-span-2 sm:gap-5 sm:rounded-3xl sm:p-6"
         >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[0_0_20px_rgba(249,115,22,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-14 sm:w-14 sm:rounded-2xl">
             <Mic className="h-5 w-5 sm:h-7 sm:w-7" />
@@ -144,7 +143,7 @@ export default function DashboardPage() {
 
         <Link
           href="/dashboard/assistant"
-          className="glass-card group flex flex-col items-center justify-center gap-1.5 rounded-2xl p-3 text-center shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-violet-500/20 dark:shadow-glass-dark sm:rounded-3xl sm:p-6 xl:flex-row xl:justify-start xl:gap-3"
+          className="glass-card group flex items-center justify-center gap-3 rounded-2xl p-3 text-center shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-violet-500/20 dark:shadow-glass-dark sm:flex-col sm:justify-center sm:p-6 sm:text-center lg:flex-row lg:justify-start lg:gap-3 sm:rounded-3xl"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-[0_0_16px_rgba(168,85,247,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-11 sm:w-11">
             <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -153,8 +152,6 @@ export default function DashboardPage() {
             {tDashboard("assistantLabel", language)}
           </span>
         </Link>
-
-        <DashboardSearchBar />
       </motion.div>
 
       <motion.section

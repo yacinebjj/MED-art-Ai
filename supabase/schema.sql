@@ -1449,6 +1449,34 @@ create policy "Users manage their own studio courses" on studio_courses
 alter table studio_courses add column if not exists flashcard_queue jsonb not null default '[]';
 
 -- ---------------------------------------------------------------------------
+-- infographic_url / audio_url: the Studio "Infographie" and "Podcast Audio"
+-- tiles' generated results, persisted PER COURSE on the student's own row.
+--
+-- WHY THIS EXISTS (real, reported bug): both results USED to be reachable
+-- only through their cross-student content-hash caches
+-- (studio_infographic_cache / studio_podcast_cache), which made retrieval
+-- non-deterministic and cost students their generations on refresh:
+--   1. Those caches only ever store the DEFAULT variant (infographic:
+--      French + nano-banana-2; podcast: fr-darija). A student who picked ANY
+--      other language/model/dialect got the result on screen but nothing
+--      persisted — gone on reload.
+--   2. The cache key is sha256(explication ?? raw_text). Generating the
+--      Infographie/Podcast BEFORE the Explication keys it under raw_text;
+--      generating the Explication afterwards changes the basis to
+--      explication, so the reload lookup computes a different hash and misses.
+--   3. The course-load read path never knows WHICH variant the student
+--      generated, so it structurally cannot find a non-default one in the
+--      hash cache at all.
+-- Storing the resulting public URL directly on the course row removes every
+-- one of those failure modes: it's written for every variant on every
+-- successful generation, and read back verbatim on course load. The
+-- cross-student caches stay as a cost optimization; these columns are the
+-- source of truth for "does THIS student's course still have its media".
+-- ---------------------------------------------------------------------------
+alter table studio_courses add column if not exists infographic_url text;
+alter table studio_courses add column if not exists audio_url text;
+
+-- ---------------------------------------------------------------------------
 -- content_hash: sha256(normalizeText(raw source text)) — the SAME value
 -- studio_content_cache already computes internally (lib/content-similarity.ts)
 -- to decide whether two students' uploads are "the same course", now also

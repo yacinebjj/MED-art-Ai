@@ -23,6 +23,8 @@ interface UseCourseChatResult {
       excludeFromHistory?: boolean;
     }
   ) => Promise<void>;
+  /** Re-runs the user turn that produced `assistantId`, replacing that reply (and dropping anything after it) with a freshly generated one — the "Regenerate" action under each assistant message. Forces `bypassCache` so it's never the same stored answer, and preserves the original turn's excludeFromHistory flag so regenerating an "Ask MedArt" quick action stays out of history exactly as the first attempt did. No-op while a reply is already streaming. */
+  regenerateFrom: (assistantId: string) => Promise<void>;
   /** A real reset, not just a local one: wipes this course's `course_chat_history` rows server-side (DELETE /api/courses/chat) and only clears the on-screen conversation once that succeeds — a failed delete leaves the transcript on screen with an error toast instead of silently keeping stale rows the student was told were gone. */
   clearMessages: () => Promise<void>;
 }
@@ -92,28 +94,30 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
     };
   }, [slug]);
 
-  async function sendChatMessage(
-    userContent: string,
-    options?: {
-      concise?: boolean;
-      translate?: boolean;
-      sourceText?: string;
-      selectedText?: string;
-      excludeFromHistory?: boolean;
-      /** Forces a fresh generation instead of a cached answer (the caching directive's required bypass/regenerate escape hatch) — see app/api/courses/chat/route.ts's own shouldBypassCache. */
-      bypassCache?: boolean;
-    }
-  ) {
-    const exclude = options?.excludeFromHistory === true;
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userContent, excludeFromHistory: exclude };
-    const assistantId = crypto.randomUUID();
-    // Past messages flagged excludeFromHistory (a prior quick action's quote
-    // AND its reply) are dropped entirely here — not trimmed, not
-    // paraphrased, just absent — so nothing about that exchange can anchor
-    // this or any later message back onto its topic.
-    const historyForRequest = chatMessages.filter((m) => !m.excludeFromHistory).map((m) => ({ role: m.role, content: m.content }));
+  interface SendOptions {
+    concise?: boolean;
+    translate?: boolean;
+    sourceText?: string;
+    selectedText?: string;
+    excludeFromHistory?: boolean;
+    /** Forces a fresh generation instead of a cached answer (the caching directive's required bypass/regenerate escape hatch) — see app/api/courses/chat/route.ts's own shouldBypassCache. */
+    bypassCache?: boolean;
+  }
 
-    setChatMessages((prev) => [...prev, userMessage, { id: assistantId, role: "assistant", content: "", excludeFromHistory: exclude }]);
+  /**
+   * The one place the POST-and-stream loop lives — shared verbatim by
+   * sendChatMessage (a brand-new turn) and regenerateFrom (re-running an
+   * existing turn). `assistantId` is the id of the already-inserted, empty
+   * assistant bubble this stream fills in; `historyForRequest` is the context
+   * the caller decided to send (each caller computes its own, since "the
+   * history before this turn" differs between a fresh send and a regenerate).
+   */
+  async function streamReplyInto(
+    assistantId: string,
+    userContent: string,
+    historyForRequest: { role: string; content: string }[],
+    options?: SendOptions
+  ) {
     setChatOpen(true);
     setIsTyping(true);
 
@@ -170,6 +174,60 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
     }
   }
 
+  async function sendChatMessage(userContent: string, options?: SendOptions) {
+    const exclude = options?.excludeFromHistory === true;
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userContent, excludeFromHistory: exclude };
+    const assistantId = crypto.randomUUID();
+    // Past messages flagged excludeFromHistory (a prior quick action's quote
+    // AND its reply) are dropped entirely here — not trimmed, not
+    // paraphrased, just absent — so nothing about that exchange can anchor
+    // this or any later message back onto its topic.
+    const historyForRequest = chatMessages.filter((m) => !m.excludeFromHistory).map((m) => ({ role: m.role, content: m.content }));
+
+    setChatMessages((prev) => [...prev, userMessage, { id: assistantId, role: "assistant", content: "", excludeFromHistory: exclude }]);
+
+    await streamReplyInto(assistantId, userContent, historyForRequest, options);
+  }
+
+  async function regenerateFrom(assistantId: string) {
+    if (isTyping) return;
+
+    // Locate the assistant reply and the user turn that produced it. Computed
+    // from the current render's chatMessages (fresh every render) — this is a
+    // direct user action, so there's no stale-closure risk worth a ref.
+    const idx = chatMessages.findIndex((m) => m.id === assistantId);
+    if (idx < 1) return;
+    const userMsg = chatMessages[idx - 1];
+    if (userMsg.role !== "user") return;
+
+    // History is everything strictly BEFORE that user turn (same
+    // excludeFromHistory filtering sendChatMessage applies) — the turn being
+    // regenerated is re-sent as `message`, never duplicated into its own
+    // history.
+    const historyForRequest = chatMessages
+      .slice(0, idx - 1)
+      .filter((m) => !m.excludeFromHistory)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const newAssistantId = crypto.randomUUID();
+    // Drop the old reply and anything after it (ChatGPT-style: regenerating a
+    // turn invalidates everything downstream of it), keep the user message,
+    // and append a fresh empty bubble to stream into.
+    setChatMessages((prev) => {
+      const cut = prev.findIndex((m) => m.id === assistantId);
+      if (cut < 1) return prev;
+      return [
+        ...prev.slice(0, cut),
+        { id: newAssistantId, role: "assistant", content: "", excludeFromHistory: userMsg.excludeFromHistory },
+      ];
+    });
+
+    await streamReplyInto(newAssistantId, userMsg.content, historyForRequest, {
+      excludeFromHistory: userMsg.excludeFromHistory,
+      bypassCache: true,
+    });
+  }
+
   async function clearMessages() {
     // No course identity (the plain /dashboard/demo overview) — nothing
     // persisted for this to wipe, same guard as the load effect above.
@@ -194,5 +252,5 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
     }
   }
 
-  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, clearMessages };
+  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, regenerateFrom, clearMessages };
 }

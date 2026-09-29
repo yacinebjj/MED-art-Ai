@@ -10,10 +10,9 @@ import type { Language } from "@/providers/LanguageProvider";
 export const STUDY_TRANSLATIONS = {
   pageTitle: { fr: "Espace de Révision", en: "Study Space" },
   pageSubtitle: {
-    fr: "Points faibles, flashcards et sessions de concentration — tout au même endroit.",
-    en: "Weak points, flashcards, and focus sessions — all in one place.",
+    fr: "Flashcards et sessions de concentration — tout au même endroit.",
+    en: "Flashcards and focus sessions — all in one place.",
   },
-  weakPoints: { fr: "Points Faibles", en: "Weak Points" },
   flashcards: { fr: "Flashcards", en: "Flashcards" },
   pomodoro: { fr: "Pomodoro", en: "Pomodoro" },
   pause: { fr: "Pause", en: "Pause" },

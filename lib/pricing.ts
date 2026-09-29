@@ -102,7 +102,6 @@ const TIER_META: Record<PricingTierId, TierMeta> = {
       "Accès complet au Studio (6 formats par cours)",
       "Examens de module générés par IA",
       "Assistant IA illimité",
-      "Suivi de tes points faibles",
     ],
   },
   group: {

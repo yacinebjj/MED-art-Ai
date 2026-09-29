@@ -169,3 +169,88 @@ export const DARK_MARKDOWN_COMPONENTS: Components = createMarkdownComponents(
   BADGE_CLASSES.dark,
   LIST_ICON_CLASSES.dark
 );
+
+/**
+ * Lighter-weight prose for the CHAT surface only — same Inter (`font-sans`),
+ * but tuned to read as a clean, compact CONVERSATION instead of the long-form
+ * "medical journal" treatment PROSE_CLASSES gives Explication/Studio. The
+ * journal look (a 75-character measure that centers a narrow column inside
+ * the chat, oversized `## ` section headings with a top rule + left accent
+ * bar + `mt-14`, and `my-6` paragraph gaps) is exactly what made a chat reply
+ * read as a dense wall of blocks rather than a message. Here: full width,
+ * modest headings, tight-but-airy vertical rhythm, and normal list bullets
+ * (not the forced ✓-icon-per-item study styling). Callouts/tables/bold keep
+ * their identity via CHAT_MARKDOWN_COMPONENTS below.
+ */
+export const CHAT_PROSE_CLASSES = [
+  "prose prose-slate font-sans prose-sm md:prose-base max-w-none",
+  "prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-slate-900",
+  "prose-h1:text-lg prose-h1:mt-0 prose-h1:mb-2",
+  "prose-h2:text-base prose-h2:mt-5 prose-h2:mb-2",
+  "prose-h3:text-sm prose-h3:mt-4 prose-h3:mb-1.5 prose-h3:text-slate-700",
+  "prose-p:my-2.5 prose-p:leading-[1.7]",
+  "prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-li:leading-[1.7]",
+  "prose-a:font-medium prose-a:text-blue-600",
+  "prose-strong:font-semibold prose-strong:text-slate-900",
+  "prose-hr:my-4 prose-hr:border-slate-200",
+  "prose-th:bg-slate-100 prose-th:text-slate-900 prose-th:font-semibold prose-th:p-2 prose-th:text-left",
+  "prose-td:p-2 prose-td:border-t prose-td:border-slate-200 prose-td:align-top",
+].join(" ");
+
+export const DARK_CHAT_PROSE_CLASSES = [
+  "prose prose-invert font-sans prose-sm md:prose-base max-w-none",
+  "prose-headings:font-semibold prose-headings:tracking-tight",
+  "prose-h1:text-lg prose-h1:mt-0 prose-h1:mb-2",
+  "prose-h2:text-base prose-h2:mt-5 prose-h2:mb-2",
+  "prose-h3:text-sm prose-h3:mt-4 prose-h3:mb-1.5 prose-h3:text-cyan-300",
+  "prose-p:my-2.5 prose-p:leading-[1.7]",
+  "prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-li:leading-[1.7]",
+  "prose-a:font-medium prose-a:text-cyan-400",
+  "prose-strong:font-semibold",
+  "prose-hr:my-4 prose-hr:border-white/10",
+  "prose-th:bg-white/10 prose-th:font-semibold prose-th:p-2 prose-th:text-left",
+  "prose-td:p-2 prose-td:border-t prose-td:border-white/10 prose-td:align-top",
+].join(" ");
+
+/**
+ * Chat's own markdown renderers: keep the colored callout blockquotes, table
+ * frame and bold-term badges (real signal in a medical reply), but DROP the
+ * per-list-item ✓ icon and the heavy `my-6` paragraph override that
+ * createMarkdownComponents forces — those belong to the long-form study
+ * surfaces, not a conversation. Everything else falls through to
+ * CHAT_PROSE_CLASSES' own compact spacing (normal bullets included).
+ */
+function createChatMarkdownComponents(
+  calloutStyles: Record<CalloutTone, string>,
+  tableWrapperClass: string,
+  badgeClass: string
+): Components {
+  return {
+    blockquote: ({ node, children }) => {
+      const tone = calloutTone(hastText(node));
+      return (
+        <blockquote className={`my-3 rounded-r-lg px-4 py-2.5 font-normal not-italic shadow-sm ${calloutStyles[tone]}`}>
+          {children}
+        </blockquote>
+      );
+    },
+    table: ({ children }) => (
+      <div className={cn("my-4 overflow-x-auto rounded-lg border shadow-sm", tableWrapperClass)}>
+        <table className="m-0 w-full text-sm">{children}</table>
+      </div>
+    ),
+    strong: ({ children }) => <strong className={badgeClass}>{children}</strong>,
+  };
+}
+
+export const CHAT_MARKDOWN_COMPONENTS: Components = createChatMarkdownComponents(
+  CALLOUT_STYLES,
+  "border-slate-200",
+  BADGE_CLASSES.light
+);
+
+export const DARK_CHAT_MARKDOWN_COMPONENTS: Components = createChatMarkdownComponents(
+  DARK_CALLOUT_STYLES,
+  "border-white/10",
+  BADGE_CLASSES.dark
+);
