@@ -23,45 +23,49 @@
  * other cache/clone layer already in this codebase.
  *
  * MODEL POLICY: every OpenRouter call in this file — the delta-chapter/
- * wrapper calls below, and generateExplicationPart — runs on CHEAP_MODEL
- * with reasoning explicitly DISABLED (`reasoning: { enabled: false }`).
+ * wrapper calls below, and generateExplicationPart — runs on
+ * EXPLICATION_MODEL (lib/ai/openrouter.ts), with reasoning explicitly
+ * DISABLED (`reasoning: { enabled: false }`).
  *
  * This used to send `reasoning: { effort: "low" }` on the belief that
- * deepseek-v3.2 (CHEAP_MODEL at the time) always reasons and "low" would cap
- * it. OpenRouter's own endpoint data said otherwise: V3.2 is a HYBRID model,
- * and every one of its providers lists `reasoning` as an optional, opt-in
- * parameter. Sending `effort` therefore switched thinking mode ON — the
- * model spent time and token budget reasoning before writing any visible
- * output. That is the likely cause of the recurring "Le modèle IA met trop
- * de temps à répondre" part failures (aborted at
- * EXPLICATION_PART_TIMEOUT_MS ≈ 180s even after the client split a part into
- * 8 small sub-parts). Disabling it keeps the whole `maxTokens` budget for
- * the visible explanation, which also covers the original concern (hidden
- * thinking eating the budget and truncating output).
- * There is no Sonnet fallback anywhere in the Explication pipeline; the
- * delta-chapter/wrapper calls used to omit `model` entirely (silently
+ * deepseek-v3.2 always reasons and "low" would cap it. OpenRouter's own
+ * endpoint data said otherwise: V3.2 is a HYBRID model, and every one of its
+ * providers lists `reasoning` as an optional, opt-in parameter. Sending
+ * `effort` therefore switched thinking mode ON — the model spent time and
+ * token budget reasoning before writing any visible output. That is the
+ * likely cause of the recurring "Le modèle IA met trop de temps à répondre"
+ * part failures (aborted at EXPLICATION_PART_TIMEOUT_MS ≈ 180s even after the
+ * client split a part into 8 small sub-parts). Disabling it keeps the whole
+ * `maxTokens` budget for the visible explanation, which also covers the
+ * original concern (hidden thinking eating the budget and truncating
+ * output). There is no Sonnet fallback anywhere in the Explication pipeline;
+ * the delta-chapter/wrapper calls used to omit `model` entirely (silently
  * defaulting to callOpenRouter's own global Sonnet MODEL) — that default is
  * not relied on here.
  *
- * HISTORY — CHEAP_MODEL was deepseek/deepseek-v3.2 until 2026-09-30, then
- * migrated to qwen/qwen-2.5-72b-instruct — a standard instruct model, not a
- * hidden-reasoning one. `reasoning: { enabled: false }` above was KEPT
- * across that migration rather than removed: it's a harmless, documented
- * no-op on a model that doesn't support the option at all (same precedent
- * as app/api/courses/chat/route.ts's own `reasoning` comment), and it keeps
- * this file defended against the exact bug described above if CHEAP_MODEL
- * ever moves to another hybrid-reasoning model again. NOT independently
- * re-measured on this pipeline's actual long-form medical-writing task with
- * Qwen specifically: this file's own EXPLICATION_PART_MAX_TOKENS/
- * EXPLICATION_PART_TIMEOUT_MS budget below was reverse-engineered from
- * DeepSeek V3.2's specifically measured ~70 tokens/second real throughput
- * (see that constant's own comment) — Qwen's real throughput and
- * output-length-following behavior on this exact task are unverified. Also
- * note Qwen2.5-72B-Instruct's real context window (32,768 tokens, confirmed
- * live against GET https://openrouter.ai/api/v1/models) is far smaller than
- * DeepSeek V3.2's — CHUNKED_SLICE_CHARS' own sizing should comfortably
- * still fit under it, but was never re-validated against this specific
- * number.
+ * HISTORY — this file ran on the shared CHEAP_MODEL constant (deepseek-v3.2)
+ * until 2026-09-30, moved to CHEAP_MODEL when it was migrated to
+ * qwen/qwen-2.5-72b-instruct, then reverted to deepseek-v3.2 specifically —
+ * via its OWN dedicated EXPLICATION_MODEL constant, no longer shared with
+ * the rest of the CHEAP_MODEL fleet — the SAME day, after the Qwen swap
+ * produced two real, reproducible regressions unique to this feature: ~182s
+ * timeouts even after shrinking the per-part budget twice, and a genuinely
+ * shallower exhaustive-depth output students could tell apart from DeepSeek's.
+ * See EXPLICATION_MODEL's own comment in lib/ai/openrouter.ts for the full
+ * reasoning (in short: DeepSeek V3.2's "genuinely long, exhaustive long-form
+ * writing" was the SPECIFIC, cited reason CHEAP_MODEL was originally chosen
+ * for this one feature over ECONOMY_MODEL — a real model-specific strength
+ * this app never verified Qwen shares). `reasoning: { enabled: false }` was
+ * never removed across any of this — it's the correct, necessary setting for
+ * deepseek-v3.2 specifically (a hybrid-reasoning model) and would have been a
+ * harmless no-op for Qwen regardless (same precedent as
+ * app/api/courses/chat/route.ts's own `reasoning` comment) — so keeping it
+ * through both swaps was correct both times, not a coincidence.
+ * EXPLICATION_PART_MAX_TOKENS/CHUNKED_SLICE_CHARS/EXPLICATION_PART_TIMEOUT_MS
+ * below are restored to the values originally, empirically calibrated
+ * against deepseek-v3.2's own measured ~70 tokens/second real throughput on
+ * this exact task (see each constant's own comment) — safe again now that
+ * the model they were tuned for is back.
  *
  * ARCHITECTURE (rewritten after a real production incident — repeated
  * "échec de génération" 3-4 times in a row, then a truncated result even on
@@ -85,7 +89,7 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
-import { callOpenRouter, CHEAP_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, EXPLICATION_MODEL } from "@/lib/ai/openrouter";
 import { parseJsonResponse, MAX_SOURCE_CHARS, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
@@ -440,22 +444,18 @@ export async function runStudioExplicationDeltaPipeline(
       // exactly the "cours longs" case reported in production. Model
       // explicit (was defaulting to callOpenRouter's global Sonnet MODEL) —
       // see this file's own header comment: every Studio Explication path,
-      // no exception, now runs on CHEAP_MODEL. This happens to sit exactly
-      // at qwen/qwen-2.5-72b-instruct's own real top_provider.max_completion_tokens
-      // (16,384, confirmed live against GET https://openrouter.ai/api/v1/models)
-      // since the 2026-09-30 CHEAP_MODEL migration off deepseek-v3.2 — leave
-      // this value as-is (it's the model's real ceiling, not headroom above
-      // it) but re-verify if CHEAP_MODEL ever changes again. `reasoning:
-      // { enabled: false }` kept (see this file's own header comment) even
-      // though Qwen2.5-72B-Instruct has no hidden reasoning to disable —
-      // a harmless no-op on this model, real protection if CHEAP_MODEL
-      // moves to another hybrid-reasoning model later.
+      // no exception, runs on EXPLICATION_MODEL (deepseek-v3.2 as of
+      // 2026-09-30 — real max_completion_tokens 65,536, so 16,384 here is
+      // real headroom, not a ceiling-pinned value like it briefly was during
+      // this file's short-lived move to Qwen). `reasoning: { enabled: false }`
+      // — see this file's own header comment for why this is the correct,
+      // necessary setting for deepseek-v3.2 specifically.
       const rawDelta = await callOpenRouter(
         [
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { model: CHEAP_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { enabled: false } }
+        { model: EXPLICATION_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { enabled: false } }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -486,7 +486,7 @@ export async function runStudioExplicationDeltaPipeline(
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { enabled: false } }
+      { model: EXPLICATION_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { enabled: false } }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -762,7 +762,18 @@ function tryDecodeJsonString(escaped: string): string | null {
 // own chapter-content requirements (make differentials/management/tables
 // more consistently mandatory, not just "when relevant") rather than
 // raising this further — see that prompt's own 2026-09-30 comment.
-const CHUNKED_SLICE_CHARS = 5_000;
+//
+// RESTORED, 5,000 -> 6,000, same day: this file's model reverted from
+// CHEAP_MODEL (qwen/qwen-2.5-72b-instruct) to its own dedicated
+// EXPLICATION_MODEL (deepseek-v3.2 — see that constant's comment in
+// lib/ai/openrouter.ts for the full reasoning) after the Qwen swap couldn't
+// recover DeepSeek's originally-cited exhaustive-long-form-writing strength
+// even at a carefully re-tuned budget. 6,000 is the ORIGINAL value this
+// whole per-part architecture (this constant, EXPLICATION_PART_MAX_TOKENS,
+// EXPLICATION_PART_TIMEOUT_MS) was empirically calibrated against DeepSeek
+// V3.2's own measured ~70 tokens/second throughput for — safe again now that
+// the model it was tuned for is back, not a fresh guess.
+const CHUNKED_SLICE_CHARS = 6_000;
 
 /**
  * Safe per-part token ceiling for the client-driven, multi-request
@@ -857,6 +868,15 @@ const CHUNKED_SLICE_CHARS = 5_000;
 // real 16,384-token max_completion_tokens (confirmed live against
 // GET https://openrouter.ai/api/v1/models), leaving ~4,384 tokens of margin
 // rather than pinning exactly at the model's own ceiling.
+//
+// MODEL REVERTED, same day, CHUNKED_SLICE_CHARS RESTORED TO 6,000: this
+// file now runs on its own EXPLICATION_MODEL (deepseek-v3.2), not Qwen — see
+// CHUNKED_SLICE_CHARS' own comment and lib/ai/openrouter.ts's
+// EXPLICATION_MODEL comment for the full reasoning. 12,000 is kept exactly
+// as-is rather than reverted to the original 10,000: it remains a
+// rarely-reached safety net regardless of model (deepseek-v3.2's own real
+// max_completion_tokens is 65,536, so 12,000 is comfortable margin either
+// way), and the slightly larger ceiling is strictly safer, never a downside.
 const EXPLICATION_PART_MAX_TOKENS = 12_000;
 
 /**
@@ -1055,10 +1075,10 @@ const PREVIOUS_PART_TAIL_CHARS = 800;
  * CALIBRATED against a REALISTIC French tokenization ratio (~1.9 tokens per
  * word for medical French — long technical terms tokenize worse than
  * everyday English, and the JSON wrapper escapes every newline on top).
- * With CHUNKED_SLICE_CHARS = 5,000 and EXPLICATION_PART_MAX_TOKENS = 12,000
+ * With CHUNKED_SLICE_CHARS = 6,000 and EXPLICATION_PART_MAX_TOKENS = 12,000
  * (both re-tuned 2026-09-30 — see each constant's own comment):
- *   target  1,100 words ≈ 2,090 tokens
- *   ceiling 1,485 words ≈ 2,822 tokens   (≈9,200 tokens of headroom)
+ *   target  1,320 words ≈ 2,508 tokens
+ *   ceiling 1,782 words ≈ 3,386 tokens   (≈8,600 tokens of headroom)
  * Both land far inside EXPLICATION_PART_TIMEOUT_MS, with real room for the
  * model to overshoot its target without ever hitting the hard cap.
  */
@@ -1129,15 +1149,12 @@ export async function generateExplicationPart(
       },
     ],
     {
-      model: CHEAP_MODEL,
+      model: EXPLICATION_MODEL,
       maxTokens: EXPLICATION_PART_MAX_TOKENS,
       bypassMock: true,
       // Reasoning OFF, not "low" — see this file's MODEL POLICY header for
       // why `effort: "low"` was switching DeepSeek V3.2's thinking mode ON
-      // and causing the 180s part timeouts. Kept across the 2026-09-30
-      // CHEAP_MODEL migration to qwen/qwen-2.5-72b-instruct — harmless no-op
-      // on this non-reasoning model, real protection if CHEAP_MODEL ever
-      // moves to another hybrid-reasoning model again.
+      // and causing the 180s part timeouts.
       reasoning: { enabled: false },
       timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
     }

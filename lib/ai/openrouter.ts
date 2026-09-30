@@ -236,6 +236,33 @@ export const MID_TIER_MODEL = "openai/gpt-5-mini";
 //   below before assuming the same fix transfers as-is.
 export const CHEAP_MODEL = "qwen/qwen-2.5-72b-instruct";
 
+// EXPLICATION-ONLY MODEL, 2026-09-30 — carved out of CHEAP_MODEL specifically
+// for lib/studio-explication-delta.ts, after the 2026-09-30 CHEAP_MODEL
+// migration produced two real, reproducible regressions on this ONE feature
+// (real ~182s timeouts even after shrinking the per-part budget twice, and a
+// genuine, repeatedly-reported drop in exhaustive medical depth) that every
+// other CHEAP_MODEL call site (Study Planner, Notes, Exam, Module Synthesis)
+// never showed. Root cause: Explication Ultra-Détaillée was the ONE feature
+// CHEAP_MODEL was originally picked for BECAUSE of DeepSeek V3.2's own
+// specifically-cited "reputation for genuinely long, exhaustive long-form
+// writing" (see the history a few lines below) — that is a real, model-
+// specific strength this app never verified Qwen2.5-72B-Instruct (a much
+// smaller dense model) actually shares, and two rounds of defensive
+// config-only tuning couldn't fully recover it. Reverted to
+// deepseek/deepseek-v3.2 EXACTLY (not deepseek/deepseek-chat, a different,
+// older DeepSeek V3 model a first draft of this fix considered — confirmed
+// live against GET https://openrouter.ai/api/v1/models: deepseek-chat's real
+// max_completion_tokens is only 16,000, well below v3.2's 65,536, and its
+// throughput on this exact task was never measured either) — this is the
+// SAME model id, same context (163,840) and completion ceiling (65,536)
+// EXPLICATION_PART_MAX_TOKENS/CHUNKED_SLICE_CHARS/EXPLICATION_PART_TIMEOUT_MS
+// were originally, empirically calibrated against (confirmed still live,
+// same specs, $0.28/M input + $0.42/M output — cheaper than CHEAP_MODEL's
+// current $0.36/$0.40). Every OTHER CHEAP_MODEL call site stays on Qwen —
+// they never showed this regression, and moving them back would give up
+// Qwen's real cost savings for no demonstrated benefit.
+export const EXPLICATION_MODEL = "deepseek/deepseek-v3.2";
+
 // Shared free-tier (":free" suffix) fallback chain — genuinely zero
 // marginal cost, used by app/api/dashboard-assistant/route.ts,
 // app/api/courses/chat/route.ts, and app/api/assistant/route.ts's
