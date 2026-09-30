@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 type ToastVariant = "success" | "error" | "info";
 
@@ -61,6 +62,9 @@ let nextId = 1;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // Phones get iOS-style banners from the top: the bottom edge is already
+  // taken by the floating nav, chat composers and the exam action bar.
+  const isTopPlacement = useMediaQuery("(max-width: 639px)");
 
   const dismiss = useCallback((id: number) => {
     setToasts((current) => current.filter((item) => item.id !== id));
@@ -84,10 +88,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {/* aria-live="polite" (never "assertive") even for errors — a screen
           reader interruption mid-sentence is its own small jolt, and staying
           calm here matters just as much for that audience. */}
+      {/* inset-x-3 on phones, never w-full + right-4: a `fixed` w-full is the
+          full viewport width, so right-4 pushed its left edge 16px off-screen. */}
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed bottom-4 right-4 z-[9999] flex w-full max-w-sm flex-col gap-2"
+        className="pointer-events-none fixed inset-x-3 top-[calc(env(safe-area-inset-top)+0.75rem)] z-[9999] flex flex-col-reverse gap-2 sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-auto sm:w-full sm:max-w-sm sm:flex-col"
       >
         <AnimatePresence>
           {toasts.map((item) => {
@@ -95,10 +101,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             return (
               <motion.div
                 key={item.id}
-                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                layout
+                initial={{ opacity: 0, y: isTopPlacement ? -16 : 12, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                exit={{ opacity: 0, y: isTopPlacement ? "-120%" : -8, scale: 0.98 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                drag={isTopPlacement ? "y" : false}
+                dragConstraints={{ top: 0, bottom: 0 }}
+                dragElastic={{ top: 0.9, bottom: 0.05 }}
+                onDragEnd={(_, info) => {
+                  if (info.offset.y < -40 || info.velocity.y < -400) dismiss(item.id);
+                }}
                 className={`glass-panel pointer-events-auto relative flex items-start gap-3 overflow-hidden rounded-2xl border p-3.5 shadow-glass dark:shadow-glass-dark ${border}`}
               >
                 <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${iconClass}`} />
@@ -114,7 +127,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                         item.action?.onClick();
                         dismiss(item.id);
                       }}
-                      className="mt-1.5 text-xs font-bold uppercase tracking-wide text-primary hover:underline"
+                      className="touch-target relative mt-1.5 text-xs font-bold uppercase tracking-wide text-primary hover:underline"
                     >
                       {item.action.label}
                     </button>
@@ -123,7 +136,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={() => dismiss(item.id)}
-                  className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="touch-target relative shrink-0 rounded-md p-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label="Fermer la notification"
                 >
                   <X className="h-3.5 w-3.5" />

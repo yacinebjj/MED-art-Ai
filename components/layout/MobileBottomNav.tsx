@@ -31,8 +31,8 @@ const PRIMARY_ITEMS = [
 
 /**
  * Native-app-style bottom tab bar — replaces the slide-in drawer on mobile
- * (< lg) entirely; Sidebar.tsx now renders desktop-only. `fixed bottom-0`,
- * safe-area padding for iOS home-indicator devices, and each tap target is
+ * (< lg) entirely; Sidebar.tsx now renders desktop-only. Floating pill,
+ * offset above the iOS home indicator by the safe area, and each tap target is
  * a full flex-1 column (well over the 44px/h-12 minimum) rather than a
  * bare icon, per the redesign's "large touch targets" requirement.
  */
@@ -59,9 +59,16 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
       className={cn(
         "glass-panel shadow-glass dark:shadow-glass-dark fixed inset-x-3 bottom-3 z-40 flex items-stretch justify-around rounded-3xl px-1 lg:hidden",
         !prefersReducedMotion && "transition-[transform,opacity] duration-200 ease-out",
-        hidden ? "pointer-events-none translate-y-[calc(100%+2rem)] opacity-0" : "translate-y-0 opacity-100"
+        hidden ? "pointer-events-none translate-y-[calc(100%+4rem)] opacity-0" : "translate-y-0 opacity-100"
       )}
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      // A floating pill takes the safe area as its OFFSET, not as internal
+      // padding (which would stretch the pill itself by ~34px under the
+      // home indicator).
+      style={{
+        bottom: "max(0.75rem, env(safe-area-inset-bottom))",
+        left: "max(0.75rem, env(safe-area-inset-left))",
+        right: "max(0.75rem, env(safe-area-inset-right))",
+      }}
     >
       {PRIMARY_ITEMS.map((item) => {
         const isActive =

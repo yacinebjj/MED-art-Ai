@@ -108,10 +108,10 @@ export default function SearchPage() {
   const showGuide = !error && !loading && results === null;
 
   return (
-    <div className="aurora-canvas-bg relative min-h-screen">
+    <div className="aurora-canvas-bg relative min-h-dvh">
       <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
 
-      <div className="relative mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
+      <div className="relative mx-auto max-w-4xl px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-6 sm:py-10 lg:px-8">
         <Link
           href="/dashboard"
           className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-gray-600 transition-all duration-300 hover:-translate-x-0.5 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 sm:mb-8"

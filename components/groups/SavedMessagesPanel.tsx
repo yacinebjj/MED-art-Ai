@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bookmark, ImageIcon, Mic, Trash2, Video, X } from "lucide-react";
+import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
 import type { SavedMessage } from "@/hooks/useSavedMessages";
 
 interface SavedMessagesPanelProps {
@@ -30,6 +31,8 @@ const MEDIA_LABEL: Record<Exclude<SavedMessage["type"], "text">, { label: string
  * whole point.
  */
 export function SavedMessagesPanel({ isOpen, onClose, saved, onRemove, currentGroupId }: SavedMessagesPanelProps) {
+  const { sheetProps, startDrag } = useBottomSheetMotion(onClose);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -43,13 +46,11 @@ export function SavedMessagesPanel({ isOpen, onClose, saved, onRemove, currentGr
             onClick={onClose}
           />
           <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
-            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed inset-x-0 bottom-0 z-[61] flex max-h-[80vh] flex-col rounded-t-2xl border-t border-zinc-200 bg-white shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-950 dark:shadow-black/40 sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:bottom-auto sm:h-full sm:w-96 sm:max-h-none sm:rounded-l-2xl sm:rounded-t-none sm:border-l sm:border-t-0"
+            {...sheetProps}
+            className="fixed inset-x-0 bottom-0 z-[61] flex max-h-[80dvh] flex-col rounded-t-3xl border-t border-zinc-200 bg-white shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-950 dark:shadow-black/40 sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:bottom-auto sm:h-full sm:w-96 sm:max-h-none sm:rounded-l-2xl sm:rounded-t-none sm:border-l sm:border-t-0"
           >
-            <div className="flex shrink-0 items-center justify-between p-4">
+            <BottomSheetHandle onPointerDown={startDrag} />
+            <div className="flex shrink-0 items-center justify-between p-4 max-sm:pt-1">
               <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-900 dark:text-white">
                 Messages enregistrés
                 <span className="text-xs font-medium tabular-nums text-zinc-500 dark:text-zinc-400">({saved.length})</span>
@@ -58,13 +59,13 @@ export function SavedMessagesPanel({ isOpen, onClose, saved, onRemove, currentGr
                 type="button"
                 onClick={onClose}
                 aria-label="Fermer"
-                className="rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 active:scale-90 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
+                className="touch-target relative rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 active:scale-90 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="chat-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4">
+            <div className="chat-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-4">
               {saved.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-14 text-center text-sm text-zinc-500 dark:text-zinc-400">
                   <Bookmark className="h-6 w-6 opacity-40" />
@@ -89,7 +90,8 @@ export function SavedMessagesPanel({ isOpen, onClose, saved, onRemove, currentGr
                         <button
                           type="button"
                           onClick={() => onRemove(item.id)}
-                          className="shrink-0 rounded-full p-1 text-zinc-400 opacity-0 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:text-zinc-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+                          // Hover-reveal only where hover exists — on touch it was permanently invisible.
+                          className="touch-target relative shrink-0 rounded-full p-1 text-zinc-400 transition-all hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
                           aria-label="Retirer"
                           title="Retirer des messages enregistrés"
                         >

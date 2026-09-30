@@ -58,7 +58,7 @@ export function FullscreenViewerModal({ open, onClose, title, children, contentC
     // app/globals.css), not a guessed hex value: pure white in light mode,
     // near-black in dark, always fully opaque (no blur/transparency),
     // exactly like the note editor's own proven fullscreen Card.
-    <div className="fixed inset-0 z-[100] flex flex-col bg-background">
+    <div className="fixed inset-0 z-[100] flex flex-col bg-background pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)]">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
         <h2 className="min-w-0 flex-1 truncate text-base font-bold text-foreground">{title}</h2>
         <button

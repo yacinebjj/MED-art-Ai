@@ -1065,6 +1065,7 @@ export function StudioPanel({
               // up (real trackpad/mouse precision, no thumb reaching for a
               // corner), the softer inset-4 floating-card treatment returns.
               "animate-fade-in fixed inset-0 z-[999] isolate flex flex-col rounded-none shadow-glass dark:shadow-glass-dark sm:inset-4 sm:rounded-3xl",
+              "max-sm:pb-[env(safe-area-inset-bottom)] max-sm:pl-[env(safe-area-inset-left)] max-sm:pr-[env(safe-area-inset-right)] max-sm:pt-[env(safe-area-inset-top)]",
               detailBg || "bg-card"
             )}
           >

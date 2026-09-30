@@ -484,3 +484,83 @@
 .chat-scrollbar::-webkit-scrollbar-thumb:hover {
   background-color: rgba(34, 211, 238, 0.4);
 }
+
+/* Native mobile foundation. `manipulation` kills double-tap zoom and the
+   300ms tap delay but keeps two-finger pinch (the PPTX viewer and
+   infographic depend on it), so zoom is never disabled outright. */
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* `hidden` is a fallback on html only: on body it would create a scroll
+     container and break every position: sticky descendant. */
+  overflow-x: hidden;
+  overflow-x: clip;
+  /* `contain` blocks pull-to-refresh (which would kill an in-flight
+     generation) but keeps the native rubber-band bounce. */
+  overscroll-behavior-y: contain;
+}
+
+body {
+  overflow-x: clip;
+  overscroll-behavior-y: contain;
+  -webkit-tap-highlight-color: transparent;
+  /* viewport-fit=cover draws under the landscape notch; keep flow content out. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+a,
+button,
+input,
+label,
+select,
+summary,
+textarea,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="option"] {
+  touch-action: manipulation;
+}
+
+/* iOS Safari zooms on focus below 16px — and the mobile bump above makes
+   `.text-sm` 15px. `.text-base` and up are already >= 16px there, so they
+   keep their own size. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl),
+  textarea:not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl),
+  select:not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl),
+  [contenteditable="true"]:not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl),
+  [contenteditable=""]:not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl) {
+    font-size: 16px;
+  }
+}
+
+/* Invisible 44x44 minimum hit area for small icon buttons. The element must
+   already be positioned (relative/absolute) — this never sets position itself. */
+.touch-target::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* Bottom-sheet entrance for mobile sheets (Dialog, group drawers). */
+@keyframes sheet-slide-up {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) and (max-width: 639px) {
+  .sheet-enter {
+    animation: sheet-slide-up 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}

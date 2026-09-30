@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Download, FileAudio, ImageIcon, Loader2, Video, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
 import { AudioPlayer } from "./AudioPlayer";
 import { ChatImage } from "./ChatImage";
 import type { ChatMessage } from "@/types/group-chat";
@@ -36,6 +37,7 @@ const TABS: { id: VaultTab; label: string; icon: typeof ImageIcon }[] = [
 export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelProps) {
   const [media, setMedia] = useState<ChatMessage[] | null>(null);
   const [activeTab, setActiveTab] = useState<VaultTab>("image");
+  const { sheetProps, startDrag } = useBottomSheetMotion(onClose);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -74,19 +76,17 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
             onClick={onClose}
           />
           <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
-            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed inset-x-0 bottom-0 z-[61] flex max-h-[80vh] flex-col rounded-t-2xl border-t border-zinc-200 bg-white shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-950 dark:shadow-black/40 sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:bottom-auto sm:h-full sm:w-96 sm:max-h-none sm:rounded-l-2xl sm:rounded-t-none sm:border-l sm:border-t-0"
+            {...sheetProps}
+            className="fixed inset-x-0 bottom-0 z-[61] flex max-h-[80dvh] flex-col rounded-t-3xl border-t border-zinc-200 bg-white shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-950 dark:shadow-black/40 sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:bottom-auto sm:h-full sm:w-96 sm:max-h-none sm:rounded-l-2xl sm:rounded-t-none sm:border-l sm:border-t-0"
           >
-            <div className="flex shrink-0 items-center justify-between p-4 pb-2">
+            <BottomSheetHandle onPointerDown={startDrag} />
+            <div className="flex shrink-0 items-center justify-between p-4 pb-2 max-sm:pt-1">
               <h2 className="text-sm font-bold tracking-tight text-zinc-900 dark:text-white">Vault Médical</h2>
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Fermer"
-                className="rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 active:scale-90 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
+                className="touch-target relative rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 active:scale-90 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -116,7 +116,7 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
               })}
             </div>
 
-            <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-4">
               {!media ? (
                 <div className="flex items-center justify-center gap-2 py-10 text-sm text-zinc-500 dark:text-zinc-400">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -172,7 +172,7 @@ function VaultItemMeta({ item }: { item: ChatMessage }) {
           download
           target="_blank"
           rel="noopener noreferrer"
-          className="shrink-0 rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-cyan-300"
+          className="touch-target relative shrink-0 rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-cyan-300"
           aria-label="Télécharger"
           title="Télécharger"
         >

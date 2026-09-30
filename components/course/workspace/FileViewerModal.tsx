@@ -356,7 +356,8 @@ export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }:
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="inset-0 flex h-full w-full max-w-none max-h-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 shadow-none"
+        sheetOnMobile={false}
+        className="inset-0 flex h-full w-full max-w-none max-h-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] shadow-none"
         onOverlayClick={() => onOpenChange(false)}
         onClick={(e) => e.stopPropagation()}
       >

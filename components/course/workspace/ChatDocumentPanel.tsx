@@ -286,7 +286,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                 </ReactMarkdown>
               </article>
               {showToolbar && (
-                <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100">
+                // Hover-reveal only on devices that can hover — on touch it left Copy/Save unreachable.
+                <div className="flex items-center gap-0.5 transition-opacity duration-200 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
                   <Button
                     variant="ghost"
                     size="icon"

@@ -33,6 +33,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
 import { useSmartPaste } from "@/hooks/useBlockPaste";
 import { useChatTheme } from "@/hooks/useChatTheme";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useSavedMessages } from "@/hooks/useSavedMessages";
 import { PrintGuard } from "@/components/security/PrintGuard";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -249,6 +250,8 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   // desktop can never end up UNDER the mobile-width fixed layer's stacking
   // order if the viewport is resized while open.
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // iOS doesn't shrink 100dvh for the keyboard — same fix as the Assistant composer.
+  const keyboardInset = useKeyboardInset();
   // Shown once the feed is scrolled up far enough that the latest message
   // is out of view — never shown from a fabricated "new messages" count,
   // just real scroll position (see handleFeedScroll below).
@@ -856,8 +859,11 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     <div
       className={cn(
         "flex h-[100dvh] w-screen min-h-0 flex-col overflow-hidden bg-white transition-colors duration-300 dark:bg-gradient-to-b dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950",
-        isFullscreen ? "fixed inset-0 z-[100]" : "fixed inset-0 z-50 lg:static lg:inset-auto lg:z-auto lg:h-full lg:w-auto"
+        // Edge-to-edge takeover: clear the notch, home indicator and landscape sides.
+        "pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)]",
+        isFullscreen ? "fixed inset-0 z-[100]" : "fixed inset-0 z-50 lg:static lg:inset-auto lg:z-auto lg:h-full lg:w-auto lg:p-0"
       )}
+      style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
     >
       <PrintGuard />
 
@@ -865,7 +871,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         <Link
           href="/dashboard/groups"
           aria-label={tGroups("backToGroups", language)}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-all duration-200 hover:-translate-x-0.5 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white active:scale-90"
+          className="touch-target relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-all duration-200 hover:-translate-x-0.5 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white active:scale-90"
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
@@ -1304,7 +1310,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
             type="submit"
             disabled={!input.trim() || isRecording}
             aria-label={tGroups("sendButton", language)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_20px_-4px_rgba(34,211,238,0.7)] active:scale-95 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-lg dark:shadow-cyan-950/50 sm:w-auto sm:px-4 sm:py-2"
+            className="touch-target relative flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_20px_-4px_rgba(34,211,238,0.7)] active:scale-95 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-lg dark:shadow-cyan-950/50 sm:w-auto sm:px-4 sm:py-2"
           >
             <span className="hidden sm:inline">{tGroups("sendButton", language)}</span>
             <Send className="h-4 w-4 sm:h-3.5 sm:w-3.5" />

@@ -34,9 +34,13 @@ export const metadata: Metadata = {
 // the page. iOS Safari ignores this property — pages with a fixed action bar
 // near a text input still need their own visualViewport listener as a
 // fallback there (see e.g. the Notes and Assistant pages).
+// viewportFit "cover" is what makes every env(safe-area-inset-*) in this app
+// non-zero on iOS — without it they all silently resolve to 0. No
+// maximum-scale/user-scalable: deliberate pinch-zoom stays available.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
   interactiveWidget: "resizes-content",
 };
 

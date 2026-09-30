@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Crown, GraduationCap, Loader2, X } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/Avatar";
+import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tGroups } from "@/lib/translations/groups";
 import type { ChatMember } from "@/types/group-chat";
@@ -28,6 +29,7 @@ function initial(name: string | null): string {
  */
 export function MemberDrawer({ isOpen, onClose, onlineUserIds, adminId, members }: MemberDrawerProps) {
   const { language } = useLanguage();
+  const { sheetProps, startDrag } = useBottomSheetMotion(onClose);
 
   return (
     <AnimatePresence>
@@ -42,17 +44,15 @@ export function MemberDrawer({ isOpen, onClose, onlineUserIds, adminId, members 
             onClick={onClose}
           />
           <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
-            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            {...sheetProps}
             // Bespoke zinc/cyan "command center" palette — matching
             // ChatRoom/MessageBubble's own hardcoded tokens rather than the
             // app-wide `glass-card`/shadcn --foreground tokens (this drawer's
             // only consumer IS the chat room, so it can share its exact
             // language without creating an inconsistency anywhere else).
-            className="fixed inset-x-0 bottom-0 z-[61] max-h-[75vh] rounded-t-2xl border-t border-zinc-200 bg-white p-4 shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-950 dark:shadow-black/40 sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:bottom-auto sm:h-full sm:w-80 sm:max-h-none sm:rounded-l-2xl sm:rounded-t-none sm:border-l sm:border-t-0"
+            className="fixed inset-x-0 bottom-0 z-[61] max-h-[75dvh] rounded-t-3xl border-t border-zinc-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-950 dark:shadow-black/40 sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:bottom-auto sm:h-full sm:w-80 sm:max-h-none sm:rounded-l-2xl sm:rounded-t-none sm:border-l sm:border-t-0 sm:pb-4"
           >
+            <BottomSheetHandle onPointerDown={startDrag} className="-mx-4 -mt-4" />
             <div className="mb-3 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-900 dark:text-white">
                 {tGroups("membersDrawerTitle", language)}
@@ -62,7 +62,7 @@ export function MemberDrawer({ isOpen, onClose, onlineUserIds, adminId, members 
                 type="button"
                 onClick={onClose}
                 aria-label={tGroups("closeMembersAriaLabel", language)}
-                className="rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 active:scale-90 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
+                className="touch-target relative rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 active:scale-90 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -74,7 +74,7 @@ export function MemberDrawer({ isOpen, onClose, onlineUserIds, adminId, members 
                 {tGroups("loadingMembers", language)}
               </div>
             ) : (
-              <ul className="max-h-[calc(75vh-4rem)] space-y-1.5 overflow-y-auto sm:max-h-[calc(100%-3rem)]">
+              <ul className="max-h-[calc(75dvh-6rem-env(safe-area-inset-bottom))] space-y-1.5 overflow-y-auto overscroll-contain sm:max-h-[calc(100%-3rem)]">
                 {members.map((member) => {
                   const isOnline = onlineUserIds.has(member.userId);
                   const isMemberAdmin = member.userId === adminId;

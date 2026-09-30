@@ -384,7 +384,9 @@ export function PptxPresentationViewer({ fileUrl, title, fallback }: { fileUrl: 
         "flex h-full min-h-0 w-full overflow-hidden",
         // Slideshow: black, full screen. Also the fallback when the browser
         // refuses real fullscreen — fixed to the viewport, above everything.
-        presenting ? "fixed inset-0 z-[100000] select-none bg-black" : "relative bg-neutral-900",
+        presenting
+          ? "fixed inset-0 z-[100000] select-none bg-black pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)]"
+          : "relative bg-neutral-900",
         presenting && !controlsVisible && "cursor-none"
       )}
       onMouseMove={presenting ? showControls : undefined}

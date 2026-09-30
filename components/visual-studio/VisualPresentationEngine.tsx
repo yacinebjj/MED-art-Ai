@@ -161,7 +161,8 @@ export function VisualPresentationEngine({ deck }: { deck: PresentationDeck }) {
     <div
       className={cn(
         "flex h-dvh flex-col",
-        isFullscreen && "fixed inset-0 z-50",
+        isFullscreen &&
+          "fixed inset-0 z-50 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)]",
         isDark ? "bg-slate-950" : "bg-slate-100"
       )}
     >
