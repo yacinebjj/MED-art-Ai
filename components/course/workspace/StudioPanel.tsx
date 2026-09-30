@@ -63,6 +63,9 @@ export interface TileGenerationOptions {
   dialect?: PodcastDialect;
 }
 
+/** Sections whose ⋮ menu offers "Régénérer" (under "Supprimer") — the Examen QCM tile only, by product direction. The server (app/api/studio/regenerate/route.ts) enforces the same rule and a 5-per-course cap. Exported so MobileStudioCards.tsx gates its own menu identically. */
+export const REGENERATABLE_SECTIONS: ReadonlySet<DemoSectionId> = new Set(["qcm"]);
+
 /** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. Exported so MobileStudioCards.tsx (a completely separate component tree for the mobile browse view) gates its own equivalent menu identically instead of drifting out of sync. */
 export const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
   "explication",
@@ -270,28 +273,18 @@ function SectionOptionsMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {/* Cas Clinique regeneration is permanently disabled by product
-            direction — the 3 generated cases must stay static forever, so
-            this item never renders for that section regardless of what the
-            caller passes as onRegenerateSection. Enforced again server-side
-            in app/api/studio/regenerate/route.ts — this is the UI half only.
-            Infographic and Audio have no variations cache (their own cache
-            tables each hold ONE canonical result per content hash, unlike
-            studio_content_variations) — regenerating would just re-serve
-            the identical cached result, so this item never renders for
-            either; there is no separate route to enforce this server-side
-            since neither /api/studio/infographic nor /api/studio/podcast
-            has a "regenerate" mode at all. */}
-        {onRegenerateSection &&
-          sectionId !== "cas_clinique" &&
-          sectionId !== "infographic" &&
-          sectionId !== "audio" && (
+        <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
+        {/* "Régénérer" is offered for the Examen QCM tile ONLY (product
+            direction), directly under Supprimer — see
+            REGENERATABLE_SECTIONS. Enforced again server-side in
+            app/api/studio/regenerate/route.ts, which rejects every other
+            section and caps QCM at 5 regenerations per course. */}
+        {onRegenerateSection && REGENERATABLE_SECTIONS.has(sectionId) && (
           <DropdownMenuItem onSelect={() => onRegenerateSection(sectionId)}>
             <RefreshCw className="h-4 w-4" />
             {tStudio("regenerate", language)}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -943,16 +936,13 @@ export function StudioPanel({
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {onRegenerateSection &&
-                              section.id !== "cas_clinique" &&
-                              section.id !== "infographic" &&
-                              section.id !== "audio" && (
+                            <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
+                            {onRegenerateSection && REGENERATABLE_SECTIONS.has(section.id) && (
                               <DropdownMenuItem onSelect={() => onRegenerateSection(section.id)}>
                                 <RefreshCw className="h-4 w-4" />
                                 {tStudio("regenerate", language)}
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>

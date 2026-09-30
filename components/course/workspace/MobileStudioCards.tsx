@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import {
+  REGENERATABLE_SECTIONS,
   SECTIONS_WITH_OPTIONS_MENU,
   TILE_TINTS,
   TileOptionsMenu,
@@ -73,15 +74,15 @@ function CardOptionsMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {/* Cas Clinique regeneration is permanently disabled by product
-            direction — mirrors StudioPanel's own identical gate. */}
-        {onRegenerateSection && sectionId !== "cas_clinique" && (
+        <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
+        {/* Examen QCM only, under Supprimer — mirrors StudioPanel's own
+            identical gate (REGENERATABLE_SECTIONS). */}
+        {onRegenerateSection && REGENERATABLE_SECTIONS.has(sectionId) && (
           <DropdownMenuItem onSelect={() => onRegenerateSection(sectionId)}>
             <RefreshCw className="h-4 w-4" />
             {tStudio("regenerate", language)}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

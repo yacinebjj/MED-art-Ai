@@ -10,8 +10,8 @@ import {
   resolveCasCliniqueSystemPrompt,
   resolveCasCliniqueMaxTokens,
 } from "@/lib/ai/studio-prompts";
-import { resolveStudioSchema } from "@/lib/ai/studio-schemas";
-import { errorMessage, MAX_SOURCE_CHARS, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { parseAndValidateStudioSection } from "@/lib/ai/studio-section-validation";
+import { errorMessage, MAX_SOURCE_CHARS } from "@/lib/course-generation-shared";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -35,51 +35,6 @@ const VALID_ACTION_TYPES = Object.keys(STUDIO_PROMPT_CONFIG) as JsonSectionId[];
 
 function isValidActionType(value: unknown): value is JsonSectionId {
   return typeof value === "string" && (VALID_ACTION_TYPES as string[]).includes(value);
-}
-
-/**
- * Parses + Zod-validates one Studio JSON response. Factored out so the
- * generic-path retry loop below (see the "else" branch's own comment) can
- * call it once per attempt without duplicating the parse/validate logic,
- * while the two explication-only single-shot paths (cross-university-delta,
- * fresh-generation-with-tagging) — whose schema is a plain min-50-char
- * string, essentially never failing validation in practice — keep calling
- * it exactly once, no retry machinery needed.
- */
-function parseAndValidateStudioSection(
-  raw: string,
-  actionType: JsonSectionId,
-  sectionKey: string,
-  studyYear: number | null | undefined
-): { success: true; data: unknown } | { success: false; correctiveNote: string } {
-  let parsedValue: unknown;
-  try {
-    const parsed = parseJsonResponse(raw);
-    const value = parsed[sectionKey];
-    if (value === undefined || value === null) {
-      throw new Error(`La réponse de l'IA ne contient pas la clé "${sectionKey}".`);
-    }
-    parsedValue = sanitizeForPostgres(value);
-  } catch (error) {
-    return {
-      success: false,
-      correctiveNote: `la réponse n'était pas un JSON valide, ou la clé "${sectionKey}" était absente (${errorMessage(error)}).`,
-    };
-  }
-
-  // resolveStudioSchema — the ONE section whose schema genuinely varies by
-  // year (cas_clinique: année 1 = essai motivationnel, année 2 = 1 cas
-  // physiologique, année 3+/inconnue = le schéma standard inchangé). Every
-  // other actionType ignores `studyYear` entirely and gets its usual,
-  // unconditional schema.
-  const result = resolveStudioSchema(actionType, studyYear).safeParse(parsedValue);
-  if (!result.success) {
-    const fieldErrors = result.error.flatten().fieldErrors;
-    console.error(`[studio/generate:${actionType}] Validation zod échouée :`, fieldErrors);
-    return { success: false, correctiveNote: `champs invalides ou manquants (d'après la validation) : ${JSON.stringify(fieldErrors)}.` };
-  }
-
-  return { success: true, data: result.data };
 }
 
 /**
