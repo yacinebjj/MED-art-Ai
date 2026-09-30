@@ -1,17 +1,39 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Check, ImageIcon, Mic, Pin, Send, Square, Stethoscope, Users, Video, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  Bookmark,
+  Check,
+  FolderOpen,
+  ImageIcon,
+  Maximize2,
+  Mic,
+  Minimize2,
+  Pin,
+  Search,
+  Send,
+  Smile,
+  Square,
+  Stethoscope,
+  Users,
+  Video,
+  X,
+} from "lucide-react";
+import { gradientFor } from "@/lib/group-avatar-gradient";
 import { cn } from "@/lib/utils";
 import { generateId } from "@/lib/generate-id";
+import { EMOJI_CATEGORIES } from "@/lib/composer-emoji";
 import { createClient } from "@/lib/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useAuth } from "@/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
 import { useSmartPaste } from "@/hooks/useBlockPaste";
 import { useChatTheme } from "@/hooks/useChatTheme";
+import { useSavedMessages } from "@/hooks/useSavedMessages";
 import { PrintGuard } from "@/components/security/PrintGuard";
 import { useLanguage } from "@/providers/LanguageProvider";
 import type { Language } from "@/providers/LanguageProvider";
@@ -19,8 +41,11 @@ import { tGroups } from "@/lib/translations/groups";
 import { ThemePicker } from "./ThemePicker";
 import { DayDivider } from "./DayDivider";
 import { MemberDrawer } from "./MemberDrawer";
+import { MediaVaultPanel } from "./MediaVaultPanel";
+import { SavedMessagesPanel } from "./SavedMessagesPanel";
+import { CommandPalette } from "./CommandPalette";
 import { MessageBubble, type LocalChatMessage } from "./MessageBubble";
-import type { ChatMessage, MessageReactions } from "@/types/group-chat";
+import type { ChatMember, ChatMessage, MessageReactions } from "@/types/group-chat";
 
 interface ChatRoomProps {
   groupId: string;
@@ -142,37 +167,36 @@ interface MedicalTheme {
   /** Translation key for the displayed label (lib/translations/groups.ts) — `id` above stays untranslated since it's the localStorage/lookup key. */
   nameKey: Parameters<typeof tGroups>[0];
   color: string;
-  bgClass: string;
   pattern: string;
 }
 
+// No more per-theme `bgClass` (light pastel wash) — the room itself is now
+// a fixed dark canvas regardless of theme (see the dark-glass redesign
+// below), so each specialty's own pattern image renders directly over that
+// canvas at low opacity instead of over a colored background of its own.
 const medicalThemes: MedicalTheme[] = [
   {
     id: "cardiologie",
     nameKey: "cardiologyThemeName",
     color: "bg-rose-500",
-    bgClass: "bg-rose-50/50 dark:bg-rose-950/20",
     pattern: `url("/illustrations/group-chat-bg-cardiologie.jpeg")`,
   },
   {
     id: "neurologie",
     nameKey: "neurologyThemeName",
     color: "bg-indigo-500",
-    bgClass: "bg-indigo-50/50 dark:bg-indigo-950/20",
     pattern: `url("/illustrations/group-chat-bg-neurologie.jpeg")`,
   },
   {
     id: "pneumologie",
     nameKey: "pneumologyThemeName",
     color: "bg-cyan-500",
-    bgClass: "bg-cyan-50/50 dark:bg-cyan-950/20",
     pattern: `url("/illustrations/group-chat-bg-pneumologie.jpeg")`,
   },
   {
     id: "infectiologie",
     nameKey: "infectiologyThemeName",
     color: "bg-emerald-500",
-    bgClass: "bg-emerald-50/50 dark:bg-emerald-950/20",
     pattern: `url("/illustrations/group-chat-bg-infectiologie.jpeg")`,
   },
 ];
@@ -209,6 +233,26 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [isMemberDrawerOpen, setIsMemberDrawerOpen] = useState(false);
+  const [isVaultOpen, setIsVaultOpen] = useState(false);
+  const [isSavedOpen, setIsSavedOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  // Lifted out of MemberDrawer (which used to fetch its own copy only while
+  // open) so ONE fetch of GET /api/groups/[id]/members can drive both the
+  // drawer AND each MessageBubble's real academic-year badge below.
+  const [members, setMembers] = useState<ChatMember[] | null>(null);
+  const { saved: savedMessages, isSaved, toggle: toggleSaved, remove: removeSaved } = useSavedMessages();
+  // Desktop-only "expand to cover the whole viewport" toggle — distinct
+  // from the existing `lg:static`/`fixed` responsive split below (which
+  // already goes edge-to-edge under `lg` unconditionally); this lets a
+  // student on a wide screen do the same on demand. z-[100] clears this
+  // component's own normal z-50 mobile layer too, so toggling it on
+  // desktop can never end up UNDER the mobile-width fixed layer's stacking
+  // order if the viewport is resized while open.
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Shown once the feed is scrolled up far enough that the latest message
+  // is out of view — never shown from a fabricated "new messages" count,
+  // just real scroll position (see handleFeedScroll below).
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   // Real presence — who's actually connected right now (Supabase Realtime
   // Presence, an in-memory channel feature with no table/column of its own,
@@ -229,18 +273,61 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  // Closes a real race: startRecording awaits getUserMedia before it sets
+  // mediaRecorderRef/isRecording, so two rapid clicks on the mic button
+  // (both still seeing isRecording === false, since React hasn't re-rendered
+  // between them yet) could otherwise both reach getUserMedia and leave one
+  // stream's mic running with nothing referencing it to stop later. Set
+  // synchronously at the top of startRecording, before any `await`.
+  const isStartingRecordingRef = useRef(false);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const typingChannelRef = useRef<RealtimeChannel | null>(null);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  // Caret position to restore once `input`'s new value actually lands in the
+  // DOM — see insertEmoji below for why this can't just be a
+  // requestAnimationFrame call at insert time.
+  const pendingCaretRef = useRef<number | null>(null);
 
   const feed = useMemo(() => buildFeed(messages, language), [messages, language]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [feed.length]);
+
+  function scrollToBottom() {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  /** Scrolls a specific message into view (pinned-bar "jump to" and the Command Palette's message results) — real DOM lookup by id, not a fabricated position. */
+  function jumpToMessage(messageId: string) {
+    document.getElementById(`chat-message-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // Real curriculum year per sender (profiles.academic_year_id ->
+  // curriculum_academic_years.name, joined server-side — see
+  // app/api/groups/[id]/members/route.ts), keyed by userId for O(1) lookup
+  // per message bubble. Empty until `members` has loaded.
+  const academicYearByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const member of members ?? []) {
+      if (member.academicYearName) map.set(member.userId, member.academicYearName);
+    }
+    return map;
+  }, [members]);
+
+  /** Shows the "scroll to bottom" FAB once the feed is scrolled more than ~1.5 message-rows away from its true bottom — real scroll math, not a fabricated unread count. */
+  function handleFeedScroll() {
+    const el = feedRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollToBottom(distanceFromBottom > 150);
+  }
 
   // Restore the saved background theme (if any) on mount.
   useEffect(() => {
@@ -278,6 +365,15 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       mergeServerMessages((messagesRes.messages as ChatMessage[]).map((m) => ({ ...m, status: "sent" as const })));
     }
 
+    // Fire-and-forget — bumps chat_members.last_read_at so the groups lobby
+    // list's unread badge (GET /api/groups) clears next time it's fetched.
+    // Never blocks/gates anything else here: a failed mark-as-read (offline,
+    // rate-limited) just means the badge stays a little stale, not a broken
+    // chat room.
+    function markAsRead() {
+      fetch(`/api/groups/${groupId}/read`, { method: "POST" }).catch(() => {});
+    }
+
     async function bootstrap() {
       const [groupRes] = await Promise.all([fetch(`/api/groups/${groupId}`).then((r) => r.json()), fetchMessages()]);
       if (cancelled) return;
@@ -289,6 +385,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       setGroupName(groupRes.group.name);
       setGroupAdminId(groupRes.group.adminId);
       setPinnedMessageId(groupRes.group.pinnedMessageId ?? null);
+      markAsRead();
     }
 
     // Mobile-specific gap this closes: Realtime's `postgres_changes` only
@@ -302,7 +399,10 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     // tab becomes visible again — cheap (one GET), and merged rather than
     // replacing state so it never clobbers a message still mid-send.
     function handleVisibilityChange() {
-      if (document.visibilityState === "visible") fetchMessages();
+      if (document.visibilityState === "visible") {
+        fetchMessages();
+        markAsRead();
+      }
     }
 
     bootstrap();
@@ -312,6 +412,36 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [groupId]);
+
+  // The member roster — real data (accepted members only), used by
+  // MemberDrawer, each MessageBubble's academic-year badge, and the Command
+  // Palette's "Membres" section. Fetched once per group, not re-fetched on
+  // every drawer open (that used to be MemberDrawer's own job).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/groups/${groupId}/members`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled || !data.success) return;
+        setMembers((data.members as ChatMember[]).filter((m) => m.status === "accepted"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupId]);
+
+  // Global Ctrl/Cmd+K — opens the Command Palette from anywhere in the room,
+  // not just while the composer input has focus.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsCommandPaletteOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const supabase = createClient();
@@ -423,6 +553,43 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     const displayName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
     void typingChannelRef.current.send({ type: "broadcast", event: "typing", payload: { userId: user.id, displayName } });
   }
+
+  /**
+   * Inserts an emoji at the text input's current cursor position (not just
+   * appended to the end) and hands focus back to it, so picking one
+   * mid-sentence doesn't scatter the caret. Falls back to appending when the
+   * input isn't mounted (recording view replaces it) or has no tracked
+   * selection.
+   *
+   * The caret restore itself is NOT done here via requestAnimationFrame —
+   * this is a controlled input, so `setInput` only *schedules* the DOM's
+   * `.value` to change. Calling setSelectionRange before React actually
+   * commits that new value loses the race in practice: the browser resets
+   * the caret to the end of the input the moment `.value` is next written,
+   * which can happen after the rAF fires. Recording the target position in a
+   * ref and restoring it from a `useLayoutEffect` keyed on `input` (below)
+   * runs synchronously right after the real DOM commit instead, so there's
+   * no race to lose.
+   */
+  function insertEmoji(emoji: string) {
+    const el = messageInputRef.current;
+    const selectionStart = el?.selectionStart ?? input.length;
+    const selectionEnd = el?.selectionEnd ?? input.length;
+    const nextValue = input.slice(0, selectionStart) + emoji + input.slice(selectionEnd);
+    pendingCaretRef.current = selectionStart + emoji.length;
+    setInput(nextValue);
+    notifyTyping();
+    setIsEmojiPickerOpen(false);
+  }
+
+  useLayoutEffect(() => {
+    if (pendingCaretRef.current === null) return;
+    const caret = pendingCaretRef.current;
+    pendingCaretRef.current = null;
+    const el = messageInputRef.current;
+    el?.focus();
+    el?.setSelectionRange(caret, caret);
+  }, [input]);
 
   /** Sends (or re-sends, on retry) a text message. `existing` is set only when retrying an already-optimistic, failed message — reuses its id instead of minting a new temp one. */
   async function sendText(text: string, existing?: LocalChatMessage) {
@@ -562,60 +729,75 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   }
 
   async function startRecording() {
-    if (typeof MediaRecorder === "undefined") {
-      toast({ variant: "error", title: "L'enregistrement vocal n'est pas supporté par ce navigateur." });
-      return;
-    }
-
-    // getUserMedia (like crypto.randomUUID) only exists in a secure context
-    // (HTTPS, or localhost). Over plain HTTP on a LAN/local IP the browser
-    // doesn't expose mediaDevices at all — catching that here gives a clear
-    // explanation instead of the generic message below.
-    if (typeof window !== "undefined" && !window.isSecureContext) {
-      toast({
-        variant: "error",
-        title: "L'enregistrement vocal nécessite une connexion sécurisée (HTTPS) ou localhost.",
-      });
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast({ variant: "error", title: "Le microphone n'est pas accessible sur cette connexion (HTTPS ou localhost requis)." });
-      return;
-    }
+    // Set BEFORE any `await` below — a double-click can otherwise fire this
+    // function twice while `isRecording` still reads false in both (React
+    // hasn't re-rendered between the two clicks yet), reaching
+    // getUserMedia() twice and leaking the first stream's open mic with
+    // nothing left referencing it to stop. isStartingRecordingRef is a
+    // plain ref specifically so this check is synchronous, unlike state.
+    if (isStartingRecordingRef.current || mediaRecorderRef.current) return;
+    isStartingRecordingRef.current = true;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      recordedChunksRef.current = [];
+      if (typeof MediaRecorder === "undefined") {
+        toast({ variant: "error", title: "L'enregistrement vocal n'est pas supporté par ce navigateur." });
+        return;
+      }
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-      };
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        clearRecordingTimer();
-        const blob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
-        if (blob.size > 0) uploadMedia(new File([blob], "vocal.webm", { type: "audio/webm" }));
-      };
-      // A mid-recording failure (device unplugged, driver error, ...) puts the
-      // recorder into "inactive" without ever firing onstop — without this,
-      // isRecording would stay stuck true forever with no way to clear it,
-      // since a later stopRecording() call would then throw on an
-      // already-inactive recorder instead of resetting state.
-      recorder.onerror = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        clearRecordingTimer();
-        setIsRecording(false);
-        toast({ variant: "error", title: "L'enregistrement a été interrompu." });
-      };
+      // getUserMedia (like crypto.randomUUID) only exists in a secure context
+      // (HTTPS, or localhost). Over plain HTTP on a LAN/local IP the browser
+      // doesn't expose mediaDevices at all — catching that here gives a clear
+      // explanation instead of the generic message below.
+      if (typeof window !== "undefined" && !window.isSecureContext) {
+        toast({
+          variant: "error",
+          title: "L'enregistrement vocal nécessite une connexion sécurisée (HTTPS) ou localhost.",
+        });
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        toast({ variant: "error", title: "Le microphone n'est pas accessible sur cette connexion (HTTPS ou localhost requis)." });
+        return;
+      }
 
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setIsRecording(true);
-      setRecordingSeconds(0);
-      recordingIntervalRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
-    } catch {
-      toast({ variant: "error", title: "Impossible d'accéder au micro." });
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        recordedChunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+        };
+        recorder.onstop = () => {
+          stream.getTracks().forEach((track) => track.stop());
+          clearRecordingTimer();
+          mediaRecorderRef.current = null;
+          const blob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
+          if (blob.size > 0) uploadMedia(new File([blob], "vocal.webm", { type: "audio/webm" }));
+        };
+        // A mid-recording failure (device unplugged, driver error, ...) puts the
+        // recorder into "inactive" without ever firing onstop — without this,
+        // isRecording would stay stuck true forever with no way to clear it,
+        // since a later stopRecording() call would then throw on an
+        // already-inactive recorder instead of resetting state.
+        recorder.onerror = () => {
+          stream.getTracks().forEach((track) => track.stop());
+          clearRecordingTimer();
+          mediaRecorderRef.current = null;
+          setIsRecording(false);
+          toast({ variant: "error", title: "L'enregistrement a été interrompu." });
+        };
+
+        mediaRecorderRef.current = recorder;
+        recorder.start();
+        setIsRecording(true);
+        setRecordingSeconds(0);
+        recordingIntervalRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      } catch {
+        toast({ variant: "error", title: "Impossible d'accéder au micro." });
+      }
+    } finally {
+      isStartingRecordingRef.current = false;
     }
   }
 
@@ -627,6 +809,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       // nothing left to stop, but the UI must still fall back out of
       // "recording" state below rather than staying stuck.
     } finally {
+      mediaRecorderRef.current = null;
       setIsRecording(false);
       clearRecordingTimer();
     }
@@ -658,113 +841,226 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
 
   return (
     // Below `lg` (the same breakpoint Sidebar/MobileBottomNav switch on),
-    // this breaks out of the shell's padded/rounded card via `fixed inset-0`
-    // to cover the whole viewport (z-50 clears MobileBottomNav's z-40) —
-    // true edge-to-edge Messenger-style chat on mobile, no shell chrome
-    // showing through. `lg:static` hands control back to the dashboard
-    // shell's page.tsx wrapper (the rounded-3xl bordered card) unchanged.
-    <div className="fixed inset-0 z-50 flex h-[100dvh] w-screen min-h-0 flex-col bg-background lg:static lg:inset-auto lg:z-auto lg:h-full lg:w-auto lg:bg-transparent">
+    // this ALWAYS breaks out of the shell's padded/rounded card via `fixed
+    // inset-0` to cover the whole viewport (z-50 clears MobileBottomNav's
+    // z-40) — true edge-to-edge Messenger-style chat on mobile, no shell
+    // chrome showing through. Above `lg`, it's normally `static` (handing
+    // layout back to the dashboard shell's own rounded-3xl card) UNLESS
+    // `isFullscreen` is on, which forces the same `fixed inset-0` treatment
+    // — z-[100] rather than z-50 so toggling it never ends up under
+    // MobileBottomNav's z-40 if the viewport narrows while it's open.
+    //
+    // Every color below is a light/`dark:` PAIR — this subtree follows the
+    // app's own light/dark toggle now, it no longer forces a literal `dark`
+    // class on itself.
+    <div
+      className={cn(
+        "flex h-[100dvh] w-screen min-h-0 flex-col overflow-hidden bg-white transition-colors duration-300 dark:bg-gradient-to-b dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950",
+        isFullscreen ? "fixed inset-0 z-[100]" : "fixed inset-0 z-50 lg:static lg:inset-auto lg:z-auto lg:h-full lg:w-auto"
+      )}
+    >
       <PrintGuard />
 
-      <div className="relative z-20 flex shrink-0 items-center gap-2 border-b border-border/60 bg-card/70 px-3 py-3 backdrop-blur-xl">
+      <div className="relative z-20 flex shrink-0 items-center gap-3 border-b border-zinc-200 bg-white/80 px-4 py-3 backdrop-blur-xl dark:border-white/5 dark:bg-zinc-950/70">
         <Link
           href="/dashboard/groups"
           aria-label={tGroups("backToGroups", language)}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-foreground shadow-lg backdrop-blur-md transition-all duration-200 hover:-translate-x-0.5 hover:bg-white/20 active:scale-90"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-all duration-200 hover:-translate-x-0.5 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white active:scale-90"
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
+
+        {/* Group avatar — same hashed gradient as the lobby's GroupCard, so
+            the same group always reads as the same color in both places.
+            The pulsing dot is real presence data (onlineUserIds, Supabase
+            Realtime Presence), never shown unless someone besides me is
+            actually connected right now — same "no fabricated status"
+            standard as the text line below it. */}
+        <div className="relative shrink-0">
+          <span className={cn("absolute inset-0 rounded-full bg-gradient-to-br opacity-70 blur-md", gradientFor(groupId))} aria-hidden />
+          <div
+            className={cn(
+              "relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br text-sm font-bold text-white shadow-lg ring-2 ring-white/50 dark:ring-white/5",
+              gradientFor(groupId)
+            )}
+          >
+            {(groupName ?? "?").trim().charAt(0).toUpperCase() || "?"}
+          </div>
+          {onlineUserIds.size > 1 && (
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-zinc-950" />
+            </span>
+          )}
+        </div>
+
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold tracking-tight text-foreground">{groupName ?? "..."}</p>
+          <p className="truncate text-sm font-bold tracking-tight text-zinc-900 dark:text-white">{groupName ?? "..."}</p>
           {/* Real, derived status — never a fabricated "Session QCM en
               cours"-style claim with no data behind it. Presence-based
               online count when there's anyone besides me online; the
               typing indicator (real, from the broadcast channel) takes
               over this same line the instant someone starts typing, since
               it's more immediately relevant. */}
-          <p className="truncate text-[11px] font-medium text-muted-foreground">
-            {Object.keys(typingUsers).length > 0
-              ? tGroups("typingIndicator", language).replace(
+          <p className="truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+            {Object.keys(typingUsers).length > 0 ? (
+              <span className="text-cyan-600 dark:text-cyan-400">
+                {tGroups("typingIndicator", language).replace(
                   "{name}",
                   Object.values(typingUsers)[0]?.displayName ?? tGroups("someoneTyping", language)
-                )
-              : onlineUserIds.size > 1
-                ? `🟢 ${onlineUserIds.size} ${tGroups("membersOnline", language)}`
-                : tGroups("onlyYouOnline", language)}
+                )}
+              </span>
+            ) : onlineUserIds.size > 1 ? (
+              `${onlineUserIds.size} ${tGroups("membersOnline", language)}`
+            ) : (
+              tGroups("onlyYouOnline", language)
+            )}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsMemberDrawerOpen(true)}
-          className="flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-foreground shadow-sm backdrop-blur-md transition-all duration-200 hover:bg-white/20 active:scale-90"
-          aria-label={tGroups("openMembersAriaLabel", language)}
-          title={tGroups("openMembersAriaLabel", language)}
-        >
-          <Users className="h-3.5 w-3.5" />
-        </button>
-
-        <ThemePicker themeId={themeId} onSelect={selectTheme} />
-
-        {/* Medical background-theme picker — separate button/popover from ThemePicker above (different icon, different concern: room background vs. my own bubble color). */}
-        <div className="relative">
+        {/* Trailing header controls clustered as one tight toolbar (gap-0.5,
+            p-1.5 icon buttons) rather than spread across the row's own wider
+            gap-3 — a denser, more "command palette" icon rhythm than the
+            previous loosely-spaced buttons. */}
+        <div className="flex items-center gap-0.5">
           <button
             type="button"
-            onClick={() => setIsThemeMenuOpen((open) => !open)}
-            className="rounded-full p-1.5 text-muted-foreground transition-all duration-200 hover:bg-accent hover:text-foreground active:scale-90"
-            aria-label="Choisir un thème médical de fond"
-            title={tGroups("medicalThemeTitle", language)}
+            onClick={() => setIsCommandPaletteOpen(true)}
+            className="hidden items-center gap-1.5 rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)] active:scale-90 sm:flex"
+            aria-label="Rechercher (Ctrl+K)"
+            title="Rechercher (Ctrl+K)"
           >
-            <Stethoscope className="h-4 w-4" />
+            <Search className="h-4 w-4" />
           </button>
 
-          <AnimatePresence>
-            {isThemeMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setIsThemeMenuOpen(false)} />
-                <motion.div
-                  initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -6, scale: 0.96 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-full z-50 mt-2 w-52 rounded-2xl border border-border/60 bg-card/90 p-1.5 shadow-glass backdrop-blur-xl dark:shadow-glass-dark"
-                >
-                  {medicalThemes.map((themeOption) => {
-                    const isActive = themeOption.id === activeTheme.id;
-                    return (
-                      <button
-                        key={themeOption.id}
-                        type="button"
-                        onClick={() => handleThemeChange(themeOption)}
-                        className={cn(
-                          "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-all duration-150 active:scale-[0.98]",
-                          isActive ? "bg-accent font-semibold text-foreground" : "text-muted-foreground hover:translate-x-0.5 hover:bg-accent hover:text-foreground"
-                        )}
-                      >
-                        <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", themeOption.color)} />
-                        <span className="flex-1">{tGroups(themeOption.nameKey, language)}</span>
-                        {isActive && <Check className="h-3.5 w-3.5 shrink-0" />}
-                      </button>
-                    );
-                  })}
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
+          <button
+            type="button"
+            onClick={() => setIsVaultOpen(true)}
+            className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)] active:scale-90"
+            aria-label="Ouvrir le Vault Médical"
+            title="Vault Médical"
+          >
+            <FolderOpen className="h-4 w-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsSavedOpen(true)}
+            className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)] active:scale-90"
+            aria-label="Messages enregistrés"
+            title="Messages enregistrés"
+          >
+            <Bookmark className="h-4 w-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsMemberDrawerOpen(true)}
+            className="flex items-center gap-1.5 rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)] active:scale-90"
+            aria-label={tGroups("openMembersAriaLabel", language)}
+            title={tGroups("openMembersAriaLabel", language)}
+          >
+            <Users className="h-4 w-4" />
+          </button>
+
+          <ThemePicker themeId={themeId} onSelect={selectTheme} />
+
+          {/* Medical background-theme picker — separate button/popover from ThemePicker above (different icon, different concern: room background vs. my own bubble color). */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsThemeMenuOpen((open) => !open)}
+              className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)] active:scale-90"
+              aria-label="Choisir un thème médical de fond"
+              title={tGroups("medicalThemeTitle", language)}
+            >
+              <Stethoscope className="h-4 w-4" />
+            </button>
+
+            <AnimatePresence>
+              {isThemeMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsThemeMenuOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute right-0 top-full z-50 mt-2 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-900/90 dark:shadow-black/40"
+                  >
+                    {medicalThemes.map((themeOption) => {
+                      const isActive = themeOption.id === activeTheme.id;
+                      return (
+                        <button
+                          key={themeOption.id}
+                          type="button"
+                          onClick={() => handleThemeChange(themeOption)}
+                          className={cn(
+                            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all duration-150 active:scale-[0.98]",
+                            isActive
+                              ? "bg-zinc-100 font-semibold text-zinc-900 dark:bg-white/10 dark:text-white"
+                              : "text-zinc-500 hover:translate-x-0.5 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
+                          )}
+                        >
+                          <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", themeOption.color)} />
+                          <span className="flex-1">{tGroups(themeOption.nameKey, language)}</span>
+                          {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Desktop-only — below `lg` the room is already always fullscreen
+              (see the root div's own comment), so this toggle would have no
+              visible effect there and is hidden rather than shown as a no-op. */}
+          <button
+            type="button"
+            onClick={() => setIsFullscreen((v) => !v)}
+            className="hidden rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)] active:scale-90 lg:flex"
+            aria-label={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
+            title={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
+          >
+            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
         </div>
       </div>
 
-      {/* Rounded, softly-tinted panel holding both the feed and the input card. `relative` anchors the absolutely-positioned SVG pattern layer below; bgClass/transition come from the active medical theme. */}
-      <div className={cn("relative flex min-h-0 flex-1 flex-col gap-3 p-3 transition-colors duration-500", activeTheme.bgClass)}>
+      {/* Ambient canvas — the panel holding both the feed and the composer.
+          `relative` anchors the absolutely-positioned decorative layers
+          below: neon glow blobs (dark mode only — a colored blur wash reads
+          as premium against a dark canvas but as a stain on white), then
+          the active specialty's pattern image with its own light/dark
+          scrim on top of it. */}
+      <div className="relative flex min-h-0 flex-1 flex-col gap-3 p-3">
+        <div className="pointer-events-none absolute inset-0 z-0 hidden overflow-hidden dark:block" aria-hidden>
+          <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
+          <div className="absolute -right-20 top-1/3 h-64 w-64 rounded-full bg-blue-600/10 blur-3xl" />
+          <div className="absolute -bottom-24 left-1/3 h-72 w-72 rounded-full bg-violet-500/10 blur-3xl" />
+        </div>
+
         {/* cover/center/no-repeat, not a small tiled size — these are real
             generated photos (1024x1024), not infinitely-tileable vector
             SVGs; each one's pattern is dense/uniform enough across the
             whole canvas that stretching it to cover reads as a rich full
-            background without ever risking a visible tile seam. */}
+            background without ever risking a visible tile seam. Rendered at
+            close to full strength now — the translucent scrim right below
+            it (not the pattern's own opacity) is what keeps text legible on
+            top, so the artwork itself actually "shines through" instead of
+            being reduced to a barely-there texture. */}
         <div
-          className="absolute inset-0 z-0 pointer-events-none transition-all duration-500"
+          className="absolute inset-0 z-0 pointer-events-none opacity-90 transition-opacity duration-500"
           style={{ backgroundImage: activeTheme.pattern, backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat" }}
         />
+        {/* The actual legibility guarantee: a near-opaque scrim over the
+            pattern above, matching the room's own base surface color in
+            each mode (white in light mode, near-black in dark) so message
+            bubbles/text read at full contrast regardless of how busy the
+            artwork underneath is. */}
+        <div className="absolute inset-0 z-0 bg-white/80 transition-colors duration-500 dark:bg-zinc-950/85" aria-hidden />
 
         {/* Pinned message bar — a real anchor for a shared cas clinique/QCM/
             résumé (see handleTogglePin), not a decorative placeholder. Looks
@@ -777,12 +1073,23 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="relative z-10 flex items-center gap-2 rounded-2xl border border-amber-300/60 bg-amber-50/90 px-3 py-2 text-xs shadow-soft backdrop-blur-md dark:border-amber-800/50 dark:bg-amber-950/40"
+            className="relative z-10 flex items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50/90 px-3 py-2 text-xs shadow-soft backdrop-blur-md dark:border-amber-800/50 dark:bg-amber-950/40"
           >
             <Pin className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span className="min-w-0 flex-1 truncate font-medium text-amber-900 dark:text-amber-200">
-              {messages.find((m) => m.id === pinnedMessageId)?.contentText ?? tGroups("pinnedMessageFallback", language)}
-            </span>
+            <button
+              type="button"
+              onClick={() => jumpToMessage(pinnedMessageId)}
+              className="min-w-0 flex-1 text-left"
+              title="Aller au message épinglé"
+            >
+              <p className="truncate font-medium text-amber-900 dark:text-amber-200">
+                {messages.find((m) => m.id === pinnedMessageId)?.contentText ?? tGroups("pinnedMessageFallback", language)}
+              </p>
+              {(() => {
+                const pinnedSender = messages.find((m) => m.id === pinnedMessageId)?.senderName;
+                return pinnedSender ? <p className="truncate text-[10px] text-amber-700/80 dark:text-amber-300/70">Épinglé · {pinnedSender}</p> : null;
+              })()}
+            </button>
             <button
               type="button"
               onClick={() => handleTogglePin(null)}
@@ -795,8 +1102,8 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
           </motion.div>
         )}
 
-        {/* z-10 relative is load-bearing here: without it, this scroll region would sit in the same stacking context as the absolutely-positioned pattern layer above and could end up behind it, breaking message legibility and audio-player clicks. */}
-        <div className="relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
+        {/* z-10 relative is load-bearing here: without it, this scroll region would sit in the same stacking context as the absolutely-positioned pattern layer above and could end up behind it, breaking message legibility and audio-player clicks. chat-scrollbar (app/globals.css) is the thin dark scrollbar treatment, scoped to this one scroll region rather than globally. */}
+        <div ref={feedRef} onScroll={handleFeedScroll} className="chat-scrollbar relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
           <AnimatePresence initial={false}>
             {feed.map((item) =>
               item.kind === "day" ? (
@@ -812,24 +1119,91 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
                   onReact={handleReact}
                   isPinned={item.message.id === pinnedMessageId}
                   onTogglePin={handleTogglePin}
+                  isSenderAdmin={!!groupAdminId && item.message.userId === groupAdminId}
+                  senderAcademicYear={academicYearByUserId.get(item.message.userId) ?? null}
+                  isSaved={isSaved(item.message.id)}
+                  onToggleSave={(m) =>
+                    toggleSaved({
+                      id: m.id,
+                      groupId,
+                      groupName: groupName ?? "Groupe",
+                      senderName: m.senderName,
+                      type: m.type,
+                      contentText: m.contentText,
+                      mediaUrl: m.mediaUrl,
+                      createdAt: m.createdAt,
+                    })
+                  }
                 />
               )
             )}
           </AnimatePresence>
+
+          {/* Animated typing indicator — real (Object.keys(typingUsers).length
+              > 0 comes straight from the presence/typing effect above), not
+              shown speculatively. Styled as an incoming-message bubble so it
+              reads as "someone is about to send this", not a separate UI
+              element. */}
+          <AnimatePresence>
+            {Object.keys(typingUsers).length > 0 && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-end gap-2">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-700 ring-2 ring-white dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-950">
+                  {(Object.values(typingUsers)[0]?.displayName ?? "?").trim().charAt(0).toUpperCase() || "?"}
+                </div>
+                <div className="flex items-center gap-1 rounded-xl rounded-tl-sm border border-zinc-200 bg-zinc-100 px-4 py-3 dark:border-white/5 dark:bg-zinc-900/70">
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.3s] dark:bg-zinc-500" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.15s] dark:bg-zinc-500" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500" />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div ref={bottomRef} />
         </div>
 
+        {/* Scroll-to-bottom FAB — only ever driven by real scroll position
+            (handleFeedScroll), never a fabricated "N new messages" count. */}
+        <AnimatePresence>
+          {showScrollToBottom && (
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, scale: 0.8, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 8 }}
+              onClick={scrollToBottom}
+              className="absolute bottom-24 right-5 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-600 shadow-lg transition-all duration-200 hover:-translate-y-0.5 hover:text-cyan-600 dark:border-white/5 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-cyan-300"
+              aria-label="Aller aux derniers messages"
+              title="Aller aux derniers messages"
+            >
+              <ArrowDown className="h-5 w-5" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+
         <form
           onSubmit={handleSend}
-          className="relative z-10 flex shrink-0 items-center gap-1.5 rounded-2xl border border-border/50 bg-card/90 px-3 py-2 shadow-glass backdrop-blur-xl transition-shadow duration-300 focus-within:shadow-glow dark:shadow-glass-dark"
+          className="relative z-10 flex shrink-0 items-center gap-1 rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 shadow-xl shadow-zinc-300/30 backdrop-blur-2xl transition-all duration-300 focus-within:border-cyan-500/50 focus-within:ring-2 focus-within:ring-cyan-500/20 dark:border-white/5 dark:bg-zinc-900/80 dark:shadow-black/40"
         >
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f); e.target.value = ""; }} />
           <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f); e.target.value = ""; }} />
 
-          <button type="button" onClick={() => imageInputRef.current?.click()} disabled={isUploadingMedia || isRecording} className="rounded-full p-2 text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground active:scale-90 disabled:opacity-50 disabled:hover:translate-y-0" aria-label={tGroups("sendImageAriaLabel", language)}>
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            disabled={isUploadingMedia || isRecording}
+            className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
+            aria-label={tGroups("sendImageAriaLabel", language)}
+          >
             <ImageIcon className="h-5 w-5" />
           </button>
-          <button type="button" onClick={() => videoInputRef.current?.click()} disabled={isUploadingMedia || isRecording} className="rounded-full p-2 text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground active:scale-90 disabled:opacity-50 disabled:hover:translate-y-0" aria-label={tGroups("sendVideoAriaLabel", language)}>
+          <button
+            type="button"
+            onClick={() => videoInputRef.current?.click()}
+            disabled={isUploadingMedia || isRecording}
+            className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
+            aria-label={tGroups("sendVideoAriaLabel", language)}
+          >
             <Video className="h-5 w-5" />
           </button>
           <button
@@ -837,8 +1211,10 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isUploadingMedia}
             className={cn(
-              "rounded-full p-2 transition-all duration-200 active:scale-90 disabled:opacity-50",
-              isRecording ? "bg-destructive/10 text-destructive animate-pulse" : "text-muted-foreground hover:-translate-y-0.5 hover:bg-accent hover:text-foreground"
+              "rounded-full p-1.5 transition-all duration-200 active:scale-90 disabled:opacity-50",
+              isRecording
+                ? "bg-rose-100 text-rose-600 animate-pulse dark:bg-rose-500/10 dark:text-rose-400"
+                : "text-zinc-500 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
             )}
             aria-label={isRecording ? tGroups("stopRecordingAriaLabel", language) : tGroups("voiceMessageAriaLabel", language)}
           >
@@ -850,21 +1226,22 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
               (a chronometer plus a decorative animated waveform), not just
               the mic button's own pulse. */}
           {isRecording ? (
-            <div className="flex h-10 flex-1 items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3.5" role="status" aria-live="polite">
-              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />
+            <div className="flex h-10 flex-1 items-center gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3.5 dark:border-rose-500/30 dark:bg-rose-500/5" role="status" aria-live="polite">
+              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-500 dark:bg-rose-400" aria-hidden />
               <div className="flex flex-1 items-center gap-[3px]">
                 {RECORDING_BAR_HEIGHTS.map((height, i) => (
                   <span
                     key={i}
                     style={{ height: `${height}px`, animationDelay: `${i * 90}ms` }}
-                    className="w-[3px] shrink-0 animate-pulse rounded-full bg-destructive/70"
+                    className="w-[3px] shrink-0 animate-pulse rounded-full bg-rose-500/70 dark:bg-rose-400/70"
                   />
                 ))}
               </div>
-              <span className="shrink-0 text-xs font-semibold tabular-nums text-destructive">{formatRecordingDuration(recordingSeconds)}</span>
+              <span className="shrink-0 text-xs font-semibold tabular-nums text-rose-600 dark:text-rose-400">{formatRecordingDuration(recordingSeconds)}</span>
             </div>
           ) : (
             <input
+              ref={messageInputRef}
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
@@ -872,14 +1249,62 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
               }}
               onPaste={handlePaste}
               placeholder={tGroups("messagePlaceholder", language)}
-              className="h-10 flex-1 rounded-xl border border-input bg-transparent px-3.5 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-10 flex-1 rounded-xl border-none bg-transparent px-3.5 text-[15px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-white dark:placeholder:text-zinc-500"
             />
+          )}
+
+          {!isRecording && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsEmojiPickerOpen((v) => !v)}
+                disabled={isUploadingMedia}
+                className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
+                aria-label={tGroups("emojiPickerAriaLabel", language)}
+                title={tGroups("emojiPickerAriaLabel", language)}
+              >
+                <Smile className="h-5 w-5" />
+              </button>
+
+              <AnimatePresence>
+                {isEmojiPickerOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsEmojiPickerOpen(false)} />
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                      transition={{ duration: 0.12 }}
+                      className="chat-scrollbar absolute bottom-full right-0 z-50 mb-2 max-h-72 w-72 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-3 shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-900/95 dark:shadow-black/40"
+                    >
+                      {EMOJI_CATEGORIES.map((category) => (
+                        <div key={category.label} className="mb-2 last:mb-0">
+                          <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{category.label}</p>
+                          <div className="grid grid-cols-6 gap-0.5">
+                            {category.emojis.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => insertEmoji(emoji)}
+                                className="rounded-lg p-1.5 text-xl leading-none transition-transform duration-150 hover:scale-125 hover:bg-zinc-100 dark:hover:bg-white/10"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
           )}
           <button
             type="submit"
             disabled={!input.trim() || isRecording}
             aria-label={tGroups("sendButton", language)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary-600 text-sm font-semibold text-white shadow-soft transition-all duration-200 hover:bg-primary-700 hover:shadow-glow active:scale-95 disabled:opacity-50 disabled:hover:shadow-soft sm:w-auto sm:px-4 sm:py-2"
+            className="flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_20px_-4px_rgba(34,211,238,0.7)] active:scale-95 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-lg dark:shadow-cyan-950/50 sm:w-auto sm:px-4 sm:py-2"
           >
             <span className="hidden sm:inline">{tGroups("sendButton", language)}</span>
             <Send className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
@@ -888,11 +1313,35 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       </div>
 
       <MemberDrawer
-        groupId={groupId}
         isOpen={isMemberDrawerOpen}
         onClose={() => setIsMemberDrawerOpen(false)}
         onlineUserIds={onlineUserIds}
         adminId={groupAdminId}
+        members={members}
+      />
+
+      <MediaVaultPanel groupId={groupId} isOpen={isVaultOpen} onClose={() => setIsVaultOpen(false)} />
+
+      <SavedMessagesPanel
+        isOpen={isSavedOpen}
+        onClose={() => setIsSavedOpen(false)}
+        saved={savedMessages}
+        onRemove={removeSaved}
+        currentGroupId={groupId}
+      />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        currentGroupId={groupId}
+        messages={messages}
+        members={members}
+        isFullscreen={isFullscreen}
+        onJumpToMessage={jumpToMessage}
+        onOpenVault={() => setIsVaultOpen(true)}
+        onOpenSaved={() => setIsSavedOpen(true)}
+        onOpenMembers={() => setIsMemberDrawerOpen(true)}
+        onToggleFullscreen={() => setIsFullscreen((v) => !v)}
       />
     </div>
   );

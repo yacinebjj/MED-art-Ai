@@ -20,6 +20,18 @@ export interface ChatTheme {
 
 export const CHAT_THEMES: ChatTheme[] = [
   {
+    id: "neon",
+    name: "Néon Premium",
+    // The chat room's new default look (see ChatRoom.tsx's dark-glass
+    // redesign) — border/shadow/radius live on the shared bubble container
+    // in MessageBubble.tsx, not here; this only ever supplies the
+    // background/text classes, same contract every other theme below
+    // follows.
+    bubble: "bg-gradient-to-br from-cyan-600/80 to-blue-600/80 text-white",
+    swatch: "bg-gradient-to-br from-cyan-600 to-blue-600",
+    accent: "bg-white",
+  },
+  {
     id: "classic",
     name: "Blanc Classique",
     // Was bg-white/text-gray-900 with zero dark: variant — same bug already
@@ -65,7 +77,7 @@ export const CHAT_THEMES: ChatTheme[] = [
   },
 ];
 
-export const DEFAULT_CHAT_THEME_ID = CHAT_THEMES[0].id;
+export const DEFAULT_CHAT_THEME_ID = "neon";
 
 export function getChatTheme(id: string | null): ChatTheme {
   return CHAT_THEMES.find((t) => t.id === id) ?? CHAT_THEMES[0];

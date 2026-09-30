@@ -29,6 +29,7 @@ export const GROUPS_TRANSLATIONS = {
   sendImageAriaLabel: { fr: "Envoyer une image", en: "Send an image" },
   sendVideoAriaLabel: { fr: "Envoyer une vidéo", en: "Send a video" },
   voiceMessageAriaLabel: { fr: "Message vocal", en: "Voice message" },
+  emojiPickerAriaLabel: { fr: "Insérer un emoji", en: "Insert an emoji" },
   stopRecordingAriaLabel: { fr: "Arrêter l'enregistrement", en: "Stop recording" },
   messagePlaceholder: {
     fr: "Écris un message (le collage est désactivé)...",

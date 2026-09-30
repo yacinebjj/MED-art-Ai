@@ -14,7 +14,7 @@ interface ChatMemberRow {
   joined_at: string;
 }
 
-function toMember(row: ChatMemberRow): ChatMember {
+function toMember(row: ChatMemberRow, academicYearName: string | null): ChatMember {
   return {
     id: row.id,
     groupId: row.group_id,
@@ -22,7 +22,52 @@ function toMember(row: ChatMemberRow): ChatMember {
     status: row.status,
     displayName: row.display_name,
     joinedAt: row.joined_at,
+    academicYearName,
   };
+}
+
+/**
+ * chat_members.user_id references auth.users, not profiles — there's no FK
+ * PostgREST can embed through, so this is two small manual lookups (real
+ * data, not fabricated): profiles.academic_year_id per member, then
+ * curriculum_academic_years.name for the distinct year ids found. No
+ * "Professeur"/role badge is built from this — that concept doesn't exist
+ * anywhere in this schema (see the ChatMember type's own comment).
+ */
+async function academicYearNamesByUserId(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  userIds: string[]
+): Promise<Map<string, string>> {
+  if (userIds.length === 0) return new Map();
+
+  const { data: profileRows, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, academic_year_id")
+    .in("id", userIds);
+  if (profileError || !profileRows) return new Map();
+
+  const yearIdByUserId = new Map<string, number>();
+  const yearIds = new Set<number>();
+  for (const row of profileRows as { id: string; academic_year_id: number | null }[]) {
+    if (row.academic_year_id === null) continue;
+    yearIdByUserId.set(row.id, row.academic_year_id);
+    yearIds.add(row.academic_year_id);
+  }
+  if (yearIds.size === 0) return new Map();
+
+  const { data: yearRows, error: yearError } = await supabase
+    .from("curriculum_academic_years")
+    .select("id, name")
+    .in("id", Array.from(yearIds));
+  if (yearError || !yearRows) return new Map();
+
+  const nameByYearId = new Map((yearRows as { id: number; name: string }[]).map((y) => [y.id, y.name]));
+  const result = new Map<string, string>();
+  for (const [userId, yearId] of yearIdByUserId) {
+    const name = nameByYearId.get(yearId);
+    if (name) result.set(userId, name);
+  }
+  return result;
 }
 
 /**
@@ -79,5 +124,12 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true, members: ((data ?? []) as ChatMemberRow[]).map(toMember), isAdmin });
+  const rows = (data ?? []) as ChatMemberRow[];
+  const yearByUserId = await academicYearNamesByUserId(supabase, rows.map((r) => r.user_id));
+
+  return NextResponse.json({
+    success: true,
+    members: rows.map((row) => toMember(row, yearByUserId.get(row.user_id) ?? null)),
+    isAdmin,
+  });
 }

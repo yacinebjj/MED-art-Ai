@@ -1,11 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
 import { Logo } from "@/components/layout/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
+
+// R3F/WebGL needs a real DOM canvas — dynamically imported with ssr:false so
+// Next.js never tries to render it on the server.
+const DnaBackground = dynamic(
+  () => import("@/components/three/DnaBackground").then((mod) => mod.DnaBackground),
+  { ssr: false },
+);
 
 /**
  * Auth layout, shared by /login and /register — a single, full-screen,
@@ -67,6 +75,7 @@ export function AuthLayout({
       />
       <div aria-hidden className="pointer-events-none absolute -left-32 top-0 -z-10 h-96 w-96 rounded-full bg-primary-400/20 blur-3xl dark:bg-primary-500/10" />
       <div aria-hidden className="pointer-events-none absolute -right-24 bottom-0 -z-10 h-96 w-96 rounded-full bg-cyan-400/20 blur-3xl dark:bg-cyan-500/10" />
+      <DnaBackground opacityClassName="opacity-30 dark:opacity-20" />
 
       <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
         <ThemeToggle />

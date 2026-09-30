@@ -222,7 +222,20 @@ function AssistantMarkdown({ content }: { content: string }) {
           Studio prompts), so each block must resolve its OWN direction from
           its own content rather than inheriting one verdict for the whole
           message. */}
-      <div dir="auto" className="prose prose-sm max-w-none text-foreground/90 prose-headings:font-semibold prose-headings:text-foreground prose-p:my-2 prose-strong:text-foreground prose-ul:my-2 prose-li:my-0.5 prose-code:text-foreground prose-pre:bg-muted/60 prose-a:text-emerald-600 dark:prose-invert dark:prose-a:text-emerald-400 sm:prose-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      {/* No prose-{size} modifier on purpose — Tailwind Typography scales
+          headings/spacing in `em`, relative to the prose container's own
+          font-size, so setting text-[15px]/leading-7 directly here (instead
+          of prose-sm/prose-base) tunes the whole scale at once instead of
+          jumping between two fixed presets. text-slate-700/dark:text-zinc-300
+          replace the old text-foreground/90: that token is a UTILITY-layer
+          class, which in Tailwind's cascade beats prose's own COMPONENT-layer
+          body color — it was silently overriding prose-invert's calmer
+          zinc-300 with the app's general (near-white) --foreground token,
+          which is exactly the "harsh white" eye strain this is fixing. */}
+      <div
+        dir="auto"
+        className="prose max-w-none text-[15px] leading-7 text-slate-700 dark:prose-invert dark:text-zinc-300 prose-headings:font-heading prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-slate-900 dark:prose-headings:text-zinc-100 prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-[1.05em] prose-h4:mb-1.5 prose-h4:mt-4 prose-h4:text-[1em] prose-p:my-2.5 prose-strong:font-semibold prose-strong:text-cyan-700 prose-ul:my-2.5 prose-ul:space-y-1.5 prose-ol:my-2.5 prose-ol:space-y-1.5 prose-li:pl-1 marker:text-cyan-500 prose-code:text-foreground prose-pre:bg-muted/60 prose-a:text-emerald-600 dark:prose-strong:text-cyan-300 dark:[&_strong]:[text-shadow:0_0_14px_rgba(34,211,238,0.35)] dark:marker:text-cyan-400 dark:prose-a:text-emerald-400 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -231,6 +244,7 @@ function AssistantMarkdown({ content }: { content: string }) {
           h1: ({ children }) => <h1 dir="auto" className="animate-in fade-in duration-500">{children}</h1>,
           h2: ({ children }) => <h2 dir="auto" className="animate-in fade-in duration-500">{children}</h2>,
           h3: ({ children }) => <h3 dir="auto" className="animate-in fade-in duration-500">{children}</h3>,
+          h4: ({ children }) => <h4 dir="auto" className="animate-in fade-in duration-500">{children}</h4>,
           blockquote: ({ children }) => (
             <blockquote dir="auto" className="animate-in fade-in border-l-emerald-400 duration-500 dark:border-l-emerald-500/60">{children}</blockquote>
           ),

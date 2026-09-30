@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
@@ -10,6 +11,13 @@ import { SidebarProvider } from "@/providers/SidebarProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { t } from "@/lib/translations";
 import { cn } from "@/lib/utils";
+
+// R3F/WebGL needs a real DOM canvas — dynamically imported with ssr:false so
+// Next.js never tries to render it on the server.
+const DnaBackground = dynamic(
+  () => import("@/components/three/DnaBackground").then((mod) => mod.DnaBackground),
+  { ssr: false },
+);
 
 // How far the student has to scroll in one direction before the mobile dock
 // reacts — without this, the tiniest scroll wobble (a bounce, a sub-pixel
@@ -169,6 +177,7 @@ export default function DashboardShellLayout({
       </a>
       <div className="aurora-canvas-bg relative flex h-dvh w-full overflow-hidden">
         <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+        <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />
 
         <div className="hidden shrink-0 lg:block lg:p-3">
           <Sidebar />

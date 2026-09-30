@@ -32,7 +32,30 @@ interface ChatGroupRow {
 
 interface MemberWithGroupRow {
   status: "pending" | "accepted";
+  last_read_at: string;
   chat_groups: ChatGroupRow | null;
+}
+
+interface LastMessageRow {
+  content_text: string | null;
+  type: "text" | "image" | "video" | "audio";
+  created_at: string;
+}
+
+const MEDIA_PREVIEW_LABEL: Record<Exclude<LastMessageRow["type"], "text">, string> = {
+  image: "📷 Photo",
+  video: "🎥 Vidéo",
+  audio: "🎤 Message vocal",
+};
+
+const PREVIEW_MAX_LENGTH = 80;
+
+/** Short, single-line preview text for the lobby list — media messages get a fixed emoji label (there's no caption to show), text messages get their own content truncated to one line. */
+function previewFor(row: LastMessageRow): string {
+  if (row.type !== "text") return MEDIA_PREVIEW_LABEL[row.type];
+  const text = (row.content_text ?? "").replace(/\s+/g, " ").trim();
+  if (text.length <= PREVIEW_MAX_LENGTH) return text;
+  return `${text.slice(0, PREVIEW_MAX_LENGTH).trimEnd()}…`;
 }
 
 /** GET — every group the student administers or belongs to (any status), with a live pending-request count for the ones they admin. */
@@ -49,7 +72,7 @@ export async function GET() {
   const supabase = getSupabaseAdmin();
   const { data: memberRows, error } = await supabase
     .from("chat_members")
-    .select("status, chat_groups(id, name, admin_id, join_code, created_at, pinned_message_id)")
+    .select("status, last_read_at, chat_groups(id, name, admin_id, join_code, created_at, pinned_message_id)")
     .eq("user_id", user.id);
 
   if (error) {
@@ -59,6 +82,11 @@ export async function GET() {
 
   const rows = (memberRows ?? []) as unknown as MemberWithGroupRow[];
   const adminGroupIds = rows.filter((r) => r.chat_groups?.admin_id === user.id).map((r) => r.chat_groups!.id);
+  // Only accepted memberships can read chat_messages at all (see that
+  // table's own SELECT policy) — computing last-message/unread for a
+  // pending membership would just be a wasted query that RLS-equivalent
+  // logic below would zero out anyway.
+  const acceptedRows = rows.filter((r): r is MemberWithGroupRow & { chat_groups: ChatGroupRow } => r.chat_groups !== null && r.status === "accepted");
 
   const pendingCounts = new Map<string, number>();
   if (adminGroupIds.length > 0) {
@@ -77,6 +105,51 @@ export async function GET() {
     }
   }
 
+  // Last message + unread count per group — a handful of groups per
+  // student, so two small indexed queries per group (in parallel) stays
+  // cheap and, unlike a denormalized counter, never needs a trigger to stay
+  // in sync with deletes/edits. See supabase/schema.sql's last_read_at
+  // migration comment for why this isn't computed in a single batched call.
+  const lastMessages = new Map<string, { preview: string; createdAt: string } | null>();
+  const unreadCounts = new Map<string, number>();
+
+  await Promise.all(
+    acceptedRows.map(async (r) => {
+      const groupId = r.chat_groups.id;
+
+      const [lastMessageResult, unreadResult] = await Promise.all([
+        supabase
+          .from("chat_messages")
+          .select("content_text, type, created_at")
+          .eq("group_id", groupId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("chat_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("group_id", groupId)
+          .neq("user_id", user.id)
+          .gt("created_at", r.last_read_at),
+      ]);
+
+      if (lastMessageResult.error) {
+        console.error("[groups:list] Échec lecture du dernier message:", lastMessageResult.error);
+      } else if (lastMessageResult.data) {
+        const row = lastMessageResult.data as LastMessageRow;
+        lastMessages.set(groupId, { preview: previewFor(row), createdAt: row.created_at });
+      } else {
+        lastMessages.set(groupId, null);
+      }
+
+      if (unreadResult.error) {
+        console.error("[groups:list] Échec comptage des messages non lus:", unreadResult.error);
+      } else {
+        unreadCounts.set(groupId, unreadResult.count ?? 0);
+      }
+    })
+  );
+
   const groups: MyChatGroup[] = rows
     .filter((r): r is MemberWithGroupRow & { chat_groups: ChatGroupRow } => r.chat_groups !== null)
     .map((r) => ({
@@ -89,6 +162,8 @@ export async function GET() {
       isAdmin: r.chat_groups.admin_id === user.id,
       pendingCount: pendingCounts.get(r.chat_groups.id) ?? 0,
       pinnedMessageId: r.chat_groups.pinned_message_id ?? null,
+      lastMessage: lastMessages.get(r.chat_groups.id) ?? null,
+      unreadCount: unreadCounts.get(r.chat_groups.id) ?? 0,
     }));
 
   return NextResponse.json({ success: true, groups });
@@ -176,6 +251,8 @@ export async function POST(request: NextRequest) {
       isAdmin: true,
       pendingCount: 0,
       pinnedMessageId: null,
+      lastMessage: null,
+      unreadCount: 0,
     } satisfies MyChatGroup,
   });
 }

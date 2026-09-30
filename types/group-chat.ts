@@ -31,6 +31,19 @@ export interface ChatMember {
   /** Snapshotted display name — see chat_members.display_name's own schema comment. */
   displayName: string | null;
   joinedAt: string;
+  /** Real curriculum year (e.g. "4ème Année Médecine"), joined server-side from profiles.academic_year_id -> curriculum_academic_years.name — see app/api/groups/[id]/members/route.ts. Null when the member hasn't set their year in Paramètres. There is no "Professeur"/role concept anywhere in this schema — never invent one. */
+  academicYearName: string | null;
+}
+
+/** One row of "my groups" — the group plus MY OWN membership status/role in it, for the lobby list. */
+export interface MyChatGroup extends ChatGroup {
+  myStatus: ChatMemberStatus;
+  isAdmin: boolean;
+  pendingCount: number;
+  /** Null when the group has no messages yet. */
+  lastMessage: { preview: string; createdAt: string } | null;
+  /** Messages from OTHER members created after my last_read_at — see supabase/schema.sql's chat_members.last_read_at migration comment. Always 0 while myStatus is "pending" (RLS blocks reading messages until accepted). */
+  unreadCount: number;
 }
 
 export type ChatMessageType = "text" | "image" | "video" | "audio";
@@ -49,11 +62,4 @@ export interface ChatMessage {
   senderName: string | null;
   createdAt: string;
   reactions: MessageReactions;
-}
-
-/** One row of "my groups" — the group plus MY OWN membership status/role in it, for the lobby list. */
-export interface MyChatGroup extends ChatGroup {
-  myStatus: ChatMemberStatus;
-  isAdmin: boolean;
-  pendingCount: number;
 }

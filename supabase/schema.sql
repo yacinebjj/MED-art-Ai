@@ -3454,3 +3454,25 @@ revoke execute on function reserve_dashboard_assistant_request(date, integer) fr
 -- how narrow and non-adversarial the trigger condition is.
 -- ---------------------------------------------------------------------------
 alter table studio_courses add column if not exists explication_reservation_pending boolean not null default false;
+
+-- ---------------------------------------------------------------------------
+-- Migration: unread count + last-message preview for the groups lobby list
+-- (GroupCard.tsx). Purely ADDITIVE — no existing column/policy touched.
+--
+-- last_read_at: per-membership high-water mark, defaulting to now() so a
+-- brand-new member — and every EXISTING member, the moment this migration
+-- runs — starts at zero unread instead of every historical message in the
+-- group suddenly counting as unread. Bumped to now() by POST
+-- /api/groups/[id]/read (service-role, called once when ChatRoom mounts) —
+-- same "defense-in-depth, real writes via server routes" pattern as every
+-- other chat_members/chat_messages mutation above; no new RLS policy is
+-- needed since this write is service-role only, mirroring
+-- chat_messages.reactions above.
+--
+-- Deliberately NOT storing a denormalized "last message"/"unread count" on
+-- chat_groups or chat_members — GET /api/groups computes both on read
+-- instead (a handful of groups per student, so a small per-group query is
+-- cheap and, unlike a denormalized counter, never goes stale against a
+-- deleted/edited message without needing a trigger to keep it in sync).
+-- ---------------------------------------------------------------------------
+alter table chat_members add column if not exists last_read_at timestamptz not null default now();

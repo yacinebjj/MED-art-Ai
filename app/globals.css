@@ -460,3 +460,27 @@
     content: "Action interdite";
   }
 }
+
+/* Thin, dark, cyan-tinted scrollbar — scoped to `.chat-scrollbar`
+   (components/groups/ChatRoom.tsx's message feed + emoji picker), not
+   global: the group-chat redesign is a deliberately always-dark surface,
+   and the rest of the app keeps the browser's default scrollbar. Firefox
+   and WebKit need separate properties; there's no single shorthand that
+   covers both. */
+.chat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(34, 211, 238, 0.25) transparent;
+}
+.chat-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(34, 211, 238, 0.25);
+  border-radius: 9999px;
+}
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(34, 211, 238, 0.4);
+}

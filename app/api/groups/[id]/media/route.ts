@@ -5,7 +5,15 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { assertAcceptedMember } from "@/lib/group-chat";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import type { ChatMessage, ChatMessageType } from "@/types/group-chat";
+import type { ChatMessage, ChatMessageType, MessageReactions } from "@/types/group-chat";
+
+// The Media Vault (GET below) needs every media message ever sent in the
+// group, not just the newest ones — GET /api/groups/[id]/messages caps its
+// own history at 200 rows (see that route's own MESSAGE_HISTORY_LIMIT) so a
+// heavily-used group's older PDFs/photos/voice notes would silently vanish
+// from a client-side filter of that already-truncated feed. This is its own
+// separate, generously-capped query instead.
+const VAULT_HISTORY_LIMIT = 500;
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // media upload, not an AI call — but a large video/audio blob still needs headroom beyond the platform default.
@@ -163,4 +171,69 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   };
 
   return NextResponse.json({ success: true, message });
+}
+
+interface MediaMessageRow {
+  id: string;
+  group_id: string;
+  user_id: string;
+  type: ChatMessageType;
+  content_text: string | null;
+  media_url: string | null;
+  sender_name: string | null;
+  created_at: string;
+  reactions: MessageReactions | null;
+}
+
+/**
+ * GET — the Media Vault: every image/video/audio message in the group,
+ * newest first, capped at VAULT_HISTORY_LIMIT. Same access level as reading
+ * the chat itself (assertAcceptedMember) — this is a different VIEW of
+ * chat_messages the student can already see one-by-one in the feed, not a
+ * new permission surface.
+ */
+export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+  }
+
+  const groupId = params.id;
+  if (!groupId) {
+    return NextResponse.json({ success: false, error: "Identifiant de groupe invalide." }, { status: 400 });
+  }
+
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const memberCheck = await assertAcceptedMember(supabase, groupId, user.id);
+  if (!memberCheck.ok) return memberCheck.response;
+
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .select("id, group_id, user_id, type, content_text, media_url, sender_name, created_at, reactions")
+    .eq("group_id", groupId)
+    .in("type", ["image", "video", "audio"])
+    .order("created_at", { ascending: false })
+    .limit(VAULT_HISTORY_LIMIT);
+
+  if (error) {
+    return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
+  }
+
+  const media: ChatMessage[] = ((data ?? []) as MediaMessageRow[]).map((row) => ({
+    id: row.id,
+    groupId: row.group_id,
+    userId: row.user_id,
+    type: row.type,
+    contentText: row.content_text,
+    mediaUrl: row.media_url,
+    senderName: row.sender_name,
+    createdAt: row.created_at,
+    reactions: row.reactions ?? {},
+  }));
+
+  return NextResponse.json({ success: true, media });
 }
