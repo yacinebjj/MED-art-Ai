@@ -731,7 +731,30 @@ function tryDecodeJsonString(escaped: string): string | null {
 // works — see lib/studio-explication-client.ts) rather than fewer, longer,
 // riskier ones. Total wall-clock rises slightly; the odds any single part
 // dies at the wall drop sharply.
-const CHUNKED_SLICE_CHARS = 6_000;
+//
+// LOWERED AGAIN, 6,000 -> 3,500, 2026-09-30, after real production reports of
+// "Le modèle IA met trop de temps à répondre" at ~182s — right at
+// EXPLICATION_PART_TIMEOUT_MS's own 180s wall — following the CHEAP_MODEL
+// migration off deepseek-v3.2 to qwen/qwen-2.5-72b-instruct. The "~60-180s at
+// real throughput" estimate above was calibrated against DeepSeek V3.2's
+// specifically MEASURED ~70 tokens/second on this exact task (see
+// EXPLICATION_PART_MAX_TOKENS's own comment) — it already left only ~20s of
+// real margin under the 180s abort even for DeepSeek on a dense slice. Qwen's
+// real throughput on this exact long-form medical-writing task has NOT been
+// independently measured (no live test call was made before the model swap,
+// per this app's own "never swap a model on documentation alone" policy —
+// see docs/05-integrations.md); if it is meaningfully slower than DeepSeek's
+// measured rate, that thin 20s margin is exactly what a ~182s failure would
+// look like. This is a DEFENSIVE reduction, not a re-measured one: shrinking
+// the slice (and EXPLICATION_PART_MAX_TOKENS below, in proportion) buys back
+// real margin regardless of Qwen's actual tok/s, at the cost of more, smaller
+// parts per course. If "trop de temps à répondre" is still observed in
+// production after this change, that is direct evidence Qwen's real
+// throughput on this task is substantially below DeepSeek's — shrink further
+// rather than raising EXPLICATION_PART_TIMEOUT_MS back toward the platform
+// wall (see that constant's own comment for why raising it is the wrong
+// lever).
+const CHUNKED_SLICE_CHARS = 3_500;
 
 /**
  * Safe per-part token ceiling for the client-driven, multi-request
@@ -800,7 +823,18 @@ const CHUNKED_SLICE_CHARS = 6_000;
 // SYSTEM_PROMPT), so 10,000 is a ceiling the model will never actually
 // approach in normal use — it exists as insurance against a genuinely
 // rich slice, not as a target to fill.
-const EXPLICATION_PART_MAX_TOKENS = 10_000;
+//
+// LOWERED 10,000 -> 6,000, 2026-09-30, in step with CHUNKED_SLICE_CHARS'S
+// own matching reduction — see that constant's comment for the full
+// incident (real ~182s timeouts after the CHEAP_MODEL migration to
+// qwen/qwen-2.5-72b-instruct). NOT re-synced with STUDIO_PROMPT_CONFIG.
+// explication.maxTokens above (still 10,000) — that constant describes the
+// OLD, pre-chunking full-document path, which `actionType === "explication"`
+// is unconditionally rejected before ever reaching in
+// app/api/studio/generate/route.ts today. Left alone rather than touched on
+// unrelated speculation, since nothing live still calls it for a real
+// generation.
+const EXPLICATION_PART_MAX_TOKENS = 6_000;
 
 /**
  * Hard abort for a single part's OpenRouter call. RAISED 200s -> 180s after
@@ -998,9 +1032,10 @@ const PREVIOUS_PART_TAIL_CHARS = 800;
  * CALIBRATED against a REALISTIC French tokenization ratio (~1.9 tokens per
  * word for medical French — long technical terms tokenize worse than
  * everyday English, and the JSON wrapper escapes every newline on top).
- * With EXPLICATION_PART_MAX_TOKENS = 10,000 and a 6,000-char slice:
- *   target  1,320 words ≈ 2,508 tokens
- *   ceiling 1,782 words ≈ 3,386 tokens   (≈6,600 tokens of headroom)
+ * With EXPLICATION_PART_MAX_TOKENS = 6,000 and a 3,500-char slice (both
+ * lowered together 2026-09-30 — see CHUNKED_SLICE_CHARS' own comment):
+ *   target    770 words ≈ 1,463 tokens
+ *   ceiling 1,040 words ≈ 1,976 tokens   (≈4,000 tokens of headroom)
  * Both land far inside EXPLICATION_PART_TIMEOUT_MS, with real room for the
  * model to overshoot its target without ever hitting the hard cap.
  */

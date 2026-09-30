@@ -383,24 +383,40 @@ export async function runModuleSynthesis(
     return { ok: false, status: 502, error: message };
   }
 
-  const hitHashes = eligibleCourses.map(resolveContentHash).filter((hash) => !missingCourses.some((c) => resolveContentHash(c) === hash));
-  if (hitHashes.length > 0) await recordCourseWorkspaceCacheHits(hitHashes, cacheType);
+  // Everything past this point is pure assembly of already-generated/cached
+  // content (no further OpenRouter calls, nothing left to refund quota for)
+  // — but it is NOT risk-free: stitchKeywordsTable/stitchSummaryChunks read
+  // back content this function itself just wrote or fetched from cache, and
+  // an unexpected shape there (or in recordCourseWorkspaceCacheHits) would
+  // otherwise escape this function as an unhandled exception, surfacing to
+  // the student as an opaque crash ("Impossible de contacter le serveur")
+  // instead of this function's own structured, catchable error contract. Its
+  // own try/catch, separate from the generation one above, since quota was
+  // never at risk here.
+  try {
+    const hitHashes = eligibleCourses.map(resolveContentHash).filter((hash) => !missingCourses.some((c) => resolveContentHash(c) === hash));
+    if (hitHashes.length > 0) await recordCourseWorkspaceCacheHits(hitHashes, cacheType);
 
-  const mainContent =
-    type === "keywords_table"
-      ? stitchKeywordsTable(eligibleCourses, cachedByHash as Map<string, KeywordCategories>)
-      : stitchSummaryChunks(eligibleCourses, cachedByHash as Map<string, string>);
+    const mainContent =
+      type === "keywords_table"
+        ? stitchKeywordsTable(eligibleCourses, cachedByHash as Map<string, KeywordCategories>)
+        : stitchSummaryChunks(eligibleCourses, cachedByHash as Map<string, string>);
 
-  const content = crossCourseSection ? `${mainContent}\n\n---\n\n${crossCourseSection}` : mainContent;
+    const content = crossCourseSection ? `${mainContent}\n\n---\n\n${crossCourseSection}` : mainContent;
 
-  return {
-    ok: true,
-    result: {
-      content,
-      fullyCached: missingCourses.length === 0 && !needsCrossCourseSynthesis,
-      coursesGenerated: missingCourses.length,
-      coursesFromCache: eligibleCourses.length - missingCourses.length,
-      coursesUsingRawTextFallback: fallbackTitles,
-    },
-  };
+    return {
+      ok: true,
+      result: {
+        content,
+        fullyCached: missingCourses.length === 0 && !needsCrossCourseSynthesis,
+        coursesGenerated: missingCourses.length,
+        coursesFromCache: eligibleCourses.length - missingCourses.length,
+        coursesUsingRawTextFallback: fallbackTitles,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erreur inconnue.";
+    console.error(`[module-synthesis:${type}] Échec assemblage final:`, error);
+    return { ok: false, status: 502, error: message };
+  }
 }

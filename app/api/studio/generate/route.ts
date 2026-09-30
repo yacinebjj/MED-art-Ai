@@ -90,7 +90,7 @@ function isValidActionType(value: unknown): value is JsonSectionId {
  * atomically reserve (and, on failure, refund) only the fuzzy/miss branch
  * above — an exact hit costs nothing and must never consume courseCap.
  */
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest): Promise<NextResponse> {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -501,4 +501,24 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ success: true, actionType, data: finalData, cached: servedFromCache, cacheMode });
+}
+
+/**
+ * Defensive top-level backstop — the AI generation step above already has
+ * its own targeted try/catch (with quota refunds attached), but an
+ * unexpected exception anywhere ELSE in this handler (a DB read, cache
+ * lookup, or persistence step not anticipated) would otherwise escape as an
+ * unhandled rejection and surface to the student as an opaque framework
+ * crash ("Impossible de contacter le serveur") instead of this app's own
+ * `{success:false, error}` JSON shape the frontend knows how to render.
+ * Never masks a real, already-handled error response — only ever catches
+ * what the handler itself did not.
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  try {
+    return await handlePost(request);
+  } catch (error) {
+    console.error("[studio/generate] Exception non interceptée:", error);
+    return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
+  }
 }

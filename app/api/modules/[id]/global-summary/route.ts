@@ -74,7 +74,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   return NextResponse.json({ success: true, summary });
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePost(request: NextRequest, { params }: { params: { id: string } }): Promise<NextResponse> {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -147,4 +147,18 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   return NextResponse.json({ success: true, summary: result });
+}
+
+/**
+ * Defensive top-level backstop — see app/api/workspace/module-synthesis/
+ * route.ts's own comment for the full rationale; this route shares the same
+ * runModuleSynthesis pipeline and the same class of risk.
+ */
+export async function POST(request: NextRequest, context: { params: { id: string } }): Promise<NextResponse> {
+  try {
+    return await handlePost(request, context);
+  } catch (error) {
+    console.error("[modules/global-summary:post] Exception non interceptée:", error);
+    return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
+  }
 }

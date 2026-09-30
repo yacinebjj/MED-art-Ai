@@ -69,12 +69,42 @@ const VARIATION_TEMPERATURE = 0.85;
 // budget instead of an arbitrary low ceiling — the Math.min(...) below then
 // only ever bites for genuine multi-course selections, exactly as the
 // "spread the shared budget across N courses" design always intended.
-// Safe to raise without a proportional cost increase: generateExamBatch
-// below now sends this text inside a cache_control-marked system block, so
-// only the FIRST of the 5 sequential batches pays full price for it —
-// batches 2-5 read it from Anthropic's prompt cache instead of repricing it
-// from scratch every time.
-const MAX_TOTAL_EXAM_CHARS = 60_000;
+//
+// The `cache_control`-based cost justification this comment used to make
+// ("only the FIRST batch pays full price, batches 2-5 read from Anthropic's
+// prompt cache") never actually applied to CHEAP_MODEL: `cache_control:
+// {type:"ephemeral"}` is an ANTHROPIC-SPECIFIC breakpoint (see
+// lib/chat-model-routing.ts's own supportsAnthropicPromptCaching), and
+// CHEAP_MODEL has never been an Anthropic model (was deepseek-v3.2, now
+// qwen/qwen-2.5-72b-instruct) — that block has been sent, unused, to every
+// CHEAP_MODEL batch call since this feature shipped. Removed at the actual
+// call site below (generateExamBatch) rather than left as a no-op, since an
+// unrecognized field forwarded to a non-Anthropic provider has "no
+// documented, verified behavior" per that same file's own comment, and is a
+// plausible contributor to the generic "Provider returned error" failures
+// reported after the CHEAP_MODEL migration.
+//
+// LOWERED 60,000 -> 40,000, 2026-09-30, for the real reason this budget must
+// now respect: qwen/qwen-2.5-72b-instruct's real context window is 32,768
+// tokens total (input + output combined, confirmed live against
+// GET https://openrouter.ai/api/v1/models) — a small fraction of
+// deepseek-v3.2's 163,840, which this 60,000-char figure was sized against
+// with enormous headroom to spare. At ~0.29 tokens/char (this codebase's own
+// established French-medical-text ratio), 60,000 chars of course content
+// alone is ~17,500 tokens — add the persona/style system prompt (~1-2k
+// tokens) and EXAM_BATCH_MAX_TOKENS's own 16,000-token output reservation,
+// and a single combined call could exceed 32,768 outright, which OpenRouter
+// rejects as a hard error rather than truncating. This exact shape — a
+// student selecting most/all of a module's courses for "Examen Guidé par le
+// Style Prof" (the one path that concatenates every selected course into ONE
+// call, see generateExamBatch's own call site below) — is the reproducible
+// "Provider returned error" reported. 40,000 chars (~11,700 tokens) leaves
+// ~3,000 tokens of real margin alongside the system prompt and the full
+// 16,000-token output reservation. The ordinary (non-style) generation path
+// was never actually at risk from this — see buildCourseInputs' own comment:
+// normal shortfall generation is PER COURSE, so it was already naturally far
+// under any per-call ceiling regardless of how many courses are selected.
+const MAX_TOTAL_EXAM_CHARS = 40_000;
 const MAX_PER_COURSE_CHARS = MAX_TOTAL_EXAM_CHARS;
 
 interface EligibleCourseRow {
@@ -123,15 +153,13 @@ function buildCourseInputs(courses: EligibleCourseRow[], budgetCourseCount: numb
  * divide cleanly into the original 90/10 standard/clinical ratio.
  *
  * The system message is the STATIC half (persona + full course content, see
- * buildExamStaticSystemPrompt) marked `cache_control: ephemeral` — byte-
- * identical across every shortfall chunk for this exam, so only the first
- * chunk pays full price for it; later chunks hit Anthropic's prompt cache
- * instead (roughly a 90% discount, per Anthropic's published cache-read
- * pricing) rather than repricing the same course text from scratch — this
- * is what makes MAX_PER_COURSE_CHARS above safe to raise without a
- * proportional cost blowup. The DYNAMIC per-batch instructions (previousTopics,
- * variation flag) go in the user message, which necessarily changes every
- * call and was never a caching candidate.
+ * buildExamStaticSystemPrompt) — byte-identical across every shortfall chunk
+ * for this exam. Sent as a plain string, NOT a `cache_control: ephemeral`
+ * block: that Anthropic-specific breakpoint was previously applied here even
+ * though CHEAP_MODEL has never been an Anthropic model, so it never actually
+ * cached anything — see MAX_TOTAL_EXAM_CHARS' own comment for the full
+ * history. The DYNAMIC per-batch instructions (previousTopics, variation
+ * flag) go in the user message, which necessarily changes every call.
  */
 async function generateExamBatch(
   inputs: ExamCourseInput[],
@@ -154,7 +182,7 @@ async function generateExamBatch(
       const batchInstruction = buildExamBatchInstruction(batchIndex, totalBatches, questionsInThisBatch, isVariation, previousTopics);
       const raw = await callOpenRouter(
         [
-          { role: "system", content: [{ type: "text", text: staticSystemPrompt, cache_control: { type: "ephemeral" } }] },
+          { role: "system", content: staticSystemPrompt },
           { role: "user", content: batchInstruction },
         ],
         {
@@ -373,7 +401,32 @@ export async function GET(request: NextRequest) {
  * generate-then-save policy as every other real generation route in this
  * app (Studio, Workspace).
  */
-export async function POST(request: NextRequest) {
+/**
+ * Turns OpenRouter's own raw error text into something a student can
+ * actually act on. Two real, distinct upstream shapes this app has hit:
+ *  - A genuine context-length rejection (status 400, message naming
+ *    "context length"/"maximum context"/"context_length_exceeded") — this IS
+ *    actionable by the student (select fewer courses), unlike most other
+ *    OpenRouter failures.
+ *  - The generic, unhelpful "Provider returned error" wrapper OpenRouter
+ *    itself sometimes returns when the underlying provider rejects a request
+ *    without surfacing a specific reason — real production symptom after the
+ *    CHEAP_MODEL migration to a model with a much smaller context window (see
+ *    MAX_TOTAL_EXAM_CHARS' own comment). Treated the same as a context error
+ *    below rather than left as opaque raw text, since a 400 from this
+ *    specific route overwhelmingly means the request was too large, not a
+ *    malformed request on this app's own side.
+ */
+function friendlyOpenRouterErrorMessage(error: OpenRouterError): string {
+  const looksLikeContextOverflow =
+    error.status === 400 && /context.length|context_length_exceeded|maximum context|too many tokens|provider returned error/i.test(error.message);
+  if (looksLikeContextOverflow) {
+    return "Le contenu sélectionné est trop volumineux pour être traité en une seule fois (trop de cours, ou des cours très longs). Réessaie avec moins de cours sélectionnés à la fois.";
+  }
+  return error.message;
+}
+
+async function handlePost(request: NextRequest): Promise<NextResponse> {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -668,7 +721,7 @@ export async function POST(request: NextRequest) {
       await refundGeneration(user.id);
       await refundModuleExamRegenerateIfNeeded();
       if (error instanceof OpenRouterError) {
-        return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+        return NextResponse.json({ success: false, error: friendlyOpenRouterErrorMessage(error) }, { status: error.status });
       }
       console.error("[exam/generate] Erreur non gérée:", error);
       return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
@@ -730,4 +783,24 @@ export async function POST(request: NextRequest) {
     // to report here; the frontend's GET-history sync already covers that case.
     ...(regenerationsRemaining !== undefined ? { regenerationsRemaining } : {}),
   });
+}
+
+/**
+ * Defensive top-level backstop — handlePost already has its own targeted
+ * try/catch around the AI generation step (with quota refunds attached), but
+ * an unexpected exception anywhere ELSE in that function (a DB read, a
+ * schema check, anything not anticipated) would otherwise escape as an
+ * unhandled rejection and surface to the student as an opaque framework
+ * crash/generic connection failure instead of this app's own
+ * `{success:false, error}` JSON shape the frontend knows how to render. Never
+ * masks a real, already-handled error response — only ever catches what
+ * handlePost itself did not.
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  try {
+    return await handlePost(request);
+  } catch (error) {
+    console.error("[exam/generate] Exception non interceptée:", error);
+    return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
+  }
 }

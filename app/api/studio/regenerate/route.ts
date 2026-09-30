@@ -62,7 +62,7 @@ function existingQuestionStems(qcms: QcmCourseRow["qcms"]): string[] {
  * validated QCM object already saved on the course; `remaining` is how many
  * regenerations this course has left.
  */
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest): Promise<NextResponse> {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -249,4 +249,17 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ success: true, section: "qcm", data: finalData, remaining });
+}
+
+/**
+ * Defensive top-level backstop — same rationale as
+ * app/api/studio/generate/route.ts's own copy of this comment.
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  try {
+    return await handlePost(request);
+  } catch (error) {
+    console.error("[studio/regenerate] Exception non interceptée:", error);
+    return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
+  }
 }

@@ -22,7 +22,7 @@ function isValidType(value: unknown): value is ModuleSynthesisType {
  * per-course, cross-student cache. Body: { moduleId: number, courseIds:
  * number[], type: ModuleSynthesisType }.
  */
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest): Promise<NextResponse> {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -65,4 +65,21 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ success: true, ...outcome.result });
+}
+
+/**
+ * Defensive top-level backstop — runModuleSynthesis already returns a
+ * discriminated union (never throws for an anticipated failure), but an
+ * unexpected exception anywhere in this handler (auth, body parsing, the
+ * validation checks above) would otherwise escape as an unhandled rejection
+ * and surface as an opaque framework crash instead of this app's own
+ * `{success:false, error}` JSON shape.
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  try {
+    return await handlePost(request);
+  } catch (error) {
+    console.error("[workspace/module-synthesis] Exception non interceptée:", error);
+    return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
+  }
 }
