@@ -29,7 +29,7 @@ logging — all of which exist because of production incidents.
 |---|---|---|
 | `MODEL` | `anthropic/claude-sonnet-5` | Default for high-stakes generation |
 | `HAIKU_MODEL` | `anthropic/claude-haiku-4.5` | Cheaper reasoning, vision |
-| `CHEAP_MODEL` | `deepseek/deepseek-v3.2` | **The entire Explication pipeline** |
+| `CHEAP_MODEL` | `qwen/qwen-2.5-72b-instruct` | **The entire Explication pipeline** |
 | `IMAGE_MODEL` | `google/gemini-3.1-flash-image-preview` | Infographics |
 
 > **Model policy — do not change casually.** Model IDs were chosen after live
@@ -37,11 +37,23 @@ logging — all of which exist because of production incidents.
 > faster on paper failed a live test outright (no response after 450s) while the
 > incumbent completed the same prompt in 4.4s. **Never swap a model on
 > documentation alone — run a real call on real content first.**
+>
+> `CHEAP_MODEL` was `deepseek/deepseek-v3.2` until 2026-09-30, migrated to
+> `qwen/qwen-2.5-72b-instruct` from catalog data only (context 32,768 vs
+> DeepSeek's 163,840; max completion 16,384 vs 65,536 — every `maxTokens`
+> ceiling coded against the old numbers has been re-capped, see
+> `app/api/study-planner/generate/route.ts`, `app/api/notes/organize/route.ts`,
+> and `lib/module-synthesis.ts`). This migration itself did **not** get the
+> live-test-first treatment this policy calls for — treat it as unverified
+> until a real call confirms Qwen's output quality and throughput on the
+> Explication and lecture-notes pipelines specifically.
 
-`CHEAP_MODEL` is always called with `reasoning: { effort: "low" }`. DeepSeek
-V3.2 is a hidden-reasoning model: uncapped, it burns most of `maxTokens` on
-invisible thinking before emitting a visible character, which silently truncates
-the real answer.
+`CHEAP_MODEL` no longer needs `reasoning: { effort: "low" }` and it has been
+removed from `lib/studio-explication-delta.ts`'s 3 call sites — that option
+existed specifically to cap DeepSeek V3.2's hidden reasoning tokens (uncapped,
+it burned most of `maxTokens` on invisible thinking before emitting a visible
+character); Qwen2.5-72B-Instruct is a standard instruct model with no hidden
+reasoning to cap.
 
 ### Three layers of timeout — all of which must be understood together
 

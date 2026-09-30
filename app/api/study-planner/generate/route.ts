@@ -30,16 +30,27 @@ const MAX_ATTEMPTS = 2; // 1 retry on a malformed/invalid AI response, same conv
 // Separately, the requested plan length was capped at a fixed 16,384-token
 // output ceiling regardless of how many days were requested — nowhere near
 // enough headroom for a 3-month (~90-day) plan, and uncomfortably tight even
-// for 30. Now scaled to the actual requested day count instead: a generous
-// per-day allowance plus a fixed base for the surrounding JSON/coachMessage,
-// capped safely under deepseek-v3.2's own real 65,536-token completion
-// ceiling (confirmed live against GET https://openrouter.ai/api/v1/models —
-// re-verify if CHEAP_MODEL ever changes). parseJsonResponse's own truncation
-// repair (lib/course-generation-shared.ts) remains a second line of defense
-// on top of this for whatever edge case still runs over budget.
+// for 30. Scaled to the actual requested day count instead: a generous
+// per-day allowance plus a fixed base for the surrounding JSON/coachMessage.
+//
+// RE-LOWERED 60,000 -> 16,000, 2026-09-30, migrating CHEAP_MODEL off
+// deepseek-v3.2 (real 65,536-token completion ceiling) to
+// qwen/qwen-2.5-72b-instruct (real top_provider.max_completion_tokens:
+// 16,384 — confirmed live against GET https://openrouter.ai/api/v1/models;
+// re-verify the same way if CHEAP_MODEL ever changes again). A ceiling above
+// a model's own max_completion_tokens isn't a generous safety margin, it's a
+// guaranteed 400 from OpenRouter the moment a plan's computed budget crosses
+// it — every plan requesting more than ~13 days (4,000 + 13×950 ≈ 16,350)
+// would have hit that wall outright. This reintroduces the SAME headroom
+// problem the 16,384 fixed ceiling above was written to escape — a long
+// (2-3 month) plan is now genuinely capped again, not just defensively
+// bounded — until/unless CHEAP_MODEL moves to a model with more completion
+// headroom. parseJsonResponse's own truncation repair
+// (lib/course-generation-shared.ts) remains a second line of defense for
+// whatever still runs over this lower budget.
 const GENERATION_MAX_TOKENS_BASE = 4_000;
 const GENERATION_MAX_TOKENS_PER_DAY = 950;
-const GENERATION_MAX_TOKENS_CEILING = 60_000;
+const GENERATION_MAX_TOKENS_CEILING = 16_000;
 
 function computeGenerationMaxTokens(totalDayCount: number): number {
   return Math.min(GENERATION_MAX_TOKENS_CEILING, GENERATION_MAX_TOKENS_BASE + totalDayCount * GENERATION_MAX_TOKENS_PER_DAY);

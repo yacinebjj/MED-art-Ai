@@ -302,9 +302,24 @@ export async function runModuleSynthesis(
       // unrecoverable even by parseJsonResponse's own repair layer — a
       // genuine truncation, not a fixable escaping quirk). Scales with how
       // many courses are ACTUALLY missing in THIS call instead of one flat
-      // number, capped at CHEAP_MODEL's real ceiling (65,536 — see
+      // number, capped at CHEAP_MODEL's real ceiling — see
       // lib/ai/openrouter.ts's own CHEAP_MODEL comment; confirmed live
       // elsewhere in this app, e.g. app/api/notes/organize/route.ts).
+      //
+      // CEILING LOWERED 65,536 -> 16,384, 2026-09-30, migrating CHEAP_MODEL
+      // off deepseek-v3.2 to qwen/qwen-2.5-72b-instruct (real
+      // top_provider.max_completion_tokens: 16,384, confirmed live against
+      // GET https://openrouter.ai/api/v1/models — exact boundary value, not
+      // a rounded-down safety margin like this codebase's other CHEAP_MODEL
+      // ceilings, because the pre-existing 16,000 floor below already sits
+      // barely under it: there is now only ~384 tokens of real "scales with
+      // course count" headroom left above that floor, versus ~49,500 before
+      // this migration. In practice this call is a near-flat 16,000-16,384
+      // token budget again regardless of missingCourses.length — the exact
+      // "a flat cap stopped being enough as soon as a real batch got large"
+      // failure mode described below is very plausibly still live for a
+      // module missing many courses at once; re-verify against a real batch
+      // rather than assuming this scaling still functions as designed.
       // Floor raised to 16000 (double the old flat cap), not kept at 8000 —
       // the reported failure named only ONE course, so a single dense
       // course's own chunk (up to 15 terms × 3 columns, plus JSON escaping
@@ -312,7 +327,7 @@ export async function runModuleSynthesis(
       // independent of how many OTHER courses shared the same call.
       const MEDICAL_DICTIONARY_TOKENS_PER_COURSE = 3000;
       const medicalDictionaryMaxTokens = Math.min(
-        65536,
+        16384,
         Math.max(16000, missingCourses.length * MEDICAL_DICTIONARY_TOKENS_PER_COURSE)
       );
 

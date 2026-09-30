@@ -17,11 +17,21 @@ export const maxDuration = 180;
 // input size instead: ~1 token per 3.2 characters (a reasonable French-text
 // estimate) plus a 1.7x allowance for HTML markup overhead, floored at the
 // old 4096 (a short note shouldn't get a smaller budget than before) and
-// capped safely under CHEAP_MODEL's (deepseek-v3.2) real 65,536-token
-// completion ceiling, confirmed live against
-// GET https://openrouter.ai/api/v1/models — re-verify if CHEAP_MODEL changes.
+// capped safely under CHEAP_MODEL's real completion-token ceiling, confirmed
+// live against GET https://openrouter.ai/api/v1/models — re-verify if
+// CHEAP_MODEL changes.
+//
+// RE-LOWERED 32,000 -> 16,000, 2026-09-30, migrating CHEAP_MODEL off
+// deepseek-v3.2 (real ceiling 65,536) to qwen/qwen-2.5-72b-instruct (real
+// top_provider.max_completion_tokens: 16,384). A cap above the model's own
+// max_completion_tokens isn't a safety margin, it's a guaranteed 400 from
+// OpenRouter — a sufficiently long note (roughly >29,000 characters of
+// input, past this function's own HTML-overhead multiplier) would have hit
+// that wall outright. This lowers the effective length a single "Organiser
+// avec l'IA" pass can restructure versus deepseek-v3.2; there is no
+// chunking fallback here today.
 const MIN_OUTPUT_TOKENS = 4_096;
-const MAX_OUTPUT_TOKENS = 32_000;
+const MAX_OUTPUT_TOKENS = 16_000;
 const CHARS_PER_TOKEN_ESTIMATE = 3.2;
 const HTML_MARKUP_OVERHEAD = 1.7;
 

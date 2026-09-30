@@ -142,6 +142,47 @@ export const MID_TIER_MODEL = "openai/gpt-5-mini";
 // it so the same mistake (trusting a small sample for a hard-exactness
 // requirement) isn't repeated on the next cost-cutting pass.
 
+// MIGRATED 2026-09-30: deepseek/deepseek-v3.2 -> qwen/qwen-2.5-72b-instruct.
+// Confirmed live against GET https://openrouter.ai/api/v1/models: pricing
+// $0.36/M input + $0.40/M output (cheaper than DeepSeek V3.2 on both axes),
+// BUT a materially smaller footprint on the two dimensions every call site
+// below was tuned against — context_length 32,768 (DeepSeek V3.2 callers
+// elsewhere in this app, e.g. lib/ai/lecture-notes-prompts.ts, were sized
+// against a 163,840-token window) and top_provider.max_completion_tokens
+// 16,384 (vs DeepSeek V3.2's 65,536, which several `maxTokens` ceilings in
+// this codebase were deliberately capped "safely under"). Every such ceiling
+// has been re-capped at this new real number — see
+// app/api/study-planner/generate/route.ts, app/api/notes/organize/route.ts,
+// and lib/module-synthesis.ts's medicalDictionaryMaxTokens, all of which
+// previously allowed values up to 60,000-65,536 that would now be rejected
+// outright by OpenRouter as exceeding this model's completion-token cap.
+// Qwen2.5-72B-Instruct's own OpenRouter description is a standard instruct
+// model, not a hidden-reasoning one — the `reasoning: { effort: "low" }`
+// option added specifically to work around DeepSeek V3.2's hidden-reasoning
+// truncation bug (see lib/studio-explication-delta.ts's header comment) has
+// been removed from that file's 3 call sites as genuinely no-longer-needed,
+// not merely left as a harmless no-op (confirmed elsewhere in this file —
+// see app/api/courses/chat/route.ts's own comment on `reasoning` being a
+// "documented no-op on a model that doesn't support it" — so leaving it
+// would not have broken anything, but it no longer describes anything real
+// for this model).
+// NOT validated with a real test call before this swap (matching this app's
+// own explicit written policy — see docs/05-integrations.md's "Never swap a
+// model on documentation alone" — this migration was executed from
+// specification/catalog data only, per explicit product direction to do so
+// immediately). The genuinely UNVERIFIED residual risks, not mechanically
+// fixable from catalog data alone: (1) lib/ai/lecture-notes-prompts.ts's
+// single-call, never-chunked 2h-lecture path was explicitly architected
+// around DeepSeek's 163,840-token context — an atypically long recording
+// could now exceed this model's 32,768-token window where it previously had
+// huge headroom; (2) lib/studio-explication-delta.ts's entire per-part
+// timing/token budget (EXPLICATION_PART_MAX_TOKENS, EXPLICATION_PART_TIMEOUT_MS)
+// was reverse-engineered from DeepSeek V3.2's OWN measured ~70 tokens/second
+// throughput on this exact long-form medical-writing task — Qwen's real
+// throughput and long-form-instruction-following behavior on this task are
+// unmeasured; a real production smoke test of both pipelines is strongly
+// recommended before trusting this migration fully.
+//
 // EXPLICIT, KNOWINGLY-ACCEPTED ACCURACY TRADEOFF — the product owner's own
 // deliberate choice to prioritize runway over a measured, non-zero accuracy
 // margin, with the explicit intent to revisit once the product has more
@@ -193,7 +234,7 @@ export const MID_TIER_MODEL = "openai/gpt-5-mini";
 //   analogous to ECONOMY_MODEL's hidden-reasoning-tokens bug ever surfaces
 //   for this model, re-read this file's own `reasoning` option doc comment
 //   below before assuming the same fix transfers as-is.
-export const CHEAP_MODEL = "deepseek/deepseek-v3.2";
+export const CHEAP_MODEL = "qwen/qwen-2.5-72b-instruct";
 
 // Shared free-tier (":free" suffix) fallback chain — genuinely zero
 // marginal cost, used by app/api/dashboard-assistant/route.ts,
