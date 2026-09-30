@@ -83,6 +83,10 @@ function isGroupChatRoomRoute(pathname: string): boolean {
   return /^\/dashboard\/groups\/[^/]+$/.test(pathname);
 }
 
+// Below lg these routes own the whole screen (their own header, no Topbar,
+// no bottom nav, no shell padding) — a full-screen chat, like ChatGPT/Claude.
+const CHROMELESS_MOBILE_ROUTES = ["/dashboard/assistant"];
+
 /**
  * "Native-app" no-scroll viewport architecture: the shell's own root is a
  * fixed `h-dvh` flex box that NEVER scrolls (`overflow-hidden`) — Topbar
@@ -111,6 +115,7 @@ export default function DashboardShellLayout({
   const { language } = useLanguage();
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
   const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname) || isGroupChatRoomRoute(pathname);
+  const isChromelessOnMobile = CHROMELESS_MOBILE_ROUTES.includes(pathname);
   const titleKey = resolvePageTitleKey(pathname);
   const pageTitle = titleKey ? t(titleKey, language) : "Espace Étudiant";
 
@@ -183,15 +188,23 @@ export default function DashboardShellLayout({
           <Sidebar />
         </div>
 
-        <div className="flex h-full min-w-0 flex-1 flex-col gap-2 p-2 sm:gap-3 sm:p-3 lg:pl-0">
-          <Topbar title={pageTitle} />
+        <div
+          className={cn(
+            "flex h-full min-w-0 flex-1 flex-col gap-2 p-2 sm:gap-3 sm:p-3 lg:pl-0",
+            isChromelessOnMobile && "max-lg:gap-0 max-lg:p-0"
+          )}
+        >
+          <Topbar title={pageTitle} className={isChromelessOnMobile ? "max-lg:hidden" : undefined} />
 
           <main
             id="main-content"
             tabIndex={-1}
             onScroll={handleMainScroll}
             className={cn(
-              "relative min-h-0 flex-1 overscroll-y-contain focus:outline-none",
+              // overflow-x-hidden: an overflow-y-auto element is ALSO horizontally
+              // scrollable, so any page content wider than the screen (e.g. a
+              // flashcard mid-swipe) made the whole page drift sideways.
+              "relative min-h-0 flex-1 overflow-x-hidden overscroll-y-none focus:outline-none",
               isFullBleed ? "overflow-hidden" : "overflow-y-auto"
             )}
           >
@@ -214,7 +227,7 @@ export default function DashboardShellLayout({
           </main>
         </div>
 
-        <MobileBottomNav hidden={navHidden} />
+        <MobileBottomNav hidden={navHidden || isChromelessOnMobile} />
       </div>
     </SidebarProvider>
   );

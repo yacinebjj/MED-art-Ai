@@ -2,6 +2,12 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   darkMode: "class",
+  // Touch browsers apply :hover on tap and keep it until the next tap
+  // elsewhere — every hover:bg-*/hover:-translate-* got stuck "on" after a
+  // press. This scopes all hover: variants to devices that can really hover.
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",

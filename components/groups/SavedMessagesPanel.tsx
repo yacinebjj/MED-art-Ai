@@ -91,7 +91,7 @@ export function SavedMessagesPanel({ isOpen, onClose, saved, onRemove, currentGr
                           type="button"
                           onClick={() => onRemove(item.id)}
                           // Hover-reveal only where hover exists — on touch it was permanently invisible.
-                          className="touch-target relative shrink-0 rounded-full p-1 text-zinc-400 transition-all hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+                          className="touch-target relative shrink-0 rounded-full p-1 text-zinc-400 transition-all hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100"
                           aria-label="Retirer"
                           title="Retirer des messages enregistrés"
                         >

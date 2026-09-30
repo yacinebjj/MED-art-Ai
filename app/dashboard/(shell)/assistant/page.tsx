@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, memo, useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -11,9 +12,11 @@ import {
   Calendar,
   Camera,
   Check,
+  ChevronLeft,
   Copy,
   FileText,
   HeartPulse,
+  History,
   ImageIcon,
   ListChecks,
   Mic,
@@ -24,6 +27,7 @@ import {
   RefreshCw,
   Send,
   Square,
+  SquarePen,
   Stethoscope,
   ThumbsDown,
   ThumbsUp,
@@ -662,6 +666,7 @@ export default function AssistantPage() {
   const firstName = auth.profile?.fullName?.split(" ")[0] || "Étudiant(e)";
   const { conversations, activeId, hydrated, saveMessages, startNewConversation, selectConversation, deleteConversation } =
     useAssistantConversations(auth.user?.id ?? null);
+  const activeConversationTitle = conversations.find((conversation) => conversation.id === activeId)?.title;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -1189,7 +1194,40 @@ export default function AssistantPage() {
           visible through the main chat column, which is most of this
           page's actual visible surface. */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white/5 backdrop-blur-sm dark:bg-transparent">
-        <div className="flex shrink-0 items-center gap-1 px-4 pt-3 sm:px-6">
+        {/* Phone header — the shell hides its Topbar and bottom nav on this
+            route below lg (see CHROMELESS_MOBILE_ROUTES), so this page owns
+            the full screen and needs its own way back out. */}
+        <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-1.5 pb-1.5 pt-[calc(env(safe-area-inset-top)+0.375rem)] lg:hidden">
+          <Link
+            href="/dashboard"
+            aria-label="Retour au tableau de bord"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-foreground transition-transform active:scale-90 active:bg-accent"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </Link>
+          <div className="min-w-0 flex-1 text-center">
+            <p className="truncate text-[15px] font-semibold text-foreground">{isEmpty ? "MedArt Assistant" : activeConversationTitle || "MedArt Assistant"}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsHistoryOpen(true)}
+            aria-label="Afficher l'historique des conversations"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-transform active:scale-90 active:bg-accent"
+          >
+            <History className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleNewConversation}
+            disabled={isEmpty}
+            aria-label="Nouvelle conversation"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-transform active:scale-90 active:bg-accent disabled:opacity-40"
+          >
+            <SquarePen className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1 px-4 pt-3 max-lg:hidden sm:px-6">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -1215,7 +1253,7 @@ export default function AssistantPage() {
               onScroll={handleScroll}
               className="h-full overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 pb-32 md:p-6 lg:pb-6">
+              <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 pb-6 md:p-6">
                 <AnimatePresence initial={false}>
                   {messages.map((message) => (
                     <ChatBubble key={message.id} message={message} onRefresh={regenerateResponse} onDelete={deleteMessage} />
@@ -1250,25 +1288,14 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* mb clears the floating MobileBottomNav (fixed, bottom-3 + its own
-            content height + safe-area) below lg, where that nav is visible —
-            generous on purpose rather than shaving it to the nav's exact
-            measured height, since a few px of slack costs nothing here but a
-            too-tight value silently regresses the moment the nav's own
-            content grows by a pixel.
-            That clearance is ONLY relevant while the dock is actually
-            visible, though: the shell (app/dashboard/(shell)/layout.tsx)
-            already hides MobileBottomNav the instant this composer's
-            textarea gains focus, which is exactly when the on-screen
-            keyboard opens and `keyboardInset` becomes > 0. Keeping the full
-            7rem margin in that state stacked an unnecessary gap on top of
-            the real keyboardInset padding (outer container, above) below a
-            dock that was no longer even on screen — collapsed to a small
-            fixed gap instead once the keyboard is actually open. */}
+        {/* The shell hides MobileBottomNav on this route below lg, so the
+            composer only clears the home indicator — and just a small gap
+            once the keyboard is open (keyboardInset already lifts the whole
+            column above it). */}
         <div
           className={cn(
-            "mx-auto w-full max-w-3xl shrink-0 px-4",
-            keyboardInset > 0 ? "mb-2" : "mb-[calc(7rem+env(safe-area-inset-bottom))] lg:mb-6"
+            "mx-auto w-full max-w-3xl shrink-0 px-3 sm:px-4",
+            keyboardInset > 0 ? "mb-2" : "mb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:mb-6"
           )}
         >
           <div className="glass-panel relative flex w-full items-end gap-1.5 rounded-[28px] p-1.5 shadow-glass transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:shadow-glass-dark">

@@ -26,6 +26,7 @@ export const GROUPS_TRANSLATIONS = {
   todayLabel: { fr: "Aujourd'hui", en: "Today" },
   backToGroups: { fr: "Retour aux groupes", en: "Back to groups" },
   medicalThemeTitle: { fr: "Thème médical", en: "Medical theme" },
+  attachAriaLabel: { fr: "Joindre une image ou une vidéo", en: "Attach an image or video" },
   sendImageAriaLabel: { fr: "Envoyer une image", en: "Send an image" },
   sendVideoAriaLabel: { fr: "Envoyer une vidéo", en: "Send a video" },
   voiceMessageAriaLabel: { fr: "Message vocal", en: "Voice message" },

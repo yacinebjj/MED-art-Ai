@@ -118,7 +118,7 @@ function PomodoroWidget() {
   );
 }
 
-export function Topbar({ title }: { title: string }) {
+export function Topbar({ title, className }: { title: string; className?: string }) {
   const router = useRouter();
   const { profile, signOut, trial, isSubscribed } = useAuth();
   const { language } = useLanguage();
@@ -133,7 +133,12 @@ export function Topbar({ title }: { title: string }) {
   }
 
   return (
-    <header className="glass-panel z-20 flex h-14 shrink-0 items-center justify-between rounded-2xl px-3 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6">
+    <header
+      className={cn(
+        "glass-panel z-20 flex h-14 shrink-0 items-center justify-between rounded-2xl px-3 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6",
+        className
+      )}
+    >
       <div className="flex min-w-0 items-center gap-3">
         <AnimatedBrandMark size="sm" className="lg:hidden" />
         <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">{title}</h1>

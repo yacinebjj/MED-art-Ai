@@ -287,7 +287,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
               </article>
               {showToolbar && (
                 // Hover-reveal only on devices that can hover — on touch it left Copy/Save unreachable.
-                <div className="flex items-center gap-0.5 transition-opacity duration-200 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
+                <div className="flex items-center gap-0.5 transition-opacity duration-200 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:focus-within:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100">
                   <Button
                     variant="ghost"
                     size="icon"

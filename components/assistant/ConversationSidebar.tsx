@@ -120,7 +120,8 @@ function ConversationRow({
             onBlur={() => setConfirming(false)}
             aria-label={confirming ? "Confirmer la suppression" : "Supprimer la conversation"}
             className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-md opacity-100 transition-all duration-200 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
+              // Hover-reveal only where a real hover exists — on touch tablets `sm:opacity-0` hid it for good.
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-md opacity-100 transition-all duration-200 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
               confirming
                 ? "scale-105 bg-destructive/15 text-destructive opacity-100 ring-1 ring-destructive/40"
                 : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -198,6 +199,7 @@ export function ConversationSidebar({
       <div
         className={cn(
           "glass-panel fixed inset-y-0 left-0 z-50 flex h-full w-72 max-w-[85vw] shrink-0 flex-col overflow-hidden border-r border-l-0 border-y-0 shadow-glass transition-transform duration-300 dark:shadow-glass-dark lg:static lg:z-auto lg:max-w-none lg:translate-x-0 lg:transition-[width]",
+          "max-lg:pb-[env(safe-area-inset-bottom)] max-lg:pl-[env(safe-area-inset-left)] max-lg:pt-[env(safe-area-inset-top)]",
           isOpen ? "translate-x-0" : "-translate-x-full",
           isOpen ? "lg:w-72" : "lg:w-0 lg:border-r-0"
         )}

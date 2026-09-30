@@ -421,7 +421,10 @@ function NotesPageContent() {
           initial={false}
           animate={isDesktopOrTablet ? { width: isSidebarCollapsed ? 0 : SIDEBAR_WIDTH } : { width: "100%" }}
           transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-          className={cn("min-h-0 w-full shrink-0 overflow-hidden", selectedId ? "hidden md:block" : "block")}
+          // max-md:flex-1: in the phone column layout this pane had auto height,
+          // so its h-full card grew to fit every note and was clipped — the
+          // list's own overflow-y-auto never engaged, and nothing scrolled.
+          className={cn("min-h-0 w-full overflow-hidden max-md:flex-1 md:shrink-0", selectedId ? "hidden md:block" : "block")}
         >
           <div
             className="glass-card flex h-full min-h-0 w-full flex-col rounded-2xl border border-border p-3 shadow-glass dark:shadow-glass-dark"

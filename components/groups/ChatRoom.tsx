@@ -10,10 +10,12 @@ import {
   Check,
   FolderOpen,
   ImageIcon,
+  Loader2,
   Maximize2,
   Mic,
   Minimize2,
   Pin,
+  Plus,
   Search,
   Send,
   Smile,
@@ -292,6 +294,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const typingChannelRef = useRef<RealtimeChannel | null>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   // Caret position to restore once `input`'s new value actually lands in the
   // DOM — see insertEmoji below for why this can't just be a
   // requestAnimationFrame call at insert time.
@@ -1187,54 +1190,79 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
           )}
         </AnimatePresence>
 
-        <form
-          onSubmit={handleSend}
-          className="relative z-10 flex shrink-0 items-center gap-1 rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 shadow-xl shadow-zinc-300/30 backdrop-blur-2xl transition-all duration-300 focus-within:border-cyan-500/50 focus-within:ring-2 focus-within:ring-cyan-500/20 dark:border-white/5 dark:bg-zinc-900/80 dark:shadow-black/40"
-        >
+        {/* Messaging-app composer (Telegram/WhatsApp shape): one "+" for
+            attachments, a pill text field, and a single primary button that
+            is the mic while the field is empty and Send once there's text.
+            Three 44px controls instead of six ~32px ones — the old row
+            couldn't fit the input's intrinsic width on a phone, which pushed
+            Send out of the clipped container. */}
+        <form onSubmit={handleSend} className="relative z-10 flex shrink-0 items-center gap-2">
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f); e.target.value = ""; }} />
           <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f); e.target.value = ""; }} />
 
-          <button
-            type="button"
-            onClick={() => imageInputRef.current?.click()}
-            disabled={isUploadingMedia || isRecording}
-            className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
-            aria-label={tGroups("sendImageAriaLabel", language)}
-          >
-            <ImageIcon className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => videoInputRef.current?.click()}
-            disabled={isUploadingMedia || isRecording}
-            className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
-            aria-label={tGroups("sendVideoAriaLabel", language)}
-          >
-            <Video className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            onClick={isRecording ? stopRecording : startRecording}
-            disabled={isUploadingMedia}
-            className={cn(
-              "rounded-full p-1.5 transition-all duration-200 active:scale-90 disabled:opacity-50",
-              isRecording
-                ? "bg-rose-100 text-rose-600 animate-pulse dark:bg-rose-500/10 dark:text-rose-400"
-                : "text-zinc-500 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
-            )}
-            aria-label={isRecording ? tGroups("stopRecordingAriaLabel", language) : tGroups("voiceMessageAriaLabel", language)}
-          >
-            {isRecording ? <Square className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-          </button>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsAttachMenuOpen((v) => !v)}
+              disabled={isUploadingMedia || isRecording}
+              aria-label={tGroups("attachAriaLabel", language)}
+              aria-expanded={isAttachMenuOpen}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-zinc-600 shadow-md shadow-zinc-300/30 ring-1 ring-zinc-200 transition-transform duration-150 hover:text-cyan-600 active:scale-90 disabled:opacity-50 dark:bg-zinc-900 dark:text-zinc-300 dark:shadow-black/40 dark:ring-white/10 dark:hover:text-cyan-300"
+            >
+              {isUploadingMedia ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Plus className={cn("h-5 w-5 transition-transform duration-200", isAttachMenuOpen && "rotate-45")} />
+              )}
+            </button>
 
-          {/* Live recording indicator — replaces the text input while a voice
+            <AnimatePresence>
+              {isAttachMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsAttachMenuOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-2xl border border-zinc-200 bg-white py-1 shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-900 dark:shadow-black/40"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAttachMenuOpen(false);
+                        imageInputRef.current?.click();
+                      }}
+                      className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-100 active:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10 dark:active:bg-white/10"
+                    >
+                      <ImageIcon className="h-5 w-5 shrink-0 text-cyan-600 dark:text-cyan-400" />
+                      {tGroups("sendImageAriaLabel", language)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAttachMenuOpen(false);
+                        videoInputRef.current?.click();
+                      }}
+                      className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-100 active:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10 dark:active:bg-white/10"
+                    >
+                      <Video className="h-5 w-5 shrink-0 text-cyan-600 dark:text-cyan-400" />
+                      {tGroups("sendVideoAriaLabel", language)}
+                    </button>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Live recording indicator — replaces the text field while a voice
               note is being captured, so it's obvious recording is in progress
               (a chronometer plus a decorative animated waveform), not just
               the mic button's own pulse. */}
           {isRecording ? (
-            <div className="flex h-10 flex-1 items-center gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3.5 dark:border-rose-500/30 dark:bg-rose-500/5" role="status" aria-live="polite">
+            <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-rose-300 bg-rose-50 px-4 dark:border-rose-500/30 dark:bg-rose-950/60" role="status" aria-live="polite">
               <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-rose-500 dark:bg-rose-400" aria-hidden />
-              <div className="flex flex-1 items-center gap-[3px]">
+              <div className="flex min-w-0 flex-1 items-center gap-[3px] overflow-hidden">
                 {RECORDING_BAR_HEIGHTS.map((height, i) => (
                   <span
                     key={i}
@@ -1246,75 +1274,109 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
               <span className="shrink-0 text-xs font-semibold tabular-nums text-rose-600 dark:text-rose-400">{formatRecordingDuration(recordingSeconds)}</span>
             </div>
           ) : (
-            <input
-              ref={messageInputRef}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                notifyTyping();
-              }}
-              onPaste={handlePaste}
-              placeholder={tGroups("messagePlaceholder", language)}
-              className="h-10 flex-1 rounded-xl border-none bg-transparent px-3.5 text-[15px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-white dark:placeholder:text-zinc-500"
-            />
-          )}
+            <div className="flex h-11 min-w-0 flex-1 items-center rounded-full bg-white pl-4 pr-1 shadow-md shadow-zinc-300/30 ring-1 ring-zinc-200 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-cyan-500/40 dark:bg-zinc-900 dark:shadow-black/40 dark:ring-white/10">
+              <input
+                ref={messageInputRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  notifyTyping();
+                }}
+                onPaste={handlePaste}
+                placeholder={tGroups("messagePlaceholder", language)}
+                // min-w-0: without it an <input>'s intrinsic ~20-character width
+                // refuses to shrink, overflowing the row on narrow phones.
+                className="h-full min-w-0 flex-1 bg-transparent text-[15px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-white dark:placeholder:text-zinc-500"
+              />
 
-          {!isRecording && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsEmojiPickerOpen((v) => !v)}
-                disabled={isUploadingMedia}
-                className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)]"
-                aria-label={tGroups("emojiPickerAriaLabel", language)}
-                title={tGroups("emojiPickerAriaLabel", language)}
-              >
-                <Smile className="h-5 w-5" />
-              </button>
+              {/* Deliberately NOT `relative`: the picker anchors to the full-width
+                  form instead, so its 18rem panel stays on-screen on 320px phones. */}
+              <div className="shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsEmojiPickerOpen((v) => !v)}
+                  disabled={isUploadingMedia}
+                  className="touch-target relative flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-transform duration-150 hover:text-cyan-600 active:scale-90 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-cyan-300"
+                  aria-label={tGroups("emojiPickerAriaLabel", language)}
+                  title={tGroups("emojiPickerAriaLabel", language)}
+                >
+                  <Smile className="h-5 w-5" />
+                </button>
 
-              <AnimatePresence>
-                {isEmojiPickerOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsEmojiPickerOpen(false)} />
-                    <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                      transition={{ duration: 0.12 }}
-                      className="chat-scrollbar absolute bottom-full right-0 z-50 mb-2 max-h-72 w-72 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-3 shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-900/95 dark:shadow-black/40"
-                    >
-                      {EMOJI_CATEGORIES.map((category) => (
-                        <div key={category.label} className="mb-2 last:mb-0">
-                          <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{category.label}</p>
-                          <div className="grid grid-cols-6 gap-0.5">
-                            {category.emojis.map((emoji) => (
-                              <button
-                                key={emoji}
-                                type="button"
-                                onClick={() => insertEmoji(emoji)}
-                                className="rounded-lg p-1.5 text-xl leading-none transition-transform duration-150 hover:scale-125 hover:bg-zinc-100 dark:hover:bg-white/10"
-                              >
-                                {emoji}
-                              </button>
-                            ))}
+                <AnimatePresence>
+                  {isEmojiPickerOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsEmojiPickerOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                        transition={{ duration: 0.12 }}
+                        className="chat-scrollbar absolute bottom-full right-0 z-50 mb-3 max-h-72 w-72 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 shadow-xl shadow-zinc-300/40 dark:border-white/5 dark:bg-zinc-900 dark:shadow-black/40"
+                      >
+                        {EMOJI_CATEGORIES.map((category) => (
+                          <div key={category.label} className="mb-2 last:mb-0">
+                            <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{category.label}</p>
+                            <div className="grid grid-cols-6 gap-0.5">
+                              {category.emojis.map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() => insertEmoji(emoji)}
+                                  className="flex h-10 items-center justify-center rounded-lg text-xl leading-none transition-transform duration-150 hover:scale-125 hover:bg-zinc-100 active:scale-110 dark:hover:bg-white/10"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
+                        ))}
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           )}
-          <button
-            type="submit"
-            disabled={!input.trim() || isRecording}
-            aria-label={tGroups("sendButton", language)}
-            className="touch-target relative flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-sm font-semibold text-white shadow-lg shadow-cyan-500/30 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_20px_-4px_rgba(34,211,238,0.7)] active:scale-95 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-lg dark:shadow-cyan-950/50 sm:w-auto sm:px-4 sm:py-2"
-          >
-            <span className="hidden sm:inline">{tGroups("sendButton", language)}</span>
-            <Send className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-          </button>
+
+          <AnimatePresence mode="popLayout" initial={false}>
+            {input.trim() && !isRecording ? (
+              <motion.button
+                key="send"
+                type="submit"
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.6, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                whileTap={{ scale: 0.9 }}
+                aria-label={tGroups("sendButton", language)}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30 dark:shadow-cyan-950/50"
+              >
+                <Send className="h-5 w-5" />
+              </motion.button>
+            ) : (
+              <motion.button
+                key={isRecording ? "stop" : "mic"}
+                type="button"
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isUploadingMedia}
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.6, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                whileTap={{ scale: 0.9 }}
+                aria-label={isRecording ? tGroups("stopRecordingAriaLabel", language) : tGroups("voiceMessageAriaLabel", language)}
+                className={cn(
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-lg disabled:opacity-50",
+                  isRecording
+                    ? "bg-rose-500 shadow-rose-500/30"
+                    : "bg-gradient-to-br from-cyan-500 to-blue-600 shadow-cyan-500/30 dark:shadow-cyan-950/50"
+                )}
+              >
+                {isRecording ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-5 w-5" />}
+              </motion.button>
+            )}
+          </AnimatePresence>
         </form>
       </div>
 

@@ -47,7 +47,9 @@ function StudyPageContent() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl">
+    // overflow-x-clip: FlipFlashcard's swipe translates/rotates the card past
+    // the page edge (and flings it off-screen on grade) — clip it here.
+    <div className="mx-auto max-w-4xl overflow-x-clip">
       {/* Page header — this space had none before; every other page in the
           shell (billing, exam, ...) opens with an icon + title + subtitle,
           this one jumped straight to controls. */}

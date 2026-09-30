@@ -492,18 +492,20 @@ html {
   touch-action: manipulation;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
   /* `hidden` is a fallback on html only: on body it would create a scroll
      container and break every position: sticky descendant. */
   overflow-x: hidden;
   overflow-x: clip;
-  /* `contain` blocks pull-to-refresh (which would kill an in-flight
-     generation) but keeps the native rubber-band bounce. */
-  overscroll-behavior-y: contain;
+  /* `none`, not `contain`: iOS rubber-banding dragged the whole shell off
+     screen and exposed the fixed aurora grid behind body's background. Also
+     blocks pull-to-refresh, which would kill an in-flight generation. */
+  overscroll-behavior-y: none;
 }
 
 body {
   overflow-x: clip;
-  overscroll-behavior-y: contain;
+  overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
   /* viewport-fit=cover draws under the landscape notch; keep flow content out. */
   padding-left: env(safe-area-inset-left);
@@ -522,6 +524,45 @@ textarea,
 [role="menuitem"],
 [role="option"] {
   touch-action: manipulation;
+}
+
+/* No focus box after a tap or click; keyboard focus (:focus-visible) keeps
+   its ring, so this never costs keyboard users their focus indicator. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Touch devices: every backdrop-filter re-blurs the always-animating aurora
+   and WebGL DNA canvas beneath it on every frame, which is what made taps
+   stutter. Flat, more opaque tints instead — same colors, no blur. */
+@media (hover: none) {
+  *,
+  *::before,
+  *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .glass-panel,
+  .fixed[class*="backdrop-blur"] {
+    will-change: auto;
+  }
+
+  .glass-panel {
+    background-color: rgb(255 255 255 / 0.94);
+  }
+
+  .dark .glass-panel {
+    background-color: rgb(15 23 42 / 0.94);
+  }
+
+  .glass-card {
+    background-color: rgb(255 255 255 / 0.86);
+  }
+
+  .dark .glass-card {
+    background-color: rgb(30 41 59 / 0.82);
+  }
 }
 
 /* iOS Safari zooms on focus below 16px — and the mobile bump above makes
