@@ -41,6 +41,10 @@ interface StudioCourseFullRow {
   exemples_analogies: string | null;
   source_file_url: string | null;
   updated_at: string | null;
+}
+
+/** studio_courses.infographic_url / audio_url — added by a MANUAL migration (see supabase/schema.sql), so a database may not have them yet. Read separately from the main row on purpose: see the GET handler. */
+interface StudioCourseMediaRow {
   infographic_url: string | null;
   audio_url: string | null;
 }
@@ -79,12 +83,34 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   }
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("studio_courses")
-    .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url, updated_at, infographic_url, audio_url")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // Two queries, run in parallel, deliberately NOT one: the media columns
+  // (infographic_url/audio_url) come from a manual migration. When they were
+  // folded into this main select and the migration hadn't been applied yet,
+  // Postgres rejected the WHOLE query — every course load failed with
+  // "Lecture échouée", which also broke "Afficher le cours" (PDF/PPTX
+  // viewer) since it loads the course first. The media query below is
+  // allowed to fail on its own; the course itself must always load.
+  const [{ data, error }, { data: mediaRow, error: mediaError }] = await Promise.all([
+    supabase
+      .from("studio_courses")
+      .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url, updated_at")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("studio_courses")
+      .select("infographic_url, audio_url")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .maybeSingle<StudioCourseMediaRow>(),
+  ]);
+
+  if (mediaError) {
+    console.warn(
+      "[studio/courses/[id]:get] infographic_url/audio_url illisibles (migration supabase/schema.sql non appliquée ?) — repli sur le cache:",
+      mediaError.message
+    );
+  }
 
   if (error) {
     console.error("[studio/courses/[id]:get] Échec lecture Supabase:", error);
@@ -106,8 +132,10 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   // find a non-default variant (the read path has no idea which the student
   // picked) and broke whenever the hash basis (explication ?? raw_text)
   // changed after generation.
-  let infographicUrl = row.infographic_url;
-  let audioUrl = row.audio_url;
+  // null when the columns don't exist yet (mediaError above) — the legacy
+  // cache fallback below then behaves exactly as it did before them.
+  let infographicUrl = mediaError ? null : mediaRow?.infographic_url ?? null;
+  let audioUrl = mediaError ? null : mediaRow?.audio_url ?? null;
 
   // LEGACY FALLBACK, only for a column still null — a course whose media was
   // generated before infographic_url/audio_url existed. Mirrors the exact

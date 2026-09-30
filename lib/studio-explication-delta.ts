@@ -24,11 +24,20 @@
  *
  * MODEL POLICY: every OpenRouter call in this file — the delta-chapter/
  * wrapper calls below, and generateExplicationPart — runs on CHEAP_MODEL
- * (deepseek/deepseek-v3.2) with `reasoning: { effort: "low" }` (added after a
- * real production truncation bug: DeepSeek V3.2 is a hidden-reasoning model,
- * same category as ECONOMY_MODEL, and an uncapped reasoning effort silently
- * burns most of `maxTokens` on invisible "thinking" before writing a single
- * visible character — see CHEAP_MODEL's own comment in lib/ai/openrouter.ts).
+ * (deepseek/deepseek-v3.2) with reasoning explicitly DISABLED
+ * (`reasoning: { enabled: false }`).
+ *
+ * This used to send `reasoning: { effort: "low" }` on the belief that V3.2
+ * always reasons and "low" would cap it. OpenRouter's own endpoint data says
+ * otherwise: V3.2 is a HYBRID model, and every one of its providers lists
+ * `reasoning` as an optional, opt-in parameter. Sending `effort` therefore
+ * switched thinking mode ON — the model spent time and token budget
+ * reasoning before writing any visible output. That is the likely cause of
+ * the recurring "Le modèle IA met trop de temps à répondre" part failures
+ * (aborted at EXPLICATION_PART_TIMEOUT_MS ≈ 180s even after the client split
+ * a part into 8 small sub-parts). Disabling it keeps the whole `maxTokens`
+ * budget for the visible explanation, which also covers the original
+ * concern (hidden thinking eating the budget and truncating output).
  * There is no Sonnet fallback anywhere in the Explication pipeline; the
  * delta-chapter/wrapper calls used to omit `model` entirely (silently
  * defaulting to callOpenRouter's own global Sonnet MODEL) — that default is
@@ -419,7 +428,7 @@ export async function runStudioExplicationDeltaPipeline(
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { model: CHEAP_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { effort: "low" } }
+        { model: CHEAP_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { enabled: false } }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -450,7 +459,7 @@ export async function runStudioExplicationDeltaPipeline(
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { effort: "low" } }
+      { model: CHEAP_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { enabled: false } }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -1038,7 +1047,10 @@ export async function generateExplicationPart(
       model: CHEAP_MODEL,
       maxTokens: EXPLICATION_PART_MAX_TOKENS,
       bypassMock: true,
-      reasoning: { effort: "low" },
+      // Reasoning OFF, not "low" — see this file's MODEL POLICY header for
+      // why `effort: "low"` was switching DeepSeek V3.2's thinking mode ON
+      // and causing the 180s part timeouts.
+      reasoning: { enabled: false },
       timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
     }
   );

@@ -532,7 +532,14 @@ export async function callOpenRouter(
     // calls this non-streaming path with a model that can route to
     // ECONOMY_MODEL, which has the same hidden-reasoning-token behavior
     // regardless of whether the call streams or not.
-    reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean };
+    //
+    // `enabled: false` is the way to turn reasoning OFF on a HYBRID model
+    // (one where thinking is optional, e.g. deepseek/deepseek-v3.2 — every
+    // one of its OpenRouter providers lists "reasoning" as a supported,
+    // opt-in parameter). On such a model, sending `effort` does NOT cap
+    // hidden thinking — it switches thinking ON. Only a model that always
+    // reasons (e.g. Gemini Flash) is actually capped by `effort`.
+    reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean; enabled?: boolean };
   }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
