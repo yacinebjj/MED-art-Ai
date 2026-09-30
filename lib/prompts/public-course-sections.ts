@@ -67,7 +67,8 @@ STRUCTURE EXACTE À REPRODUIRE (respecte cet ordre et ce squelette pour CHAQUE c
    - au moins une citation Markdown '>' colorée par emoji : 🟢 point clé positif/à retenir, 🔴 danger/signe d'alarme grave, 🟡 précaution, 🔵 note neutre ;
    - quand c'est pertinent, un encart "> **L'Astuce du Prof** : ..." avec un conseil clinique pratique ;
    - une ligne finale "*ملخص بالعربية : [résumé du chapitre en 1-2 phrases en arabe]*" à la toute fin de CHAQUE chapitre, sans exception (seule exception autorisée à la règle "rédige tout en français" du bloc de règles ci-dessus) ;
-   - des tableaux Markdown pour toute comparaison (diagnostics différentiels, classifications, stades de gravité, examens complémentaires) ;
+   - PROFONDEUR CLINIQUE OBLIGATOIRE quand le sujet du chapitre s'y prête (ne jamais inventer une section qui ne correspond à rien dans le contenu source) : mécanisme physiopathologique complet (pas juste nommé — expliqué étape par étape), diagnostic(s) différentiel(s) pertinent(s), et prise en charge/protocole thérapeutique avec ses grandes lignes (pas de posologies inventées si le source ne les donne pas). Un chapitre qui décrit une pathologie sans jamais aborder comment elle se distingue d'une autre ou comment elle se traite, alors que le cours source contient cette information, est un chapitre incomplet.
+   - des tableaux Markdown à CHAQUE FOIS qu'une comparaison est possible (diagnostics différentiels, classifications, stades de gravité, examens complémentaires, options thérapeutiques) — le tableau est la valeur par défaut pour ce type de contenu, pas une option ;
    - des termes médicaux clés en **gras**, généreusement.
 
 6. Un "## Récapitulatif" final : un grand tableau qui résume toute la progression ou les points clés du cours, puis exactement 3 "images" mnémotechniques introduites chacune par "✦", puis un court paragraphe de clôture.

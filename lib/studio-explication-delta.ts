@@ -739,22 +739,30 @@ function tryDecodeJsonString(escaped: string): string | null {
 // real throughput" estimate above was calibrated against DeepSeek V3.2's
 // specifically MEASURED ~70 tokens/second on this exact task (see
 // EXPLICATION_PART_MAX_TOKENS's own comment) — it already left only ~20s of
-// real margin under the 180s abort even for DeepSeek on a dense slice. Qwen's
-// real throughput on this exact long-form medical-writing task has NOT been
-// independently measured (no live test call was made before the model swap,
-// per this app's own "never swap a model on documentation alone" policy —
-// see docs/05-integrations.md); if it is meaningfully slower than DeepSeek's
-// measured rate, that thin 20s margin is exactly what a ~182s failure would
-// look like. This is a DEFENSIVE reduction, not a re-measured one: shrinking
-// the slice (and EXPLICATION_PART_MAX_TOKENS below, in proportion) buys back
-// real margin regardless of Qwen's actual tok/s, at the cost of more, smaller
-// parts per course. If "trop de temps à répondre" is still observed in
-// production after this change, that is direct evidence Qwen's real
-// throughput on this task is substantially below DeepSeek's — shrink further
-// rather than raising EXPLICATION_PART_TIMEOUT_MS back toward the platform
-// wall (see that constant's own comment for why raising it is the wrong
-// lever).
-const CHUNKED_SLICE_CHARS = 3_500;
+// real margin under the 180s abort even for DeepSeek on a dense slice.
+//
+// RAISED PARTIALLY BACK, 3,500 -> 5,000, same day, after a real,
+// legitimate follow-up complaint: 3,500 (raw target ≈770 words/part) was
+// noticeably shallower per part than students were used to — real
+// exhaustiveness (differentials, staged management, worked tables) needs
+// room to develop, and 770 words rarely fits all of it for a dense slice.
+// 5,000 (raw target ≈1,100 words/part, see buildPartLengthBudget) restores
+// real per-part depth while staying BELOW the 6,000 that was already
+// producing ~182s timeouts — i.e., strictly more safety margin than the
+// already-failing baseline, not less. Deliberately NOT restored to the
+// requested 8,000-10,000 (the ORIGINAL, already-timing-out value's own
+// range or higher): that would ask for MORE typical-case generation time
+// than the configuration that was already failing, on a model whose real
+// throughput on this task remains genuinely unmeasured — see
+// EXPLICATION_PART_MAX_TOKENS's own comment for why the ceiling (a rarely-
+// reached safety net) and the slice size (the actual driver of typical
+// generation time) are different levers, only one of which is safe to
+// raise aggressively without new evidence. If depth is still reported as
+// insufficient at 5,000, the next lever to pull is EXPLICATION_SYSTEM_PROMPT's
+// own chapter-content requirements (make differentials/management/tables
+// more consistently mandatory, not just "when relevant") rather than
+// raising this further — see that prompt's own 2026-09-30 comment.
+const CHUNKED_SLICE_CHARS = 5_000;
 
 /**
  * Safe per-part token ceiling for the client-driven, multi-request
@@ -834,7 +842,22 @@ const CHUNKED_SLICE_CHARS = 3_500;
 // app/api/studio/generate/route.ts today. Left alone rather than touched on
 // unrelated speculation, since nothing live still calls it for a real
 // generation.
-const EXPLICATION_PART_MAX_TOKENS = 6_000;
+//
+// RAISED AGAIN, 6,000 -> 12,000, same day, following the depth-regression
+// report — but this is a DIFFERENT lever than CHUNKED_SLICE_CHARS' own
+// partial raise, and safe to move much further: this constant is a SAFETY
+// NET, not the target. At CHUNKED_SLICE_CHARS = 5,000, the actual per-part
+// word budget the model is asked for (buildPartLengthBudget) is only
+// ~1,100-1,485 words ≈ ~2,100-2,822 tokens — normal generation never
+// approaches even the OLD 6,000-token ceiling, let alone this new one, so
+// raising the ceiling itself does not increase TYPICAL generation time or
+// reopen the timeout regression. What it does buy: real headroom for a
+// genuinely dense slice to finish without hitting `finish_reason: "length"`
+// mid-sentence — 12,000 is comfortably under qwen/qwen-2.5-72b-instruct's
+// real 16,384-token max_completion_tokens (confirmed live against
+// GET https://openrouter.ai/api/v1/models), leaving ~4,384 tokens of margin
+// rather than pinning exactly at the model's own ceiling.
+const EXPLICATION_PART_MAX_TOKENS = 12_000;
 
 /**
  * Hard abort for a single part's OpenRouter call. RAISED 200s -> 180s after
@@ -1032,10 +1055,10 @@ const PREVIOUS_PART_TAIL_CHARS = 800;
  * CALIBRATED against a REALISTIC French tokenization ratio (~1.9 tokens per
  * word for medical French — long technical terms tokenize worse than
  * everyday English, and the JSON wrapper escapes every newline on top).
- * With EXPLICATION_PART_MAX_TOKENS = 6,000 and a 3,500-char slice (both
- * lowered together 2026-09-30 — see CHUNKED_SLICE_CHARS' own comment):
- *   target    770 words ≈ 1,463 tokens
- *   ceiling 1,040 words ≈ 1,976 tokens   (≈4,000 tokens of headroom)
+ * With CHUNKED_SLICE_CHARS = 5,000 and EXPLICATION_PART_MAX_TOKENS = 12,000
+ * (both re-tuned 2026-09-30 — see each constant's own comment):
+ *   target  1,100 words ≈ 2,090 tokens
+ *   ceiling 1,485 words ≈ 2,822 tokens   (≈9,200 tokens of headroom)
  * Both land far inside EXPLICATION_PART_TIMEOUT_MS, with real room for the
  * model to overshoot its target without ever hitting the hard cap.
  */

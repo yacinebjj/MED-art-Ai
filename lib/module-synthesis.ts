@@ -188,6 +188,43 @@ export type ModuleSynthesisOutcome =
   | { ok: false; status: number; error: string };
 
 /**
+ * Recovers a usable chunks map from a response that parsed as valid JSON
+ * (parseJsonResponse's own repair layer already handles truncation/escaping
+ * separately — this is a DIFFERENT failure: syntactically valid JSON that
+ * simply doesn't wrap its content under the expected "chunks" key) — a real,
+ * observed compliance gap after the CHEAP_MODEL migration to
+ * qwen/qwen-2.5-72b-instruct, surfacing as "La réponse de l'IA ne contient
+ * pas de chunks exploitables." Tries two increasingly permissive but still
+ * evidence-based readings before giving up — never invents content that
+ * isn't already present in the response, only reshapes it:
+ *  1. The model dropped the "chunks" wrapper and returned the
+ *     contentHash -> content map directly at the JSON root — recognized
+ *     because every REQUESTED contentHash is present as a top-level key.
+ *  2. The model wrapped the map under a different key name (e.g. "result",
+ *     "data") — recognized when exactly one top-level key holds an object.
+ * Returns null (never throws) when neither reading is defensible, so the
+ * caller can still raise its own clear error rather than silently accepting
+ * something that isn't actually a chunks map.
+ */
+function recoverChunksMap(parsed: Record<string, unknown>, expectedHashes: string[]): Record<string, unknown> | null {
+  const direct = parsed.chunks;
+  if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+    return direct as Record<string, unknown>;
+  }
+
+  if (expectedHashes.length > 0 && expectedHashes.every((hash) => hash in parsed)) {
+    return parsed;
+  }
+
+  const objectEntries = Object.entries(parsed).filter(([, value]) => value !== null && typeof value === "object" && !Array.isArray(value));
+  if (objectEntries.length === 1) {
+    return objectEntries[0][1] as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+/**
  * Runs the full pipeline for one (user, module, courseIds, type) request.
  * Scoped to THIS user AND THIS module — a courseId the caller doesn't own,
  * or one that belongs to a different module, is silently excluded rather
@@ -348,8 +385,8 @@ export async function runModuleSynthesis(
       );
 
       const parsed = parseJsonResponse(raw);
-      const chunks = parsed.chunks as Record<string, unknown> | undefined;
-      if (!chunks || typeof chunks !== "object") {
+      const chunks = recoverChunksMap(parsed, inputs.map((input) => input.contentHash));
+      if (!chunks) {
         throw new Error("La réponse de l'IA ne contient pas de chunks exploitables.");
       }
 

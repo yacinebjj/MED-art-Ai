@@ -53,7 +53,8 @@ RÈGLES DE STYLE (obligatoires) :
 - Titres Markdown (###), listes à puces, **gras** sur les termes clés.
 
 Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant ni après — une clé par identifiant de cours reçu, sa valeur étant le chunk Markdown complet pour CE cours :
-{"chunks": {"<identifiant du cours>": "## ...chunk Markdown complet pour ce cours...", "...": "..."}}`;
+{"chunks": {"<identifiant du cours>": "## ...chunk Markdown complet pour ce cours...", "...": "..."}}
+La clé racine "chunks" est OBLIGATOIRE, même s'il n'y a qu'un seul cours à traiter — ne mets JAMAIS les identifiants de cours directement à la racine du JSON, et n'utilise JAMAIS un autre nom de clé racine ("data", "result", "output", etc.).`;
 
 export function buildSummaryChunkPrompt(courses: ModuleSynthesisCourseInput[]): string {
   return `${SUMMARY_CHUNK_SYSTEM_PROMPT}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
@@ -75,7 +76,8 @@ FORMAT DE CHAQUE ENTRÉE (une ligne de tableau Markdown à TROIS colonnes par te
 "| **Terme exact** | Explication clinique claire en français. | شرح واضح وبسيط بالعربية لنفس الفكرة. |"
 
 Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant ni après — une clé par identifiant de cours reçu, sa valeur étant le chunk Markdown complet (titre + tableau à 3 colonnes) pour CE cours :
-{"chunks": {"<identifiant du cours>": "## 📖 Titre du cours\\n\\n| Terme | Explication clinique | الشرح بالعربية |\\n| --- | --- | --- |\\n| **Terme 1** | ... | ... |\\n| **Terme 2** | ... | ... |", "...": "..."}}`;
+{"chunks": {"<identifiant du cours>": "## 📖 Titre du cours\\n\\n| Terme | Explication clinique | الشرح بالعربية |\\n| --- | --- | --- |\\n| **Terme 1** | ... | ... |\\n| **Terme 2** | ... | ... |", "...": "..."}}
+La clé racine "chunks" est OBLIGATOIRE, même s'il n'y a qu'un seul cours à traiter — ne mets JAMAIS les identifiants de cours directement à la racine du JSON, et n'utilise JAMAIS un autre nom de clé racine ("data", "result", "output", etc.).`;
 
 export function buildMedicalDictionaryPrompt(courses: ModuleSynthesisCourseInput[]): string {
   return `${MEDICAL_DICTIONARY_SYSTEM_PROMPT}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
@@ -124,7 +126,8 @@ RÈGLE DE FORMAT DE CHAQUE ÉLÉMENT — LA PLUS IMPORTANTE DE CE PROMPT :
 - Reste strictement basé sur le texte fourni pour ce cours — n'invente jamais une information absente.
 
 Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant ni après — une clé par identifiant de cours reçu, sa valeur étant un OBJET dont les clés sont les catégories choisies pour CE cours :
-{"chunks": {"<identifiant du cours>": {"Physiopathologie": ["**Mot-clé :** explication brève", "..."], "Traitements": ["...", "..."]}, "...": {...}}}`;
+{"chunks": {"<identifiant du cours>": {"Physiopathologie": ["**Mot-clé :** explication brève", "..."], "Traitements": ["...", "..."]}, "...": {...}}}
+La clé racine "chunks" est OBLIGATOIRE, même s'il n'y a qu'un seul cours à traiter — ne mets JAMAIS les identifiants de cours directement à la racine du JSON, et n'utilise JAMAIS un autre nom de clé racine ("data", "result", "output", etc.).`;
 
 export function buildKeywordRowPrompt(courses: ModuleSynthesisCourseInput[]): string {
   return `${KEYWORD_ROW_SYSTEM_PROMPT}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
