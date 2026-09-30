@@ -39,7 +39,7 @@ import {
   type CourseWorkspaceGenerationType,
   type KeywordCategories,
 } from "@/lib/course-workspace-cache";
-import { parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export type ModuleSynthesisType = "global_summary" | "keywords_table" | "medical_dictionary";
@@ -181,6 +181,16 @@ export interface ModuleSynthesisResult {
   coursesGenerated: number;
   coursesFromCache: number;
   coursesUsingRawTextFallback: string[];
+  /**
+   * medical_dictionary ONLY (always [] for every other type) — course titles
+   * whose sub-batch failed even after this function's own per-batch
+   * isolation (see runModuleSynthesis' own comment). The request still
+   * succeeds overall as long as at least one course generated; these titles
+   * are simply missing from `content` rather than silently pretended
+   * complete — the frontend surfaces this so the student knows to retry
+   * specifically for what's missing, not the whole dictionary.
+   */
+  coursesFailedToGenerate: string[];
 }
 
 export type ModuleSynthesisOutcome =
@@ -252,22 +262,59 @@ const MEDICAL_DICTIONARY_TOKENS_PER_COURSE = 3000;
 // runModuleSynthesis never previously split a large missingCourses list into
 // more than one call.
 //
-// SIZED so that even the WORST case (every course in a batch independently
-// hits MEDICAL_DICTIONARY_TOKENS_PER_COURSE's own dense-course output need,
-// AND every course's input is at buildCourseInputs' own MAX_PER_COURSE_CHARS
-// ceiling) stays safely under the real 32,768 ceiling: fixed persona
-// overhead (MEDICAL_DICTIONARY_SYSTEM_PROMPT itself, confirmed ~2,739 chars
-// ≈ 800 tokens at this codebase's established ~0.29 tokens/char French-
-// medical-text ratio) + per-course (input ~8,000 chars ≈ 2,320 tokens +
-// output 3,000 tokens) ≈ 5,320 tokens/course, against a deliberately
-// conservative 28,000-token target (≈4,700 tokens of margin below the real
-// ceiling — this codebase's usual cushion for a CHEAP_MODEL hard ceiling,
-// see e.g. EXPLICATION_PART_MAX_TOKENS' own comment in
-// lib/studio-explication-delta.ts): (28,000 - 800) / 5,320 ≈ 5.1, floored.
-const MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL = Math.max(
-  1,
-  Math.floor((28_000 - 800) / (Math.ceil(MAX_PER_COURSE_CHARS * 0.29) + MEDICAL_DICTIONARY_TOKENS_PER_COURSE))
-);
+// TOKEN MATH ALONE permits up to ~5 courses/call: fixed persona overhead
+// (MEDICAL_DICTIONARY_SYSTEM_PROMPT itself, ~2,739 chars ≈ 800 tokens at this
+// codebase's established ~0.29 tokens/char French-medical-text ratio) +
+// per-course (input ~8,000 chars ≈ 2,320 tokens + output 3,000 tokens) ≈
+// 5,320 tokens/course, against a 28,000-token target (≈4,700 tokens of
+// margin below the real 32,768 ceiling): (28,000 - 800) / 5,320 ≈ 5.1.
+//
+// LOWERED 5 -> 3, 2026-09-30, after a real follow-up report: even a 5-course
+// batch (safely under the token ceiling by the math above) still failed with
+// a generic error — most consistent with per-call LATENCY or output-parsing
+// reliability, not context length (qwen-2.5-72b-instruct's real generation
+// throughput/large-input prefill time for THIS specific task has never been
+// measured live in this codebase, unlike deepseek-v3.2's own confirmed
+// ~70 tokens/second). Smaller batches are both faster individually (less to
+// prefill, less to generate) and less likely to produce a single malformed/
+// truncated JSON response covering many courses at once. Paired with
+// MEDICAL_DICTIONARY_CONCURRENCY below specifically so that shrinking the
+// batch size (which on its own would mean MORE sequential batches for the
+// same course count) doesn't linearly increase total wall-clock time.
+const MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL = 3;
+
+// Concurrency ceiling for the sub-batch fan-out below. Reuses the SAME value
+// already established and proven in production for this exact question
+// (bounded fan-out of independent CHEAP_MODEL calls from one account) at two
+// other call sites — lib/studio-explication-client.ts's
+// MAX_CONCURRENT_REQUESTS and app/api/exam/generate/route.ts's
+// MAX_CONCURRENT_COURSE_GENERATIONS — rather than inventing a third, untested
+// number for the same underlying constraint (OpenRouter/DeepSeek-family
+// per-account concurrency tolerance, still not independently measured).
+const MEDICAL_DICTIONARY_CONCURRENCY = 8;
+
+/**
+ * Runs `fn` over every item, at most `limit` in flight at once. A third,
+ * independent copy of the same small helper already duplicated in
+ * lib/studio-explication-client.ts ("use client", browser-only) and
+ * app/api/exam/generate/route.ts (a separate route file) — still not worth a
+ * shared module for three small, independent copies of ~15 lines each.
+ * Order-preserving in the RETURNED array even though completion order isn't.
+ */
+async function mapWithConcurrencyLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
 
 /**
  * ONE OpenRouter call for `batchInputs` (a full `missingCourses` list for
@@ -417,6 +464,10 @@ export async function runModuleSynthesis(
 
   let fallbackTitles: string[] = [];
   let crossCourseSection: string | null = null;
+  // medical_dictionary ONLY — course titles whose sub-batch failed even after
+  // this function's own per-batch isolation below (see the batching loop's
+  // own comment).
+  let dictionaryFailedCourses: string[] = [];
 
   const needsReservation = missingCourses.length > 0 || needsCrossCourseSynthesis;
 
@@ -445,9 +496,44 @@ export async function runModuleSynthesis(
         // missing (same "don't discard already-good work" principle already
         // applied to Explication's checkpointing and Exam's per-course
         // tolerance elsewhere in this app).
+        //
+        // CONCURRENT (bounded — MEDICAL_DICTIONARY_CONCURRENCY) rather than
+        // sequential, and FAILURE-ISOLATED PER BATCH, both added 2026-09-30
+        // after a real follow-up report: a batch failing (timeout or
+        // malformed output — see MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL's
+        // own comment) used to propagate straight to this function's outer
+        // catch below, discarding every OTHER batch's already-succeeded,
+        // already-cached work behind one generic "Échec de la génération".
+        // Now: each batch's failure is caught right here, logged with the
+        // REAL underlying error and exactly which courses it covered, and
+        // does not stop the remaining batches. Only if EVERY batch failed
+        // (nothing at all was generated) does this rethrow — using the LAST
+        // real error seen, not a generic message — so the outer catch's
+        // quota refund still fires for a genuinely total failure. Any
+        // partial failure is reported honestly via dictionaryFailedCourses
+        // (see ModuleSynthesisResult's own comment) rather than silently
+        // pretending the dictionary is complete.
+        const batches: ModuleSynthesisCourseInput[][] = [];
         for (let i = 0; i < inputs.length; i += MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL) {
-          const batchInputs = inputs.slice(i, i + MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL);
-          await generateAndStoreSynthesisChunks(type, cacheType, batchInputs, cachedByHash);
+          batches.push(inputs.slice(i, i + MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL));
+        }
+        let lastBatchError: unknown = null;
+        const batchOutcomes = await mapWithConcurrencyLimit(batches, MEDICAL_DICTIONARY_CONCURRENCY, async (batchInputs) => {
+          try {
+            await generateAndStoreSynthesisChunks(type, cacheType, batchInputs, cachedByHash);
+            return { ok: true as const, batchInputs };
+          } catch (error) {
+            lastBatchError = error;
+            console.warn(
+              `[module-synthesis:medical_dictionary] Sous-lot échoué pour [${batchInputs.map((c) => c.title).join(", ")}] — poursuite avec les autres sous-lots:`,
+              errorMessage(error)
+            );
+            return { ok: false as const, batchInputs };
+          }
+        });
+        dictionaryFailedCourses = batchOutcomes.filter((o) => !o.ok).flatMap((o) => o.batchInputs.map((c) => c.title));
+        if (dictionaryFailedCourses.length === inputs.length) {
+          throw lastBatchError instanceof Error ? lastBatchError : new Error("Aucun cours n'a pu être ajouté au dictionnaire médical.");
         }
       } else {
         // global_summary/keywords_table run on ECONOMY_MODEL, whose real
@@ -496,9 +582,13 @@ export async function runModuleSynthesis(
       result: {
         content,
         fullyCached: missingCourses.length === 0 && !needsCrossCourseSynthesis,
-        coursesGenerated: missingCourses.length,
+        // Actual successes, not merely attempted — subtracts any
+        // medical_dictionary sub-batch that failed (dictionaryFailedCourses
+        // is always [] for every other type, so this is a no-op there).
+        coursesGenerated: missingCourses.length - dictionaryFailedCourses.length,
         coursesFromCache: eligibleCourses.length - missingCourses.length,
         coursesUsingRawTextFallback: fallbackTitles,
+        coursesFailedToGenerate: dictionaryFailedCourses,
       },
     };
   } catch (error) {

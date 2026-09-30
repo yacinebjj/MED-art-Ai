@@ -105,6 +105,13 @@ export default function ModuleWorkspacePage() {
   const [isGeneratingDictionary, setIsGeneratingDictionary] = useState(false);
   const [output, setOutput] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string[] | null>(null);
+  // medical_dictionary ONLY — course titles whose sub-batch failed even after
+  // lib/module-synthesis.ts's own per-batch isolation (a network hiccup, a
+  // malformed OpenRouter response for that one sub-batch). The request still
+  // succeeds overall with whatever DID generate; this just says honestly
+  // what's missing instead of silently presenting an incomplete dictionary
+  // as if it were complete — see ModuleSynthesisResult's own comment.
+  const [dictionaryFailedNotice, setDictionaryFailedNotice] = useState<string[] | null>(null);
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
@@ -280,6 +287,7 @@ export default function ModuleWorkspacePage() {
       type === "global_summary" ? setIsGeneratingSummary : type === "keywords_table" ? setIsGeneratingKeywords : setIsGeneratingDictionary;
     setLoading(true);
     setFallbackNotice(null);
+    setDictionaryFailedNotice(null);
     try {
       const res = await fetch("/api/workspace/module-synthesis", {
         method: "POST",
@@ -314,6 +322,9 @@ export default function ModuleWorkspacePage() {
 
       if (Array.isArray(body.coursesUsingRawTextFallback) && body.coursesUsingRawTextFallback.length > 0) {
         setFallbackNotice(body.coursesUsingRawTextFallback as string[]);
+      }
+      if (Array.isArray(body.coursesFailedToGenerate) && body.coursesFailedToGenerate.length > 0) {
+        setDictionaryFailedNotice(body.coursesFailedToGenerate as string[]);
       }
       // Per-course cache reporting (course_workspace_cache) — a request
       // almost never used to be a clean "all cached" vs "all generated"
@@ -525,6 +536,21 @@ export default function ModuleWorkspacePage() {
           <span>
             {fallbackNotice.length} cours sans Explication générée ont utilisé leur texte source brut à la place, pour une
             qualité de synthèse potentiellement moindre : <strong>{fallbackNotice.join(", ")}</strong>.
+          </span>
+        </motion.div>
+      )}
+
+      {dictionaryFailedNotice && dictionaryFailedNotice.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="not-prose mb-6 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {dictionaryFailedNotice.length} cours n&apos;ont pas pu être ajoutés au dictionnaire (erreur temporaire) et sont
+            absents du résultat ci-dessous : <strong>{dictionaryFailedNotice.join(", ")}</strong>. Relance une génération pour
+            réessayer — les cours déjà réussis resteront en cache.
           </span>
         </motion.div>
       )}
