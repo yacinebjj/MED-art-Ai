@@ -224,6 +224,137 @@ function recoverChunksMap(parsed: Record<string, unknown>, expectedHashes: strin
   return null;
 }
 
+// medical_dictionary's 3-column format (Terme | Explication clinique |
+// الشرح بالعربية) produces meaningfully more output per course than
+// global_summary/keywords_table's own chunks. Combined with CHEAP_MODEL's
+// real, small context window (see the constant below), a single dense
+// course's own chunk (up to 15 terms × 3 columns, plus JSON escaping
+// overhead) can genuinely need this much output alone — confirmed in
+// production (cours "Traumatismes du coude", 8000/8000 completion_tokens
+// hit, unrecoverable even by parseJsonResponse's own repair layer — a
+// genuine truncation, not a fixable escaping quirk). This is a PER-COURSE
+// output floor, not a per-call one — see medicalDictionaryMaxTokens' own
+// call site in generateAndStoreSynthesisChunks below.
+const MEDICAL_DICTIONARY_TOKENS_PER_COURSE = 3000;
+
+// Real production overflow, 2026-09-30: "17533 input + 16384 output = 33917
+// tokens" on a single call covering ALL missing courses in the module at
+// once — qwen/qwen-2.5-72b-instruct's real ceiling (confirmed live against
+// GET https://openrouter.ai/api/v1/models) is 32,768 tokens TOTAL, input and
+// output COMBINED. medical_dictionary is the one ModuleSynthesisType that
+// runs on CHEAP_MODEL at all (see its own comment below) — every other type
+// uses ECONOMY_MODEL's much larger context, never observed to hit this.
+//
+// FIXED by actually batching the calls — buildMedicalDictionaryPrompt's own
+// header comment already anticipated this ("even when a single OpenRouter
+// call covers several missing courses at once — a batching optimization,
+// not a synthesis step, each course's chunk is produced independently") but
+// runModuleSynthesis never previously split a large missingCourses list into
+// more than one call.
+//
+// SIZED so that even the WORST case (every course in a batch independently
+// hits MEDICAL_DICTIONARY_TOKENS_PER_COURSE's own dense-course output need,
+// AND every course's input is at buildCourseInputs' own MAX_PER_COURSE_CHARS
+// ceiling) stays safely under the real 32,768 ceiling: fixed persona
+// overhead (MEDICAL_DICTIONARY_SYSTEM_PROMPT itself, confirmed ~2,739 chars
+// ≈ 800 tokens at this codebase's established ~0.29 tokens/char French-
+// medical-text ratio) + per-course (input ~8,000 chars ≈ 2,320 tokens +
+// output 3,000 tokens) ≈ 5,320 tokens/course, against a deliberately
+// conservative 28,000-token target (≈4,700 tokens of margin below the real
+// ceiling — this codebase's usual cushion for a CHEAP_MODEL hard ceiling,
+// see e.g. EXPLICATION_PART_MAX_TOKENS' own comment in
+// lib/studio-explication-delta.ts): (28,000 - 800) / 5,320 ≈ 5.1, floored.
+const MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL = Math.max(
+  1,
+  Math.floor((28_000 - 800) / (Math.ceil(MAX_PER_COURSE_CHARS * 0.29) + MEDICAL_DICTIONARY_TOKENS_PER_COURSE))
+);
+
+/**
+ * ONE OpenRouter call for `batchInputs` (a full `missingCourses` list for
+ * global_summary/keywords_table, or one sub-batch of it for
+ * medical_dictionary — see runModuleSynthesis' own call sites), storing the
+ * result immediately on success. Throws (never returns partial data) on any
+ * failure — the caller's own try/catch handles quota refund; a partial
+ * medical_dictionary batch is never lost even so, since any EARLIER batch in
+ * the same request already called storeCourseWorkspaceChunks before this one
+ * ran.
+ */
+async function generateAndStoreSynthesisChunks(
+  type: ModuleSynthesisType,
+  cacheType: CourseWorkspaceGenerationType,
+  batchInputs: ModuleSynthesisCourseInput[],
+  cachedByHash: Map<string, unknown>
+): Promise<void> {
+  const prompt =
+    type === "global_summary"
+      ? buildSummaryChunkPrompt(batchInputs)
+      : type === "keywords_table"
+        ? buildKeywordRowPrompt(batchInputs)
+        : buildMedicalDictionaryPrompt(batchInputs);
+  const userPrompt =
+    type === "global_summary"
+      ? "Génère les chunks de résumé demandés."
+      : type === "keywords_table"
+        ? "Génère les lignes de mots-clés demandées."
+        : "Génère les entrées de dictionnaire médical demandées.";
+
+  // medical_dictionary is the ONE exception to the ECONOMY_MODEL policy
+  // below — explicit product request: use the cheapest available text model
+  // for this specific tab. CHEAP_MODEL (qwen/qwen-2.5-72b-instruct) is
+  // genuinely cheaper than ECONOMY_MODEL here (see lib/ai/openrouter.ts), at
+  // the accepted tradeoff already disclosed on every other CHEAP_MODEL call
+  // site in this codebase (a real, measured medical-accuracy risk on a
+  // different, comparably rigor-sensitive task — exam QCM generation; never
+  // independently re-measured for a term-dictionary task specifically). No
+  // `reasoning` option, matching every other CHEAP_MODEL call site.
+  const model = type === "medical_dictionary" ? CHEAP_MODEL : ECONOMY_MODEL;
+
+  // Scales with THIS BATCH's own course count (bounded by
+  // MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL above, never the full
+  // missingCourses list — see that constant's own comment for why that
+  // bound is what actually keeps this under the real 32,768 ceiling, not
+  // this formula's own min/max alone), capped at CHEAP_MODEL's real
+  // top_provider.max_completion_tokens (16,384, confirmed live).
+  const medicalDictionaryMaxTokens = Math.min(16384, Math.max(16000, batchInputs.length * MEDICAL_DICTIONARY_TOKENS_PER_COURSE));
+
+  const raw = await callOpenRouter(
+    [
+      { role: "system", content: prompt },
+      { role: "user", content: userPrompt },
+    ],
+    type === "medical_dictionary"
+      ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true }
+      // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
+      // lib/ai/studio-prompts.ts's own header comment) + the matching
+      // reasoning cap: without it, this model's hidden reasoning tokens can
+      // silently consume the completion budget before writing any of the
+      // actual JSON, truncating it (see callOpenRouter's own doc comment).
+      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
+  );
+
+  const parsed = parseJsonResponse(raw);
+  const chunks = recoverChunksMap(parsed, batchInputs.map((input) => input.contentHash));
+  if (!chunks) {
+    throw new Error("La réponse de l'IA ne contient pas de chunks exploitables.");
+  }
+
+  const newChunks: { courseContentHash: string; content: unknown }[] = [];
+  for (const input of batchInputs) {
+    const chunk = chunks[input.contentHash];
+    if (chunk === undefined || chunk === null) {
+      throw new Error(`La réponse de l'IA ne contient pas de chunk pour le cours "${input.title}".`);
+    }
+    // keywords_table alone stores structured categories; global_summary and
+    // medical_dictionary are both a self-contained Markdown string per
+    // course.
+    const sanitized = type === "keywords_table" ? normalizeKeywordCategories(chunk) : sanitizeForPostgres(String(chunk));
+    newChunks.push({ courseContentHash: input.contentHash, content: sanitized });
+    cachedByHash.set(input.contentHash, sanitized);
+  }
+
+  await storeCourseWorkspaceChunks(newChunks, cacheType);
+}
+
 /**
  * Runs the full pipeline for one (user, module, courseIds, type) request.
  * Scoped to THIS user AND THIS module — a courseId the caller doesn't own,
@@ -301,110 +432,29 @@ export async function runModuleSynthesis(
       const { inputs, fallbackTitles: missingFallbacks } = buildCourseInputs(missingCourses);
       fallbackTitles = missingFallbacks;
 
-      const prompt =
-        type === "global_summary"
-          ? buildSummaryChunkPrompt(inputs)
-          : type === "keywords_table"
-            ? buildKeywordRowPrompt(inputs)
-            : buildMedicalDictionaryPrompt(inputs);
-      const userPrompt =
-        type === "global_summary"
-          ? "Génère les chunks de résumé demandés."
-          : type === "keywords_table"
-            ? "Génère les lignes de mots-clés demandées."
-            : "Génère les entrées de dictionnaire médical demandées.";
-
-      // medical_dictionary is the ONE exception to the ECONOMY_MODEL policy
-      // below — explicit product request: use the cheapest available text
-      // model for this specific tab. CHEAP_MODEL (DeepSeek V3.2) is
-      // genuinely cheaper than ECONOMY_MODEL here (~$0.21/$0.31 vs
-      // $0.75/$3.75 per M tokens — see lib/ai/openrouter.ts), at the
-      // accepted tradeoff already disclosed on every other CHEAP_MODEL call
-      // site in this codebase (a real, measured medical-accuracy risk on a
-      // different, comparably rigor-sensitive task — exam QCM generation;
-      // never independently re-measured for a term-dictionary task
-      // specifically). No `reasoning` option, matching every other
-      // CHEAP_MODEL call site.
-      const model = type === "medical_dictionary" ? CHEAP_MODEL : ECONOMY_MODEL;
-
-      // medical_dictionary's 3-column format (Terme | Explication clinique |
-      // الشرح بالعربية) produces meaningfully more output per course than
-      // global_summary/keywords_table's own chunks, AND this one call can
-      // cover MANY missing courses at once — this feature's whole premise
-      // is selecting "généralement tout le module" (≥ MIN_COURSES_REQUIRED,
-      // often far more), so a flat 8000-token cap that happened to be
-      // enough for 1-2 courses' worth of chunks silently stopped being
-      // enough as soon as a real batch got large — confirmed in production
-      // (cours "Traumatismes du coude", 8000/8000 completion_tokens hit,
-      // unrecoverable even by parseJsonResponse's own repair layer — a
-      // genuine truncation, not a fixable escaping quirk). Scales with how
-      // many courses are ACTUALLY missing in THIS call instead of one flat
-      // number, capped at CHEAP_MODEL's real ceiling — see
-      // lib/ai/openrouter.ts's own CHEAP_MODEL comment; confirmed live
-      // elsewhere in this app, e.g. app/api/notes/organize/route.ts).
-      //
-      // CEILING LOWERED 65,536 -> 16,384, 2026-09-30, migrating CHEAP_MODEL
-      // off deepseek-v3.2 to qwen/qwen-2.5-72b-instruct (real
-      // top_provider.max_completion_tokens: 16,384, confirmed live against
-      // GET https://openrouter.ai/api/v1/models — exact boundary value, not
-      // a rounded-down safety margin like this codebase's other CHEAP_MODEL
-      // ceilings, because the pre-existing 16,000 floor below already sits
-      // barely under it: there is now only ~384 tokens of real "scales with
-      // course count" headroom left above that floor, versus ~49,500 before
-      // this migration. In practice this call is a near-flat 16,000-16,384
-      // token budget again regardless of missingCourses.length — the exact
-      // "a flat cap stopped being enough as soon as a real batch got large"
-      // failure mode described below is very plausibly still live for a
-      // module missing many courses at once; re-verify against a real batch
-      // rather than assuming this scaling still functions as designed.
-      // Floor raised to 16000 (double the old flat cap), not kept at 8000 —
-      // the reported failure named only ONE course, so a single dense
-      // course's own chunk (up to 15 terms × 3 columns, plus JSON escaping
-      // overhead) may already have been what exceeded 8000 tokens alone,
-      // independent of how many OTHER courses shared the same call.
-      const MEDICAL_DICTIONARY_TOKENS_PER_COURSE = 3000;
-      const medicalDictionaryMaxTokens = Math.min(
-        16384,
-        Math.max(16000, missingCourses.length * MEDICAL_DICTIONARY_TOKENS_PER_COURSE)
-      );
-
-      const raw = await callOpenRouter(
-        [
-          { role: "system", content: prompt },
-          { role: "user", content: userPrompt },
-        ],
-        type === "medical_dictionary"
-          ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true }
-          // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
-          // lib/ai/studio-prompts.ts's own header comment) + the matching
-          // reasoning cap: without it, this model's hidden reasoning tokens
-          // can silently consume the completion budget before writing any of
-          // the actual JSON, truncating it (see callOpenRouter's own doc
-          // comment).
-          : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
-      );
-
-      const parsed = parseJsonResponse(raw);
-      const chunks = recoverChunksMap(parsed, inputs.map((input) => input.contentHash));
-      if (!chunks) {
-        throw new Error("La réponse de l'IA ne contient pas de chunks exploitables.");
-      }
-
-      const newChunks: { courseContentHash: string; content: unknown }[] = [];
-      for (const input of inputs) {
-        const chunk = chunks[input.contentHash];
-        if (chunk === undefined || chunk === null) {
-          throw new Error(`La réponse de l'IA ne contient pas de chunk pour le cours "${input.title}".`);
+      if (type === "medical_dictionary") {
+        // BATCHED, 2026-09-30 — see MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL's
+        // own comment for why: a single call covering every missing course in
+        // the module at once (this feature's whole premise routinely selects
+        // most/all of a module) was a real, confirmed production overflow of
+        // CHEAP_MODEL's real 32,768-token combined ceiling. Each sub-batch is
+        // stored (storeCourseWorkspaceChunks, inside the helper) as soon as
+        // it succeeds, not only after every batch finishes — a later batch
+        // failing still leaves the earlier ones' real, paid-for work durably
+        // cached, so a retry only needs to regenerate whatever's still
+        // missing (same "don't discard already-good work" principle already
+        // applied to Explication's checkpointing and Exam's per-course
+        // tolerance elsewhere in this app).
+        for (let i = 0; i < inputs.length; i += MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL) {
+          const batchInputs = inputs.slice(i, i + MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL);
+          await generateAndStoreSynthesisChunks(type, cacheType, batchInputs, cachedByHash);
         }
-        // keywords_table alone stores structured categories; global_summary
-        // and medical_dictionary are both a self-contained Markdown string
-        // per course.
-        const sanitized = type === "keywords_table" ? normalizeKeywordCategories(chunk) : sanitizeForPostgres(String(chunk));
-        newChunks.push({ courseContentHash: input.contentHash, content: sanitized });
-        cachedByHash.set(input.contentHash, sanitized);
+      } else {
+        // global_summary/keywords_table run on ECONOMY_MODEL, whose real
+        // context window has never shown this failure — left as a single
+        // call covering every missing course, exactly as before.
+        await generateAndStoreSynthesisChunks(type, cacheType, inputs, cachedByHash);
       }
-
-      await storeCourseWorkspaceChunks(newChunks, cacheType);
     }
 
     if (needsCrossCourseSynthesis) {
