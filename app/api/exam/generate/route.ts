@@ -115,6 +115,39 @@ interface EligibleCourseRow {
   qcms: unknown;
 }
 
+// Concurrency ceiling for the per-course shortfall fan-out below (see its own
+// call-site comment for the real scalability bug this fixes). Reuses the
+// EXACT value lib/studio-explication-client.ts's own MAX_CONCURRENT_REQUESTS
+// already established and put into production for the same underlying
+// question — bounded, not unbounded, because OpenRouter/DeepSeek's real
+// per-account concurrency tolerance for a sudden burst from one account has
+// never been measured live. Reusing that already-accepted number here rather
+// than inventing a new untested one for a second call site.
+const MAX_CONCURRENT_COURSE_GENERATIONS = 8;
+
+/**
+ * Runs `fn` over every item, at most `limit` in flight at once. Duplicated
+ * (not imported) from lib/studio-explication-client.ts's own identical
+ * helper: that file is "use client" (browser-only), this is a server route,
+ * and this is the only other call site in the app that needs bounded
+ * fan-out — not worth a shared module for two small, independent copies.
+ * Order-preserving in the RETURNED array even though completion order isn't.
+ */
+async function mapWithConcurrencyLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
 /**
  * Same Explication-preferred, combined-budget-aware per-course cap used by
  * the Workspace synthesis route — see that route's own comment for why.
@@ -662,39 +695,82 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // nothing from it could ever be attributed back to a course's own
         // harvested pool. Each course's own shortfall is still generated in
         // batches of up to QUESTIONS_PER_BATCH internally (generateShortfallQuestions
-        // is unchanged, just called once per under-covered course instead of
-        // once for all of them combined) — budgetCourseCount is passed
-        // explicitly as the FULL eligible-course count (not the narrowed
-        // 1-course array's own length) so this loop keeps sharing
-        // MAX_TOTAL_EXAM_CHARS the same way the old combined call did, instead
-        // of silently handing every course the full ceiling.
+        // is unchanged) — budgetCourseCount is passed explicitly as the FULL
+        // eligible-course count (not the narrowed 1-course array's own
+        // length) so this loop keeps sharing MAX_TOTAL_EXAM_CHARS the same
+        // way the old combined call did, instead of silently handing every
+        // course the full ceiling.
         //
-        // previousTopics accumulates ACROSS courses in this loop (seeded with
-        // every pooled question's weakPointTag, then growing with each
-        // course's own freshly-generated tags before the NEXT course's call)
-        // so "ensure new QCMs are completely distinct and non-overlapping"
-        // still holds cross-course, not just within one course's own batches —
-        // a combined single call used to get this for free from one shared,
-        // continuously-growing topics array; the per-course split needs it
-        // threaded through explicitly instead.
-        const generatedQuestions: ExamQuestion[] = [];
+        // CONCURRENT (bounded — see MAX_CONCURRENT_COURSE_GENERATIONS' own
+        // comment), NOT sequential, fixed 2026-09-30 after a real, confirmed
+        // scalability bug: a plain `for...of` awaiting one course at a time
+        // here meant total wall-clock scaled LINEARLY with how many selected
+        // courses lacked a sufficient pooled QCM supply — and most do, since
+        // convertIfCompatible (lib/exam-pooling.ts) requires a Studio QCM to
+        // already have exactly 5 options / exactly 1 correct answer / a full
+        // per-option explanation, a shape most existing Studio QCMs were
+        // never generated to match. A 30-40+ course "Semaine Bloquée"
+        // selection where most courses needed even their 1-question
+        // shortfall could require 30-40 SEQUENTIAL OpenRouter calls — each a
+        // full QUESTIONS_PER_BATCH generation (see generateShortfallQuestions'
+        // own "ALWAYS request the full batch size" comment) — comfortably
+        // exceeding this route's maxDuration=300 long before the last course.
+        // This is the actual, evidenced root cause of "Échec de la
+        // génération" scaling with course count: each call here already
+        // sends only ONE course's own capped text (buildCourseInputs), so
+        // context-length overflow was never the real risk for this path —
+        // only wall-clock, and only because of the sequential await.
+        //
+        // TRADE-OFF, same shape already accepted for Explication's own
+        // concurrent part-generation (see stitchSeams' comment in
+        // lib/studio-explication-client.ts): `allTopicsSoFar` can no longer
+        // grow LIVE across this loop — each course's call only sees topics
+        // known BEFORE the fan-out starts (every pooled question's tag), not
+        // topics another course's concurrently-running shortfall is
+        // generating right now. Accepted without an Explication-style repair
+        // pass: unlike Explication's within-course continuity (adjacent
+        // parts of the SAME subject), cross-course topic overlap between
+        // independently-selected courses (different subjects) was never a
+        // meaningful risk — buildExamBatchInstruction's topic list exists to
+        // stop the SAME course re-testing the same notion, which stays fully
+        // enforced within each course's own (still-sequential) internal
+        // batch loop.
+        //
+        // RESILIENCE: one course's shortfall failing outright (after its own
+        // MAX_BATCH_ATTEMPTS retries) no longer aborts the whole exam — caught
+        // per-course below and logged, contributing 0 questions from that one
+        // course instead of throwing. The final ExamGenerationSchema.safeParse
+        // below (min 40 questions) is the single, already-existing arbiter of
+        // whether the resulting exam is still acceptable overall — the
+        // student gets a real, usable exam built from every course that DID
+        // succeed instead of a blanket "Échec de la génération" over one
+        // course's failure, with no new fabrication risk (a short-changed
+        // course just contributes fewer real questions, never an invented one).
         const allTopicsSoFar = pooled.map((q) => q.weakPointTag);
-        for (const shortfall of shortfallByCourse) {
+        const shortfallResults = await mapWithConcurrencyLimit(shortfallByCourse, MAX_CONCURRENT_COURSE_GENERATIONS, async (shortfall) => {
           const course = eligibleCourses.find((c) => c.id === shortfall.id);
-          if (!course) continue; // unreachable — shortfallByCourse is derived from eligibleCourses itself
+          if (!course) return []; // unreachable — shortfallByCourse is derived from eligibleCourses itself
           const courseInputs = buildCourseInputs([course], eligibleCourses.length);
-          const courseQuestions = await generateShortfallQuestions(courseInputs, shortfall.shortfall, isVariation, allTopicsSoFar);
-          generatedQuestions.push(...courseQuestions);
-          for (const question of courseQuestions) {
-            allTopicsSoFar.push(question.weakPointTag);
-            // Sanitized the same way the exam's own canonical save is below —
-            // a stray control character in raw LLM output would otherwise fail
-            // this jsonb insert silently (caught by storeHarvestedQcm's own
-            // fail-open catch), permanently losing an already-paid-for
-            // generation that should have become poolable.
-            void storeHarvestedQcm(shortfall.id, sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
+          try {
+            const courseQuestions = await generateShortfallQuestions(courseInputs, shortfall.shortfall, isVariation, allTopicsSoFar);
+            for (const question of courseQuestions) {
+              // Sanitized the same way the exam's own canonical save is below —
+              // a stray control character in raw LLM output would otherwise fail
+              // this jsonb insert silently (caught by storeHarvestedQcm's own
+              // fail-open catch), permanently losing an already-paid-for
+              // generation that should have become poolable.
+              void storeHarvestedQcm(shortfall.id, sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
+            }
+            return courseQuestions;
+          } catch (error) {
+            console.warn(
+              `[exam/generate] Shortfall échoué pour le cours ${shortfall.id} ("${shortfall.title}") — exam continue sans ses questions:`,
+              errorMessage(error)
+            );
+            return [];
           }
-        }
+        });
+        const generatedQuestions = shortfallResults.flat();
 
         // Upper-bound safety net: targetPerCourse is ceiling-divided, so for an
         // unusually large course count the combined total could land just
@@ -706,12 +782,15 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 
         const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
         if (!result.success) {
-          // Should be unreachable in practice — pooled questions are already
-          // validated by poolExamQuestions, generated ones by
-          // generateShortfallQuestions, and the combined count is
-          // constructed to satisfy ExamGenerationSchema's min(40).max(60).
-          // Kept as a final backstop rather than trusting the arithmetic
-          // blindly.
+          // NO LONGER unreachable-in-practice, 2026-09-30: pooled and
+          // successfully-generated questions are each individually valid by
+          // construction, but the per-course shortfall fan-out above now
+          // tolerates individual course failures (see its own comment) rather
+          // than throwing — so the combined count can genuinely fall short of
+          // ExamGenerationSchema's min(40) if enough courses' shortfalls fail
+          // in the same request. This is the real, intended failure mode for
+          // that case: still a clean, reported error (with quota refunded
+          // below) rather than a partial/broken exam silently saved.
           console.error("[exam/generate] Examen final invalide malgré des lots valides:", result.error.flatten());
           throw new Error("L'IA n'a pas produit un examen valide (nombre de questions ou format incorrect). Réessaie.");
         }
