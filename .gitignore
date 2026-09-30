@@ -40,3 +40,6 @@ next-env.d.ts
 
 # repomix full-codebase dump (local tool output, not source)
 /repomix-output.xml
+
+# Supabase CLI local cache
+supabase/.temp/
