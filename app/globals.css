@@ -443,6 +443,15 @@
   user-select: text;
 }
 
+/* PowerPoint viewer (components/course/workspace/PptxPresentationViewer.tsx):
+   @aiden0z/pptx-renderer wraps every table in a frame with a fixed height and
+   `overflow: hidden`, so a table whose rows outgrow the frame declared in the
+   file gets cut off. PowerPoint itself always lets a table grow to fit its
+   rows — this restores that on the slide stage and in the thumbnails. */
+.pptx-stage div:has(> table) {
+  overflow: visible !important;
+}
+
 @media print {
   body {
     display: none !important;

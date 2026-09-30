@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, FileText, Minus, Plus } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/Dialog";
-import { cn } from "@/lib/utils";
+import { PptxPresentationViewer } from "@/components/course/workspace/PptxPresentationViewer";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 /** Formats a bare iframe can't render natively (no native browser support for Office formats). */
@@ -18,46 +18,14 @@ const OFFICE_VIEWER_EXTENSIONS = ["doc", "docx", "ppt", "pptx", "xls", "xlsx"];
  *   2. "File error" — the embed needs the source to be a publicly fetchable
  *      URL and otherwise shows Microsoft's own remote error page, which we
  *      can't catch or restyle.
- * .pptx renders client-side in PptxReader below (pptx-preview). Legacy
+ * .pptx renders client-side as a real presentation in PptxPresentationViewer
+ * (@aiden0z/pptx-renderer: one slide at a time, slide rail, slideshow). Legacy
  * binary .ppt is NOT OOXML, so no browser library can parse it — it shows
  * the text the server already extracted (officeparser) instead. DOCX/XLSX
  * stay on the embed (not reported broken; a spreadsheet as flat text would
  * be worse).
  */
 const TEXT_VIEW_EXTENSIONS = ["ppt"];
-
-const PPTX_MIN_ZOOM = 0.5;
-const PPTX_MAX_ZOOM = 2.5;
-/** pptx-preview re-parses the deck on every render, so a burst of resize/zoom events is coalesced into one re-render. */
-const PPTX_RERENDER_DEBOUNCE_MS = 150;
-
-/**
- * Drops `[Content_Types].xml` <Override> entries whose part isn't actually in
- * the .pptx zip. pptx-preview loads every declared part in one all-or-nothing
- * try/catch that SWALLOWS its error, so a single phantom entry leaves it with
- * zero slides and no message — a blank viewer. Real, observed trigger: decks
- * written by pptxgenjs declare one slideMaster per slide but ship only
- * slideMaster1.xml (other export tools can drift the same way). A deck with
- * nothing to fix is returned untouched (no re-zip).
- */
-async function dropPhantomPptxParts(input: ArrayBuffer): Promise<ArrayBuffer> {
-  const { default: JSZip } = await import("jszip");
-  const zip = await JSZip.loadAsync(input);
-  const manifest = zip.file("[Content_Types].xml");
-  if (!manifest) return input;
-
-  const xml = await manifest.async("text");
-  let removed = 0;
-  const cleaned = xml.replace(/<Override\b[^>]*\bPartName="\/([^"]+)"[^>]*\/>/g, (tag, part: string) => {
-    if (zip.file(part)) return tag;
-    removed++;
-    return "";
-  });
-  if (removed === 0) return input;
-
-  zip.file("[Content_Types].xml", cleaned);
-  return zip.generateAsync({ type: "arraybuffer" });
-}
 
 /** The server-extracted plain text of a course — the pasted-text/no-file view, and the fallback whenever a real file can't be rendered. */
 function ExtractedTextView({ rawText, notice }: { rawText: string; notice?: string }) {
@@ -79,164 +47,6 @@ function ExtractedTextView({ rawText, notice }: { rawText: string; notice?: stri
         {/* text-select-stable — see its own comment in app/globals.css: fixes a sub-pixel blur on text selection under a Framer Motion ancestor's transform. */}
         <pre className="text-reading text-select-stable whitespace-pre-wrap break-words font-sans text-foreground">{rawText}</pre>
       </div>
-    </div>
-  );
-}
-
-/**
- * Real slide rendering for .pptx, on the same dark backdrop + floating pill
- * toolbar as PdfReader. pptx-preview lays each slide out as actual DOM at the
- * deck's native size and fits it with a CSS scale — text stays vector text,
- * so it's sharp at any zoom (unlike the old Office Online raster). "list"
- * mode stacks every slide vertically, matching the PDF reader's continuous
- * scroll. Zoom and resize re-render at the new width (like PdfReader re-renders
- * pages) instead of stretching pixels.
- *
- * The library (plus echarts, which it uses for slide charts) is loaded with a
- * dynamic import on first use: it only downloads when a student actually opens
- * a .pptx, and it never runs during server rendering.
- */
-function PptxReader({ fileUrl, title, rawText }: { fileUrl: string; title: string; rawText: string }) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const mountRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
-  const [zoom, setZoom] = useState(1);
-  const [slideCount, setSlideCount] = useState(0);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setContainerWidth(entry.contentRect.width));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  // Download the original bytes once per file — every later zoom/resize
-  // re-render reuses this buffer instead of re-fetching.
-  useEffect(() => {
-    let cancelled = false;
-    setBuffer(null);
-    setSlideCount(0);
-    setZoom(1);
-    setStatus("loading");
-
-    fetch(fileUrl)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.arrayBuffer();
-      })
-      .then(dropPhantomPptxParts)
-      .then((bytes) => {
-        if (!cancelled) setBuffer(bytes);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("[pptx-reader] Téléchargement du fichier impossible:", error);
-        setStatus("error");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [fileUrl]);
-
-  // Same sizing rule as PdfReader: fill the viewport minus padding, capped so
-  // a very wide monitor doesn't blow a slide up past a comfortable size.
-  const slideWidth = containerWidth > 0 ? Math.round(Math.min(1400, Math.max(280, containerWidth - 64)) * zoom) : 0;
-
-  useEffect(() => {
-    const mount = mountRef.current;
-    if (!buffer || !mount || !slideWidth) return;
-
-    let cancelled = false;
-    let previewer: { destroy: () => void } | null = null;
-
-    const timer = setTimeout(async () => {
-      try {
-        const { init } = await import("pptx-preview");
-        if (cancelled) return;
-        // pptx-preview owns this node's children; React never renders into it.
-        mount.innerHTML = "";
-        const instance = init(mount, { width: slideWidth, mode: "list" });
-        previewer = instance;
-        await instance.preview(buffer);
-        if (cancelled) return;
-        // pptx-preview reports a failed parse as success with zero slides
-        // (see dropPhantomPptxParts) — never show that as an empty viewer.
-        if (!instance.slideCount) throw new Error("Aucune diapositive lisible dans ce fichier.");
-        setSlideCount(instance.slideCount);
-        setStatus("ready");
-      } catch (error) {
-        if (cancelled) return;
-        console.error("[pptx-reader] Rendu de la présentation impossible:", error);
-        setStatus("error");
-      }
-    }, PPTX_RERENDER_DEBOUNCE_MS);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      previewer?.destroy();
-    };
-  }, [buffer, slideWidth]);
-
-  if (status === "error") {
-    return (
-      <ExtractedTextView
-        rawText={rawText}
-        notice="Cette présentation n'a pas pu être affichée en diapositives — voici son texte. Tu peux aussi la télécharger avec le bouton en haut."
-      />
-    );
-  }
-
-  return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-neutral-900">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-4 pb-28 pt-8 sm:px-10 sm:pt-10">
-        {status === "loading" && (
-          <p className="py-20 text-center text-sm text-neutral-400">Chargement de la présentation...</p>
-        )}
-        <div ref={mountRef} className={cn("[&_.pptx-preview-wrapper]:!bg-transparent", status === "loading" && "hidden")} />
-      </div>
-
-      {status === "ready" && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-4">
-          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-neutral-800/95 px-2 py-1.5 shadow-2xl backdrop-blur">
-            <span className="min-w-16 px-2 text-center text-xs font-medium tabular-nums text-neutral-200">
-              {slideCount} diapo{slideCount > 1 ? "s" : ""}
-            </span>
-
-            <div className="mx-1 h-5 w-px bg-white/10" />
-
-            <div className="flex items-center gap-1" aria-label="Contrôles de zoom">
-              <button
-                type="button"
-                onClick={() => setZoom((current) => Math.max(PPTX_MIN_ZOOM, +(current - 0.25).toFixed(2)))}
-                disabled={zoom <= PPTX_MIN_ZOOM}
-                className="rounded-full p-2 text-neutral-300 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30"
-                aria-label="Réduire le zoom"
-              >
-                <Minus className="h-4 w-4" />
-              </button>
-              <span className="min-w-12 text-center text-xs font-medium tabular-nums text-neutral-300">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                type="button"
-                onClick={() => setZoom((current) => Math.min(PPTX_MAX_ZOOM, +(current + 0.25).toFixed(2)))}
-                disabled={zoom >= PPTX_MAX_ZOOM}
-                className="rounded-full p-2 text-neutral-300 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30"
-                aria-label="Augmenter le zoom"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <span className="sr-only">Lecteur de présentation pour {title}</span>
     </div>
   );
 }
@@ -515,7 +325,7 @@ interface FileViewerModalProps {
  * raw extracted text, full-screen (OneDrive/Google-Drive style) rather than
  * a small centered popup — the cramped version was unusable on phones and
  * showed the page far too small on desktop. PDFs render directly via
- * react-pdf; PPTX renders as real slides via pptx-preview (PptxReader);
+ * react-pdf; PPTX renders as a real presentation (PptxPresentationViewer);
  * DOCX/XLS(X) route through Microsoft's Office Online viewer; legacy .ppt
  * shows its extracted text (see TEXT_VIEW_EXTENSIONS). Falls back to
  * the raw extracted text whenever there's no original file to show —
@@ -531,7 +341,7 @@ export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }:
   // defensive) case where `fileUrl` itself has none.
   const extension = fileUrl ? getExtension(fileUrl) || getExtension(title) : "";
   const isPdf = extension === "pdf";
-  // .pptx renders in PptxReader and legacy .ppt in the extracted-text view —
+  // .pptx renders in PptxPresentationViewer and legacy .ppt in the extracted-text view —
   // neither goes through the Office Online iframe (see TEXT_VIEW_EXTENSIONS).
   const isPptx = extension === "pptx";
   const forceTextView = TEXT_VIEW_EXTENSIONS.includes(extension);
@@ -575,7 +385,16 @@ export function FileViewerModal({ open, onOpenChange, title, fileUrl, rawText }:
           {isPdf && fileUrl ? (
             <PdfReader fileUrl={fileUrl} title={title} />
           ) : isPptx && fileUrl ? (
-            <PptxReader fileUrl={fileUrl} title={title} rawText={rawText} />
+            <PptxPresentationViewer
+              fileUrl={fileUrl}
+              title={title}
+              fallback={
+                <ExtractedTextView
+                  rawText={rawText}
+                  notice="Cette présentation n'a pas pu être affichée en diapositives — voici son texte. Tu peux aussi la télécharger avec le bouton en haut."
+                />
+              }
+            />
           ) : iframeSrc ? (
             <iframe src={iframeSrc} title={title} className="h-full w-full border-0 bg-white" />
           ) : (
