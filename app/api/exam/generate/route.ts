@@ -208,8 +208,11 @@ async function generateExamBatch(
   systemPromptOverride?: string
 ): Promise<ExamQuestion[]> {
   const staticSystemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
-  const batchSchema = z.object({ questions: z.array(ExamQuestionSchema).length(questionsInThisBatch) });
   let lastError: unknown;
+  // Tracks the most valid questions seen across every attempt — see this
+  // function's own final comment for why the last attempt now returns this
+  // instead of throwing.
+  let bestPartial: ExamQuestion[] = [];
   for (let attempt = 1; attempt <= MAX_BATCH_ATTEMPTS; attempt++) {
     try {
       const batchInstruction = buildExamBatchInstruction(batchIndex, totalBatches, questionsInThisBatch, isVariation, previousTopics);
@@ -246,38 +249,58 @@ async function generateExamBatch(
       );
 
       const parsed = parseJsonResponse(raw);
+      const rawQuestions: unknown[] =
+        parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions)
+          ? (parsed as { questions: unknown[] }).questions
+          : [];
 
-      // Repair over-generation: confirmed live (4 real test calls at a
-      // non-round count of 6) that the model occasionally emits ONE extra
-      // question despite the "EXACTLY N" instruction — every individual
-      // question was still schema-valid on its own, just a surplus. Rather
-      // than hard-failing (and burning a retry) over having MORE valid
-      // content than needed, keep only the individually-valid questions and
-      // take the first `questionsInThisBatch` of them. Under-generation
-      // (fewer than needed) is NOT repaired this way — fabricating a
-      // question is never acceptable — that still falls through to the
-      // retry loop below exactly as before.
-      let repaired: unknown = parsed;
-      if (parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions)) {
-        const rawQuestions = (parsed as { questions: unknown[] }).questions;
-        if (rawQuestions.length > questionsInThisBatch) {
-          const individuallyValid = rawQuestions.filter((q) => ExamQuestionSchema.safeParse(q).success);
-          if (individuallyValid.length >= questionsInThisBatch) {
-            repaired = { questions: individuallyValid.slice(0, questionsInThisBatch) };
-          }
-        }
+      // EXTRACT EVERY INDIVIDUALLY-VALID QUESTION regardless of whether the
+      // raw response came back over, under, or exactly at
+      // questionsInThisBatch — 2026-09-30, replacing the old rule that only
+      // repaired a SURPLUS and hard-failed the WHOLE batch on any shortfall.
+      // Real production report: a batch landing at, say, 6/8 valid questions
+      // (one malformed option array, one under-length explanation) used to
+      // be discarded ENTIRELY by an exact `.length(N)` check, throwing away 6
+      // perfectly good, already-paid-for questions over the other 2 — which,
+      // compounded across several courses' shortfalls, was enough to push
+      // the WHOLE exam under ExamGenerationSchema's own floor and fail the
+      // entire generation. No new fabrication risk either direction — this
+      // only ever KEEPS a question that already independently passes
+      // ExamQuestionSchema on its own merits; a malformed one is dropped, not
+      // repaired or invented.
+      const individuallyValid = rawQuestions
+        .map((q) => ExamQuestionSchema.safeParse(q))
+        .filter((r): r is z.SafeParseSuccess<ExamQuestion> => r.success)
+        .map((r) => r.data);
+
+      if (individuallyValid.length > bestPartial.length) bestPartial = individuallyValid;
+
+      if (individuallyValid.length >= questionsInThisBatch) {
+        return individuallyValid.slice(0, questionsInThisBatch);
       }
 
-      const result = batchSchema.safeParse(repaired);
-      if (!result.success) {
-        console.error(`[exam/generate] Lot ${batchIndex}/${totalBatches} invalide (tentative ${attempt}/${MAX_BATCH_ATTEMPTS}):`, result.error.flatten());
-        throw new Error(`Le lot ${batchIndex} n'a pas produit exactement ${questionsInThisBatch} QCMs valides.`);
-      }
-      return result.data.questions;
+      console.error(
+        `[exam/generate] Lot ${batchIndex}/${totalBatches} : ${individuallyValid.length}/${questionsInThisBatch} QCMs valides (tentative ${attempt}/${MAX_BATCH_ATTEMPTS}).`
+      );
+      lastError = new Error(`Le lot ${batchIndex} n'a produit que ${individuallyValid.length}/${questionsInThisBatch} QCMs valides.`);
+      // Falls through to the next attempt — a fresh, independent generation,
+      // never a repair of this same response — unless attempts are exhausted
+      // (handled below, after the loop).
     } catch (error) {
       lastError = error;
     }
   }
+  // Every attempt exhausted. Previously this always threw here, discarding
+  // whatever partial progress every single attempt made. Now returns the
+  // BEST attempt's valid questions instead — real, individually-validated
+  // content, just fewer than hoped, letting the caller (and ultimately
+  // ExamGenerationSchema's own — now more forgiving — floor, see that
+  // schema's own comment) decide whether the overall exam is still
+  // acceptable. Only genuinely returns via the throw below when literally
+  // nothing ever validated across every attempt (e.g. a network/parse
+  // failure every single time) — functionally identical to the old
+  // behavior for that specific worst case.
+  if (bestPartial.length > 0) return bestPartial;
   throw lastError instanceof Error ? lastError : new Error(`Le lot ${batchIndex} a échoué après ${MAX_BATCH_ATTEMPTS} tentatives.`);
 }
 
@@ -776,21 +799,48 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // unusually large course count the combined total could land just
         // above ExamGenerationSchema's own max(60) — trimmed here rather than
         // failing the whole request over an edge case that never loses the
-        // required 40-question floor (targetPerCourse*courses.length is
-        // always >= EXAM_TARGET_TOTAL by construction).
-        const allQuestions = [...pooled, ...generatedQuestions].slice(0, 60);
+        // required question floor (targetPerCourse*courses.length is always
+        // >= EXAM_TARGET_TOTAL by construction).
+        let allQuestions = [...pooled, ...generatedQuestions].slice(0, 60);
+
+        // GAP FILLER, 2026-09-30: per-course shortfall generation is now both
+        // concurrent AND partial-tolerant (see the fan-out's own comment and
+        // generateExamBatch's own final comment) — both changes make the
+        // remaining shortfall, if any, typically small (a handful of
+        // questions) rather than the dozens a fully-failed course used to
+        // lose. Rather than accepting that small gap immediately or failing
+        // the whole exam over it, ONE extra fast top-up call tries to close
+        // it: a single combined-courses request (budget-shared exactly like
+        // buildCourseInputs' own division above) for just the missing count.
+        // Reuses generateShortfallQuestions unchanged — for a gap this size
+        // (almost always <= QUESTIONS_PER_BATCH) that's exactly ONE
+        // additional OpenRouter call, not a new batching architecture.
+        // Best-effort: a failure here is caught and logged, never thrown —
+        // the exam is still served with whatever it already had going in,
+        // exactly as if this top-up attempt had never run.
+        if (allQuestions.length < EXAM_TARGET_TOTAL) {
+          const gapCount = EXAM_TARGET_TOTAL - allQuestions.length;
+          try {
+            const topUpInputs = buildCourseInputs(eligibleCourses, eligibleCourses.length);
+            const topUpTopics = [...allTopicsSoFar, ...generatedQuestions.map((q) => q.weakPointTag)];
+            const topUpQuestions = await generateShortfallQuestions(topUpInputs, gapCount, isVariation, topUpTopics);
+            allQuestions = [...allQuestions, ...topUpQuestions].slice(0, 60);
+          } catch (error) {
+            console.warn("[exam/generate] Top-up de comblement échoué — examen servi avec le compte actuel:", errorMessage(error));
+          }
+        }
 
         const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
         if (!result.success) {
-          // NO LONGER unreachable-in-practice, 2026-09-30: pooled and
-          // successfully-generated questions are each individually valid by
-          // construction, but the per-course shortfall fan-out above now
-          // tolerates individual course failures (see its own comment) rather
-          // than throwing — so the combined count can genuinely fall short of
-          // ExamGenerationSchema's min(40) if enough courses' shortfalls fail
-          // in the same request. This is the real, intended failure mode for
-          // that case: still a clean, reported error (with quota refunded
-          // below) rather than a partial/broken exam silently saved.
+          // Still reachable, deliberately: even with concurrent + partial-
+          // tolerant shortfall generation AND the gap-filler top-up above,
+          // a request where MOST selected courses' shortfalls fail outright
+          // (a genuine, sustained upstream outage, not an occasional
+          // malformed question) can still land under ExamGenerationSchema's
+          // own floor. That floor was RELAXED, not removed (see its own
+          // comment in lib/ai/exam-schemas.ts) — this path is now a real,
+          // meaningfully rarer last resort, still a clean, reported error
+          // (with quota refunded below) rather than a broken exam saved.
           console.error("[exam/generate] Examen final invalide malgré des lots valides:", result.error.flatten());
           throw new Error("L'IA n'a pas produit un examen valide (nombre de questions ou format incorrect). Réessaie.");
         }
