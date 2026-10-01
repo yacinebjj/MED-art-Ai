@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -1043,7 +1044,7 @@ export default function AssistantPage() {
     if (next) textareaRef.current?.focus();
   }
 
-  return (
+  const surface = (
     <div
       // Phones: a `fixed` surface pinned to the VISIBLE viewport — top/height
       // come from visualViewport once measured (inline style wins), 100dvh
@@ -1372,4 +1373,14 @@ export default function AssistantPage() {
       </div>
     </div>
   );
+
+  // Phones: render straight into <body>, OUTSIDE every ancestor of the shell.
+  // The page normally sits inside the shell's <PageTransition> wrapper, which
+  // fades its content in from opacity 0 and keeps a transform while it runs —
+  // an ancestor with opacity 0 hides everything below it (leaving only the
+  // separately-mounted DNA canvas visible), and a transformed ancestor
+  // re-anchors `position: fixed` descendants. A portal removes this surface
+  // from that whole chain, so no wrapper state can ever blank or displace it.
+  // z-50 sits above the DNA canvas (z-0). Desktop keeps the in-flow layout.
+  return isPhoneLayout && typeof document !== "undefined" ? createPortal(surface, document.body) : surface;
 }
