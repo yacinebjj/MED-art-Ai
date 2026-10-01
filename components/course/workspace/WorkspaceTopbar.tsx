@@ -51,7 +51,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   }
 
   return (
-    <header className="glass-panel relative z-20 flex min-h-14 shrink-0 items-center justify-between rounded-b-3xl px-2 py-1 shadow-glass dark:shadow-glass-dark sm:min-h-16 sm:px-6 sm:py-2">
+    <header className="glass-panel relative z-20 flex h-14 shrink-0 items-center justify-between rounded-b-3xl px-2 py-1 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6 sm:py-2">
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
         {/* Explicit back control — distinct from the logo below, which reads
             as branding rather than navigation to a hurried student. Neither
@@ -71,7 +71,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
           <Logo size="sm" />
         </Link>
         <span className="hidden h-6 w-px shrink-0 bg-border sm:block" />
-        <h1 className="min-w-0 flex-1 break-words bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-sm font-bold tracking-tight text-transparent sm:text-lg">
+        <h1 className="truncate bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-sm font-bold tracking-tight text-transparent sm:text-lg">
           <span className="hidden text-muted-foreground/70 font-medium md:inline">MedArt Workspace — </span>
           {title || tWorkspaceTopbar("courseFallbackTitle", language)}
         </h1>
@@ -147,15 +147,8 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
             Avatar), just a static placeholder. Swapped for the official
             MedArt mark (same <Logo size="sm" /> instance already rendered on
             the left side of this header, for a guaranteed-consistent look)
-            so this corner reads as the brand, not a fake/stale identity badge.
-            `hidden sm:block` — on a narrow phone, this logo (plus the 3 icon
-            buttons before it) left the title next to no room to breathe,
-            wrapping/clipping long module names; the left-side logo is already
-            hidden below `sm:` for the exact same reason, so hiding this one
-            too on mobile is consistent, not a regression — the brand still
-            shows via the back-arrow/Logo pairing the instant the viewport
-            crosses into `sm:`. */}
-        <Logo size="sm" className="hidden shrink-0 sm:block" />
+            so this corner reads as the brand, not a fake/stale identity badge. */}
+        <Logo size="sm" className="shrink-0" />
       </div>
     </header>
   );

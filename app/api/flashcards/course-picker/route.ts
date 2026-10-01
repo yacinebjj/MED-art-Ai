@@ -14,11 +14,11 @@ interface CoursePickerRow {
 
 /**
  * Every eligible course (has an Explication generated — same eligibility
- * bar as /api/flashcards/generate) across EVERY module the student has, not
- * just the ones already activated whole via flashcard_active_module_ids —
- * this is what powers FlashcardCoursePicker's ad-hoc "pick 2-3 specific
- * courses for this session" list, distinct from (and additive to) the
- * whole-module toggle on CurriculumView's cards.
+ * bar as /api/flashcards/generate) in the student's activated modules. The
+ * picker is reached from the blended flashcard deck, so showing courses from
+ * unrelated modules would let students select content outside the module
+ * scope they activated. Already selected standalone courses remain visible
+ * so they can still be turned off.
  */
 export async function GET(_request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -33,7 +33,11 @@ export async function GET(_request: NextRequest) {
   const supabase = getSupabaseAdmin();
 
   const [{ data: profile, error: profileError }, { data: courses, error: coursesError }] = await Promise.all([
-    supabase.from("profiles").select("flashcard_active_course_ids").eq("id", user.id).maybeSingle<{ flashcard_active_course_ids: number[] | null }>(),
+    supabase
+      .from("profiles")
+      .select("flashcard_active_module_ids, flashcard_active_course_ids")
+      .eq("id", user.id)
+      .maybeSingle<{ flashcard_active_module_ids: number[] | null; flashcard_active_course_ids: number[] | null }>(),
     supabase
       .from("studio_courses")
       .select("id, title, curriculum_module_id, curriculum_modules(title)")
@@ -51,16 +55,19 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${coursesError.message}` }, { status: 500 });
   }
 
+  const activeModuleIds = new Set(profile?.flashcard_active_module_ids ?? []);
   const activeCourseIds = new Set(profile?.flashcard_active_course_ids ?? []);
   const rows = (courses ?? []) as unknown as CoursePickerRow[];
 
-  const items = rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    moduleId: row.curriculum_module_id,
-    moduleName: row.curriculum_modules?.title ?? "Module",
-    active: activeCourseIds.has(row.id),
-  }));
+  const items = rows
+    .filter((row) => activeModuleIds.has(row.curriculum_module_id) || activeCourseIds.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      title: row.title,
+      moduleId: row.curriculum_module_id,
+      moduleName: row.curriculum_modules?.title ?? "Module",
+      active: activeCourseIds.has(row.id),
+    }));
 
   return NextResponse.json({ success: true, courses: items });
 }
