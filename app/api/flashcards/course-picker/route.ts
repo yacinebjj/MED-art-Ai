@@ -17,8 +17,7 @@ interface CoursePickerRow {
  * bar as /api/flashcards/generate) in the student's activated modules. The
  * picker is reached from the blended flashcard deck, so showing courses from
  * unrelated modules would let students select content outside the module
- * scope they activated. Already selected standalone courses remain visible
- * so they can still be turned off.
+ * scope they activated.
  */
 export async function GET(_request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -60,7 +59,7 @@ export async function GET(_request: NextRequest) {
   const rows = (courses ?? []) as unknown as CoursePickerRow[];
 
   const items = rows
-    .filter((row) => activeModuleIds.has(row.curriculum_module_id) || activeCourseIds.has(row.id))
+    .filter((row) => activeModuleIds.has(row.curriculum_module_id))
     .map((row) => ({
       id: row.id,
       title: row.title,

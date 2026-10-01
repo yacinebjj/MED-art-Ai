@@ -131,7 +131,7 @@ export function FlashcardCoursePicker({ onSelectionChanged }: { onSelectionChang
             <p className="py-6 text-center text-sm text-destructive">{loadError}</p>
           ) : filtered.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              {courses.length === 0 ? "Aucun cours avec une Explication générée pour l'instant." : "Aucun résultat."}
+              {courses.length === 0 ? "Aucun cours avec une Explication générée dans le module ou l'unité sélectionné(e)." : "Aucun résultat."}
             </p>
           ) : (
             filtered.map((course) => (

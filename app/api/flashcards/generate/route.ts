@@ -100,21 +100,15 @@ export async function POST(request: NextRequest) {
 
   const activeModuleIds = profile?.flashcard_active_module_ids ?? [];
   const activeCourseIds = profile?.flashcard_active_course_ids ?? [];
-  if (activeModuleIds.length === 0 && activeCourseIds.length === 0) {
+  if (activeModuleIds.length === 0) {
     return NextResponse.json({ success: false, error: "Aucun module actif." }, { status: 400 });
   }
-
-  // Same union as /api/flashcards/pool — a course is eligible if EITHER its
-  // whole module is active OR it was individually picked.
-  const orFilters: string[] = [];
-  if (activeModuleIds.length > 0) orFilters.push(`curriculum_module_id.in.(${activeModuleIds.join(",")})`);
-  if (activeCourseIds.length > 0) orFilters.push(`id.in.(${activeCourseIds.join(",")})`);
 
   const { data: courses, error: coursesError } = await supabase
     .from("studio_courses")
     .select("id, title, curriculum_module_id, explication, flashcard_queue")
     .eq("user_id", user.id)
-    .or(orFilters.join(","))
+    .in("curriculum_module_id", activeModuleIds)
     .not("explication", "is", null);
 
   if (coursesError) {

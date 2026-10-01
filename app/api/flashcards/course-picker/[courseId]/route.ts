@@ -57,15 +57,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { course
 
   const supabase = getSupabaseAdmin();
 
-  // Activating a course the student doesn't actually own would just sit as
-  // a dead id in their own array (every downstream read still filters by
-  // user_id — see /api/flashcards/pool's own comment), but confirming
-  // ownership up front gives an honest 404 instead of a silent no-op, and
-  // keeps the array meaningful.
+  let ownedCourse: { id: number; curriculum_module_id: number } | null = null;
+
+  // Activating a course also requires its module to be active. This keeps
+  // per-course selections inside the module/unit scope chosen on the dashboard.
   if (active) {
     const { data: course, error: courseError } = await supabase
       .from("studio_courses")
-      .select("id")
+      .select("id, curriculum_module_id")
       .eq("id", courseId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -76,17 +75,22 @@ export async function PATCH(request: NextRequest, { params }: { params: { course
     if (!course) {
       return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
     }
+    ownedCourse = course;
   }
 
   const { data: profile, error: readError } = await supabase
     .from("profiles")
-    .select("flashcard_active_course_ids")
+    .select("flashcard_active_module_ids, flashcard_active_course_ids")
     .eq("id", user.id)
-    .maybeSingle<{ flashcard_active_course_ids: number[] | null }>();
+    .maybeSingle<{ flashcard_active_module_ids: number[] | null; flashcard_active_course_ids: number[] | null }>();
 
   if (readError) {
     console.error("[flashcards/course-picker/[courseId]:patch] Échec lecture Supabase:", readError);
     return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+  }
+
+  if (active && ownedCourse && !(profile?.flashcard_active_module_ids ?? []).includes(ownedCourse.curriculum_module_id)) {
+    return NextResponse.json({ success: false, error: "Ce cours n'appartient pas à un module actif." }, { status: 400 });
   }
 
   const current = profile?.flashcard_active_course_ids ?? [];

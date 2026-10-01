@@ -70,23 +70,15 @@ export async function GET(_request: NextRequest) {
 
     const activeModuleIds = profile?.flashcard_active_module_ids ?? [];
     const activeCourseIds = profile?.flashcard_active_course_ids ?? [];
-    if (activeModuleIds.length === 0 && activeCourseIds.length === 0) {
+    if (activeModuleIds.length === 0) {
       return NextResponse.json({ success: true, items: [], activeModuleCount: 0, activeModuleIds: [], activeCourseIds: [] });
     }
-
-    // A course is eligible if EITHER its whole module was activated OR it
-    // was individually picked (FlashcardCoursePicker) — additive, never one
-    // overriding the other. `.or()` unions both conditions in one query
-    // instead of two round trips + a client-side merge.
-    const orFilters: string[] = [];
-    if (activeModuleIds.length > 0) orFilters.push(`curriculum_module_id.in.(${activeModuleIds.join(",")})`);
-    if (activeCourseIds.length > 0) orFilters.push(`id.in.(${activeCourseIds.join(",")})`);
 
     const { data: courses, error: coursesError } = await supabase
       .from("studio_courses")
       .select("id, title, curriculum_module_id, flashcard_queue")
       .eq("user_id", user.id)
-      .or(orFilters.join(","));
+      .in("curriculum_module_id", activeModuleIds);
 
     if (coursesError) {
       console.error("[flashcards/pool] Échec lecture studio_courses:", coursesError);
