@@ -605,3 +605,21 @@ textarea,
     animation: sheet-slide-up 320ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 }
+
+/* MedArt Assistant streaming: each newly arrived word fades in. Opacity only —
+   transforms don't apply to inline spans, and this keeps it compositor-cheap.
+   components/assistant/StreamedMarkdown.tsx only wraps the LIVE block's words,
+   and React never re-mounts an existing span, so words already shown don't
+   replay it. (The global reduced-motion rule above collapses it to instant.) */
+@keyframes stream-word-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.stream-word {
+  animation: stream-word-in 240ms ease-out both;
+}

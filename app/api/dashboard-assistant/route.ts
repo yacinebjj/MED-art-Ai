@@ -5,6 +5,8 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
 import { reserveChatMessageDaily } from "@/lib/subscription";
 import { errorMessage } from "@/lib/course-generation-shared";
+import { isAssistantMode, isAssistantStyle } from "@/lib/assistant-modes";
+import { buildAssistantSystemPrompt } from "@/lib/ai/assistant-prompts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -100,9 +102,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { message, history, image, document } = (body ?? {}) as {
+  const { message, history, image, document, mode, style, stepByStep } = (body ?? {}) as {
     message?: unknown;
     history?: unknown;
+    /** Quick-action chip / answer-style / step-by-step toggles from the assistant UI — each validated against a whitelist below (lib/assistant-modes.ts); an unknown value is ignored, never echoed into the prompt. */
+    mode?: unknown;
+    style?: unknown;
+    stepByStep?: unknown;
     /** Rejected below — the free-tier model chain is verified text-only (no vision). Sent by the shared assistant UI (app/dashboard/(shell)/assistant/page.tsx), which also targets the paid, vision-capable route — must be refused explicitly here, not silently ignored, so a student who attaches an image gets an honest message instead of a reply that quietly never looked at it. */
     image?: unknown;
     /** Text-only, so this DOES work here — folded into the prompt like app/api/assistant/route.ts's own document support. */
@@ -143,8 +149,14 @@ export async function POST(request: NextRequest) {
   // never be blocked by that unrelated circuit breaker being saturated.
   const dailyGate = await reserveChatMessageDaily(user);
 
+  const systemPrompt = buildAssistantSystemPrompt(SYSTEM_PROMPT, {
+    mode: isAssistantMode(mode) ? mode : undefined,
+    style: isAssistantStyle(style) ? style : undefined,
+    stepByStep: stepByStep === true,
+  });
+
   const messages: ChatMessageInput[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     ...(documentAttachment
       ? [
           {

@@ -15,11 +15,14 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import type { AssistantMode } from "@/lib/assistant-modes";
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** User messages only — the quick action (QCM, flashcards…) this message was sent with, kept so "Régénérer" re-runs it the same way. Absent on every message sent before quick actions existed. */
+  mode?: AssistantMode;
 }
 
 export interface StoredConversation {

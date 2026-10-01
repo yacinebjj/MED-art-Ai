@@ -1,6 +1,6 @@
 "use client";
 
-import { Component, memo, useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -11,16 +11,13 @@ import {
   BrainCircuit,
   Calendar,
   Camera,
-  Check,
   ChevronLeft,
-  Copy,
   FileText,
   HeartPulse,
   History,
   ImageIcon,
   ListChecks,
   Mic,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -29,23 +26,27 @@ import {
   Square,
   SquarePen,
   Stethoscope,
-  ThumbsDown,
-  ThumbsUp,
-  Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { generateId } from "@/lib/generate-id";
 import { uploadDocumentDirect } from "@/lib/upload-client";
+import { haptic } from "@/lib/haptics";
+import { DEFAULT_ASSISTANT_PREFS, isAssistantStyle, type AssistantMode, type AssistantPrefs } from "@/lib/assistant-modes";
 import { useSidebarState } from "@/providers/SidebarProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAssistant } from "@/lib/translations/assistant";
 import { useAuth } from "@/providers/AuthProvider";
 import { useAssistantConversations, type ChatMessage } from "@/hooks/useAssistantConversations";
-import { useKeyboardInset } from "@/hooks/useKeyboardInset";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { stopSpeaking } from "@/hooks/useSpeechSynthesis";
+import { useVisualViewportBox } from "@/hooks/useVisualViewportBox";
 import { ConversationSidebar, ConversationSidebarCollapsedToggle } from "@/components/assistant/ConversationSidebar";
+import { MessageActions } from "@/components/assistant/MessageActions";
+import { QUICK_ACTIONS, QuickActionBar } from "@/components/assistant/QuickActionBar";
+import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
+import { VoiceMeter } from "@/components/assistant/VoiceMeter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { useToast } from "@/components/ui/Toast";
 
@@ -82,7 +83,7 @@ function NovaOrb() {
 
 function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
   return (
-    <div className="relative flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-10 text-center sm:gap-8">
+    <div className="relative flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-x-none px-3 py-8 text-center sm:gap-8 sm:px-4 sm:py-10">
       <video
         aria-hidden
         autoPlay
@@ -166,269 +167,23 @@ function TypingIndicator() {
   );
 }
 
-/**
- * Point 7 fix — a real production crash: streaming a PARTIAL markdown chunk
- * (an unclosed code fence, a half-written GFM table row, a lone
- * `http://` autolink) into react-markdown/remark-gfm can, on rare
- * malformed intermediate states, throw INSIDE the parser itself — not a
- * null-access bug in this app's own code, so no amount of `?.` on our side
- * prevents it. A class-based Error Boundary (React has no hook equivalent)
- * is the correct, standard containment for "a third-party render library
- * might throw on some input": it catches the render exception before it
- * bubbles up and takes down the whole page ("Application error: a
- * client-side exception has occurred"), and falls back to the message's
- * RAW text instead — still readable, never a crash. Retries automatically
- * on the NEXT chunk (see getDerivedStateFromProps): a parse failure on one
- * partial frame is very often gone the instant more text streams in and
- * the malformed construct completes or resolves itself.
- */
-class MarkdownErrorBoundary extends Component<
-  { content: string; children: ReactNode },
-  { hasError: boolean; lastContent: string }
-> {
-  state = { hasError: false, lastContent: this.props.content };
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  static getDerivedStateFromProps(props: { content: string }, state: { hasError: boolean; lastContent: string }) {
-    if (props.content !== state.lastContent) {
-      return { hasError: false, lastContent: props.content };
-    }
-    return null;
-  }
-
-  componentDidCatch(error: unknown) {
-    console.error("[assistant] Rendu Markdown échoué sur ce chunk — repli sur texte brut (non bloquant) :", error);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return <p className="whitespace-pre-wrap text-sm text-foreground/90 sm:text-base">{this.props.content}</p>;
-    }
-    return this.props.children;
-  }
-}
-
-function AssistantMarkdown({ content }: { content: string }) {
-  // Optional-chaining fallback (Point 7) — content is typed as a plain
-  // string end-to-end (see streamAssistantReply's own `content: ""` init),
-  // but this call site never assumes that holds; `?? ""` costs nothing and
-  // guarantees ReactMarkdown never receives undefined/null even if a future
-  // caller's contract drifts.
-  const safeContent = content ?? "";
-  return (
-    <MarkdownErrorBoundary content={safeContent}>
-      {/* dir="auto" here AND on every block-level element below — a single
-          reply commonly mixes French with an Arabic/Darija clarification
-          paragraph (this app's own established register elsewhere, e.g. the
-          Studio prompts), so each block must resolve its OWN direction from
-          its own content rather than inheriting one verdict for the whole
-          message. */}
-      {/* No prose-{size} modifier on purpose — Tailwind Typography scales
-          headings/spacing in `em`, relative to the prose container's own
-          font-size, so setting text-[15px]/leading-7 directly here (instead
-          of prose-sm/prose-base) tunes the whole scale at once instead of
-          jumping between two fixed presets. text-slate-700/dark:text-zinc-300
-          replace the old text-foreground/90: that token is a UTILITY-layer
-          class, which in Tailwind's cascade beats prose's own COMPONENT-layer
-          body color — it was silently overriding prose-invert's calmer
-          zinc-300 with the app's general (near-white) --foreground token,
-          which is exactly the "harsh white" eye strain this is fixing. */}
-      <div
-        dir="auto"
-        className="prose max-w-none text-[15px] leading-7 text-slate-700 dark:prose-invert dark:text-zinc-300 prose-headings:font-heading prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-slate-900 dark:prose-headings:text-zinc-100 prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-[1.05em] prose-h4:mb-1.5 prose-h4:mt-4 prose-h4:text-[1em] prose-p:my-2.5 prose-strong:font-semibold prose-strong:text-cyan-700 prose-ul:my-2.5 prose-ul:space-y-1.5 prose-ol:my-2.5 prose-ol:space-y-1.5 prose-li:pl-1 marker:text-cyan-500 prose-code:text-foreground prose-pre:bg-muted/60 prose-a:text-emerald-600 dark:prose-strong:text-cyan-300 dark:[&_strong]:[text-shadow:0_0_14px_rgba(34,211,238,0.35)] dark:marker:text-cyan-400 dark:prose-a:text-emerald-400 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-      >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          p: ({ children }) => <p dir="auto" className="animate-in fade-in duration-500">{children}</p>,
-          li: ({ children }) => <li dir="auto" className="animate-in fade-in duration-500">{children}</li>,
-          h1: ({ children }) => <h1 dir="auto" className="animate-in fade-in duration-500">{children}</h1>,
-          h2: ({ children }) => <h2 dir="auto" className="animate-in fade-in duration-500">{children}</h2>,
-          h3: ({ children }) => <h3 dir="auto" className="animate-in fade-in duration-500">{children}</h3>,
-          h4: ({ children }) => <h4 dir="auto" className="animate-in fade-in duration-500">{children}</h4>,
-          blockquote: ({ children }) => (
-            <blockquote dir="auto" className="animate-in fade-in border-l-emerald-400 duration-500 dark:border-l-emerald-500/60">{children}</blockquote>
-          ),
-          table: ({ children }) => (
-            <div className="my-3 animate-in fade-in overflow-x-auto rounded-lg border border-border duration-500">
-              <table className="w-full border-collapse text-left text-sm">{children}</table>
-            </div>
-          ),
-          thead: ({ children }) => <thead className="bg-emerald-50 dark:bg-emerald-950/40">{children}</thead>,
-          th: ({ children }) => (
-            <th dir="auto" className="border-b border-border px-3 py-2 font-semibold text-foreground">
-              {children}
-            </th>
-          ),
-          td: ({ children }) => (
-            <td dir="auto" className="border-b border-border/60 px-3 py-2 align-top text-muted-foreground last:border-b-0">
-              {children}
-            </td>
-          ),
-          tr: ({ children }) => <tr className="animate-in fade-in even:bg-muted/40 duration-500">{children}</tr>,
-        }}
-      >
-        {safeContent}
-      </ReactMarkdown>
-      </div>
-    </MarkdownErrorBoundary>
-  );
-}
-
-function ChatToolbar({
-  messageId,
-  content,
-  onRefresh,
-  onDelete,
-}: {
-  messageId: string;
-  content: string;
-  onRefresh: (id: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const { language } = useLanguage();
-  const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
-  const [reported, setReported] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
-      setMenuOpen(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-      copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch {}
-  }
-
-  return (
-    <div className="mt-1.5 flex flex-row items-center gap-2 text-muted-foreground">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button type="button" onClick={() => onRefresh(messageId)} aria-label={tAssistant("regenerate", language)} className="flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-emerald-500">
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{tAssistant("regenerateResponse", language)}</TooltipContent>
-      </Tooltip>
-
-      <Tooltip open={copied ? true : undefined}>
-        <TooltipTrigger asChild>
-          <button type="button" onClick={handleCopy} aria-label={tAssistant("copy", language)} className="flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-emerald-500">
-            {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{copied ? tAssistant("copied", language) : tAssistant("copy", language)}</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => setFeedback((prev) => (prev === "up" ? null : "up"))}
-            aria-label={tAssistant("goodResponse", language)}
-            className={cn("flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-emerald-500", feedback === "up" && "text-emerald-500")}
-          >
-            <ThumbsUp className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{tAssistant("goodResponse", language)}</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => setFeedback((prev) => (prev === "down" ? null : "down"))}
-            aria-label={tAssistant("badResponse", language)}
-            className={cn("flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-emerald-500", feedback === "down" && "text-rose-500")}
-          >
-            <ThumbsDown className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{tAssistant("badResponse", language)}</TooltipContent>
-      </Tooltip>
-
-      <div className="relative">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              ref={menuButtonRef}
-              type="button"
-              onClick={() => setMenuOpen((prev) => !prev)}
-              aria-label="Plus d'options"
-              className="flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-emerald-500"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Plus d&apos;options</TooltipContent>
-        </Tooltip>
-
-        <AnimatePresence>
-          {menuOpen && (
-            <motion.div
-              ref={menuRef}
-              initial={{ opacity: 0, y: 6, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.96 }}
-              transition={{ duration: 0.15 }}
-              className="absolute left-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-lg border border-border bg-popover text-sm text-popover-foreground shadow-glass dark:shadow-glass-dark"
-            >
-              <button
-                type="button"
-                onClick={() => { setReported(true); setMenuOpen(false); }}
-                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-foreground transition-colors hover:bg-accent"
-              >
-                {reported ? tAssistant("reported", language) : tAssistant("reportResponse", language)}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMenuOpen(false); onDelete(messageId); }}
-                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Supprimer cette réponse
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-}
-
 const ChatBubble = memo(function ChatBubble({
   message,
+  isStreaming,
+  questionText,
   onRefresh,
   onDelete,
 }: {
   message: ChatMessage;
+  /** True only for the reply currently arriving — its newest words fade in, and its action bar waits until it is complete. */
+  isStreaming: boolean;
+  /** For an assistant reply: the question it answers (names the saved note). */
+  questionText: string | null;
   onRefresh: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const { language } = useLanguage();
+  const proseRef = useRef<HTMLDivElement>(null);
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -436,41 +191,43 @@ const ChatBubble = memo(function ChatBubble({
     // `content` (see decodeAttachmentEnvelope above) — decode it back into an
     // actual thumbnail/file chip instead of showing the raw JSON string.
     const attachment = decodeAttachmentEnvelope(message.content);
+    const action = message.mode ? QUICK_ACTIONS.find((candidate) => candidate.mode === message.mode) : undefined;
 
     return (
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25, ease: "easeOut" }}
-        className="flex w-full justify-end"
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        className="flex w-full min-w-0 justify-end"
       >
-        <div className="flex max-w-[90%] flex-col items-end gap-2 sm:max-w-[75%]">
+        <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
+          {action && (
+            <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+              <action.icon className="h-3 w-3" />
+              {tAssistant(action.label, language)}
+            </span>
+          )}
           {attachment?.kind === IMAGE_ENVELOPE_KIND && (
             <img
               src={attachment.dataUrl}
               alt={attachment.fileName ?? "Image envoyée"}
-              className="max-h-64 w-auto rounded-2xl rounded-br-sm border border-emerald-500/30 object-cover shadow-sm"
+              className="max-h-64 w-auto max-w-full rounded-2xl rounded-br-sm border border-emerald-500/30 object-cover shadow-sm"
             />
           )}
           {attachment?.kind === DOCUMENT_ENVELOPE_KIND && (
-            <div className="flex items-center gap-2 rounded-2xl rounded-br-sm border border-emerald-500/30 bg-emerald-50/80 px-3.5 py-2.5 text-emerald-800 shadow-sm dark:bg-emerald-950/30 dark:text-emerald-200">
+            <div className="flex max-w-full items-center gap-2 rounded-2xl rounded-br-sm border border-emerald-500/30 bg-emerald-50/80 px-3.5 py-2.5 text-emerald-800 shadow-sm dark:bg-emerald-950/30 dark:text-emerald-200">
               <FileText className="h-4 w-4 shrink-0" />
-              <span className="max-w-[14rem] truncate text-xs font-medium sm:text-sm">{attachment.fileName}</span>
+              <span className="min-w-0 max-w-[14rem] truncate text-sm font-medium">{attachment.fileName}</span>
             </div>
           )}
           {(!attachment || attachment.caption) && (
-            // Was bg-white/text-gray-900 — no dark: variant at all, so this
-            // rendered as a stark opaque white box in dark mode, breaking
-            // continuity with the rest of the page (which is already
-            // theme-token-driven throughout). bg-card/text-card-foreground/
-            // border-border match every other theme-aware surface in this
-            // file (e.g. the document-attachment chip and error bubble
-            // above already do this correctly). dir="auto" — a user message
-            // in Arabic/Darija must read right-to-left, not inherit the
-            // page's own LTR default.
+            // bg-card/text-card-foreground/border-border: theme tokens, so it
+            // follows light/dark like every other surface here. dir="auto" — a
+            // message in Arabic/Darija must read right-to-left. break-words:
+            // a pasted long token wraps instead of widening the thread.
             <div
               dir="auto"
-              className="whitespace-pre-wrap rounded-2xl rounded-br-sm border border-border bg-card px-4 py-3 text-sm leading-relaxed text-card-foreground shadow-sm sm:text-[15px]"
+              className="max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-br-sm border border-border bg-card px-4 py-2.5 text-[16px] leading-relaxed text-card-foreground shadow-sm"
             >
               {attachment ? attachment.caption : message.content}
             </div>
@@ -480,55 +237,65 @@ const ChatBubble = memo(function ChatBubble({
     );
   }
 
-  // Point 7 hardening — optional chaining + fallback rather than assuming
-  // `content` is always a string, even though it's typed that way end-to-end.
   const isPending = (message.content ?? "").trim().length === 0;
   // The stream reports failures by flushing a "⚠️ …" line into the same
   // content field (see streamAssistantReply) rather than a separate error
-  // field — purely a rendering fork on that already-existing text, no new
-  // state: a failed reply gets its own unmistakable look and a one-click
-  // retry instead of silently reading like any other answer.
+  // field — purely a rendering fork on that already-existing text: a failed
+  // reply gets its own unmistakable look and a one-click retry.
   const isError = !isPending && (message.content ?? "").trimStart().startsWith("⚠️");
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: "easeOut" }}
-      className="flex w-full flex-col items-start"
+      transition={{ duration: 0.22, ease: "easeOut" }}
+      className="flex w-full min-w-0 flex-col items-start"
     >
-      <div className="flex w-full items-start gap-2">
-        <AssistantAvatar isPending={isPending} />
-        <div className="min-w-0 flex-1 pt-0.5">
+      {/* Edge-to-edge on phones: no avatar column, so the reply uses the whole
+          width between the thread's px-3 gutters. The avatar returns at sm+. */}
+      <div className="flex w-full min-w-0 items-start gap-2.5">
+        <div className="hidden sm:block">
+          <AssistantAvatar isPending={isPending} />
+        </div>
+        <div className="min-w-0 max-w-full flex-1 pt-0.5">
           {isPending ? (
             <TypingIndicator />
           ) : isError ? (
-            <div className="flex items-start gap-2.5 rounded-xl border border-amber-300/60 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <div className="flex items-start gap-2.5 rounded-xl border border-amber-300/60 bg-amber-50/80 px-3.5 py-3 text-[15px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <div className="flex-1 space-y-2">
-                <p className="leading-relaxed">{message.content.trimStart().replace(/^⚠️\s*/, "")}</p>
+              <div className="min-w-0 flex-1 space-y-2">
+                <p className="break-words leading-relaxed">{message.content.trimStart().replace(/^⚠️\s*/, "")}</p>
                 <button
                   type="button"
                   onClick={() => onRefresh(message.id)}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-500/25 dark:text-amber-100"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-amber-500/15 px-3.5 text-sm font-medium text-amber-900 transition-[transform,background-color] active:scale-95 hover:bg-amber-500/25 dark:text-amber-100"
                 >
-                  <RefreshCw className="h-3 w-3" /> Réessayer
+                  <RefreshCw className="h-3.5 w-3.5" /> Réessayer
                 </button>
               </div>
             </div>
           ) : (
-            <AssistantMarkdown content={message.content} />
+            <StreamedMarkdown ref={proseRef} content={message.content} isStreaming={isStreaming} />
           )}
         </div>
       </div>
-      {!isPending && !isError && (
-        <div className="pl-9">
-          <ChatToolbar messageId={message.id} content={message.content} onRefresh={onRefresh} onDelete={onDelete} />
+      {!isPending && !isError && !isStreaming && (
+        <div className="w-full min-w-0 sm:pl-[3.125rem]">
+          <MessageActions
+            messageId={message.id}
+            content={message.content}
+            contentRef={proseRef}
+            questionText={questionText}
+            onRefresh={onRefresh}
+            onDelete={onDelete}
+          />
         </div>
       )}
     </motion.div>
   );
 });
+
+const PREFS_STORAGE_KEY = "medart-assistant-prefs";
 
 const ATTACHMENT_ITEMS = [
   { kind: "image" as const, icon: ImageIcon, label: "Importer une image" },
@@ -693,15 +460,23 @@ export default function AssistantPage() {
   // cover the chat on first paint. The effect below flips it open on desktop
   // right after mount, once `window.matchMedia` is actually available.
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  // Real visualViewport-derived keyboard inset on iOS Safari, which shrinks
-  // the visual viewport when the virtual keyboard opens while
-  // `window.innerHeight`/100vh do not — Android already gets this for free
-  // from the `interactiveWidget: "resizes-content"` viewport meta in
-  // app/layout.tsx, but iOS Safari ignores that property. Applied as extra
-  // bottom padding on the page's flex column so the composer (pinned at the
-  // bottom of that column) stays above the keyboard instead of sliding out
-  // of view behind it.
-  const keyboardInset = useKeyboardInset();
+  // Phones: the whole assistant is a `fixed` surface pinned to the VISIBLE
+  // viewport (top/height from window.visualViewport, see the root element
+  // below), so the composer sits directly on the soft keyboard with no
+  // padding arithmetic. iOS Safari doesn't shrink the layout viewport for the
+  // keyboard (and scrolls it to reveal the focused field), which is exactly
+  // what the old "add the keyboard height as bottom padding" approach got
+  // wrong; Android Chrome resizes the layout itself, where this is a no-op.
+  const isPhoneLayout = useMediaQuery("(max-width: 1023px)");
+  const viewportBox = useVisualViewportBox(isPhoneLayout);
+  const keyboardOpen = viewportBox?.keyboardOpen === true;
+  // Quick action ("QCM", "Flashcards"…) armed for the NEXT message only, and
+  // the answer-style toggles (kept per device in localStorage).
+  const [mode, setMode] = useState<AssistantMode | null>(null);
+  const [prefs, setPrefs] = useState<AssistantPrefs>(DEFAULT_ASSISTANT_PREFS);
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
+  // Aborts the in-flight reply when the student taps Stop (see stopGeneration).
+  const abortControllerRef = useRef<AbortController | null>(null);
   // Whether the student is currently scrolled near the latest message.
   // Starts true (a freshly opened/empty thread has nothing to scroll away
   // from). Purely a scroll-position/UI concern — see the effect below and
@@ -752,6 +527,60 @@ export default function AssistantPage() {
     );
   }, []);
 
+  // Answer-style preferences survive reloads (per device — not sensitive, and
+  // the server validates them against a whitelist on every request anyway).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PREFS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<AssistantPrefs> | null;
+      setPrefs({
+        style: isAssistantStyle(parsed?.style) ? parsed.style : DEFAULT_ASSISTANT_PREFS.style,
+        stepByStep: parsed?.stepByStep === true,
+      });
+    } catch {
+      // Unreadable or storage blocked — keep the defaults.
+    }
+  }, []);
+
+  function updatePrefs(next: AssistantPrefs) {
+    setPrefs(next);
+    try {
+      window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Private mode / quota: the choice still applies for this session.
+    }
+  }
+
+  // Never leave a reply being read aloud (or a generation running) behind a page the student has left.
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // Grows the composer to fit what's typed (up to ~30% of the visible height,
+  // then it scrolls internally). The brief "auto" step is only to MEASURE: the
+  // box is put back at its previous pixel height and then set to the target,
+  // so the CSS height transition animates px -> px instead of snapping.
+  const composerHeightRef = useRef(0);
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const visibleHeight = viewportBox?.height ?? window.innerHeight;
+    const maxHeight = Math.min(180, Math.max(96, Math.round(visibleHeight * 0.3)));
+    const previous = composerHeightRef.current || el.offsetHeight;
+    el.style.height = "auto";
+    const natural = el.scrollHeight;
+    const target = Math.min(natural, maxHeight);
+    el.style.height = `${previous}px`;
+    void el.offsetHeight; // commit the start height so the transition has something to animate from
+    el.style.height = `${target}px`;
+    el.style.overflowY = natural > maxHeight ? "auto" : "hidden";
+    composerHeightRef.current = target;
+  }, [input, isListening, viewportBox?.height]);
+
   // Drawer-vs-column breakpoint for the history rail. Reads matchMedia only
   // inside the effect (client-only, post-mount) rather than during render,
   // so the server-rendered markup and the first client render agree (both
@@ -775,10 +604,18 @@ export default function AssistantPage() {
   // them back down even after they deliberately scrolled up mid-generation
   // to re-read something earlier. When they've scrolled away, the floating
   // "revenir en bas" button (rendered below) takes over instead.
+  //
+  // The follow is INSTANT while a reply streams (behavior "auto" — this scroller
+  // has no CSS scroll-behavior, so that means a jump): firing a smooth
+  // scroll for every streamed chunk makes each one chase a target the next
+  // chunk has already moved, which reads as lag and jitter. Smooth is kept for
+  // the moments nothing is streaming (sending a message, opening a thread).
   useEffect(() => {
     if (!isAtBottom) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, isAtBottom]);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: isTyping ? "auto" : "smooth" });
+  }, [messages, isAtBottom, isTyping]);
 
   /** Tracks proximity to the bottom of the scrollable message list — feeds both the auto-follow effect above and the floating "revenir en bas" button's visibility. A generous 150px threshold so it doesn't flicker on tiny scroll jitters. */
   function handleScroll() {
@@ -826,7 +663,15 @@ export default function AssistantPage() {
     saveMessages(messages);
   }, [messages, isTyping, saveMessages]);
 
+  /** Leaving the current thread: stop whatever is still being read aloud or generated for it. */
+  function settleCurrentThread() {
+    stopSpeaking();
+    abortControllerRef.current?.abort();
+    setMode(null);
+  }
+
   function handleNewConversation() {
+    settleCurrentThread();
     setMessages([]);
     setInput("");
     setIsAtBottom(true);
@@ -836,6 +681,7 @@ export default function AssistantPage() {
   function handleSelectConversation(id: string) {
     const found = selectConversation(id);
     if (found) {
+      settleCurrentThread();
       setMessages(found.messages);
       setIsAtBottom(true);
     }
@@ -851,11 +697,15 @@ export default function AssistantPage() {
     userText: string,
     historyForRequest: HistoryTurn[],
     attachments?: { image?: { dataUrl: string; fileName?: string }; document?: { fileName: string; text: string } },
-    bypassCache?: boolean
+    bypassCache?: boolean,
+    requestMode?: AssistantMode
   ) => {
     const assistantId = generateId();
     setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
     setIsTyping(true);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     let rafId: number | null = null;
     let latestText = "";
@@ -891,10 +741,16 @@ export default function AssistantPage() {
       const res = await fetch("/api/dashboard-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           message: userText,
           history: historyForRequest,
           language,
+          // Answer-style settings + the armed quick action; the server
+          // validates each against a whitelist (lib/assistant-modes.ts).
+          style: prefs.style,
+          stepByStep: prefs.stepByStep,
+          ...(requestMode ? { mode: requestMode } : {}),
           ...(attachments?.image ? { image: attachments.image } : {}),
           ...(attachments?.document ? { document: attachments.document } : {}),
           ...(bypassCache ? { bypassCache: true } : {}),
@@ -926,30 +782,44 @@ export default function AssistantPage() {
       }
     } catch (error) {
       cancelScheduledFlush();
-      const msg = error instanceof Error ? error.message : "L'assistant n'a pas pu répondre. Réessaie.";
-      flush(`⚠️ ${msg}`);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        // The student tapped Stop (or left the thread): keep whatever already
+        // arrived. A reply stopped before its first word has nothing to show,
+        // so that empty placeholder is removed instead of left spinning.
+        if (isMountedRef.current) {
+          if (latestText.trim()) flush(latestText);
+          else setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+        }
+      } else {
+        const msg = error instanceof Error ? error.message : "L'assistant n'a pas pu répondre. Réessaie.";
+        flush(`⚠️ ${msg}`);
+      }
     } finally {
+      if (abortControllerRef.current === controller) abortControllerRef.current = null;
       if (isMountedRef.current) setIsTyping(false);
     }
-  }, [language]);
+  }, [language, prefs]);
+
+  function stopGeneration() {
+    haptic();
+    abortControllerRef.current?.abort();
+  }
 
   async function sendMessage(rawText: string) {
     const text = rawText.trim();
     if (!text || isTyping || isAttachmentBusy) return;
 
-    const userMessage: ChatMessage = { id: generateId(), role: "user", content: text };
+    haptic(10);
+    const sendMode = mode;
+    const userMessage: ChatMessage = { id: generateId(), role: "user", content: text, ...(sendMode ? { mode: sendMode } : {}) };
     const historyForRequest = toHistoryTurns(messages);
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setMode(null); // an armed quick action applies to ONE message
     setIsAtBottom(true); // sending implies wanting to watch the reply arrive, even if scrolled up reading earlier context
 
-    // Reset the textarea back to its single-row height after sending.
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-
-    await streamAssistantReply(text, historyForRequest);
+    await streamAssistantReply(text, historyForRequest, undefined, undefined, sendMode ?? undefined);
   }
 
   /** Shared tail end of both attachment-send paths below: append the encoded envelope as a user message, clear the composer, and kick off the actual multimodal/document-augmented request. */
@@ -958,14 +828,16 @@ export default function AssistantPage() {
     outgoingText: string,
     attachments: { image?: { dataUrl: string; fileName?: string }; document?: { fileName: string; text: string } }
   ) {
-    const userMessage: ChatMessage = { id: generateId(), role: "user", content: envelopeContent };
+    const sendMode = mode;
+    const userMessage: ChatMessage = { id: generateId(), role: "user", content: envelopeContent, ...(sendMode ? { mode: sendMode } : {}) };
     const historyForRequest = toHistoryTurns(messages);
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setMode(null);
     setIsAtBottom(true);
 
-    await streamAssistantReply(outgoingText, historyForRequest, attachments);
+    await streamAssistantReply(outgoingText, historyForRequest, attachments, undefined, sendMode ?? undefined);
   }
 
   async function sendDocumentMessage(fileName: string, extractedText: string) {
@@ -1030,7 +902,7 @@ export default function AssistantPage() {
     const historyForRequest = toHistoryTurns(current.slice(0, index - 1));
     const payload = buildOutgoingPayload(precedingUser.content);
     setMessages((prev) => prev.slice(0, index));
-    await streamAssistantReply(payload.message, historyForRequest, { image: payload.image, document: payload.document }, true);
+    await streamAssistantReply(payload.message, historyForRequest, { image: payload.image, document: payload.document }, true, precedingUser.mode);
     // streamAssistantReply is a plain function redefined every render (it
     // closes over `language`, which can change) — listing it here isn't
     // just satisfying the linter: omitting it was a real stale-closure bug,
@@ -1111,6 +983,7 @@ export default function AssistantPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
+      setRecordingStream(stream);
       recordedChunksRef.current = [];
       dictationBaseRef.current = input;
 
@@ -1125,6 +998,7 @@ export default function AssistantPage() {
         recordedChunksRef.current = [];
         stream.getTracks().forEach((track) => track.stop());
         recordingStreamRef.current = null;
+        setRecordingStream(null);
         void transcribeRecording(blob);
       };
 
@@ -1154,28 +1028,37 @@ export default function AssistantPage() {
   }
 
   const canSend = input.trim().length > 0 && !isTyping && !isAttachmentBusy;
+  const activeAction = mode ? QUICK_ACTIONS.find((action) => action.mode === mode) : undefined;
+  const composerPlaceholder = activeAction ? tAssistant(activeAction.placeholder, language) : tAssistant("composerPlaceholder", language);
+  // On a phone the primary button morphs (mic while there's nothing to send,
+  // Send once there is) to give the text field the width — see the mic's className.
+  const hasPrimaryAction = canSend || isTyping;
+
+  function handleSelectMode(next: AssistantMode | null) {
+    setMode(next);
+    if (next) textareaRef.current?.focus();
+  }
 
   return (
     <div
-      // Point 6 — transition-[padding-bottom] so this reserved space grows
-      // in step with the on-screen keyboard's own slide animation instead
-      // of snapping instantly, which is what could read as a "big empty
-      // gap" flashing briefly before the keyboard visually catches up.
+      // Phones: a `fixed` surface pinned to the VISIBLE viewport — top/height
+      // come from visualViewport once measured (inline style wins), 100dvh
+      // until then. The composer therefore always sits directly on the soft
+      // keyboard and nothing behind it can show through or scroll. At lg+
+      // it's an ordinary in-flow panel in the shell, as before.
       //
-      // Was a solid bg-background — the shell layout
-      // (app/dashboard/(shell)/layout.tsx) already paints its own
-      // aurora-canvas-bg/aurora-mesh-bg gradient behind every page in this
-      // route group, and this page's own opaque background fully occluded
-      // it. Light mode keeps a very-low-opacity white tint (text over the
-      // bright light aurora needs a little help); dark:bg-black/20 was
-      // WRONG — .dark .aurora-canvas-bg is already a near-black base
-      // (#030712) with only faint 16-22%-opacity color glows on top, so
-      // stacking another black tint on top of that just recreated an
-      // effectively opaque black panel, confirmed still visibly broken by
-      // the user. dark:bg-transparent — genuinely no fill at all — is what
-      // actually lets those already-subtle color glows read through.
-      className="flex h-full overflow-hidden bg-white/5 backdrop-blur-sm transition-[padding-bottom] duration-200 ease-out dark:bg-transparent"
-      style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
+      // overflow-hidden + w-full/max-w-full here and on every wrapper below is
+      // the horizontal-sway lock: nothing inside can widen this surface.
+      //
+      // bg-white/5 (light) / transparent (dark): the shell paints its aurora
+      // gradient behind every page in this route group, and an opaque
+      // background here would hide it (dark:bg-black/20 was tried and was
+      // still effectively opaque against the near-black dark aurora).
+      className={cn(
+        "flex w-full max-w-full overflow-hidden bg-white/5 dark:bg-transparent lg:h-full lg:backdrop-blur-sm",
+        "max-lg:fixed max-lg:inset-x-0 max-lg:top-0 max-lg:z-30 max-lg:h-[100dvh]"
+      )}
+      style={viewportBox ? { top: viewportBox.top, height: viewportBox.height } : undefined}
     >
       <ConversationSidebar
         isOpen={isHistoryOpen}
@@ -1187,13 +1070,7 @@ export default function AssistantPage() {
         onDelete={handleDeleteConversation}
       />
 
-      {/* Same fix as the root container above — was bg-background (opaque),
-          then dark:bg-black/20 (still effectively opaque against the
-          already-near-black dark aurora, confirmed broken live). Now
-          dark:bg-transparent, so the shell's own aurora gradient stays
-          visible through the main chat column, which is most of this
-          page's actual visible surface. */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white/5 backdrop-blur-sm dark:bg-transparent">
+      <div className="flex w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-white/5 dark:bg-transparent lg:backdrop-blur-sm">
         {/* Phone header — the shell hides its Topbar and bottom nav on this
             route below lg (see CHROMELESS_MOBILE_ROUTES), so this page owns
             the full screen and needs its own way back out. */}
@@ -1247,16 +1124,27 @@ export default function AssistantPage() {
         {isEmpty ? (
           <EmptyState firstName={firstName} onSelectPrompt={(text) => void sendMessage(text)} />
         ) : (
-          <div className="relative min-h-0 flex-1">
+          <div className="relative min-h-0 w-full max-w-full flex-1">
+            {/* The thread: overflow-x-hidden + overscroll-x-none + touch-action
+                pan-y(+pinch-zoom) means a long token, a wide table or a stray
+                horizontal swipe can never move the page sideways. Tables and
+                code blocks scroll INSIDE their own wrappers instead. */}
             <div
               ref={scrollContainerRef}
               onScroll={handleScroll}
-              className="h-full overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-x-none overscroll-y-contain [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
             >
-              <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 pb-6 md:p-6">
+              <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 px-3 py-4 sm:px-5 md:px-6 md:py-6">
                 <AnimatePresence initial={false}>
-                  {messages.map((message) => (
-                    <ChatBubble key={message.id} message={message} onRefresh={regenerateResponse} onDelete={deleteMessage} />
+                  {messages.map((message, index) => (
+                    <ChatBubble
+                      key={message.id}
+                      message={message}
+                      isStreaming={isTyping && index === messages.length - 1}
+                      questionText={message.role === "assistant" && messages[index - 1]?.role === "user" ? summarizeForHistory(messages[index - 1].content) : null}
+                      onRefresh={regenerateResponse}
+                      onDelete={deleteMessage}
+                    />
                   ))}
                 </AnimatePresence>
                 <div ref={bottomRef} />
@@ -1268,19 +1156,22 @@ export default function AssistantPage() {
               {!isAtBottom && (
                 <motion.button
                   type="button"
-                  onClick={scrollToBottom}
+                  onClick={() => {
+                    haptic();
+                    scrollToBottom();
+                  }}
                   initial={{ opacity: 0, y: 10, scale: 0.94 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.94 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
                   className={cn(
-                    "absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium shadow-glass backdrop-blur-md transition-colors dark:shadow-glass-dark",
+                    "absolute bottom-3 left-1/2 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-glass transition-colors dark:shadow-glass-dark",
                     isTyping
                       ? "border-emerald-500/30 bg-emerald-500 text-white hover:bg-emerald-600"
-                      : "border-border bg-popover/90 text-foreground hover:bg-accent"
+                      : "border-border bg-popover/95 text-foreground hover:bg-accent"
                   )}
                 >
-                  <ArrowDown className="h-3.5 w-3.5" />
+                  <ArrowDown className="h-4 w-4" />
                   {isTyping ? tAssistant("newResponseInProgress", language) : tAssistant("backToBottom", language)}
                 </motion.button>
               )}
@@ -1288,143 +1179,186 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* The shell hides MobileBottomNav on this route below lg, so the
-            composer only clears the home indicator — and just a small gap
-            once the keyboard is open (keyboardInset already lifts the whole
-            column above it). */}
-        <div
-          className={cn(
-            "mx-auto w-full max-w-3xl shrink-0 px-3 sm:px-4",
-            keyboardInset > 0 ? "mb-2" : "mb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:mb-6"
-          )}
-        >
-          <div className="glass-panel relative flex w-full items-end gap-1.5 rounded-[28px] p-1.5 shadow-glass transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:shadow-glass-dark">
+        {/* Bottom safe-area only while the keyboard is CLOSED: with it open the
+            home indicator is hidden under the keyboard, and keeping that inset
+            is exactly the "awkward gap above the keyboard". */}
+        <div className={cn("relative shrink-0 lg:pb-6", keyboardOpen ? "pb-2" : "pb-[max(0.5rem,env(safe-area-inset-bottom))]")}>
+          <div className="mx-auto w-full max-w-3xl">
+            {!keyboardOpen && (
+              <QuickActionBar
+                mode={mode}
+                onSelectMode={handleSelectMode}
+                prefs={prefs}
+                onChangePrefs={updatePrefs}
+                disabled={isTyping || isListening}
+              />
+            )}
 
-            <div className="relative shrink-0 pb-0.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    ref={attachmentButtonRef}
-                    type="button"
-                    onClick={() => setIsAttachmentMenuOpen((prev) => !prev)}
-                    disabled={isAttachmentBusy}
-                    aria-label={tAssistant("addAttachment", language)}
-                    className={cn(
-                      "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
-                      isAttachmentBusy ? "cursor-not-allowed text-muted-foreground/50" : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                    )}
-                  >
-                    {isAttachmentBusy ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">{isAttachmentBusy ? "Traitement en cours…" : tAssistant("addAttachment", language)}</TooltipContent>
-              </Tooltip>
+            <div className="px-3 sm:px-4">
+              <div className="glass-panel relative flex w-full flex-col rounded-[26px] shadow-glass transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:shadow-glass-dark">
+                <AnimatePresence initial={false}>
+                  {activeAction && (
+                    <motion.div
+                      key="armed-mode"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 px-3.5 pt-2.5">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 py-1 pl-2.5 pr-1 text-xs font-semibold text-white">
+                          <activeAction.icon className="h-3.5 w-3.5" />
+                          {tAssistant(activeAction.label, language)}
+                          <button
+                            type="button"
+                            onClick={() => setMode(null)}
+                            aria-label={tAssistant("removeMode", language)}
+                            className="touch-target relative flex h-5 w-5 items-center justify-center rounded-full transition-colors active:bg-white/25 hover:bg-white/20"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-              {/* Hidden native file inputs, one per attachment kind (camera gets its own `capture` input rather than sharing the gallery one, matching the ChatRoom.tsx group-chat pattern this mirrors) — triggered programmatically from the menu items below. */}
-              <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageFileChosen} />
-              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageFileChosen} />
-              <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={handlePdfFileChosen} />
+                <div className="flex w-full items-end gap-1 p-1.5">
+                  <div className="relative shrink-0">
+                    <button
+                      ref={attachmentButtonRef}
+                      type="button"
+                      onClick={() => {
+                        haptic();
+                        setIsAttachmentMenuOpen((prev) => !prev);
+                      }}
+                      disabled={isAttachmentBusy || isListening}
+                      aria-label={tAssistant("addAttachment", language)}
+                      aria-expanded={isAttachmentMenuOpen}
+                      className={cn(
+                        "flex h-11 w-11 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
+                        isAttachmentBusy || isListening
+                          ? "cursor-not-allowed text-muted-foreground/50"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      )}
+                    >
+                      {isAttachmentBusy ? (
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Plus className={cn("h-5 w-5 transition-transform duration-200", isAttachmentMenuOpen && "rotate-45")} />
+                      )}
+                    </button>
 
-              <AnimatePresence>
-                {isAttachmentMenuOpen && (
-                  <motion.div
-                    ref={attachmentMenuRef}
-                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-glass backdrop-blur-md dark:shadow-glass-dark"
-                  >
-                    {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }) => {
-                      const displayLabel =
-                        kind === "image" ? tAssistant("attachImage", language) : kind === "camera" ? tAssistant("attachCamera", language) : label;
-                      return (
-                        <button
-                          key={kind}
-                          type="button"
-                          onClick={() => {
-                            setIsAttachmentMenuOpen(false);
-                            if (kind === "image") imageInputRef.current?.click();
-                            else if (kind === "camera") cameraInputRef.current?.click();
-                            else pdfInputRef.current?.click();
-                          }}
-                          className="flex w-full cursor-pointer items-center gap-3 p-3 text-left text-sm text-foreground transition-colors hover:bg-accent"
+                    {/* Hidden native file inputs, one per attachment kind (camera gets its own `capture` input rather than sharing the gallery one, matching the ChatRoom.tsx group-chat pattern this mirrors) — triggered programmatically from the menu items below. */}
+                    <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageFileChosen} />
+                    <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageFileChosen} />
+                    <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={handlePdfFileChosen} />
+
+                    <AnimatePresence>
+                      {isAttachmentMenuOpen && (
+                        <motion.div
+                          ref={attachmentMenuRef}
+                          initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute bottom-full left-0 z-50 mb-2 w-60 overflow-hidden rounded-2xl border border-border bg-popover py-1 text-popover-foreground shadow-glass dark:shadow-glass-dark"
                         >
-                          <Icon size={18} className="shrink-0 text-emerald-500" />
-                          <span className="flex-1">{displayLabel}</span>
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }) => {
+                            const displayLabel =
+                              kind === "image" ? tAssistant("attachImage", language) : kind === "camera" ? tAssistant("attachCamera", language) : label;
+                            return (
+                              <button
+                                key={kind}
+                                type="button"
+                                onClick={() => {
+                                  setIsAttachmentMenuOpen(false);
+                                  if (kind === "image") imageInputRef.current?.click();
+                                  else if (kind === "camera") cameraInputRef.current?.click();
+                                  else pdfInputRef.current?.click();
+                                }}
+                                className="flex min-h-12 w-full cursor-pointer items-center gap-3 px-4 text-left text-[15px] text-foreground transition-colors active:bg-accent hover:bg-accent"
+                              >
+                                <Icon size={18} className="shrink-0 text-emerald-500" />
+                                <span className="flex-1">{displayLabel}</span>
+                              </button>
+                            );
+                          })}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
 
-            {/* text-base (16px) specifically — anything smaller triggers iOS Safari's automatic zoom-on-focus. */}
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                e.target.style.height = "auto";
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
-              }}
-              onKeyDown={handleKeyDown}
-              rows={1}
-              placeholder="Ask MedArt Assistant..."
-              className="flex-1 resize-none bg-transparent px-2 py-2 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 scrollbar-hide my-auto"
-            />
+                  {isListening ? (
+                    <VoiceMeter stream={recordingStream} label={tAssistant("listening", language)} />
+                  ) : (
+                    // text-[16px] (never smaller): iOS Safari zooms the page when a
+                    // field under 16px is focused. The height is driven by the
+                    // layout effect above; min-w-0 lets it shrink inside the row.
+                    <textarea
+                      ref={textareaRef}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      rows={1}
+                      enterKeyHint="send"
+                      aria-label={tAssistant("composerPlaceholder", language)}
+                      placeholder={composerPlaceholder}
+                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out placeholder:text-muted-foreground focus:ring-0"
+                    />
+                  )}
 
-            <div className="flex shrink-0 items-center gap-1 pr-1 pb-0.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={toggleListening}
+                    onClick={() => {
+                      haptic();
+                      toggleListening();
+                    }}
                     disabled={!micSupported || isTranscribing}
                     aria-label={isListening ? tAssistant("stopDictation", language) : tAssistant("startDictation", language)}
                     className={cn(
-                      "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
-                      isListening
-                        ? "animate-pulse bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40"
+                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
+                      isListening ? "bg-rose-500 text-white" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40",
+                      hasPrimaryAction && !isListening && "max-sm:hidden"
                     )}
                   >
                     {isTranscribing ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <RefreshCw className="h-[18px] w-[18px] animate-spin" />
                     ) : isListening ? (
-                      <Square className="h-4 w-4" />
+                      <Square className="h-4 w-4 fill-current" />
                     ) : (
                       <Mic className="h-5 w-5" />
                     )}
                   </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {!micSupported
-                    ? "Dictée vocale indisponible sur ce navigateur"
-                    : isTranscribing
-                      ? "Transcription en cours…"
-                      : isListening
-                        ? tAssistant("stopDictation", language)
-                        : tAssistant("startDictation", language)}
-                </TooltipContent>
-              </Tooltip>
 
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!canSend}
-                aria-label={tAssistant("sendMessage", language)}
-                className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200",
-                  canSend
-                    ? "bg-emerald-500 text-white shadow-soft hover:-translate-y-0.5 hover:bg-emerald-600 active:scale-[0.92] active:translate-y-0"
-                    : "cursor-not-allowed text-muted-foreground/50"
-                )}
-              >
-                <Send className="h-5 w-5" />
-              </button>
+                  {isTyping ? (
+                    <button
+                      type="button"
+                      onClick={stopGeneration}
+                      aria-label={tAssistant("stopGeneration", language)}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-transform active:scale-90"
+                    >
+                      <Square className="h-4 w-4 fill-current" />
+                    </button>
+                  ) : canSend && !isListening ? (
+                    <motion.button
+                      key="send"
+                      type="button"
+                      onClick={handleSubmit}
+                      initial={{ scale: 0.6, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.15 }}
+                      whileTap={{ scale: 0.9 }}
+                      aria-label={tAssistant("sendMessage", language)}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-soft"
+                    >
+                      <Send className="h-5 w-5" />
+                    </motion.button>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </div>
         </div>
