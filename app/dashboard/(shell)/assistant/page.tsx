@@ -470,6 +470,10 @@ export default function AssistantPage() {
   const isPhoneLayout = useMediaQuery("(max-width: 1023px)");
   const viewportBox = useVisualViewportBox(isPhoneLayout);
   const keyboardOpen = viewportBox?.keyboardOpen === true;
+  // The measured box is applied ONLY when it differs from the plain
+  // full-screen layout: keyboard open, or iOS having scrolled the visual
+  // viewport. Otherwise the CSS (`inset-0`) alone sizes the surface.
+  const dockedBox = viewportBox && (viewportBox.keyboardOpen || viewportBox.top > 0) ? viewportBox : null;
   // Quick action ("QCM", "Flashcards"…) armed for the NEXT message only, and
   // the answer-style toggles (kept per device in localStorage).
   const [mode, setMode] = useState<AssistantMode | null>(null);
@@ -1056,9 +1060,12 @@ export default function AssistantPage() {
       // still effectively opaque against the near-black dark aurora).
       className={cn(
         "flex w-full max-w-full overflow-hidden bg-white/5 dark:bg-transparent lg:h-full lg:backdrop-blur-sm",
-        "max-lg:fixed max-lg:inset-x-0 max-lg:top-0 max-lg:z-30 max-lg:h-[100dvh]"
+        // `inset-0` (like the group chat room, proven on real phones) — the
+        // surface fills the layout viewport with no JS and no `dvh`
+        // dependency, so it can never render at zero size.
+        "max-lg:fixed max-lg:inset-0 max-lg:z-50"
       )}
-      style={viewportBox ? { top: viewportBox.top, height: viewportBox.height } : undefined}
+      style={dockedBox ? { top: dockedBox.top, height: dockedBox.height } : undefined}
     >
       <ConversationSidebar
         isOpen={isHistoryOpen}

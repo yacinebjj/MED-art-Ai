@@ -16,6 +16,10 @@ export interface VisualViewportBox {
 // catch every real soft keyboard (always 250px+).
 const KEYBOARD_MIN_SHRINK_PX = 120;
 
+// Even a small phone in landscape with the keyboard open keeps well over this
+// visible; anything below it is a bad reading, not a real viewport.
+const MIN_PLAUSIBLE_HEIGHT_PX = 100;
+
 /**
  * The currently VISIBLE rectangle of the page (window.visualViewport), for
  * pinning a full-screen surface exactly to it. A page that sets its own
@@ -50,6 +54,13 @@ export function useVisualViewportBox(enabled: boolean): VisualViewportBox | null
     function measure() {
       frame = null;
       if (!vv) return;
+      // Some browsers (in-app webviews, a page that hasn't laid out yet)
+      // report a 0/NaN visual viewport. Pinning a full-screen surface to that
+      // would collapse it to nothing with no event ever firing to recover —
+      // ignore an implausible reading and keep the last good one (or null).
+      // Checked BEFORE the baseline update so a bad reading can't poison it.
+      if (!Number.isFinite(vv.height) || !Number.isFinite(vv.offsetTop) || vv.height < MIN_PLAUSIBLE_HEIGHT_PX || vv.offsetTop < 0) return;
+
       const baseline = baselineRef.current;
       // A different width means a rotation or a window resize: start the
       // "tallest height seen" baseline over for the new orientation.
