@@ -53,6 +53,10 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
+  // Set while the mic permission prompt / getUserMedia is pending — the state
+  // is still "idle" then, so without this a second click started a second
+  // recorder and orphaned the first stream (microphone left on).
+  const startingRef = useRef(false);
   // Latest callbacks without re-creating start/stop on every parent render.
   const callbacksRef = useRef({ onTranscript, onError });
   callbacksRef.current = { onTranscript, onError };
@@ -102,12 +106,20 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
   }, []);
 
   const start = useCallback(async () => {
-    if (!supported || recorderRef.current?.state === "recording") return;
+    if (!supported || startingRef.current || recorderRef.current?.state === "recording") return;
+    startingRef.current = true;
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mountedRef.current) {
+        // Unmounted while the permission prompt was open — release the mic now.
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const activeStream = stream;
+      streamRef.current = activeStream;
       chunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
+      const recorder = new MediaRecorder(activeStream);
       recorderRef.current = recorder;
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -115,7 +127,7 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         chunksRef.current = [];
-        stream.getTracks().forEach((track) => track.stop());
+        activeStream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         if (timerRef.current) clearInterval(timerRef.current);
         void transcribe(blob);
@@ -125,8 +137,15 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
       timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
       setState("recording");
     } catch (error) {
-      setState("idle");
-      callbacksRef.current.onError("Micro inaccessible", describeMicError(error));
+      // e.g. MediaRecorder unsupported for this stream — never leave the mic on.
+      stream?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      if (mountedRef.current) {
+        setState("idle");
+        callbacksRef.current.onError("Micro inaccessible", describeMicError(error));
+      }
+    } finally {
+      startingRef.current = false;
     }
   }, [supported, transcribe]);
 

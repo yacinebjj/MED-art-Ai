@@ -130,8 +130,29 @@ function findNormalized(haystack: NormalizedText, needle: string): { start: numb
 
 const CONTEXT_CHARS = 220;
 
+/**
+ * Normalizing a full course is the expensive part (one pass per character),
+ * and the same few source texts are checked against every chip of every
+ * reply — so each text is normalized once and reused. Bounded so a long
+ * session switching through many courses can't grow it without limit.
+ */
+const NORMALIZED_CACHE_LIMIT = 16;
+const normalizedCache = new Map<string, NormalizedText>();
+
+function normalizeCached(text: string): NormalizedText {
+  const hit = normalizedCache.get(text);
+  if (hit) return hit;
+  const normalized = normalizeForMatch(text);
+  normalizedCache.set(text, normalized);
+  if (normalizedCache.size > NORMALIZED_CACHE_LIMIT) {
+    const oldest = normalizedCache.keys().next().value;
+    if (oldest !== undefined) normalizedCache.delete(oldest);
+  }
+  return normalized;
+}
+
 function locateIn(text: string, quote: string): { start: number; end: number; partial: boolean } | null {
-  const hay = normalizeForMatch(text);
+  const hay = normalizeCached(text);
   const needle = normalizeForMatch(quote).text;
   const exact = findNormalized(hay, needle);
   if (exact) return { ...exact, partial: false };
@@ -162,7 +183,29 @@ function titleScore(candidate: string, wanted: string): number {
  * several checked courses a fragment came from, and the passage is still
  * genuinely in the student's material. Returns null when it is nowhere.
  */
+const LOCATION_CACHE_LIMIT = 300;
+const locationCache = new Map<string, CitationLocation | null>();
+
 export function locateCitation(citation: ChatCitation, sources: CitationSourceText[]): CitationLocation | null {
+  // Keyed by the quote AND the exact source texts it was checked against —
+  // a source loading later (or its Explication being generated) changes the
+  // key, so a previously "missing" citation is re-checked, never stuck.
+  const key = [
+    citation.sourceTitle,
+    citation.quote,
+    ...sources.map((source) => `${source.id}:${source.rawText?.length ?? 0}:${source.explication?.length ?? 0}`),
+  ].join("\u0000");
+  if (locationCache.has(key)) return locationCache.get(key) ?? null;
+  const location = locateCitationUncached(citation, sources);
+  locationCache.set(key, location);
+  if (locationCache.size > LOCATION_CACHE_LIMIT) {
+    const oldest = locationCache.keys().next().value;
+    if (oldest !== undefined) locationCache.delete(oldest);
+  }
+  return location;
+}
+
+function locateCitationUncached(citation: ChatCitation, sources: CitationSourceText[]): CitationLocation | null {
   const ordered = [...sources].sort((x, y) => titleScore(y.title, citation.sourceTitle) - titleScore(x.title, citation.sourceTitle));
 
   for (const source of ordered) {

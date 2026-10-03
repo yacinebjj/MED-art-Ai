@@ -18,8 +18,9 @@
  *
  * Three views: "Réviser" (the SRS session: due cards first, then new ones,
  * optionally everything + shuffle), "Parcourir" (free flip-through, ←/→),
- * "Liste" (searchable list with each card's box). Keyboard shortcuts are
- * ignored while a text field, a menu or a foreign dialog has focus.
+ * "Liste" (searchable list with each card's box). Keyboard shortcuts only act
+ * once the student last clicked/focused inside the deck, and are ignored
+ * while a text field, a menu or a foreign dialog has focus.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
@@ -172,7 +173,27 @@ const RATINGS: { rating: Rating; label: string; shortcut: string; className: str
   },
 ];
 
+/**
+ * Matched on the PHYSICAL key first: on an AZERTY keyboard (most of this
+ * app's students) the unshifted digit row types & é " ' — `event.key` would
+ * never be "1"–"4". `event.key` stays as a fallback for layouts/devices that
+ * report no usable `code`.
+ */
+const RATING_BY_CODE: Record<string, Rating> = {
+  Digit1: "again",
+  Numpad1: "again",
+  Digit2: "hard",
+  Numpad2: "hard",
+  Digit3: "good",
+  Numpad3: "good",
+  Digit4: "easy",
+  Numpad4: "easy",
+};
 const RATING_BY_KEY: Record<string, Rating> = { "1": "again", "2": "hard", "3": "good", "4": "easy" };
+
+function ratingForKeyEvent(event: KeyboardEvent): Rating | undefined {
+  return RATING_BY_CODE[event.code] ?? RATING_BY_KEY[event.key];
+}
 
 /** Red → green progression, so the distribution bar reads as "how mastered" at a glance. */
 const BOX_STYLES: Record<number, { bar: string; chip: string }> = {
@@ -287,8 +308,23 @@ function intervalDaysForBox(box: number): number {
  * midnight (unlike lib/srs.ts's exact `now + interval`, built for a server
  * table): a card rated at 22:00 is "due tomorrow" for the whole of
  * tomorrow, not only from 22:00 — what a student actually expects.
+ *
+ * `lapsedThisSession`: the card was rated "À revoir" earlier in the SAME
+ * session. Recalling it on the end-of-session retry only proves it was
+ * relearned minutes ago, so it must not jump to box 2/3 and erase the lapse:
+ * it stays in box 1 (due tomorrow) and only the review itself is counted.
  */
-function scheduleRating(previous: CardProgress | undefined, rating: Rating, now: number): CardProgress {
+function scheduleRating(previous: CardProgress | undefined, rating: Rating, now: number, lapsedThisSession = false): CardProgress {
+  if (lapsedThisSession && rating !== "again") {
+    return {
+      box: 1,
+      dueAt: addLocalDays(startOfLocalDay(now), intervalDaysForBox(1)),
+      reviews: (previous?.reviews ?? 0) + 1,
+      lapses: previous?.lapses ?? 0,
+      lastRating: rating,
+      lastReviewedAt: now,
+    };
+  }
   const box = nextBoxFor(previous?.box ?? 1, rating);
   return {
     box,
@@ -358,6 +394,11 @@ function computeDeckStats(cards: LabCard[], progress: ProgressMap, now: number):
 
 function createSession(cards: LabCard[], progress: ProgressMap, options: SessionOptions, now: number): Session {
   return { queue: buildQueue(cards, progress, options, now), index: 0, log: [], masteryAtStart: computeMastery(cards, progress) };
+}
+
+/** True when this card was already rated "À revoir" earlier in the session — see scheduleRating. */
+function lapsedInSession(session: Session, cardId: string): boolean {
+  return session.log.some((entry) => entry.cardId === cardId && entry.rating === "again");
 }
 
 function formatDueRelative(dueAt: number, now: number): string {
@@ -567,14 +608,14 @@ function isInForeignOverlay(target: Element | null, root: HTMLElement): boolean 
 
 // --- Network ----------------------------------------------------------------
 
-async function fetchDeck(courseId: number, signal: AbortSignal): Promise<LoadState> {
+/** Never aborted on purpose — see `inFlight` below. */
+async function fetchDeck(courseId: number): Promise<LoadState> {
   let res: Response;
   try {
     res = await fetch("/api/studio/flashcards", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ courseId }),
-      signal,
     });
   } catch {
     return { status: "error", kind: "generic", message: "Impossible de contacter le serveur. Vérifie ta connexion puis réessaie." };
@@ -592,6 +633,41 @@ async function fetchDeck(courseId: number, signal: AbortSignal): Promise<LoadSta
     return { status: "error", kind: "generic", message: data.error ?? "La génération des flashcards a échoué. Réessaie dans un instant." };
   }
   return { status: "ready", cards: toLabCards(data.cards) };
+}
+
+/**
+ * Deck requests in flight, keyed `${userId ?? "anon"}:${courseId}`.
+ * Module-level on purpose (same idea as ClinicalCaseSimulator's store): the
+ * Lab remounts when the Studio pane is expanded/collapsed, the Lab tool
+ * changes, or the course changes and back. A first-ever generation can take
+ * a minute; if a remount aborted it and fired a fresh request, the student
+ * would be charged twice for the same set. So the request outlives the
+ * instance that started it, fills `deckCache` itself, and whichever instance
+ * is mounted for that key when it settles adopts the result.
+ */
+const inFlight = new Map<string, Promise<LoadState>>();
+
+function inFlightKey(userId: string | null, courseId: number): string {
+  return `${userId ?? "anon"}:${courseId}`;
+}
+
+/** Returns the request already in flight for this key, or starts one — never two at once. */
+function loadDeck(userId: string | null, courseId: number): Promise<LoadState> {
+  const key = inFlightKey(userId, courseId);
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const promise: Promise<LoadState> = fetchDeck(courseId)
+    .catch((): LoadState => ({ status: "error", kind: "generic", message: "La génération des flashcards a échoué. Réessaie dans un instant." }))
+    .then((next) => {
+      // Written by the request itself, so a result landing while no instance is mounted is still there on the next open.
+      if (next.status === "ready" && next.cards.length > 0) deckCache.set(courseId, next.cards);
+      return next;
+    })
+    .finally(() => {
+      if (inFlight.get(key) === promise) inFlight.delete(key);
+    });
+  inFlight.set(key, promise);
+  return promise;
 }
 
 // ---------------------------------------------------------------------------
@@ -908,7 +984,18 @@ function FlipCard({ card, flipped, onToggle, reduceMotion }: { card: LabCard; fl
   );
 }
 
-function RatingBar({ currentBox, onRate, reduceMotion }: { currentBox: number; onRate: (rating: Rating) => void; reduceMotion: boolean }) {
+function RatingBar({
+  currentBox,
+  lapsedThisSession,
+  onRate,
+  reduceMotion,
+}: {
+  currentBox: number;
+  /** Retry of a card forgotten earlier in this session — every rating but "À revoir" keeps it in box 1 (see scheduleRating), so the previews say so. */
+  lapsedThisSession: boolean;
+  onRate: (rating: Rating) => void;
+  reduceMotion: boolean;
+}) {
   // Two pairs that sit side by side (1 row of 4) when the panel is wide and
   // stack (2×2) when narrow — never an awkward 3+1. Done with the
   // "flex-basis albatross" trick so it follows the PANEL width, not the
@@ -926,7 +1013,7 @@ function RatingBar({ currentBox, onRate, reduceMotion }: { currentBox: number; o
       {pairs.map((pair, pairIndex) => (
         <div key={pairIndex} className="grid min-w-0 grid-cols-2 gap-2" style={{ flex: "1 1 calc((34rem - 100%) * 999)" }}>
           {pair.map((option) => {
-            const days = intervalDaysForBox(nextBoxFor(currentBox, option.rating));
+            const days = intervalDaysForBox(lapsedThisSession ? 1 : nextBoxFor(currentBox, option.rating));
             return (
               <motion.button
                 key={option.rating}
@@ -1039,15 +1126,23 @@ export function FlashcardsLab({ courseId, courseTitle, hasExplication, onAskInCh
       setLoad({ status: "ready", cards: memo });
       return;
     }
-    const controller = new AbortController();
     setLoad({ status: "loading" });
-    fetchDeck(courseId, controller.signal).then((next) => {
-      if (controller.signal.aborted) return;
-      if (next.status === "ready" && next.cards.length > 0) deckCache.set(courseId, next.cards);
-      setLoad(next);
+    // The in-flight key includes the user, so wait for auth to settle:
+    // starting under "anon" and again under the real id once it resolves
+    // would be exactly the double request the registry exists to prevent.
+    // (The review UI waits for auth anyway, to hydrate the progress.)
+    if (authLoading) return;
+    // Adopts the request a previous mount left running, if any. The request
+    // itself is never aborted: unmounting (or switching course) only stops
+    // THIS instance from applying its result.
+    let active = true;
+    void loadDeck(userId, courseId).then((next) => {
+      if (active) setLoad(next);
     });
-    return () => controller.abort();
-  }, [courseId, hasExplication, reloadNonce]);
+    return () => {
+      active = false;
+    };
+  }, [courseId, hasExplication, reloadNonce, authLoading, userId]);
 
   useEffect(() => {
     if (load.status !== "loading") {
@@ -1135,7 +1230,8 @@ export function FlashcardsLab({ courseId, courseTitle, hasExplication, onAskInCh
     flippedRef.current = false; // blocks a second rating before the next render
 
     const timestamp = Date.now();
-    setProgress((previous) => ({ ...previous, [cardId]: scheduleRating(previous[cardId], rating, timestamp) }));
+    const lapsed = lapsedInSession(current, cardId);
+    setProgress((previous) => ({ ...previous, [cardId]: scheduleRating(previous[cardId], rating, timestamp, lapsed) }));
 
     // "À revoir" re-queues the card once at the end of this session (unless
     // it's already pending there) — real active recall, not just a reschedule.
@@ -1246,8 +1342,28 @@ export function FlashcardsLab({ courseId, courseTitle, hasExplication, onAskInCh
 
   // --- Keyboard -----------------------------------------------------------------
 
+  // The shortcuts listen on window, so without this they'd act on keys
+  // pressed anywhere on the page whenever focus sits on <body> or another
+  // scroll container (Space scrolling the chat would flip the card, a digit
+  // would rate it). They only act once the student has last clicked or
+  // focused INSIDE the deck; a click or focus anywhere else disengages them.
+  const isEngagedRef = useRef(false);
+  useEffect(() => {
+    const track = (event: Event) => {
+      const root = rootRef.current;
+      isEngagedRef.current = !!root && event.target instanceof Node && root.contains(event.target);
+    };
+    document.addEventListener("pointerdown", track, true);
+    document.addEventListener("focusin", track, true);
+    return () => {
+      document.removeEventListener("pointerdown", track, true);
+      document.removeEventListener("focusin", track, true);
+    };
+  }, []);
+
   const keyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
   keyHandlerRef.current = (event: KeyboardEvent) => {
+    if (!isEngagedRef.current) return;
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
     const root = rootRef.current;
     if (!root || root.getClientRects().length === 0) return; // unmounted-from-layout / hidden tab
@@ -1267,7 +1383,7 @@ export function FlashcardsLab({ courseId, courseTitle, hasExplication, onAskInCh
     }
 
     if (view === "review") {
-      const rating = RATING_BY_KEY[event.key];
+      const rating = ratingForKeyEvent(event);
       if (rating && reviewCard && flippedRef.current && !event.repeat) {
         event.preventDefault();
         rate(rating);
@@ -1407,7 +1523,12 @@ export function FlashcardsLab({ courseId, courseTitle, hasExplication, onAskInCh
         </motion.div>
 
         {flipped ? (
-          <RatingBar currentBox={state?.box ?? 1} onRate={rate} reduceMotion={reduceMotion} />
+          <RatingBar
+            currentBox={state?.box ?? 1}
+            lapsedThisSession={lapsedInSession(session, reviewCard.id)}
+            onRate={rate}
+            reduceMotion={reduceMotion}
+          />
         ) : (
           <PillButton variant="primary" onClick={toggleFlip} className="min-h-[3.5rem] w-full rounded-2xl" ariaKeyShortcuts="Space">
             <Eye className="h-4 w-4" />

@@ -8,7 +8,7 @@ import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { lookupFlashcardsCache, storeFlashcardsCache, recordFlashcardsCacheHit, type FlashcardQA } from "@/lib/flashcards-content-cache";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
-import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { errorMessage, parseJsonResponse, sanitizeForPostgres, upstreamStatusForClient } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
       reserved = false;
       await refundGeneration(user.id);
       if (error instanceof OpenRouterError) {
-        return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+        return NextResponse.json({ success: false, error: error.message }, { status: upstreamStatusForClient(error.status) });
       }
       console.error("[studio/flashcards] Échec appel IA (ensemble définitif):", error);
       return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
     if (reserved) await refundGeneration(user.id);
     console.error("[studio/flashcards] Erreur non gérée:", error);
     if (error instanceof OpenRouterError) {
-      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+      return NextResponse.json({ success: false, error: error.message }, { status: upstreamStatusForClient(error.status) });
     }
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
   }

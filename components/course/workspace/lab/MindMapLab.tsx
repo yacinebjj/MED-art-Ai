@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -836,6 +837,66 @@ function describeError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+// --- Generation requests (module-level, survive remounts) --------------------
+
+type GenerationOutcome = { ok: true; entry: CachedMindMap } | { ok: false; error: string };
+
+const GENERATION_FAILED = "La génération de la carte mentale a échoué. Réessaie.";
+
+/**
+ * Generations in flight, keyed `${userId ?? "anon"}:${courseId}`.
+ * Module-level on purpose (same idea as ClinicalCaseSimulator's store): the
+ * panel remounts when the Studio pane is expanded/collapsed, the Lab tool
+ * changes, or the course changes and back. A request owned by component
+ * state would be orphaned by that remount — its result never shown — and the
+ * student, back on the empty state, would click "Générer" again and pay a
+ * second time. So the request outlives the instance that started it, writes
+ * the localStorage cache itself, and whichever instance is mounted for that
+ * key when it settles adopts the result.
+ */
+const inFlight = new Map<string, Promise<GenerationOutcome>>();
+
+function inFlightKey(userId: string | null, courseId: number): string {
+  return `${userId ?? "anon"}:${courseId}`;
+}
+
+async function requestMindMap(userId: string | null, courseId: number): Promise<GenerationOutcome> {
+  try {
+    const res = await fetch("/api/studio/mindmap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ courseId }),
+    });
+    const data = ((await res.json().catch(() => null)) ?? {}) as { success?: unknown; error?: unknown; mindmap?: unknown };
+    if (!res.ok || data.success !== true) {
+      throw new Error(
+        res.status === 429 ? buildRateLimitMessage(res) : typeof data.error === "string" && data.error ? data.error : GENERATION_FAILED
+      );
+    }
+    if (!isMindMapData(data.mindmap)) {
+      throw new Error("Réponse inattendue du serveur. Réessaie.");
+    }
+    const entry: CachedMindMap = { generatedAt: new Date().toISOString(), mindmap: data.mindmap };
+    // Cached even if no instance is mounted any more (or the student switched course): the generation was paid for, it must be there next time.
+    if (userId) writeCachedMindMap(userId, courseId, entry);
+    return { ok: true, entry };
+  } catch (failure) {
+    return { ok: false, error: describeError(failure, GENERATION_FAILED) };
+  }
+}
+
+/** Returns the generation already in flight for this key, or starts one — never two at once. */
+function startGeneration(userId: string | null, courseId: number): Promise<GenerationOutcome> {
+  const key = inFlightKey(userId, courseId);
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const promise = requestMindMap(userId, courseId).finally(() => {
+    if (inFlight.get(key) === promise) inFlight.delete(key);
+  });
+  inFlight.set(key, promise);
+  return promise;
+}
+
 function buildNodePrompt(tree: FlatTree, id: string, courseTitle: string): string {
   const node = tree.get(id);
   if (!node) return "";
@@ -982,16 +1043,22 @@ function MindMapEmptyState({ error, onGenerate }: { error: string | null; onGene
 // SVG layer (memoised: panning/zooming never re-renders the nodes)
 // ---------------------------------------------------------------------------
 
+/** DOM id of a node's element — referenced by the canvas's aria-activedescendant. Prefixed per viewer instance (useId) so two mounted maps can never collide. */
+function nodeElementId(prefix: string, id: string): string {
+  return `${prefix}-node-${id}`;
+}
+
 interface MapLayerProps {
   layout: MapLayout;
   tree: FlatTree;
   selectedId: string | null;
   reduceMotion: boolean;
+  idPrefix: string;
   onNodeClick: (id: string) => void;
   onNodeToggle: (id: string) => void;
 }
 
-const MapLayer = memo(function MapLayer({ layout, tree, selectedId, reduceMotion, onNodeClick, onNodeToggle }: MapLayerProps) {
+const MapLayer = memo(function MapLayer({ layout, tree, selectedId, reduceMotion, idPrefix, onNodeClick, onNodeToggle }: MapLayerProps) {
   const transition: Transition = reduceMotion ? { duration: 0 } : { duration: 0.32, ease: EASE };
 
   return (
@@ -1064,6 +1131,7 @@ const MapLayer = memo(function MapLayer({ layout, tree, selectedId, reduceMotion
                 exit="exit"
                 transition={transition}
                 className="cursor-pointer"
+                id={nodeElementId(idPrefix, id)}
                 role="treeitem"
                 aria-label={flat.label}
                 aria-level={flat.depth + 1}
@@ -1164,6 +1232,7 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
   const { mindmap, generatedAt } = entry;
   const reduceMotion = Boolean(useReducedMotion());
   const tree = useMemo(() => flattenMindMap(mindmap), [mindmap]);
+  const idPrefix = `mindmap${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1413,6 +1482,13 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
 
   function handlePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     if (!pointersRef.current.has(event.pointerId)) return;
+    // Mouse/pen released outside the canvas without capture (capture is best-effort,
+    // and is only taken once the drag passes the threshold): the pointerup never
+    // reached us, so the next hover would keep panning. No button held = it ended.
+    if (event.pointerType !== "touch" && event.buttons === 0) {
+      handlePointerEnd(event);
+      return;
+    }
     const point = toLocal(event.clientX, event.clientY);
     pointersRef.current.set(event.pointerId, point);
     const gesture = gestureRef.current;
@@ -1497,9 +1573,31 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    // Escape deselects from anywhere in the canvas, detail card buttons included.
+    // preventDefault marks it as handled: the Studio overlay ignores a
+    // defaultPrevented Escape, so closing the detail never closes the pane too.
+    // With nothing selected it's left alone, and the overlay may close.
+    if (event.key === "Escape") {
+      if (selectedId) {
+        event.preventDefault();
+        const fromDrawer = event.target instanceof Node && !!drawerRef.current?.contains(event.target);
+        setSelectedId(null);
+        // The detail card unmounts with the selection — don't strand focus on a removed button.
+        if (fromDrawer) canvasRef.current?.focus({ preventScroll: true });
+      }
+      return;
+    }
     // Keys pressed on the overlay buttons (zoom, detail card) belong to those buttons.
     if (event.target !== event.currentTarget || !layout) return;
     const current = selectedId && layout.nodes.has(selectedId) ? selectedId : null;
+
+    // "0" = fit, matched on the physical key: on AZERTY the unshifted 0 key types "à".
+    // event.key stays as a fallback; modifiers are left to the browser (Ctrl+0 resets the page zoom).
+    if ((event.code === "Digit0" || event.code === "Numpad0" || event.key === "0") && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      fitToScreen();
+      return;
+    }
 
     switch (event.key) {
       case "ArrowRight": {
@@ -1543,13 +1641,6 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
         toggleNode(current);
         return;
       }
-      case "Escape": {
-        if (current) {
-          event.preventDefault();
-          setSelectedId(null);
-        }
-        return;
-      }
       case "+":
       case "=": {
         event.preventDefault();
@@ -1560,11 +1651,6 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
       case "_": {
         event.preventDefault();
         zoomBy(1 / BUTTON_ZOOM_STEP);
-        return;
-      }
-      case "0": {
-        event.preventDefault();
-        fitToScreen();
         return;
       }
       default:
@@ -1623,6 +1709,24 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
 
   const selectedFlat = selectedId ? tree.get(selectedId) ?? null : null;
   const selectedLayout = selectedId && layout ? layout.nodes.get(selectedId) ?? null : null;
+  // Focus stays on the canvas while the arrows move the selection, so screen
+  // readers need both: aria-activedescendant pointing at the selected node,
+  // and a polite live region spelling out where it sits in the tree.
+  const activeDescendant = selectedLayout && selectedId ? nodeElementId(idPrefix, selectedId) : undefined;
+  let selectionAnnouncement = "";
+  if (selectedFlat) {
+    const ancestors = pathLabels(tree, selectedFlat.id).slice(0, -1);
+    const branchState =
+      selectedFlat.childIds.length === 0
+        ? ""
+        : selectedLayout?.collapsed
+          ? ` Branche repliée, ${selectedFlat.descendantCount} point${selectedFlat.descendantCount > 1 ? "s" : ""}.`
+          : " Branche dépliée.";
+    selectionAnnouncement =
+      ancestors.length === 0
+        ? `Sujet central : ${selectedFlat.label}.${branchState}`
+        : `${selectedFlat.label}. Chemin : ${ancestors.join(" › ")}.${branchState}`;
+  }
   const totalNodes = tree.size;
   const gridSize = Math.max(10, 22 * view.k);
 
@@ -1741,6 +1845,7 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
         role="application"
         aria-roledescription="carte mentale"
         aria-label={`Carte mentale « ${mindmap.title} ». Flèches pour naviguer entre les nœuds, Entrée pour déplier ou replier, + et − pour zoomer, 0 pour ajuster.`}
+        aria-activedescendant={activeDescendant}
         onKeyDown={handleKeyDown}
         className={cn(
           CANVAS_FRAME,
@@ -1776,6 +1881,7 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
                 tree={tree}
                 selectedId={selectedId}
                 reduceMotion={reduceMotion}
+                idPrefix={idPrefix}
                 onNodeClick={handleNodeClick}
                 onNodeToggle={handleNodeToggle}
               />
@@ -1883,6 +1989,10 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
         </AnimatePresence>
       </div>
 
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {selectionAnnouncement}
+      </p>
+
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         Glisse le fond pour te déplacer · Ctrl + molette ou pincement pour zoomer · clique un nœud pour son détail, sur +/− pour le déplier ·
         au clavier : flèches puis Entrée.
@@ -1914,6 +2024,32 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
   // Guards against a response for a previous course/user landing in the current view.
   const scope = `${userId ?? "anonyme"}:${courseId}`;
   const scopeRef = useRef(scope);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  /**
+   * Shows the generating state until `promise` (from startGeneration —
+   * started by this instance or left running by a previous mount) settles,
+   * then displays its result — only if this instance is still mounted and
+   * still on the same course/user.
+   */
+  const adopt = useCallback((promise: Promise<GenerationOutcome>) => {
+    const requestScope = scopeRef.current;
+    setPending(true);
+    setError(null);
+    void promise.then((outcome) => {
+      if (!mountedRef.current || scopeRef.current !== requestScope) return;
+      if (outcome.ok) setEntry(outcome.entry);
+      else setError(outcome.error);
+      setPending(false);
+    });
+  }, []);
 
   useEffect(() => {
     scopeRef.current = scope;
@@ -1925,42 +2061,17 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
     setPending(false);
     setError(null);
     setCacheReady(true);
-  }, [authLoading, courseId, scope, userId]);
+    // A generation started before a remount (or before switching course and
+    // back) is still running: show it as such and pick up its result rather
+    // than offering — and charging — a second one.
+    const running = inFlight.get(inFlightKey(userId, courseId));
+    if (running) adopt(running);
+  }, [adopt, authLoading, courseId, scope, userId]);
 
-  const generate = useCallback(async () => {
-    const requestScope = scopeRef.current;
-    const isCurrent = () => scopeRef.current === requestScope;
-    setPending(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/studio/mindmap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ courseId }),
-      });
-      const data = ((await res.json().catch(() => null)) ?? {}) as { success?: unknown; error?: unknown; mindmap?: unknown };
-      if (!res.ok || data.success !== true) {
-        throw new Error(
-          res.status === 429
-            ? buildRateLimitMessage(res)
-            : typeof data.error === "string" && data.error
-              ? data.error
-              : "La génération de la carte mentale a échoué. Réessaie."
-        );
-      }
-      if (!isMindMapData(data.mindmap)) {
-        throw new Error("Réponse inattendue du serveur. Réessaie.");
-      }
-      const next: CachedMindMap = { generatedAt: new Date().toISOString(), mindmap: data.mindmap };
-      // Cached even if the student has switched course meanwhile: the generation was paid for, it must be there next time.
-      if (userId) writeCachedMindMap(userId, courseId, next);
-      if (isCurrent()) setEntry(next);
-    } catch (failure) {
-      if (isCurrent()) setError(describeError(failure, "La génération de la carte mentale a échoué. Réessaie."));
-    } finally {
-      if (isCurrent()) setPending(false);
-    }
-  }, [courseId, userId]);
+  const generate = useCallback(() => {
+    // startGeneration hands back the running request if there is one, so a double click never pays twice.
+    adopt(startGeneration(userId, courseId));
+  }, [adopt, courseId, userId]);
 
   let content: ReactNode;
   if (!cacheReady) {

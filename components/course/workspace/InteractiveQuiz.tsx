@@ -427,6 +427,8 @@ interface PersistedQuizState {
   gradedQrocs: Record<number, boolean>;
   /** Mode Concours confidence ratings — absent in progress saved before that mode existed. */
   confidence?: Record<number, Confidence>;
+  /** Mode Concours countdown, so a remount (full-screen toggle, Zen) resumes the same timed run. */
+  timer?: { mode: TimerMode; startedAt: number | null };
 }
 
 const QUIZ_PROGRESS_STORAGE_PREFIX = "medart:quiz-progress:";
@@ -532,11 +534,20 @@ export function InteractiveQuiz({
       saved = null; // Corrupted or unavailable localStorage — start fresh, never crash the quiz over it.
     }
 
+    // Mode Concours state is restored even before any answer exists — the
+    // student may have rated certainty or started the clock, then remounted.
+    if (concoursTools && saved) {
+      setConfidence(saved.confidence ?? {});
+      if (saved.timer) {
+        setTimerMode(saved.timer.mode);
+        setTimerStartedAt(saved.timer.startedAt);
+      }
+    }
+
     if (saved && Object.keys(saved.qcmAnswers ?? {}).length > 0) {
       setQcmAnswers(saved.qcmAnswers);
       setRevealedQrocs(saved.revealedQrocs ?? {});
       setGradedQrocs(saved.gradedQrocs ?? {});
-      setConfidence(saved.confidence ?? {});
       toast({
         variant: "info",
         title: "Progression restaurée",
@@ -552,14 +563,20 @@ export function InteractiveQuiz({
   // this can't cycle back into itself.
   useEffect(() => {
     if (!userId) return;
-    if (Object.keys(qcmAnswers).length === 0 && Object.keys(revealedQrocs).length === 0) return;
+    const hasConcoursState = concoursTools && (Object.keys(confidence).length > 0 || timerMode !== "libre");
+    if (Object.keys(qcmAnswers).length === 0 && Object.keys(revealedQrocs).length === 0 && !hasConcoursState) return;
     try {
-      const state: PersistedQuizState = { qcmAnswers, revealedQrocs, gradedQrocs, ...(concoursTools ? { confidence } : {}) };
+      const state: PersistedQuizState = {
+        qcmAnswers,
+        revealedQrocs,
+        gradedQrocs,
+        ...(concoursTools ? { confidence, timer: { mode: timerMode, startedAt: timerStartedAt } } : {}),
+      };
       localStorage.setItem(quizProgressStorageKey(userId, courseSlug), JSON.stringify(state));
     } catch {
       // Quota exceeded / private mode — losing the local save is not worth interrupting the quiz over.
     }
-  }, [courseSlug, userId, qcmAnswers, revealedQrocs, gradedQrocs, confidence, concoursTools]);
+  }, [courseSlug, userId, qcmAnswers, revealedQrocs, gradedQrocs, confidence, concoursTools, timerMode, timerStartedAt]);
 
   function handleTimerModeChange(mode: TimerMode) {
     setTimerMode(mode);

@@ -17,7 +17,8 @@
  * - ±15 s, persisted playback speed, Media Session (lock-screen controls);
  * - "Moments clés": timestamped, optionally labelled bookmarks persisted per
  *   episode in localStorage, also drawn as markers on the waveform;
- * - keyboard: Space play/pause, ←/→ ±5 s, B bookmark — ignored while a text
+ * - keyboard: Space play/pause, ←/→ ±5 s, B bookmark — active only once the
+ *   student last clicked/focused inside the player, and ignored while a text
  *   field (or a foreign menu/dialog) has focus.
  *
  * There is deliberately no transcript view: the podcast script is not
@@ -794,8 +795,28 @@ export function AudioPodcastViewer({ audioUrl, courseTitle }: { audioUrl: string
 
   // --- Keyboard ------------------------------------------------------------------------
 
+  // The shortcuts listen on window, so without this they'd fire for keys
+  // pressed anywhere on the page whenever focus sits on <body> or another
+  // scroll container (Space scrolling the chat would toggle playback). They
+  // only act once the student has last clicked or focused INSIDE the player;
+  // a click or focus anywhere else disengages them.
+  const isEngagedRef = useRef(false);
+  useEffect(() => {
+    const track = (event: Event) => {
+      const root = rootRef.current;
+      isEngagedRef.current = !!root && event.target instanceof Node && root.contains(event.target);
+    };
+    document.addEventListener("pointerdown", track, true);
+    document.addEventListener("focusin", track, true);
+    return () => {
+      document.removeEventListener("pointerdown", track, true);
+      document.removeEventListener("focusin", track, true);
+    };
+  }, []);
+
   const keyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
   keyHandlerRef.current = (event: KeyboardEvent) => {
+    if (!isEngagedRef.current) return;
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
     const root = rootRef.current;
     if (!root || root.getClientRects().length === 0) return; // hidden tab
@@ -913,6 +934,11 @@ export function AudioPodcastViewer({ audioUrl, courseTitle }: { audioUrl: string
     [bookmarks, duration]
   );
   const downloadName = `podcast-${courseTitle.replace(/[^a-zA-Z0-9-_]/g, "_")}.mp3`;
+  // The `download` attribute is ignored for cross-origin URLs (the Supabase
+  // public Storage URL), so a plain link would navigate away from the
+  // workspace to the raw MP3. Supabase's own `download` query parameter makes
+  // the server answer with Content-Disposition: attachment instead.
+  const downloadHref = `${audioUrl}${audioUrl.includes("?") ? "&" : "?"}download=${encodeURIComponent(downloadName)}`;
 
   return (
     <div ref={rootRef} className="mx-auto flex w-full max-w-2xl flex-col gap-4">
@@ -1212,9 +1238,12 @@ export function AudioPodcastViewer({ audioUrl, courseTitle }: { audioUrl: string
       </section>
 
       <div className="flex justify-center">
+        {/* target="_blank" is a safety net: if the attachment header were ever missing, the file opens in a new tab instead of replacing the workspace. */}
         <a
-          href={audioUrl}
+          href={downloadHref}
           download={downloadName}
+          target="_blank"
+          rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-bold text-white shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 hover:shadow-glow dark:bg-primary-500 dark:hover:bg-primary-400"
         >
           <Download className="h-4 w-4" />

@@ -166,9 +166,12 @@ export type ChunkSource = { studioCourseId: number } | { legacyCourseSlug: strin
  * course text anywhere upstream — that fallback no longer exists in this
  * codebase, by strict product rule (see this route's own callers).
  */
-export async function retrieveRelevantContext(question: string, source: ChunkSource): Promise<string | null> {
+export async function retrieveRelevantContext(question: string, source: ChunkSource, broadHint?: string): Promise<string | null> {
   if (!isSupabaseConfigured()) return null;
-  const topK = BROAD_QUESTION_PATTERN.test(question) ? TOP_K_BROAD : TOP_K;
+  // `broadHint` (the student's current message alone) decides breadth when
+  // given — `question` may carry history text, and a "résumé" in a PREVIOUS
+  // answer must not widen THIS turn's retrieval.
+  const topK = BROAD_QUESTION_PATTERN.test(broadHint ?? question) ? TOP_K_BROAD : TOP_K;
 
   try {
     const supabase = getSupabaseAdmin();
@@ -265,10 +268,11 @@ interface LabeledExplicationChapterRow extends ExplicationChapterRow {
  */
 export async function retrieveRelevantContextForStudioCourses(
   question: string,
-  courses: { id: number; title: string }[]
+  courses: { id: number; title: string }[],
+  broadHint?: string
 ): Promise<string | null> {
   if (!isSupabaseConfigured() || courses.length === 0) return null;
-  const isBroad = BROAD_QUESTION_PATTERN.test(question);
+  const isBroad = BROAD_QUESTION_PATTERN.test(broadHint ?? question);
   // One extra slot per additional course (capped at the broad budget) so a
   // second checked source isn't always crowded out by the first.
   const topK = isBroad ? TOP_K_BROAD : Math.min(TOP_K + courses.length - 1, TOP_K_BROAD);
@@ -301,6 +305,10 @@ export async function retrieveRelevantContextForStudioCourses(
         similarity: cosineSimilarity(questionEmbedding, toEmbeddingArray(row.embedding)),
       }))
       .sort((a, b) => b.similarity - a.similarity)
+      // The same polycop imported into two checked courses yields identical
+      // chunks — without this, duplicates would take the slots meant for the
+      // other sources.
+      .filter((row, index, all) => all.findIndex((other) => other.content === row.content) === index)
       .slice(0, topK);
 
     if (ranked.length === 0) return null;
@@ -317,9 +325,14 @@ export async function retrieveRelevantContextForStudioCourses(
       }
     }
 
+    // Two retrieved chunks can map to the same Explication chapter — its
+    // polished text is emitted once; later slots fall back to their raw chunk.
+    const emittedChapters = new Set<LabeledExplicationChapterRow>();
     const slots = ranked.map((r) => {
       const header = `[Source : "${titleById.get(r.courseId) ?? "Cours"}"]`;
-      const chapter = r.chunkIndex !== undefined ? chapterByKey.get(`${r.courseId}:${r.chunkIndex}`) : undefined;
+      const mappedChapter = r.chunkIndex !== undefined ? chapterByKey.get(`${r.courseId}:${r.chunkIndex}`) : undefined;
+      const chapter = mappedChapter && !emittedChapters.has(mappedChapter) ? mappedChapter : undefined;
+      if (chapter) emittedChapters.add(chapter);
       if (!chapter) return `${header}\n${truncateToBudget(r.content, MAX_CHUNK_CHARS_FOR_CHAT)}`;
 
       const polished = truncateToBudget(chapter.content, EXPLICATION_SLOT_CHARS);

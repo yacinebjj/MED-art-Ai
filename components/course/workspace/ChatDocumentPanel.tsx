@@ -98,6 +98,8 @@ interface ChatDocumentPanelProps {
   sourceCount: number;
   messages: ChatMessage[];
   isTyping: boolean;
+  /** True from send until the reply has fully streamed (isTyping drops at the first chunk). Blocks sends/regenerations meanwhile. Defaults to isTyping. */
+  isBusy?: boolean;
   input: string;
   onInputChange: (value: string) => void;
   onSend: () => void;
@@ -214,6 +216,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     sourceCount,
     messages,
     isTyping,
+    isBusy: isBusyProp,
     input,
     onInputChange,
     onSend,
@@ -253,6 +256,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   const { language } = useLanguage();
   const { toast } = useToast();
   const speakingId = useSpeakingId();
+  const isBusy = isBusyProp ?? isTyping;
 
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
@@ -300,6 +304,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   useEffect(() => {
     return () => {
       if (copyResetTimeoutRef.current) clearTimeout(copyResetTimeoutRef.current);
+      // A reply being read aloud must not keep talking once the workspace is gone.
+      stopSpeaking();
     };
   }, []);
 
@@ -329,7 +335,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }
 
-  const canSend = input.trim().length > 0 && input.length <= MAX_MESSAGE_CHARS && !isTyping && dictation.state !== "transcribing";
+  const canSend = input.trim().length > 0 && input.length <= MAX_MESSAGE_CHARS && !isBusy && dictation.state !== "transcribing";
 
   function submit() {
     if (!canSend) return;
@@ -411,7 +417,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   }
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
-    if (!onImportFiles) return;
+    // Only file drops are ours — dragged TEXT must still land in the composer normally.
+    if (!onImportFiles || !e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     setIsDragOver(false);
     handleFiles(e.dataTransfer.files);
@@ -521,7 +528,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                     transition={{ delay: index * 0.05, type: "spring", stiffness: 380, damping: 30 }}
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
-                    disabled={isTyping}
+                    disabled={isBusy}
                     onClick={() => (onSendPrompt ? onSendPrompt(prompt) : onInputChange(prompt))}
                     className="group flex items-start gap-2 rounded-2xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--card)_60%,transparent)] p-3 text-left text-xs font-medium text-[color-mix(in_oklab,var(--foreground)_85%,transparent)] backdrop-blur-md transition-colors hover:border-primary-300 hover:bg-primary-50/60 disabled:opacity-50 dark:hover:border-primary-700 dark:hover:bg-primary-950/30"
                   >
@@ -548,13 +555,19 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           }
 
           const cleanContent = stripReasoning(message.content);
-          const isStreaming = isLast && (isTyping || cleanContent.length === 0);
-          const showToolbar = cleanContent.length > 0 && !(isLast && isTyping);
+          const isStreaming = isLast && (isBusy || cleanContent.length === 0);
+          const showToolbar = cleanContent.length > 0 && !isStreaming;
 
           return (
             <div key={message.id} className="group animate-in fade-in slide-in-from-bottom-2 space-y-2 duration-300 ease-out">
               {useRichRenderer ? (
-                <ChatRichMarkdown content={cleanContent} dark={dark} citationSources={citationSources ?? []} onOpenSource={onOpenCitationSource} />
+                <ChatRichMarkdown
+                  content={cleanContent}
+                  dark={dark}
+                  citationSources={citationSources ?? []}
+                  onOpenSource={onOpenCitationSource}
+                  isStreaming={isStreaming}
+                />
               ) : (
                 <article className={cn(dark ? DARK_CHAT_PROSE_CLASSES : CHAT_PROSE_CLASSES, "max-w-none")}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={dark ? DARK_CHAT_MARKDOWN_COMPONENTS : CHAT_MARKDOWN_COMPONENTS}>
@@ -568,7 +581,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                     {copiedMessageId === message.id ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                   </IconButton>
                   {onRegenerate && (
-                    <IconButton label="Régénérer la réponse" disabled={isTyping} onClick={() => onRegenerate(message.id)}>
+                    <IconButton label="Régénérer la réponse" disabled={isBusy} onClick={() => onRegenerate(message.id)}>
                       <RefreshCw className="h-4 w-4" />
                     </IconButton>
                   )}

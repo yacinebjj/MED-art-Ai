@@ -380,6 +380,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   uploadRequestNonce = 0,
   loadedCourses,
   onSearchSources,
+  onViewSourceFile,
 }: {
   courses: StudioCourseSummary[];
   activeCourseId: number | null;
@@ -414,6 +415,8 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   loadedCourses?: Map<number, StudioCourseFull>;
   /** Full-text search through the module's sources (loads any course not fetched yet). Optional: omitted, the search box only searches the web. */
   onSearchSources?: (query: string) => Promise<SourceSearchHit[]>;
+  /** Opens a source's document without making it the active course (search hits). Falls back to onShowCourseFile. */
+  onViewSourceFile?: (id: number) => void;
 }) {
   const { language } = useLanguage();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -424,9 +427,15 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   const [searchHits, setSearchHits] = useState<SourceSearchHit[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const searchRunRef = useRef(0);
+  // Starts at the nonce current on mount — a request consumed by a previous
+  // instance (before Zen / split-screen / a mobile tab switch remounted this
+  // panel) must not pop the modal open again.
+  const consumedUploadNonceRef = useRef(uploadRequestNonce);
 
   useEffect(() => {
-    if (uploadRequestNonce > 0) setUploadOpen(true);
+    if (uploadRequestNonce === consumedUploadNonceRef.current) return;
+    consumedUploadNonceRef.current = uploadRequestNonce;
+    setUploadOpen(true);
   }, [uploadRequestNonce]);
 
   // Debounced in-source search — every keystroke past 3 characters reruns
@@ -435,6 +444,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   useEffect(() => {
     const query = webSearchQuery.trim();
     if (!onSearchSources || query.length < 3) {
+      searchRunRef.current++;
       setSearchHits(null);
       setIsSearching(false);
       return;
@@ -584,7 +594,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                       <button
                         key={`${hit.courseId}-${index}`}
                         type="button"
-                        onClick={() => onShowCourseFile(hit.courseId)}
+                        onClick={() => (onViewSourceFile ?? onShowCourseFile)(hit.courseId)}
                         className="block w-full rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent"
                       >
                         <span className="block truncate text-[11px] font-semibold text-primary-700 dark:text-primary-300">{hit.courseTitle}</span>
@@ -964,23 +974,20 @@ export default function ModuleWorkspacePage() {
     };
   }, []);
 
+  /** Total notes in "Mes notes", read from the server — never guessed client-side (a save may append to an existing module note rather than create one). */
+  const refreshNotesCount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notes");
+      const data = (await res.json().catch(() => null)) as { success?: boolean; notes?: unknown[] } | null;
+      if (res.ok && data?.success && Array.isArray(data.notes)) setNotesCount(data.notes.length);
+    } catch {
+      // The counter simply keeps its last value (or stays hidden).
+    }
+  }, []);
+
   useEffect(() => {
-    if (!Number.isFinite(moduleId)) return;
-    let cancelled = false;
-    fetch("/api/notes")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { success?: boolean; notes?: { moduleId: number | null }[] } | null) => {
-        if (!cancelled && data?.success && Array.isArray(data.notes)) {
-          setNotesCount(data.notes.filter((note) => note.moduleId === moduleId).length);
-        }
-      })
-      .catch(() => {
-        // The counter simply stays hidden.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [moduleId]);
+    void refreshNotesCount();
+  }, [refreshNotesCount]);
 
   const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
@@ -1001,6 +1008,9 @@ export default function ModuleWorkspacePage() {
   // <aside> to w-20" mechanism Studio already had, so Chat's flex-1 middle
   // section naturally reclaims the freed width with zero grid changes.
   const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(false);
+  useEffect(() => {
+    if (window.innerWidth < 1024) setIsSourcesCollapsed(true);
+  }, []);
   // Multi-select CHAT-CONTEXT sources (Point 2) — deliberately independent
   // of `activeCourse` (which course's Studio tiles are showing): a student
   // can check several sources into the Chat's context without "opening"
@@ -1089,7 +1099,9 @@ export default function ModuleWorkspacePage() {
     () => ({ mode: chatMode, sourceCourseIds: Array.from(selectedSourceIds), structured: true }),
     [chatMode, selectedSourceIds]
   );
-  const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, regenerateFrom, clearMessages } = useCourseChat(courseChatSlug, chatRequestExtras);
+  const { chatMessages, chatInput, setChatInput, isTyping, isStreaming, sendChatMessage, regenerateFrom, clearMessages } = useCourseChat(courseChatSlug, chatRequestExtras);
+  /** True from send until the reply has fully streamed — the guard against a second overlapping request. */
+  const isChatBusy = isTyping || isStreaming;
 
   useEffect(() => {
     if (!Number.isFinite(moduleId)) return;
@@ -1702,7 +1714,7 @@ export default function ModuleWorkspacePage() {
   function handleSend() {
     const text = chatInput.trim();
     if (!text) return;
-    if (isTyping) return;
+    if (isChatBusy) return;
 
     setChatInput("");
     sendChatMessage(text);
@@ -1710,7 +1722,7 @@ export default function ModuleWorkspacePage() {
 
   /** Starter suggestions and Lab tools ("Approfondir dans le chat") — sends a ready-made prompt straight away, bringing the chat into view first. */
   function handleSendPrompt(prompt: string) {
-    if (isTyping) {
+    if (isChatBusy) {
       toast({ variant: "error", title: "MedArt répond déjà", description: "Attends la fin de la réponse en cours." });
       return;
     }
@@ -1743,7 +1755,7 @@ export default function ModuleWorkspacePage() {
   function sendSelectionQuickAction(text: string, mode: "ask" | "translate") {
     // Mirrors handleSend's own guard — never fire a second overlapping
     // request while one is still streaming in.
-    if (isTyping) {
+    if (isChatBusy) {
       toast({ variant: "error", title: "MedArt répond déjà", description: "Attends la fin de la réponse en cours." });
       return;
     }
@@ -1797,6 +1809,33 @@ export default function ModuleWorkspacePage() {
     }
     toast({ variant: "success", title: "Cours supprimé" });
   }, [activeCourse, toast, language]);
+
+  /**
+   * Opens a source's document WITHOUT making it the active course — used by
+   * citation chips and source-search hits. Switching the active course
+   * would swap the chat to that course's own thread (history is per
+   * course), wiping the conversation the student was reading.
+   */
+  const handleViewSourceFile = useCallback(
+    async (courseId: number) => {
+      const cached = courseCacheRef.current.get(courseId);
+      if (cached) {
+        setFileViewerCourse(cached);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/studio/courses/${courseId}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data?.error ?? "Impossible de charger ce cours.");
+        courseCacheRef.current.set(courseId, data.course);
+        setCacheVersion((v) => v + 1);
+        setFileViewerCourse(data.course as StudioCourseFull);
+      } catch (error) {
+        toast({ variant: "error", title: tModulePage("toastLoadFailed", language), description: error instanceof Error ? error.message : "Erreur inconnue." });
+      }
+    },
+    [toast, language]
+  );
 
   /** "Afficher le cours" — opens FileViewerModal for this course, loading it first if it isn't already the active one. Fully decoupled from the chat/Studio split-screen. */
   const handleShowCourseFile = useCallback(async (courseId: number) => {
@@ -1865,7 +1904,7 @@ export default function ModuleWorkspacePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
-      if (activeCourse) setNotesCount((count) => (count === null ? count : count + 1));
+      void refreshNotesCount();
       toast({ variant: "success", title: "Réponse enregistrée", description: "Retrouve-la dans « Mes notes »." });
     } catch (error) {
       toast({
@@ -1886,17 +1925,14 @@ export default function ModuleWorkspacePage() {
       const res = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: noteTitle.trim() || activeCourse?.title || moduleTitle,
-          content,
-          moduleId,
-          ...(activeCourse ? { courseTitle: activeCourse.title } : {}),
-        }),
+        // No moduleId on purpose: with one, /api/notes appends to the single
+        // per-module note and discards this note's own title.
+        body: JSON.stringify({ title: noteTitle.trim() || activeCourse?.title || moduleTitle, content }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
 
-      setNotesCount((count) => (count === null ? count : count + 1));
+      void refreshNotesCount();
       setIsNoteOpen(false);
       setNoteContent("");
       setNoteTitle("");
@@ -1923,6 +1959,9 @@ export default function ModuleWorkspacePage() {
 
   // Deep link ?course=<id> — used by the "📎 Source" links the note editor
   // inserts (note → course). Read once the module's course list is known.
+  const activeCourseRef = useRef<StudioCourseFull | null>(null);
+  activeCourseRef.current = activeCourse;
+
   const deepLinkHandledRef = useRef(false);
   useEffect(() => {
     if (deepLinkHandledRef.current || courses.length === 0) return;
@@ -1994,7 +2033,31 @@ export default function ModuleWorkspacePage() {
         setUploadsInFlight((n) => n + 1);
         toast({ variant: "info", title: "Import en cours", description: `${file.name} — extraction du texte…` });
         try {
-          await handleFileSelected(file);
+          if (!activeCourseRef.current) {
+            await handleFileSelected(file);
+          } else {
+            const uploaded = await uploadDocumentDirect(file, moduleId);
+            if (!uploaded.course) throw new Error("La création du cours a échoué.");
+            const created = uploaded.course;
+            setCourses((prev) => [...prev, created]);
+            courseCacheRef.current.set(created.id, {
+              id: created.id,
+              title: created.title,
+              rawText: uploaded.text,
+              explication: null,
+              resume: null,
+              casClinique: null,
+              qcms: null,
+              exemplesAnalogies: null,
+              sourceFileUrl: uploaded.fileUrl,
+              updatedAt: created.createdAt,
+              infographicUrl: null,
+              audioUrl: null,
+            });
+            setCacheVersion((v) => v + 1);
+            setSelectedSourceIds((prev) => new Set(prev).add(created.id));
+            toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} est ajouté et coché comme source du co-pilote.` });
+          }
         } catch (error) {
           toast({
             variant: "error",
@@ -2011,7 +2074,7 @@ export default function ModuleWorkspacePage() {
         }
       }
     },
-    [handleFileSelected, toast]
+    [handleFileSelected, toast, moduleId, language]
   );
 
   const openLabTool = useCallback(
@@ -2095,14 +2158,14 @@ export default function ModuleWorkspacePage() {
   }, [isPaletteOpen, paletteModules, curriculumSpecialtyName, studyYear]);
 
   const pendingGenerations = generatingByKey.size + regeneratingByKey.size;
-  const syncState: WorkspaceSyncState = !isOnline ? "offline" : pendingGenerations + uploadsInFlight > 0 || isTyping ? "working" : "synced";
+  const syncState: WorkspaceSyncState = !isOnline ? "offline" : pendingGenerations + uploadsInFlight > 0 || isChatBusy ? "working" : "synced";
   const syncDetail = !isOnline
     ? "Hors ligne — tes cours et générations déjà enregistrés restent sur ton compte ; reconnecte-toi pour continuer."
     : syncState === "working"
       ? [
           pendingGenerations > 0 ? `${pendingGenerations} génération${pendingGenerations > 1 ? "s" : ""} en cours` : null,
           uploadsInFlight > 0 ? `${uploadsInFlight} import${uploadsInFlight > 1 ? "s" : ""} en cours` : null,
-          isTyping ? "le co-pilote rédige" : null,
+          isChatBusy ? "le co-pilote rédige" : null,
         ]
           .filter(Boolean)
           .join(" · ")
@@ -2304,6 +2367,7 @@ export default function ModuleWorkspacePage() {
       sourceCount={courses.length}
       messages={chatMessages}
       isTyping={isTyping}
+      isBusy={isChatBusy}
       input={chatInput}
       onInputChange={setChatInput}
       onSend={handleSend}
@@ -2324,7 +2388,7 @@ export default function ModuleWorkspacePage() {
       mode={chatMode}
       onModeChange={handleChatModeChange}
       citationSources={citationSources}
-      onOpenCitationSource={handleShowCourseFile}
+      onOpenCitationSource={handleViewSourceFile}
       onImportFiles={handleImportFiles}
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
@@ -2345,6 +2409,7 @@ export default function ModuleWorkspacePage() {
       sourceCount={courses.length}
       messages={chatMessages}
       isTyping={isTyping}
+      isBusy={isChatBusy}
       input={chatInput}
       onInputChange={setChatInput}
       onSend={handleSend}
@@ -2358,7 +2423,7 @@ export default function ModuleWorkspacePage() {
       mode={chatMode}
       onModeChange={handleChatModeChange}
       citationSources={citationSources}
-      onOpenCitationSource={handleShowCourseFile}
+      onOpenCitationSource={handleViewSourceFile}
       onImportFiles={handleImportFiles}
       pendingThinkingLabel={null}
       isSplitScreen={false}
@@ -2543,6 +2608,7 @@ export default function ModuleWorkspacePage() {
     uploadRequestNonce,
     loadedCourses,
     onSearchSources: handleSearchSources,
+    onViewSourceFile: handleViewSourceFile,
   };
 
   return (
@@ -2667,6 +2733,7 @@ export default function ModuleWorkspacePage() {
                 studioPanel
               ) : (
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                  <div className="shrink-0">
                   <MobileStudioCards
                     sections={DEMO_SECTIONS}
                     getSectionStatus={getSectionStatus}
@@ -2678,6 +2745,7 @@ export default function ModuleWorkspacePage() {
                     studyYear={studyYear}
                     sectionMasteryPct={sectionMasteryPct}
                   />
+                  </div>
                   <section aria-label="MedArt Lab" className="space-y-2 px-3 pb-24 pt-1">
                     <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">MedArt Lab</p>
                     <div className="grid grid-cols-2 gap-2">

@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, cloneElement, isValidElement, memo, useMemo, useState, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, memo, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, BadgeCheck, ExternalLink, Lightbulb, Pill, ScanSearch, Siren } from "lucide-react";
@@ -106,17 +106,24 @@ function CitationChip({
   citation,
   sources,
   onOpenSource,
+  verify,
 }: {
   citation: ChatCitation;
   sources: CitationSourceText[];
   onOpenSource?: (sourceId: number) => void;
+  /** False while the reply is still streaming — the chip shows as pending and nothing is searched until the text is final. */
+  verify: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [lastPointer, setLastPointer] = useState<string>("mouse");
   // Recomputed only when the chip or the loaded sources change — the
   // normalization pass over a long course is the expensive part.
-  const location = useMemo(() => locateCitation(citation, sources), [citation, sources]);
-  const status = !location ? "missing" : location.partial ? "partial" : "verified";
+  const { sourceTitle, quote } = citation;
+  const location = useMemo(
+    () => (verify ? locateCitation({ index: 0, sourceTitle, quote }, sources) : null),
+    [verify, sourceTitle, quote, sources]
+  );
+  const status = !verify ? "pending" : !location ? "missing" : location.partial ? "partial" : "verified";
 
   function handleClick() {
     // Touch has no hover: the first tap previews, a second tap opens.
@@ -138,6 +145,7 @@ function CitationChip({
           aria-label={`Citation ${citation.index} — ${citation.sourceTitle}`}
           className={cn(
             "mx-0.5 inline-flex h-[18px] min-w-[18px] -translate-y-0.5 items-center justify-center rounded-md px-1 align-baseline text-[10px] font-bold leading-none no-underline transition-all duration-200 hover:-translate-y-1 hover:shadow-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+            status === "pending" && "bg-muted text-muted-foreground",
             status === "verified" && "bg-primary-600 text-white dark:bg-primary-500",
             status === "partial" && "bg-primary-100 text-primary-800 ring-1 ring-primary-300 dark:bg-primary-900/50 dark:text-primary-200 dark:ring-primary-700",
             status === "missing" && "bg-amber-100 text-amber-800 ring-1 ring-amber-300 dark:bg-amber-900/40 dark:text-amber-200 dark:ring-amber-700"
@@ -164,6 +172,7 @@ function CitationChip({
               {status === "verified" && (location?.origin === "explication" ? "Retrouvée dans l'Explication MedArt" : "Retrouvée mot pour mot dans ton cours")}
               {status === "partial" && "Correspondance partielle dans ton cours"}
               {status === "missing" && "Citation introuvable dans tes sources chargées — vérifie-la"}
+              {status === "pending" && "Vérification dès la fin de la réponse…"}
             </p>
           </div>
         </div>
@@ -191,6 +200,8 @@ function CitationChip({
 
 interface ChatRichMarkdownProps {
   content: string;
+  /** The reply is still streaming: citation chips are shown but not verified yet. */
+  isStreaming?: boolean;
   dark: boolean;
   /** Course texts the citations are checked against — the sources currently loaded client-side. */
   citationSources: CitationSourceText[];
@@ -201,8 +212,12 @@ interface ChatRichMarkdownProps {
  * One assistant reply in the workspace chat: the shared chat markdown
  * renderer, plus medical callouts and verifiable citation chips.
  */
-export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, dark, citationSources, onOpenSource }: ChatRichMarkdownProps) {
+export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, dark, citationSources, onOpenSource, isStreaming = false }: ChatRichMarkdownProps) {
   const { markdown, citations } = useMemo(() => extractCitations(normalizeCallouts(content)), [content]);
+  // Read through a ref so the renderer map below keeps the same identity while
+  // the reply streams — new identities on every chunk would remount every chip.
+  const citationsRef = useRef(citations);
+  citationsRef.current = citations;
 
   const components = useMemo<Components>(() => {
     const base = dark ? DARK_CHAT_MARKDOWN_COMPONENTS : CHAT_MARKDOWN_COMPONENTS;
@@ -237,8 +252,8 @@ export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, dark, 
       },
       a: ({ href, children, ...rest }) => {
         const index = citationIndexFromHref(href);
-        const citation = index !== null ? citations.find((c) => c.index === index) : undefined;
-        if (citation) return <CitationChip citation={citation} sources={citationSources} onOpenSource={onOpenSource} />;
+        const citation = index !== null ? citationsRef.current.find((c) => c.index === index) : undefined;
+        if (citation) return <CitationChip citation={citation} sources={citationSources} onOpenSource={onOpenSource} verify={!isStreaming} />;
         return (
           <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
             {children}
@@ -246,7 +261,7 @@ export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, dark, 
         );
       },
     };
-  }, [dark, citations, citationSources, onOpenSource]);
+  }, [dark, citationSources, onOpenSource, isStreaming]);
 
   return (
     <article className={cn(dark ? DARK_CHAT_PROSE_CLASSES : CHAT_PROSE_CLASSES, "max-w-none")}>

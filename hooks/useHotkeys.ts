@@ -11,6 +11,18 @@ export interface HotkeyBinding {
   enabled?: boolean;
 }
 
+/**
+ * A modal dialog (Radix Dialog: file viewer, upload, delete confirmation…)
+ * owns the keyboard while it's open — workspace shortcuts must not act on
+ * the page behind it. The command palette is the one dialog that keeps its
+ * own shortcut (Ctrl/⌘+K closes it).
+ */
+function isInsideForeignDialog(target: EventTarget | null): boolean {
+  const insidePalette = target instanceof Element && target.closest("[data-command-palette]") !== null;
+  if (insidePalette) return false;
+  return document.querySelector('[role="dialog"]:not([data-command-palette]), [role="alertdialog"]') !== null;
+}
+
 function isTextEntry(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -50,6 +62,7 @@ export function useHotkeys(bindings: HotkeyBinding[]) {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing) return;
+      if (isInsideForeignDialog(event.target)) return;
       const typing = isTextEntry(event.target);
       for (const binding of bindingsRef.current) {
         if (binding.enabled === false) continue;

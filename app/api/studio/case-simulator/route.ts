@@ -5,7 +5,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
-import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
+import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
@@ -623,7 +623,7 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
     return NextResponse.json({ success: true, case: publicCase, token });
   } catch (error) {
     await refundGeneration(user.id);
-    const status = error instanceof OpenRouterError ? error.status : 502;
+    const status = error instanceof OpenRouterError ? upstreamStatusForClient(error.status) : 502;
     console.error(`${LOG_PREFIX} Échec de la génération du cas:`, error);
     return jsonError(errorMessage(error), status);
   }
@@ -647,6 +647,11 @@ function handleExam(user: { id: string }, body: z.infer<typeof ExamBodySchema>) 
 
   // Deliberately NOT returning whether the exam was pertinent — that would hand out the answer key one click at a time.
   return NextResponse.json({ success: true, examId: body.examId, result });
+}
+
+/** Angle brackets removed from student text placed inside <reponse_etudiant> — typing a closing tag must not let the answer escape into the grading instructions. */
+function stripTags(text: string): string {
+  return text.replace(/[<>]/g, " ");
 }
 
 async function handleDiagnose(user: { id: string }, body: z.infer<typeof DiagnoseBodySchema>) {
@@ -678,7 +683,7 @@ async function handleDiagnose(user: { id: string }, body: z.infer<typeof Diagnos
     `CAS PRÉSENTÉ\nTitre : ${publicCase.title}\nPatient : ${publicCase.patient.sexe === "F" ? "femme" : "homme"}, ${publicCase.patient.age} ans — ${publicCase.patient.contexte}\nMotif : ${publicCase.motif}\nAnamnèse : ${publicCase.anamnese}\nConstantes : ${publicCase.constantes.map((c) => `${c.label} ${c.value}`).join(", ")}`,
     `CORRECTION OFFICIELLE\nDiagnostic attendu : ${hidden.diagnostic}\nDiagnostics différentiels : ${hidden.diagnosticsDifferentiels.join(" ; ")}\nArguments clés :\n${hidden.argumentsCles.map((a) => `- ${a}`).join("\n")}\nPiège d'examen : ${hidden.piegeExamen}`,
     `EXAMENS DEMANDÉS PAR L'ÉTUDIANT\n${requestedLines}`,
-    `<reponse_etudiant>\nDiagnostic : ${body.diagnosis}\nRaisonnement : ${body.reasoning && body.reasoning.length > 0 ? body.reasoning : "(aucun raisonnement fourni)"}\n</reponse_etudiant>`,
+    `<reponse_etudiant>\nDiagnostic : ${stripTags(body.diagnosis)}\nRaisonnement : ${body.reasoning && body.reasoning.length > 0 ? stripTags(body.reasoning) : "(aucun raisonnement fourni)"}\n</reponse_etudiant>`,
   ].join("\n\n");
 
   try {
@@ -713,7 +718,7 @@ async function handleDiagnose(user: { id: string }, body: z.infer<typeof Diagnos
       pertinentExamIds: hidden.pertinentExamIds,
     });
   } catch (error) {
-    const status = error instanceof OpenRouterError ? error.status : 502;
+    const status = error instanceof OpenRouterError ? upstreamStatusForClient(error.status) : 502;
     console.error(`${LOG_PREFIX} Échec de la correction:`, error);
     return jsonError(errorMessage(error), status);
   }

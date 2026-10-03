@@ -243,9 +243,16 @@ function buildMarkdown(title: string, columns: string[], rows: string[][], notes
  * app's students) uses ";" as its list separator and would open a
  * comma-separated file as one single column. Every field is quoted, so
  * semicolons/quotes/newlines inside a cell can never shift a column.
+ *
+ * Cells are AI-generated text: one starting with = + - @ (or a tab/CR) would
+ * be evaluated as a formula by Excel/LibreOffice (CSV formula injection), so
+ * it gets a leading `'`, which spreadsheets treat as "this is text".
  */
 function buildCsv(columns: string[], rows: string[][]): string {
-  const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const quote = (value: string) => {
+    const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
   return [columns, ...rows].map((row) => row.map(quote).join(";")).join("\r\n");
 }
 
@@ -310,6 +317,68 @@ function describeError(error: unknown, fallback: string): string {
   if (error instanceof TypeError) return "Connexion au serveur impossible. Vérifie ta connexion puis réessaie.";
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Generation requests (module-level, survive remounts)
+// ---------------------------------------------------------------------------
+
+type GenerationOutcome = { ok: true; entry: CachedMatrix } | { ok: false; error: string };
+
+const GENERATION_FAILED = "La génération de la matrice a échoué. Réessaie.";
+
+/**
+ * Generations in flight, keyed `${userId ?? "anon"}:${courseId}:${kind}`.
+ * Module-level on purpose (same idea as ClinicalCaseSimulator's store): the
+ * panel remounts when the Studio pane is expanded/collapsed, the Lab tool
+ * changes, or the course changes and back. A request owned by component
+ * state would be orphaned by that remount — its result never shown — and the
+ * student, back on the empty state, would click "Générer" again and pay a
+ * second time. So the request outlives the instance that started it, writes
+ * the localStorage cache itself, and whichever instance is mounted for that
+ * key when it settles adopts the result.
+ */
+const inFlight = new Map<string, Promise<GenerationOutcome>>();
+
+function inFlightKey(userId: string | null, courseId: number, kind: MatrixKind): string {
+  return `${userId ?? "anon"}:${courseId}:${kind}`;
+}
+
+async function requestMatrix(userId: string | null, courseId: number, kind: MatrixKind): Promise<GenerationOutcome> {
+  try {
+    const res = await fetch("/api/studio/matrix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ courseId, kind }),
+    });
+    const data = ((await res.json().catch(() => null)) ?? {}) as { success?: unknown; error?: unknown; matrix?: unknown };
+    if (!res.ok || data.success !== true) {
+      throw new Error(
+        res.status === 429 ? buildRateLimitMessage(res) : typeof data.error === "string" && data.error ? data.error : GENERATION_FAILED
+      );
+    }
+    if (!isMedicalMatrix(data.matrix, kind)) {
+      throw new Error("Réponse inattendue du serveur. Réessaie.");
+    }
+    const entry: CachedMatrix = { generatedAt: new Date().toISOString(), matrix: data.matrix };
+    // Cached even if no instance is mounted any more (or the student switched course): the generation was paid for, it must be there next time.
+    if (userId) writeCachedMatrix(userId, courseId, kind, entry);
+    return { ok: true, entry };
+  } catch (error) {
+    return { ok: false, error: describeError(error, GENERATION_FAILED) };
+  }
+}
+
+/** Returns the generation already in flight for this key, or starts one — never two at once. */
+function startGeneration(userId: string | null, courseId: number, kind: MatrixKind): Promise<GenerationOutcome> {
+  const key = inFlightKey(userId, courseId, kind);
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const promise = requestMatrix(userId, courseId, kind).finally(() => {
+    if (inFlight.get(key) === promise) inFlight.delete(key);
+  });
+  inFlight.set(key, promise);
+  return promise;
 }
 
 // ---------------------------------------------------------------------------
@@ -892,6 +961,33 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
   // Guards against a response for a previous course/user landing in the current view.
   const scope = `${userId ?? "anonyme"}:${courseId}`;
   const scopeRef = useRef(scope);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  /**
+   * Shows `target` as generating until `promise` (from startGeneration —
+   * started by this instance or left running by a previous mount) settles,
+   * then displays its result — only if this instance is still mounted and
+   * still on the same course/user. The result is stored per kind, so
+   * switching tab meanwhile is fine.
+   */
+  const adopt = useCallback((target: MatrixKind, promise: Promise<GenerationOutcome>) => {
+    const requestScope = scopeRef.current;
+    setPending((current) => ({ ...current, [target]: true }));
+    setErrors((current) => ({ ...current, [target]: null }));
+    void promise.then((outcome) => {
+      if (!mountedRef.current || scopeRef.current !== requestScope) return;
+      if (outcome.ok) setEntries((current) => ({ ...current, [target]: outcome.entry }));
+      else setErrors((current) => ({ ...current, [target]: outcome.error }));
+      setPending((current) => ({ ...current, [target]: false }));
+    });
+  }, []);
 
   useEffect(() => {
     scopeRef.current = scope;
@@ -906,46 +1002,21 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
     setPending({ pharmaco: false, ddx: false });
     setErrors({ pharmaco: null, ddx: null });
     setCacheReady(true);
-  }, [authLoading, courseId, scope, userId]);
+    // A generation started before a remount (or before switching course and
+    // back) is still running: show it as such and pick up its result rather
+    // than offering — and charging — a second one.
+    for (const target of MATRIX_KINDS) {
+      const running = inFlight.get(inFlightKey(userId, courseId, target));
+      if (running) adopt(target, running);
+    }
+  }, [adopt, authLoading, courseId, scope, userId]);
 
   const generate = useCallback(
-    async (target: MatrixKind) => {
-      const requestScope = scopeRef.current;
-      const isCurrent = () => scopeRef.current === requestScope;
-      setPending((current) => ({ ...current, [target]: true }));
-      setErrors((current) => ({ ...current, [target]: null }));
-      try {
-        const res = await fetch("/api/studio/matrix", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ courseId, kind: target }),
-        });
-        const data = ((await res.json().catch(() => null)) ?? {}) as { success?: unknown; error?: unknown; matrix?: unknown };
-        if (!res.ok || data.success !== true) {
-          throw new Error(
-            res.status === 429
-              ? buildRateLimitMessage(res)
-              : typeof data.error === "string" && data.error
-                ? data.error
-                : "La génération de la matrice a échoué. Réessaie."
-          );
-        }
-        if (!isMedicalMatrix(data.matrix, target)) {
-          throw new Error("Réponse inattendue du serveur. Réessaie.");
-        }
-        const entry: CachedMatrix = { generatedAt: new Date().toISOString(), matrix: data.matrix };
-        // Cached even if the student has switched course meanwhile: the generation was paid for, it must be there next time.
-        if (userId) writeCachedMatrix(userId, courseId, target, entry);
-        if (isCurrent()) setEntries((current) => ({ ...current, [target]: entry }));
-      } catch (error) {
-        if (isCurrent()) {
-          setErrors((current) => ({ ...current, [target]: describeError(error, "La génération de la matrice a échoué. Réessaie.") }));
-        }
-      } finally {
-        if (isCurrent()) setPending((current) => ({ ...current, [target]: false }));
-      }
+    (target: MatrixKind) => {
+      // startGeneration hands back the running request if there is one, so a double click never pays twice.
+      adopt(target, startGeneration(userId, courseId, target));
     },
-    [courseId, userId]
+    [adopt, courseId, userId]
   );
 
   const meta = KIND_META[kind];

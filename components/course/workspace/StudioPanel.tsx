@@ -655,7 +655,9 @@ export function StudioPanel({
   useEffect(() => {
     if (!isSectionExpanded) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setIsSectionExpanded(false);
+      // A tool inside the overlay that already handled Escape (deselecting a
+      // mind-map node, cancelling a bookmark edit) must not also close it.
+      if (e.key === "Escape" && !e.defaultPrevented) setIsSectionExpanded(false);
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);

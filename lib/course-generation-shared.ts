@@ -73,6 +73,17 @@ export function stripDangerousHtml(html: string): string {
     .replace(/(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*')/gi, "");
 }
 
+/**
+ * HTTP status to return to OUR client for a failed upstream (OpenRouter)
+ * call. An upstream 4xx (its auth, moderation, rate limit) is never the
+ * student's own 401/403/429 — forwarding it as-is made the Lab tools show a
+ * login prompt or a quota upsell for a provider hiccup. 4xx becomes 502;
+ * 5xx (incl. 504 timeouts) passes through.
+ */
+export function upstreamStatusForClient(status: number): number {
+  return status >= 500 && status < 600 ? status : 502;
+}
+
 /** Formats any thrown value into a plain string message, never leaking `[object Object]`. */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;

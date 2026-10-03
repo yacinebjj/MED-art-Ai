@@ -53,7 +53,7 @@ interface WorkspaceCommandBarProps {
   courseTitle: string | null;
   sourceCount: number;
   contextCount: number;
-  /** Notes saved for this module (Mes notes) — null while unknown. */
+  /** Notes saved in "Mes notes" (all modules) — null while unknown. */
   notesCount: number | null;
   syncState: WorkspaceSyncState;
   syncDetail: string;
@@ -296,7 +296,7 @@ export function WorkspaceCommandBar({
                   <span className="tabular-nums text-foreground">{notesCount}</span>
                 </Link>
               </TooltipTrigger>
-              <TooltipContent>Notes de ce module — ouvrir Mes notes</TooltipContent>
+              <TooltipContent>Notes enregistrées dans Mes notes — ouvrir</TooltipContent>
             </Tooltip>
           )}
         </div>

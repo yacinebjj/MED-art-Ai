@@ -476,6 +476,9 @@ async function requestExam(courseId: number, examId: string): Promise<void> {
     const pendingExamIds = state.pendingExamIds.filter((id) => id !== examId);
     // The case was abandoned or replaced while this request was in flight — drop the stale answer.
     if (!state.snapshot || state.snapshot.token !== token) return { ...state, pendingExamIds };
+    // Already graded: the correction was computed without this exam, so
+    // appending it now would rewrite the history the score was based on.
+    if (state.snapshot.evaluation) return { ...state, pendingExamIds };
     if (!result.ok) return { ...state, pendingExamIds, caseError: result.failure };
     if (typeof result.data.result !== "string") return { ...state, pendingExamIds, caseError: UNEXPECTED_RESPONSE };
     if (state.snapshot.obtained.some((item) => item.examId === examId)) return { ...state, pendingExamIds };
@@ -488,6 +491,8 @@ async function submitDiagnosis(courseId: number): Promise<void> {
   const current = getStore(courseId);
   const snapshot = current.snapshot;
   if (!snapshot || snapshot.evaluation || current.submitting) return;
+  // An exam still in flight would be missing from requestedExamIds and land after grading — wait for it.
+  if (current.pendingExamIds.length > 0) return;
   const diagnosis = snapshot.diagnosisDraft.trim();
   const reasoning = snapshot.reasoningDraft.trim();
   if (!diagnosis) return;
@@ -1146,12 +1151,15 @@ function ResultsTimeline({ exams, obtained }: { exams: CaseExam[]; obtained: Obt
 function DiagnosisForm({
   snapshot,
   submitting,
+  examsPending,
   onDiagnosisChange,
   onReasoningChange,
   onSubmit,
 }: {
   snapshot: CaseSnapshot;
   submitting: boolean;
+  /** True while at least one requested exam has not answered yet — grading now would ignore it. */
+  examsPending: boolean;
   onDiagnosisChange: (value: string) => void;
   onReasoningChange: (value: string) => void;
   onSubmit: () => void;
@@ -1159,7 +1167,7 @@ function DiagnosisForm({
   const diagnosisId = useId();
   const reasoningId = useId();
   const hintId = useId();
-  const canSubmit = snapshot.diagnosisDraft.trim().length > 0 && !submitting;
+  const canSubmit = snapshot.diagnosisDraft.trim().length > 0 && !submitting && !examsPending;
   const inputClass = cn(
     "w-full rounded-xl border border-input bg-white px-3 py-2.5 text-base text-foreground placeholder:text-slate-400 dark:bg-slate-950/60 dark:placeholder:text-slate-500 shadow-sm transition-colors sm:text-sm",
     "focus-visible:border-primary-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1224,10 +1232,12 @@ function DiagnosisForm({
           />
         </div>
 
-        <p id={hintId} className="text-[12px] leading-snug text-muted-foreground">
-          {snapshot.obtained.length === 0
-            ? "Tu n'as demandé aucun examen : la pertinence des examens comptera 0/30."
-            : "Une fois soumis, le cas est corrigé et la correction complète s'affiche. Ctrl + Entrée pour envoyer depuis le raisonnement."}
+        <p id={hintId} className="text-[12px] leading-snug text-muted-foreground" aria-live="polite">
+          {examsPending
+            ? "Attends les résultats en cours… Tu pourras soumettre ton diagnostic dès qu'ils seront arrivés."
+            : snapshot.obtained.length === 0
+              ? "Tu n'as demandé aucun examen : la pertinence des examens comptera 0/30."
+              : "Une fois soumis, le cas est corrigé et la correction complète s'affiche. Ctrl + Entrée pour envoyer depuis le raisonnement."}
         </p>
 
         <Button type="submit" size="lg" disabled={!canSubmit} isLoading={submitting} className="w-full">
@@ -1308,6 +1318,7 @@ function CaseScreen({
       <DiagnosisForm
         snapshot={snapshot}
         submitting={state.submitting}
+        examsPending={state.pendingExamIds.length > 0}
         onDiagnosisChange={(value) => updateDraft(courseId, "diagnosisDraft", value)}
         onReasoningChange={(value) => updateDraft(courseId, "reasoningDraft", value)}
         onSubmit={() => void submitDiagnosis(courseId)}

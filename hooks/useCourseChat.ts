@@ -26,6 +26,8 @@ interface UseCourseChatResult {
   chatInput: string;
   setChatInput: (value: string) => void;
   isTyping: boolean;
+  /** True for the WHOLE request — from send until the stream ends — unlike `isTyping`, which drops as soon as the first chunk arrives (it drives the "MedArt écrit…" indicator). Use this to block a second overlapping send. */
+  isStreaming: boolean;
   /** Sends a user message to the MedArt Assistant and streams the reply in progressively. `concise` forces a 2-3 sentence answer server-side — for the "Ask MedArt" text-selection quick action only, never for the free-form chat input, to avoid degrading normal answer quality. `translate` swaps the system prompt entirely for a strict medical-translator persona (arabe + français) — for the "Translate" quick action only, mutually exclusive with `concise`. `sourceText` lets a caller with no matching `courses` table row (e.g. the studio_courses-backed module workspace) supply the course context inline instead of relying on the server's slug lookup — ignored server-side when `selectedText` is set. `selectedText` is the exact highlighted passage: passing it (alongside `concise` or `translate`) puts the server in "highlight isolation" mode — no course text, no history, forced onto the cheap model (see app/api/courses/chat/route.ts's isHighlightMode). `excludeFromHistory` marks BOTH this message and its reply so neither resends in any LATER request's history (see ChatMessage.excludeFromHistory in lib/types.ts) — set for one-off quick actions (Ask MedArt/Translate on a text selection) so they inform only their own exchange. */
   sendChatMessage: (
     userContent: string,
@@ -57,6 +59,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   // Guards the streaming loop in sendChatMessage below against setState on an
   // unmounted component — a student can send a message then immediately
@@ -136,6 +139,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
   ) {
     setChatOpen(true);
     setIsTyping(true);
+    setIsStreaming(true);
 
     try {
       const res = await fetch("/api/courses/chat", {
@@ -187,7 +191,10 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
       const message = err instanceof Error ? err.message : "L'assistant n'a pas pu répondre. Réessaie.";
       setChatMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: `⚠️ ${message}` } : m)));
     } finally {
-      if (isMountedRef.current) setIsTyping(false);
+      if (isMountedRef.current) {
+        setIsTyping(false);
+        setIsStreaming(false);
+      }
     }
   }
 
@@ -207,7 +214,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
   }
 
   async function regenerateFrom(assistantId: string) {
-    if (isTyping) return;
+    if (isTyping || isStreaming) return;
 
     // Locate the assistant reply and the user turn that produced it. Computed
     // from the current render's chatMessages (fresh every render) — this is a
@@ -269,5 +276,5 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
     }
   }
 
-  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, regenerateFrom, clearMessages };
+  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, isStreaming, sendChatMessage, regenerateFrom, clearMessages };
 }

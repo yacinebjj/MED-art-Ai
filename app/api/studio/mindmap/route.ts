@@ -4,7 +4,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
-import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
+import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
@@ -285,7 +285,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     await refundGeneration(user.id);
-    const status = error instanceof OpenRouterError ? error.status : 502;
+    const status = error instanceof OpenRouterError ? upstreamStatusForClient(error.status) : 502;
     console.error(`[studio:mindmap] Échec (cours ${course.id}):`, error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });
   }

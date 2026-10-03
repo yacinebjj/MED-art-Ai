@@ -99,6 +99,18 @@ const MAX_HIGHLIGHT_CHARS = 800;
 // "instruction" text ever needs) while still bounding worst-case spend.
 const MAX_MESSAGE_CHARS = 4000;
 
+// Per-turn cap on the client-supplied history — MAX_MESSAGE_CHARS above only
+// bounds the NEW message, so 10 arbitrarily large "history" turns could
+// otherwise still reach the model. Generous enough to keep a long previous
+// answer's substance (assistant replies can run to several thousand chars).
+const MAX_HISTORY_TURN_CHARS = 6000;
+
+// Each history turn's share of the RAG retrieval query. The CURRENT question
+// goes first and history only adds a short topic anchor — a long previous
+// answer must never push the actual question past the embedding's input
+// limit or drown it out in the ranking.
+const RETRIEVAL_HISTORY_CHARS = 500;
+
 // Cap on the small pre/post excerpt taken from the SAME course text
 // immediately around the highlighted passage — e.g. an abbreviation defined
 // two lines earlier, or a dosage unit given in the preceding sentence.
@@ -334,6 +346,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Validated before ANY quota reservation below — a malformed or oversized
+  // message used to be rejected only after the highlight pool had already
+  // been charged, silently costing the student a unit for a 400.
+  if (typeof message !== "string" || !message.trim()) {
+    return NextResponse.json({ error: "Le champ 'message' est requis." }, { status: 400 });
+  }
+  if (message.length > MAX_MESSAGE_CHARS) {
+    return NextResponse.json(
+      { error: `Ton message est trop long (${message.length} caractères, max ${MAX_MESSAGE_CHARS}). Raccourcis-le et réessaie.` },
+      { status: 400 }
+    );
+  }
+
   // Plan quota gate — highlight mode's own pool (chatMessageCap, the
   // free-form pool below, is checked separately further down).
   if (isHighlightMode) {
@@ -347,16 +372,6 @@ export async function POST(request: NextRequest) {
     isHighlightMode && typeof adjacentContext === "string" && adjacentContext.trim()
       ? adjacentContext.trim().slice(0, ADJACENT_CONTEXT_CHARS)
       : null;
-
-  if (typeof message !== "string" || !message.trim()) {
-    return NextResponse.json({ error: "Le champ 'message' est requis." }, { status: 400 });
-  }
-  if (message.length > MAX_MESSAGE_CHARS) {
-    return NextResponse.json(
-      { error: `Ton message est trop long (${message.length} caractères, max ${MAX_MESSAGE_CHARS}). Raccourcis-le et réessaie.` },
-      { status: 400 }
-    );
-  }
 
   const isBareGreetingMessage = isBareGreeting(message);
 
@@ -376,7 +391,10 @@ export async function POST(request: NextRequest) {
     isBareGreetingMessage || isHighlightMode
       ? []
       : Array.isArray(history)
-        ? history.filter(isHistoryTurn).slice(-MAX_HISTORY_MESSAGES)
+        ? history
+            .filter(isHistoryTurn)
+            .slice(-MAX_HISTORY_MESSAGES)
+            .map((turn) => ({ role: turn.role, content: turn.content.slice(0, MAX_HISTORY_TURN_CHARS) }))
         : [];
 
   // Save the student's message — its id is only ever read later, inside the
@@ -462,8 +480,8 @@ export async function POST(request: NextRequest) {
               // Active course first — purely cosmetic for the ranking (all
               // chunks compete equally), but keeps the order deterministic.
               owned.sort((a, b) => requestedIds.indexOf(a.id) - requestedIds.indexOf(b.id));
-              const retrievalQuery = [...historyTurns.slice(-2).map((turn) => turn.content), message].join("\n");
-              return await retrieveRelevantContextForStudioCourses(retrievalQuery, owned);
+              const retrievalQuery = [message, ...historyTurns.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
+              return await retrieveRelevantContextForStudioCourses(retrievalQuery, owned, message);
             }
 
             let chunkSource: { studioCourseId: number } | { legacyCourseSlug: string } | null = studioIdMatch
@@ -490,8 +508,8 @@ export async function POST(request: NextRequest) {
             // historyTurns, computed above for the model call itself) so a
             // follow-up's embedding carries the real topic forward, not just its
             // own bare wording.
-            const retrievalQuery = [...historyTurns.slice(-2).map((turn) => turn.content), message].join("\n");
-            return await retrieveRelevantContext(retrievalQuery, chunkSource);
+            const retrievalQuery = [message, ...historyTurns.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
+            return await retrieveRelevantContext(retrievalQuery, chunkSource, message);
           } catch (error) {
             // Fails open to `null` (no course context at all), NEVER to the full
             // raw text — see the strict rule above.
@@ -623,6 +641,13 @@ export async function POST(request: NextRequest) {
     // just because the free tier happens to be saturated.
     const freeTierCapacity = await reserveFreeTierCapacity();
     if (!freeTierCapacity.allowed) {
+      // The student's own unit was already reserved above — a platform-wide
+      // saturation they can't do anything about must not cost them it.
+      if (!isHighlightMode) {
+        await refundChatMessage(user.id);
+      } else {
+        await refundHighlightMessage(user.id);
+      }
       return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
     }
 
