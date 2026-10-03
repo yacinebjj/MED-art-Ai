@@ -1,5 +1,7 @@
 "use client";
 
+import { labFetch } from "@/lib/lab-fetch";
+
 import {
   forwardRef,
   useCallback,
@@ -363,7 +365,7 @@ async function requestMatrix(
   language: ContentLanguage
 ): Promise<GenerationOutcome> {
   try {
-    const res = await fetch("/api/studio/matrix", {
+    const res = await labFetch("/api/studio/matrix", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ courseId, kind, language }),

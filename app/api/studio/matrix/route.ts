@@ -3,17 +3,18 @@ import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
-import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
+import { OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouterChain } from "@/lib/ai/call-resilient";
+import { LAB_CHAIN_DEADLINE_MS, labAttempts } from "@/lib/ai/lab-generation";
 import { labContentHash, labToolTypeFor, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
 import { buildLanguageDirective, parseContentLanguage } from "@/lib/ai/language-directive";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
-// 120 (was 60): the model call below may now run up to 90s, with headroom for
-// one fast transient retry and the cache write.
-export const maxDuration = 120;
+// 300: the generation runs through a model fallback chain (lib/ai/lab-generation.ts)
+// whose own deadline (250 s) leaves room for the DB reads and the cache write.
+export const maxDuration = 300;
 
 type MatrixKind = "pharmaco" | "ddx";
 
@@ -267,22 +268,34 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const raw = await callOpenRouterResilient(
+    // Fast model first, stronger fallbacks next, all under one deadline; an
+    // invalid answer is rejected by `validate` and the NEXT model is asked.
+    const { value: validation } = await callOpenRouterChain(
       [
         { role: "system", content: buildSystemPrompt(matrixKind) + buildLanguageDirective(language) },
         { role: "user", content: `Cours : "${course.title}"\n\nContenu du cours :\n"""\n${sourceText}\n"""` },
       ],
-      // AbortController-backed timeout inside callOpenRouter; well under maxDuration so it fails cleanly (and refunds) before the platform kills the route.
-      { model: CHEAP_MODEL, maxTokens: 4500, temperature: 0.2, timeoutMs: 90_000, bypassMock: true }
+      {
+        label: "[studio:matrix]",
+        attempts: labAttempts(),
+        deadlineMs: LAB_CHAIN_DEADLINE_MS,
+        maxTokens: 4500,
+        temperature: 0.2,
+        bypassMock: true,
+        responseFormat: { type: "json_object" },
+        providerSort: "throughput",
+        validate: (raw) => {
+          const parsed = parseJsonResponse(raw);
+          const candidate = parsed.matrix && typeof parsed.matrix === "object" && !Array.isArray(parsed.matrix) ? parsed.matrix : parsed;
+          const result = MatrixAiSchema.safeParse(candidate);
+          if (!result.success) {
+            console.error("[studio:matrix] Validation zod échouée :", result.error.flatten());
+            throw new Error("La réponse de l'IA ne respecte pas le format attendu de la matrice. Réessaie.");
+          }
+          return result;
+        },
+      }
     );
-
-    const parsed = parseJsonResponse(raw);
-    const candidate = parsed.matrix && typeof parsed.matrix === "object" && !Array.isArray(parsed.matrix) ? parsed.matrix : parsed;
-    const validation = MatrixAiSchema.safeParse(candidate);
-    if (!validation.success) {
-      console.error("[studio:matrix] Validation zod échouée :", validation.error.flatten());
-      throw new Error("La réponse de l'IA ne respecte pas le format attendu de la matrice. Réessaie.");
-    }
 
     const rows = validation.data.rows
       .map((row) => toCells(row, columns))

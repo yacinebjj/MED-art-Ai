@@ -296,6 +296,20 @@ export const EXPLICATION_MODEL = CHEAP_MODEL;
 // The route falls back to CHEAP_MODEL if this model fails.
 export const FLASHCARD_MODEL = "qwen/qwen3-30b-a3b-instruct-2507";
 
+// MEDART LAB MODELS, 2026-10-03 — Carte mentale, Matrice pharmaco/DDx,
+// Patient virtuel. These used CHEAP_MODEL (qwen-2.5-72b) with 3,500-5,000
+// output tokens inside a 90 s timeout. Measured live (same long medical JSON,
+// streamed): qwen-2.5-72b ~42 tok/s, so a 5,000-token map needs ~120 s and
+// the richer Lab prompts timed out ("Le modèle IA met trop de temps à répondre").
+//   - LAB_PRIMARY_MODEL = qwen3-30b-a3b-instruct-2507: 154 tok/s (3,433
+//     tokens in 22 s), valid JSON, 12 detailed rows — 3.7x faster, cheaper.
+//   - LAB_FALLBACK_MODEL = qwen3-235b-a22b-2507: 38 tok/s but the strongest
+//     Qwen, still cheaper than qwen-2.5-72b; only used when the primary fails,
+//     inside whatever remains of the route deadline (callOpenRouterChain in
+//     lib/ai/call-resilient.ts).
+export const LAB_PRIMARY_MODEL = FLASHCARD_MODEL;
+export const LAB_FALLBACK_MODEL = "qwen/qwen3-235b-a22b-2507";
+
 /**
  * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
  * decoding to the schema (structured outputs); `json_object` only guarantees
@@ -654,6 +668,12 @@ export async function callOpenRouter(
     // so OpenRouter only routes to providers that actually honor it — never to
     // one that would silently ignore the format and answer free text.
     responseFormat?: OpenRouterResponseFormat;
+    /**
+     * OpenRouter provider routing: "throughput" sends the request to the
+     * fastest-decoding provider of the model, "latency" to the quickest first
+     * token. Used by time-critical calls (Lab, podcast script).
+     */
+    providerSort?: "throughput" | "latency" | "price";
   }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
@@ -726,8 +746,14 @@ export async function callOpenRouter(
         max_tokens: options?.maxTokens ?? 8192,
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
-        ...(options?.responseFormat
-          ? { response_format: options.responseFormat, provider: { require_parameters: true } }
+        ...(options?.responseFormat ? { response_format: options.responseFormat } : {}),
+        ...(options?.responseFormat || options?.providerSort
+          ? {
+              provider: {
+                ...(options.responseFormat ? { require_parameters: true } : {}),
+                ...(options.providerSort ? { sort: options.providerSort } : {}),
+              },
+            }
           : {}),
       }),
       signal: timeoutController.signal,

@@ -522,6 +522,15 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
   const playbackSrc =
     sourceStage === "blob" && blobUrl ? blobUrl : sourceStage === "cache-bust" ? `${audioUrl}${audioUrl.includes("?") ? "&" : "?"}t=${CACHE_BUST_TOKEN}` : audioUrl;
 
+  /** Starts the whole source ladder again (direct → cache-bust → blob). */
+  const restartPlaybackLadder = useCallback(() => {
+    setPlaybackError(false);
+    blobFallbackRunningRef.current = false;
+    setBlobUrl(null);
+    setSourceStage("direct");
+    audioRef.current?.load();
+  }, []);
+
   const handleMediaError = useCallback(() => {
     setIsPlaying(false);
     setIsBuffering(false);
@@ -563,6 +572,26 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
   const [mediaDuration, setMediaDuration] = useState(0);
   const [speed, setSpeed] = useState<Speed>(1);
   const [playbackError, setPlaybackError] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const playbackErrorRef = useRef(false);
+  playbackErrorRef.current = playbackError;
+
+  // A failure caused by a dropped connection fixes itself: when the network
+  // comes back, the source ladder restarts on its own — no tap needed.
+  useEffect(() => {
+    setIsOffline(typeof navigator !== "undefined" && navigator.onLine === false);
+    const onOffline = () => setIsOffline(true);
+    const onOnline = () => {
+      setIsOffline(false);
+      if (playbackErrorRef.current) restartPlaybackLadder();
+    };
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [restartPlaybackLadder]);
   const [waveform, setWaveform] = useState<WaveformState>(() => {
     const cached = waveformCache.get(audioUrl);
     return cached ? { status: "ready", ...cached } : { status: "loading" };
@@ -1232,21 +1261,26 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
         {playbackError && (
           <div role="alert" className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            Lecture impossible : le fichier audio n&apos;a pas pu être chargé.
+            {isOffline
+              ? "Connexion perdue — la lecture reprendra automatiquement dès le retour du réseau."
+              : "Lecture impossible : le fichier audio n'a pas pu être chargé."}
             <button
               type="button"
-              onClick={() => {
-                // Start the whole ladder again — the failure may have been transient.
-                setPlaybackError(false);
-                blobFallbackRunningRef.current = false;
-                setBlobUrl(null);
-                setSourceStage("direct");
-                audioRef.current?.load();
-              }}
+              // Start the whole ladder again — the failure may have been transient.
+              onClick={restartPlaybackLadder}
               className="rounded-lg px-2 py-0.5 font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               Réessayer
             </button>
+            {/* Plan B: the device's own media player, outside this page's audio element. */}
+            <a
+              href={audioUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg px-2 py-0.5 font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Ouvrir le fichier
+            </a>
           </div>
         )}
 

@@ -18,6 +18,14 @@ const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
+  // <audio>/<video> sources. WITHOUT this directive media fell back to
+  // default-src 'self', so every file served from Supabase Storage — Studio
+  // podcasts, lecture-note audio, group voice messages, media vault — was
+  // blocked by the browser, and so were the blob: URLs the podcast player
+  // falls back to: all three playback attempts failed and the student saw
+  // "Lecture impossible : le fichier audio n'a pas pu être chargé".
+  // blob:/data: also cover recorded voice notes and generated speech.
+  "media-src 'self' blob: data: https://*.supabase.co",
   // wss:// (not just https://) is required here — components/groups/ChatRoom.tsx
   // uses Supabase Realtime (postgres_changes/presence/broadcast channels over
   // a WebSocket) for live group chat; without it this CSP would silently
@@ -27,7 +35,9 @@ const CONTENT_SECURITY_POLICY = [
   // iframes either the raw uploaded file straight from Supabase Storage
   // (PDF) or Google Docs Viewer (docs.google.com/gview, for Office formats)
   // — both needed here, or that feature silently breaks for every file type.
-  "frame-src https://accounts.google.com https://docs.google.com https://*.supabase.co",
+  // view.officeapps.live.com: FileViewerModal previews DOCX/XLSX courses in
+  // Microsoft Office Online embed viewer — without it that preview was blocked.
+  "frame-src https://accounts.google.com https://docs.google.com https://view.officeapps.live.com https://*.supabase.co",
   "frame-ancestors 'self'",
   "object-src 'none'",
   "base-uri 'self'",

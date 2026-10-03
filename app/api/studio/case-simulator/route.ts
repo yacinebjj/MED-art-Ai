@@ -4,17 +4,19 @@ import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
-import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
+import { OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouterChain } from "@/lib/ai/call-resilient";
+import { LAB_CHAIN_DEADLINE_MS, labAttempts } from "@/lib/ai/lab-generation";
 import { labContentHash, labToolTypeFor, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
 import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
-// 120 (was 60): the generation call may now run up to 90s, with headroom for
-// one fast transient retry and the cache write.
-export const maxDuration = 120;
+// 300: generation and grading run through a model fallback chain
+// (lib/ai/lab-generation.ts) whose own deadline (250 s) leaves room for the
+// DB reads and the cache write.
+export const maxDuration = 300;
 
 /**
  * "Simulateur de patient virtuel" — an interactive clinical case built from
@@ -636,19 +638,30 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
   ].join("\n\n");
 
   try {
-    const raw = await callOpenRouterResilient(
+    const { value: validated } = await callOpenRouterChain(
       [
         { role: "system", content: CASE_SYSTEM_PROMPT + buildLanguageDirective(body.language) },
         { role: "user", content: userPrompt },
       ],
-      { model: CHEAP_MODEL, maxTokens: 3500, timeoutMs: 90_000, temperature: 0.7, bypassMock: true }
+      {
+        label: LOG_PREFIX,
+        attempts: labAttempts(),
+        deadlineMs: LAB_CHAIN_DEADLINE_MS,
+        maxTokens: 3500,
+        temperature: 0.7,
+        bypassMock: true,
+        responseFormat: { type: "json_object" },
+        providerSort: "throughput",
+        validate: (raw) => {
+          const result = GeneratedCaseSchema.safeParse(parseJsonResponse(raw));
+          if (!result.success) {
+            console.error(`${LOG_PREFIX} Cas généré invalide:`, JSON.stringify(result.error.flatten()).slice(0, 1500));
+            throw new Error("L'IA n'a pas produit un cas clinique exploitable. Réessaie.");
+          }
+          return result;
+        },
+      }
     );
-
-    const validated = GeneratedCaseSchema.safeParse(parseJsonResponse(raw));
-    if (!validated.success) {
-      console.error(`${LOG_PREFIX} Cas généré invalide:`, JSON.stringify(validated.error.flatten()).slice(0, 1500));
-      throw new Error("L'IA n'a pas produit un cas clinique exploitable. Réessaie.");
-    }
 
     const { publicCase, hidden } = buildCase(validated.data);
     await storeLabCache({ contentHash, toolType, courseId: course.id, content: { publicCase, hidden } });
@@ -736,19 +749,30 @@ async function handleDiagnose(user: { id: string }, body: z.infer<typeof Diagnos
   ].join("\n\n");
 
   try {
-    const raw = await callOpenRouterResilient(
+    const { value: graded } = await callOpenRouterChain(
       [
         { role: "system", content: GRADING_SYSTEM_PROMPT + buildLanguageDirective(body.language) },
         { role: "user", content: userPrompt },
       ],
-      { model: CHEAP_MODEL, maxTokens: 1200, timeoutMs: 60_000, temperature: 0.2, bypassMock: true }
+      {
+        label: LOG_PREFIX,
+        attempts: labAttempts(),
+        deadlineMs: LAB_CHAIN_DEADLINE_MS,
+        maxTokens: 1200,
+        temperature: 0.2,
+        bypassMock: true,
+        responseFormat: { type: "json_object" },
+        providerSort: "throughput",
+        validate: (raw) => {
+          const result = GradingSchema.safeParse(parseJsonResponse(raw));
+          if (!result.success) {
+            console.error(`${LOG_PREFIX} Correction invalide:`, JSON.stringify(result.error.flatten()).slice(0, 1000));
+            throw new Error("L'IA n'a pas produit une correction exploitable. Réessaie.");
+          }
+          return result;
+        },
+      }
     );
-
-    const graded = GradingSchema.safeParse(parseJsonResponse(raw));
-    if (!graded.success) {
-      console.error(`${LOG_PREFIX} Correction invalide:`, JSON.stringify(graded.error.flatten()).slice(0, 1000));
-      throw new Error("L'IA n'a pas produit une correction exploitable. Réessaie.");
-    }
 
     // The categorical verdict is the more reliable model signal — the numeric score is clamped into its band so the two never contradict each other on screen.
     const { verdict } = graded.data;

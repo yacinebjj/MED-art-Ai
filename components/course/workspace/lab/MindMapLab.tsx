@@ -1,5 +1,7 @@
 "use client";
 
+import { labFetch } from "@/lib/lab-fetch";
+
 import {
   forwardRef,
   memo,
@@ -874,7 +876,7 @@ function inFlightKey(userId: string | null, courseId: number, language: ContentL
 
 async function requestMindMap(userId: string | null, courseId: number, language: ContentLanguage): Promise<GenerationOutcome> {
   try {
-    const res = await fetch("/api/studio/mindmap", {
+    const res = await labFetch("/api/studio/mindmap", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ courseId, language }),

@@ -4,7 +4,8 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
-import { callOpenRouter, generateOpenRouterAudio, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { generateOpenRouterAudio, CHEAP_MODEL, LAB_PRIMARY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouterChain } from "@/lib/ai/call-resilient";
 import {
   DEFAULT_PODCAST_DIALECT,
   MAX_EXPLICATION_CHARS_FOR_PODCAST,
@@ -169,18 +170,36 @@ async function ensurePodcastBucket(supabase: ReturnType<typeof getSupabaseAdmin>
  */
 async function planPodcastScript(courseTitle: string, explicationExcerpt: string, dialect: PodcastDialect): Promise<string> {
   try {
-    const script = await callOpenRouter(
+    // Same 60 s budget as before (script + narration must fit the route's
+    // 300 s), but a ~3,000-token script on CHEAP_MODEL (~42 tok/s measured)
+    // needed ~70 s and timed out — silently replacing the student's course
+    // with the GENERIC fallback script. The fast Lab model (~150 tok/s)
+    // writes it in ~20 s; CHEAP_MODEL only takes what time is left.
+    // 4000 -> 6000 tokens: the script's target is ~1300-1500 words (see
+    // lib/ai/podcast-prompts.ts); mixed français/darija tokenizes worse than prose.
+    const { value: script } = await callOpenRouterChain(
       [
         { role: "system", content: buildPodcastScriptSystemPrompt(dialect) },
         { role: "user", content: buildPodcastScriptUserMessage(courseTitle, explicationExcerpt) },
       ],
-      // 4000 -> 6000: the script's own target moved from ~700-900 to
-      // ~1300-1500 words (see lib/ai/podcast-prompts.ts) — real headroom
-      // above the ~2,500-3,200 tokens that length needs (mixed
-      // français/darija tokenizes worse than plain prose).
-      { model: CHEAP_MODEL, maxTokens: 6000, bypassMock: true, timeoutMs: 60_000 } // NOT raised: script (60s) + narration (225s) must stay inside this route's 300s maxDuration — see the budget notes above
+      {
+        label: "[studio/podcast]",
+        attempts: [
+          { model: LAB_PRIMARY_MODEL, timeoutMs: 45_000 },
+          { model: CHEAP_MODEL, timeoutMs: 45_000 },
+        ],
+        deadlineMs: 60_000, // NOT raised: script (60s) + narration (225s) must stay inside this route's 300s maxDuration — see the budget notes above
+        maxTokens: 6000,
+        bypassMock: true,
+        providerSort: "throughput",
+        validate: (raw) => {
+          const text = raw.trim();
+          if (text.length <= 100) throw new Error(`Script trop court (${text.length} caractères).`);
+          return text;
+        },
+      }
     );
-    if (script.trim().length > 100) return script.trim();
+    if (script.length > 100) return script;
     // Distinctly tagged (not just the generic catch below) so this is
     // greppable in production logs on its own — this branch produced NO log
     // line at all before, which is exactly how the fallback going out far

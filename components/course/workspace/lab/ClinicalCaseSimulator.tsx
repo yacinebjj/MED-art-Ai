@@ -1,5 +1,7 @@
 "use client";
 
+import { labFetch } from "@/lib/lab-fetch";
+
 import {
   useCallback,
   useEffect,
@@ -419,7 +421,7 @@ function fallbackMessage(status: number): string {
 async function postSimulator<T>(payload: Record<string, unknown>): Promise<ApiResult<T>> {
   let res: Response;
   try {
-    res = await fetch(ENDPOINT, {
+    res = await labFetch(ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

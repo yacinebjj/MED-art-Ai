@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { isChunkLoadError, recoverFromChunkError } from "@/lib/chunk-recovery";
 
 /**
  * Route-segment Error Boundary for the whole app (Next.js App Router
@@ -24,6 +25,8 @@ import { Button } from "@/components/ui/Button";
  */
 export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
+    // Stale build after a deploy (see lib/chunk-recovery.ts): one guarded silent reload loads the new one.
+    if (isChunkLoadError(error) && recoverFromChunkError()) return;
     // Kept as console.error (not a toast): this renders INSTEAD of the page,
     // so the app's toast provider may itself be part of what failed.
     console.error("[app/error] Uncaught render error:", error);
