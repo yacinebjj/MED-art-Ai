@@ -99,9 +99,10 @@ const TIER_META: Record<PricingTierId, TierMeta> = {
     tagline: "Pour réviser à ton rythme",
     prices: { monthly: 1500, quad: 5500, annual: 10000 },
     features: [
-      "Accès complet au Studio (6 formats par cours)",
-      "Examens de module générés par IA",
-      "Assistant IA illimité",
+      "Accès complet au Studio (7 formats par cours)",
+      "30 cours générés par mois",
+      "Examens de module, Lab clinique et flashcards",
+      "Assistant IA : 300 messages / mois",
     ],
   },
   group: {
