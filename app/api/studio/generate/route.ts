@@ -1,3 +1,4 @@
+import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
 import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import {
@@ -196,7 +197,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const isPersonalizedVariant = language !== "fr" || (actionType === "cas_clinique" && studyYear !== null);
   const languageInstruction =
     language === "en"
-      ? "\n\nINSTRUCTION DE LANGUE OBLIGATOIRE (remplace toute langue de sortie précédemment implicite) : rédige l'INTÉGRALITÉ de ta réponse — tous les champs textuels du JSON, sans exception — en ANGLAIS, jamais en français, en conservant strictement le même niveau de rigueur médicale, la même structure JSON et le même format exact déjà exigés ci-dessus."
+      ? "\n\nINSTRUCTION DE LANGUE OBLIGATOIRE (remplace toute langue de sortie précédemment implicite) : rédige l'INTÉGRALITÉ de ta réponse — tous les champs textuels du JSON, sans exception — en ANGLAIS, jamais en français, en conservant strictement le même niveau de rigueur médicale, la même structure JSON et le même format exact déjà exigés ci-dessus." + buildLanguageDirective("en")
       : "";
 
   if (!isSupabaseConfigured()) {

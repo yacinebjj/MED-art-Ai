@@ -2,19 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage } from "@/lib/course-generation-shared";
+import { parseContentLanguage } from "@/lib/ai/language-directive";
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Session hard ceiling — mirrors ActiveFlashcardsDeck's own SESSION_CAP; see this file's header comment. */
-const MAX_POOL_SIZE = 60;
+/** One study batch — the opening batch of a session (cards already served before, shuffled across the selected courses). Later batches come from /api/flashcards/generate. */
+const MAX_POOL_SIZE = 25;
 
 interface StudioCourseFlashcardRow {
   id: number;
   title: string;
   curriculum_module_id: number;
-  flashcard_queue: { id: string; question: string; answer: string }[] | null;
+  /** `lang` absent = served before languages existed = French. */
+  flashcard_queue: { id: string; question: string; answer: string; lang?: "fr" | "en" }[] | null;
 }
 
 /** Fisher-Yates — used instead of `.sort(() => Math.random() - 0.5)`, which is a well-known non-uniform shuffle. */
@@ -44,7 +46,7 @@ function shuffle<T>(items: T[]): T[] {
  * initial payload bounded and never hands the frontend more than a single
  * session ever needs (see ActiveFlashcardsDeck's own SESSION_CAP).
  */
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -55,6 +57,8 @@ export async function GET(_request: NextRequest) {
   }
 
   const supabase = getSupabaseAdmin();
+  // Global AI-content language (store/useLanguageStore.ts): only cards served in this language are pooled.
+  const language = parseContentLanguage(request.nextUrl.searchParams.get("language"));
 
   try {
     const { data: profile, error: profileError } = await supabase
@@ -95,11 +99,15 @@ export async function GET(_request: NextRequest) {
     const rows = (courses ?? []) as StudioCourseFlashcardRow[];
     const items: FlashcardPoolItem[] = shuffle(
       rows.flatMap((row) =>
-        (row.flashcard_queue ?? []).map((card) => ({
-          ...card,
-          courseTitle: row.title,
-          moduleId: row.curriculum_module_id,
-        }))
+        (row.flashcard_queue ?? [])
+          .filter((card) => (card.lang ?? "fr") === language)
+          .map((card) => ({
+            id: card.id,
+            question: card.question,
+            answer: card.answer,
+            courseTitle: row.title,
+            moduleId: row.curriculum_module_id,
+          }))
       )
     ).slice(0, MAX_POOL_SIZE);
 

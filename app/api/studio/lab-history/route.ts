@@ -7,14 +7,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** The only tool variants this endpoint knows how to return. */
-const KNOWN_TOOL_TYPES: readonly LabToolType[] = [
-  "matrix:pharmaco",
-  "matrix:ddx",
-  "mindmap",
-  "case:externe",
-  "case:interne",
-  "case:concours",
-];
+const BASE_TOOL_TYPES = ["matrix:pharmaco", "matrix:ddx", "mindmap", "case:externe", "case:interne", "case:concours"] as const;
+/** Every variant, French (unsuffixed) and English (":en") — see labToolTypeFor. */
+const KNOWN_TOOL_TYPES: readonly LabToolType[] = [...BASE_TOOL_TYPES, ...BASE_TOOL_TYPES.map((type) => `${type}:en` as const)];
 
 interface HistoryRow {
   tool_type: string;

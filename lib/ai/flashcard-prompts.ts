@@ -30,3 +30,34 @@ Génère entre ${minCount} et ${maxCount} flashcards couvrant l'intégralité de
 
 ${fullExplicationText}`;
 }
+
+/**
+ * "Infinite" study flow (app/api/flashcards/generate/route.ts): once every
+ * card of a course's cached set has been served to the student, the set is
+ * EXTENDED — new cards on the same course, appended to the cross-student
+ * cache so the next student gets them for free. The existing questions are
+ * passed in so the model targets facts, angles and levels of detail the
+ * deck does not test yet, instead of rephrasing it.
+ */
+const FLASHCARD_EXTENSION_SYSTEM_PROMPT = `Tu es un professeur de médecine expert en mémorisation active (méthode Anki). On te donne le texte d'un cours de médecine ET la liste des flashcards qui existent DÉJÀ pour ce cours. Ta mission : produire de NOUVELLES flashcards question/réponse, au format JSON strict, qui complètent ce jeu sans jamais le répéter.
+
+RÈGLES :
+- Chaque nouvelle flashcard doit tester un fait ABSENT de la liste existante : détail plus fin, autre angle (mécanisme, conséquence, comparaison, contre-indication, chiffre, piège classique d'examen, cas d'application clinique), ou une notion du cours encore non couverte.
+- Interdiction de reformuler, d'inverser ou de légèrement modifier une question existante.
+- Une question = un seul fait précis. Réponse courte (1 à 3 phrases), complète et autonome.
+- Ne jamais inventer d'information absente du texte fourni ni d'une connaissance médicale standard et vérifiée.
+- Format question/réponse ouvert uniquement — jamais d'options A/B/C/D.
+
+Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans texte autour, sans balises markdown :
+{"flashcards": [{"question": "...", "answer": "..."}]}`;
+
+export function buildFlashcardExtensionPrompt(fullExplicationText: string, existingQuestions: string[], count: number): string {
+  return `${FLASHCARD_EXTENSION_SYSTEM_PROMPT}
+
+FLASHCARDS DÉJÀ EXISTANTES (à ne jamais répéter) :
+${existingQuestions.map((question, index) => `${index + 1}. ${question}`).join("\n")}
+
+Génère exactement ${count} NOUVELLES flashcards pour ce cours :
+
+${fullExplicationText}`;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -36,6 +36,8 @@ import {
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { Select } from "@/components/ui/Select";
+import { useLanguageStore } from "@/store/useLanguageStore";
+import { AiLanguageSelect } from "@/components/course/workspace/AiLanguageSelect";
 import { Kbd } from "@/components/course/workspace/os/Kbd";
 import { useTheme } from "next-themes";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES } from "@/lib/markdown";
@@ -344,7 +346,7 @@ const TILE_SELECT_TRIGGER_CLASSES = "rounded-lg px-2.5 py-1.5 text-left text-xs 
 /** The single language list used by every generation-options popover — Studio tiles (desktop and mobile share TileOptionsMenu). */
 const LANGUAGE_OPTIONS = [
   { value: "fr", label: "🇫🇷 Français" },
-  { value: "en", label: "🇬🇧 Anglais" },
+  { value: "en", label: "🇬🇧 English" },
 ];
 
 const PODCAST_DIALECT_OPTIONS = [
@@ -376,102 +378,162 @@ export function TileOptionsMenu({
   onClose: () => void;
   onGenerate: (options: TileGenerationOptions) => void;
 }) {
-  const [draftLanguage, setDraftLanguage] = useState<"fr" | "en">("fr");
+  // The content language is the GLOBAL choice (store/useLanguageStore.ts):
+  // changing it here changes it for every other tile and Lab tool too, and a
+  // plain tile click (no popover) generates in it as well.
+  const contentLanguage = useLanguageStore((state) => state.language);
+  const setContentLanguage = useLanguageStore((state) => state.setLanguage);
   const [draftCustomPrompt, setDraftCustomPrompt] = useState("");
   const [draftModel, setDraftModel] = useState<InfographicModelKey>("nano-banana-2");
-  const [draftDialect, setDraftDialect] = useState<PodcastDialect>("fr-darija");
+  // Podcast keeps its own dialect list; it starts on the global language
+  // (plain English, not the mixed Darija variant) when English is selected.
+  const [draftDialect, setDraftDialect] = useState<PodcastDialect>(() => (contentLanguage === "en" ? "en" : "fr-darija"));
+
+  // Rendered in a portal with fixed positioning, anchored to the tile: as a
+  // plain `absolute` child it lived inside the Studio's scrolling grid
+  // (overflow-y-auto), which clipped it near the panel's edges.
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const PANEL_WIDTH = 256;
+    const MARGIN = 8;
+    function place() {
+      const anchor = anchorRef.current?.parentElement;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const panelHeight = panelRef.current?.offsetHeight ?? 220;
+      const spaceBelow = window.innerHeight - rect.bottom - MARGIN;
+      const openAbove = spaceBelow < panelHeight && rect.top - MARGIN > spaceBelow;
+      const top = openAbove
+        ? Math.max(MARGIN, rect.top - panelHeight - 4)
+        : Math.max(MARGIN, Math.min(rect.bottom + 4, window.innerHeight - panelHeight - MARGIN));
+      const left = Math.max(MARGIN, Math.min(rect.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - MARGIN));
+      setPosition((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
+    }
+    place();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
+    if (panelRef.current) observer?.observe(panelRef.current);
+    window.addEventListener("resize", place);
+    // capture: also follows scrolling of the Studio panel itself, not just the window.
+    window.addEventListener("scroll", place, true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
   function handleGenerate() {
     const options: TileGenerationOptions =
       sectionId === "infographic"
-        ? { language: draftLanguage, model: draftModel }
+        ? { language: contentLanguage, model: draftModel }
         : sectionId === "audio"
           ? { dialect: draftDialect }
           : sectionId === "explication"
-            ? { language: draftLanguage, customPrompt: draftCustomPrompt.trim() || undefined }
-            : { language: draftLanguage };
+            ? { language: contentLanguage, customPrompt: draftCustomPrompt.trim() || undefined }
+            : { language: contentLanguage };
     onGenerate(options);
     onClose();
   }
 
   return (
     <>
-      <button
-        type="button"
-        aria-label={tStudio("collapsePanelAria", language)}
-        tabIndex={-1}
-        className="fixed inset-0 z-40 cursor-default"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-      />
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="absolute right-0 top-full z-50 mt-1 w-64 space-y-2.5 rounded-xl border border-border bg-card p-3 text-left shadow-glass dark:shadow-glass-dark"
-      >
-        {sectionId === "audio" ? (
-          <div className="space-y-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {language === "fr" ? "Langue / dialecte" : "Language / dialect"}
-            </p>
-            <Select
-              value={draftDialect}
-              onValueChange={(value) => setDraftDialect(value as PodcastDialect)}
-              options={PODCAST_DIALECT_OPTIONS}
-              className={TILE_SELECT_TRIGGER_CLASSES}
-            />
-          </div>
-        ) : (
-          <>
-            {sectionId === "infographic" && (
+      <span ref={anchorRef} hidden aria-hidden />
+      {createPortal(
+        <>
+          <button
+            type="button"
+            aria-label={tStudio("collapsePanelAria", language)}
+            tabIndex={-1}
+            className="fixed inset-0 z-[1040] cursor-default"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+          />
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-label={language === "fr" ? "Options de génération" : "Generation options"}
+            onClick={(e) => e.stopPropagation()}
+            style={position ? { top: position.top, left: position.left } : { top: 0, left: 0, visibility: "hidden" }}
+            className="fixed z-[1050] w-64 space-y-2.5 rounded-xl border border-border bg-card p-3 text-left shadow-glass dark:shadow-glass-dark"
+          >
+            {sectionId === "audio" ? (
               <div className="space-y-1">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {language === "fr" ? "Modèle" : "Model"}
+                  {language === "fr" ? "Langue / dialecte" : "Language / dialect"}
                 </p>
                 <Select
-                  value={draftModel}
-                  onValueChange={(value) => setDraftModel(value as InfographicModelKey)}
-                  options={Object.entries(INFOGRAPHIC_MODEL_OPTIONS).map(([key, opt]) => ({
-                    value: key,
-                    label: language === "fr" ? opt.labelFr : opt.labelEn,
-                  }))}
+                  value={draftDialect}
+                  onValueChange={(value) => setDraftDialect(value as PodcastDialect)}
+                  options={PODCAST_DIALECT_OPTIONS}
                   className={TILE_SELECT_TRIGGER_CLASSES}
                 />
               </div>
+            ) : (
+              <>
+                {sectionId === "infographic" && (
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {language === "fr" ? "Modèle" : "Model"}
+                    </p>
+                    <Select
+                      value={draftModel}
+                      onValueChange={(value) => setDraftModel(value as InfographicModelKey)}
+                      options={Object.entries(INFOGRAPHIC_MODEL_OPTIONS).map(([key, opt]) => ({
+                        value: key,
+                        label: language === "fr" ? opt.labelFr : opt.labelEn,
+                      }))}
+                      className={TILE_SELECT_TRIGGER_CLASSES}
+                    />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {language === "fr" ? "Langue (tout le Studio et le Lab)" : "Language (whole Studio and Lab)"}
+                  </p>
+                  <Select
+                    value={contentLanguage}
+                    onValueChange={(value) => setContentLanguage(value === "en" ? "en" : "fr")}
+                    options={LANGUAGE_OPTIONS}
+                    className={TILE_SELECT_TRIGGER_CLASSES}
+                  />
+                </div>
+                {sectionId === "explication" && (
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {language === "fr" ? "Consigne personnalisée" : "Custom instructions"}
+                    </p>
+                    <textarea
+                      value={draftCustomPrompt}
+                      onChange={(e) => setDraftCustomPrompt(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder={language === "fr" ? "Décris ce que tu veux détailler..." : "Describe what you want to detail..."}
+                      rows={3}
+                      className="w-full resize-none rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary-400"
+                    />
+                  </div>
+                )}
+              </>
             )}
-            <div className="space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {language === "fr" ? "Langue" : "Language"}
-              </p>
-              <Select
-                value={draftLanguage}
-                onValueChange={(value) => setDraftLanguage(value as "fr" | "en")}
-                options={LANGUAGE_OPTIONS}
-                className={TILE_SELECT_TRIGGER_CLASSES}
-              />
-            </div>
-            {sectionId === "explication" && (
-              <div className="space-y-1">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {language === "fr" ? "Consigne personnalisée" : "Custom instructions"}
-                </p>
-                <textarea
-                  value={draftCustomPrompt}
-                  onChange={(e) => setDraftCustomPrompt(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                  placeholder={language === "fr" ? "Décris ce que tu veux détailler..." : "Describe what you want to detail..."}
-                  rows={3}
-                  className="w-full resize-none rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary-400"
-                />
-              </div>
-            )}
-          </>
-        )}
-        <Button size="sm" className="w-full rounded-lg" onClick={handleGenerate}>
-          {tStudio("generateAction", language)}
-        </Button>
-      </div>
+            <Button size="sm" className="w-full rounded-lg" onClick={handleGenerate}>
+              {tStudio("generateAction", language)}
+            </Button>
+          </div>
+        </>,
+        document.body
+      )}
     </>
   );
 }
@@ -800,6 +862,8 @@ export function StudioPanel({
             </button>
           ) : (
             <>
+              {/* Global AI-content language — one switch for every tile and Lab tool. */}
+              {!isCollapsed && <AiLanguageSelect compact className="mr-0.5" />}
               {openedSection && !isCollapsed && (
                 <SectionOptionsMenu
                   sectionId={openedSection}

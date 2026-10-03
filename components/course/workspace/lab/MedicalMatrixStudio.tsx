@@ -46,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import { useAuth } from "@/providers/AuthProvider";
+import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { slugify } from "@/lib/course-generation-shared";
 import { cn } from "@/lib/utils";
@@ -142,6 +143,18 @@ const KIND_META: Record<MatrixKind, KindMeta> = {
 
 const CACHE_VERSION = 1;
 
+/** Honest reminder of what the next generation will be written in — the selector itself lives in the Studio header. */
+const LANGUAGE_HINT: Record<ContentLanguage, string> = { fr: "Langue : Français", en: "Langue : English" };
+
+/**
+ * Suffix appended to every local identity of a result (localStorage key,
+ * in-flight key, history toolType). Empty for French so entries cached before
+ * the language switch existed stay valid; ":en" mirrors the server's toolType.
+ */
+function languageSuffix(language: ContentLanguage): string {
+  return language === "en" ? ":en" : "";
+}
+
 const TEAL_BUTTON =
   "bg-primary-600 text-white hover:bg-primary-700 hover:shadow-glow dark:bg-primary-500 dark:text-primary-950 dark:hover:bg-primary-400";
 
@@ -164,8 +177,8 @@ const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", {
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-function cacheKey(userId: string, courseId: number, kind: MatrixKind): string {
-  return `medart:matrix:${userId}:${courseId}:${kind}`;
+function cacheKey(userId: string, courseId: number, kind: MatrixKind, language: ContentLanguage): string {
+  return `medart:matrix:${userId}:${courseId}:${kind}${languageSuffix(language)}`;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -181,9 +194,9 @@ function isMedicalMatrix(value: unknown, kind: MatrixKind): value is MedicalMatr
   return Array.isArray(candidate.rows) && candidate.rows.every((row) => isStringArray(row) && row.length === width);
 }
 
-function readCachedMatrix(userId: string, courseId: number, kind: MatrixKind): CachedMatrix | null {
+function readCachedMatrix(userId: string, courseId: number, kind: MatrixKind, language: ContentLanguage): CachedMatrix | null {
   try {
-    const raw = window.localStorage.getItem(cacheKey(userId, courseId, kind));
+    const raw = window.localStorage.getItem(cacheKey(userId, courseId, kind, language));
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
@@ -195,9 +208,9 @@ function readCachedMatrix(userId: string, courseId: number, kind: MatrixKind): C
   }
 }
 
-function writeCachedMatrix(userId: string, courseId: number, kind: MatrixKind, entry: CachedMatrix): void {
+function writeCachedMatrix(userId: string, courseId: number, kind: MatrixKind, language: ContentLanguage, entry: CachedMatrix): void {
   try {
-    window.localStorage.setItem(cacheKey(userId, courseId, kind), JSON.stringify({ v: CACHE_VERSION, ...entry }));
+    window.localStorage.setItem(cacheKey(userId, courseId, kind, language), JSON.stringify({ v: CACHE_VERSION, ...entry }));
   } catch {
     // Private mode / full storage: the cache is a convenience, the matrix itself is still displayed.
   }
@@ -327,7 +340,7 @@ type GenerationOutcome = { ok: true; entry: CachedMatrix } | { ok: false; error:
 const GENERATION_FAILED = "La génération de la matrice a échoué. Réessaie.";
 
 /**
- * Generations in flight, keyed `${userId ?? "anon"}:${courseId}:${kind}`.
+ * Generations in flight, keyed `${userId ?? "anon"}:${courseId}:${kind}` (+ ":en" for English).
  * Module-level on purpose (same idea as ClinicalCaseSimulator's store): the
  * panel remounts when the Studio pane is expanded/collapsed, the Lab tool
  * changes, or the course changes and back. A request owned by component
@@ -339,16 +352,21 @@ const GENERATION_FAILED = "La génération de la matrice a échoué. Réessaie."
  */
 const inFlight = new Map<string, Promise<GenerationOutcome>>();
 
-function inFlightKey(userId: string | null, courseId: number, kind: MatrixKind): string {
-  return `${userId ?? "anon"}:${courseId}:${kind}`;
+function inFlightKey(userId: string | null, courseId: number, kind: MatrixKind, language: ContentLanguage): string {
+  return `${userId ?? "anon"}:${courseId}:${kind}${languageSuffix(language)}`;
 }
 
-async function requestMatrix(userId: string | null, courseId: number, kind: MatrixKind): Promise<GenerationOutcome> {
+async function requestMatrix(
+  userId: string | null,
+  courseId: number,
+  kind: MatrixKind,
+  language: ContentLanguage
+): Promise<GenerationOutcome> {
   try {
     const res = await fetch("/api/studio/matrix", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ courseId, kind }),
+      body: JSON.stringify({ courseId, kind, language }),
     });
     const data = ((await res.json().catch(() => null)) ?? {}) as { success?: unknown; error?: unknown; matrix?: unknown };
     if (!res.ok || data.success !== true) {
@@ -361,7 +379,7 @@ async function requestMatrix(userId: string | null, courseId: number, kind: Matr
     }
     const entry: CachedMatrix = { generatedAt: new Date().toISOString(), matrix: data.matrix };
     // Cached even if no instance is mounted any more (or the student switched course): the generation was paid for, it must be there next time.
-    if (userId) writeCachedMatrix(userId, courseId, kind, entry);
+    if (userId) writeCachedMatrix(userId, courseId, kind, language, entry);
     return { ok: true, entry };
   } catch (error) {
     return { ok: false, error: describeError(error, GENERATION_FAILED) };
@@ -369,11 +387,16 @@ async function requestMatrix(userId: string | null, courseId: number, kind: Matr
 }
 
 /** Returns the generation already in flight for this key, or starts one — never two at once. */
-function startGeneration(userId: string | null, courseId: number, kind: MatrixKind): Promise<GenerationOutcome> {
-  const key = inFlightKey(userId, courseId, kind);
+function startGeneration(
+  userId: string | null,
+  courseId: number,
+  kind: MatrixKind,
+  language: ContentLanguage
+): Promise<GenerationOutcome> {
+  const key = inFlightKey(userId, courseId, kind, language);
   const existing = inFlight.get(key);
   if (existing) return existing;
-  const promise = requestMatrix(userId, courseId, kind).finally(() => {
+  const promise = requestMatrix(userId, courseId, kind, language).finally(() => {
     if (inFlight.get(key) === promise) inFlight.delete(key);
   });
   inFlight.set(key, promise);
@@ -442,9 +465,13 @@ function fetchLabHistory(userId: string, courseId: number): Promise<LabHistoryIt
   return promise;
 }
 
-/** Newest-first list, so the first item of a kind is its most recent matrix; anything failing the cache validator is ignored. */
-function matrixFromHistory(items: readonly LabHistoryItem[], kind: MatrixKind): CachedMatrix | null {
-  const item = items.find((candidate) => candidate.toolType === `matrix:${kind}` && isMedicalMatrix(candidate.content, kind));
+/**
+ * Newest-first list, so the first item of a kind is its most recent matrix; anything failing the cache validator is ignored.
+ * Exact toolType match: "matrix:ddx" never matches "matrix:ddx:en", so a French matrix is never shown as the English one.
+ */
+function matrixFromHistory(items: readonly LabHistoryItem[], kind: MatrixKind, language: ContentLanguage): CachedMatrix | null {
+  const toolType = `matrix:${kind}${languageSuffix(language)}`;
+  const item = items.find((candidate) => candidate.toolType === toolType && isMedicalMatrix(candidate.content, kind));
   if (!item || !isMedicalMatrix(item.content, kind)) return null;
   const generatedAt = Number.isNaN(Date.parse(item.lastOpenedAt)) ? new Date().toISOString() : item.lastOpenedAt;
   return { generatedAt, matrix: item.content };
@@ -535,11 +562,13 @@ function MatrixSkeleton({ columns, label }: { columns: string[]; label: string }
 
 function MatrixEmptyState({
   kind,
+  language,
   pending,
   error,
   onGenerate,
 }: {
   kind: MatrixKind;
+  language: ContentLanguage;
   pending: boolean;
   error: string | null;
   onGenerate: () => void;
@@ -574,6 +603,7 @@ function MatrixEmptyState({
           {!pending && <Sparkles className="h-4 w-4" />}
           Générer la matrice
         </Button>
+        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{LANGUAGE_HINT[language]}</p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           Générée une seule fois pour tous les étudiants : si elle existe déjà pour ce cours, elle s'affiche gratuitement ; sinon elle utilise 1 génération de ton forfait.
         </p>
@@ -960,6 +990,7 @@ function MatrixView({ entry, courseTitle, onAskInChat, error }: MatrixViewProps)
 export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: MedicalMatrixStudioProps) {
   const { user, loading: authLoading } = useAuth();
   const userId = user?.id ?? null;
+  const language = useLanguageStore((s) => s.language);
   const reduceMotion = useReducedMotion();
   const segmentId = useId();
 
@@ -971,8 +1002,11 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
   // True while the server history is being fetched for a kind with no local entry — keeps the skeleton up instead of flashing the empty state.
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Guards against a response for a previous course/user landing in the current view.
-  const scope = `${userId ?? "anonyme"}:${courseId}`;
+  // Guards against a response for a previous course/user/language landing in
+  // the current view. The language is part of the scope so a switch re-reads the
+  // entries of the new language; a result for the old one is still cached by
+  // requestMatrix, so switching back shows it again.
+  const scope = `${userId ?? "anonyme"}:${courseId}:${language}`;
   const scopeRef = useRef(scope);
   const mountedRef = useRef(false);
 
@@ -987,7 +1021,7 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
    * Shows `target` as generating until `promise` (from startGeneration —
    * started by this instance or left running by a previous mount) settles,
    * then displays its result — only if this instance is still mounted and
-   * still on the same course/user. The result is stored per kind, so
+   * still on the same course/user/language. The result is stored per kind, so
    * switching tab meanwhile is fine.
    */
   const adopt = useCallback((target: MatrixKind, promise: Promise<GenerationOutcome>) => {
@@ -1009,8 +1043,8 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
       return;
     }
     setEntries({
-      pharmaco: userId ? readCachedMatrix(userId, courseId, "pharmaco") : null,
-      ddx: userId ? readCachedMatrix(userId, courseId, "ddx") : null,
+      pharmaco: userId ? readCachedMatrix(userId, courseId, "pharmaco", language) : null,
+      ddx: userId ? readCachedMatrix(userId, courseId, "ddx", language) : null,
     });
     setPending({ pharmaco: false, ddx: false });
     setErrors({ pharmaco: null, ddx: null });
@@ -1019,10 +1053,10 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
     // back) is still running: show it as such and pick up its result rather
     // than offering — and charging — a second one.
     for (const target of MATRIX_KINDS) {
-      const running = inFlight.get(inFlightKey(userId, courseId, target));
+      const running = inFlight.get(inFlightKey(userId, courseId, target, language));
       if (running) adopt(target, running);
     }
-  }, [adopt, authLoading, courseId, scope, userId]);
+  }, [adopt, authLoading, courseId, language, scope, userId]);
 
   // Restores matrices from the server history when localStorage has none
   // (new device, cleared storage). Declared after the cache read above so it runs second.
@@ -1031,7 +1065,7 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
       setHistoryLoading(false);
       return;
     }
-    const missing = MATRIX_KINDS.filter((target) => !readCachedMatrix(userId, courseId, target));
+    const missing = MATRIX_KINDS.filter((target) => !readCachedMatrix(userId, courseId, target, language));
     if (missing.length === 0) {
       setHistoryLoading(false);
       return;
@@ -1040,10 +1074,10 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
     const hydrate = (items: readonly LabHistoryItem[]) => {
       for (const target of missing) {
         // A generation in flight (or a result that landed meanwhile) is newer than anything in the history.
-        if (inFlight.has(inFlightKey(userId, courseId, target))) continue;
-        const restored = matrixFromHistory(items, target);
+        if (inFlight.has(inFlightKey(userId, courseId, target, language))) continue;
+        const restored = matrixFromHistory(items, target, language);
         if (!restored) continue;
-        if (!readCachedMatrix(userId, courseId, target)) writeCachedMatrix(userId, courseId, target, restored);
+        if (!readCachedMatrix(userId, courseId, target, language)) writeCachedMatrix(userId, courseId, target, language, restored);
         setEntries((current) => (current[target] ? current : { ...current, [target]: restored }));
       }
     };
@@ -1062,14 +1096,14 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
     return () => {
       cancelled = true;
     };
-  }, [authLoading, courseId, userId]);
+  }, [authLoading, courseId, language, userId]);
 
   const generate = useCallback(
     (target: MatrixKind) => {
       // startGeneration hands back the running request if there is one, so a double click never pays twice.
-      adopt(target, startGeneration(userId, courseId, target));
+      adopt(target, startGeneration(userId, courseId, target, language));
     },
-    [adopt, courseId, userId]
+    [adopt, courseId, language, userId]
   );
 
   const meta = KIND_META[kind];
@@ -1081,7 +1115,7 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
   } else if (entry) {
     content = (
       <MatrixView
-        key={`${kind}:${entry.generatedAt}`}
+        key={`${kind}:${language}:${entry.generatedAt}`}
         entry={entry}
         courseTitle={courseTitle}
         onAskInChat={onAskInChat}
@@ -1093,7 +1127,7 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
   } else if (historyLoading) {
     content = <MatrixSkeleton columns={meta.expectedColumns} label="Chargement de ta matrice…" />;
   } else {
-    content = <MatrixEmptyState kind={kind} pending={pending[kind]} error={errors[kind]} onGenerate={() => generate(kind)} />;
+    content = <MatrixEmptyState kind={kind} language={language} pending={pending[kind]} error={errors[kind]} onGenerate={() => generate(kind)} />;
   }
 
   return (

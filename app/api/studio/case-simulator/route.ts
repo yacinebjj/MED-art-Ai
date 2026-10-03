@@ -6,7 +6,8 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
-import { labContentHash, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
+import { labContentHash, labToolTypeFor, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
+import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
@@ -79,9 +80,13 @@ const examIdField = z
   .min(1, "'examId' est requis.")
   .max(64, "'examId' est trop long.");
 
+/** Global AI-content language (store/useLanguageStore.ts). Absent = French, the default every cached case was generated in. */
+const languageField = z.enum(["fr", "en"]).optional().default("fr");
+
 const StartBodySchema = z.object({
   action: z.literal("start"),
   courseId: courseIdField,
+  language: languageField,
   difficulty: z.enum(DIFFICULTIES, {
     errorMap: () => ({ message: "'difficulty' doit valoir \"externe\", \"interne\" ou \"concours\"." }),
   }),
@@ -97,6 +102,8 @@ const ExamBodySchema = z.object({
 const DiagnoseBodySchema = z.object({
   action: z.literal("diagnose"),
   courseId: courseIdField,
+  // The correction/feedback follows the same language as the case.
+  language: languageField,
   token: tokenField,
   diagnosis: z
     .string({ required_error: "'diagnosis' est requis.", invalid_type_error: "'diagnosis' doit être une chaîne." })
@@ -597,7 +604,8 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
   // course and time), so the hidden answer key still never reaches a client
   // and one student's token is useless to another.
   const contentHash = labContentHash(courseText);
-  const toolType = `case:${body.difficulty}` as const;
+  // Language-scoped cache key: an English case is never served to a French request, nor the reverse.
+  const toolType = labToolTypeFor(`case:${body.difficulty}`, body.language);
   const cachedCase = parseStoredCase(await lookupLabCache(contentHash, toolType));
   if (cachedCase) {
     await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: cachedCase.publicCase.title });
@@ -630,7 +638,7 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
   try {
     const raw = await callOpenRouterResilient(
       [
-        { role: "system", content: CASE_SYSTEM_PROMPT },
+        { role: "system", content: CASE_SYSTEM_PROMPT + buildLanguageDirective(body.language) },
         { role: "user", content: userPrompt },
       ],
       { model: CHEAP_MODEL, maxTokens: 3500, timeoutMs: 90_000, temperature: 0.7, bypassMock: true }
@@ -730,7 +738,7 @@ async function handleDiagnose(user: { id: string }, body: z.infer<typeof Diagnos
   try {
     const raw = await callOpenRouterResilient(
       [
-        { role: "system", content: GRADING_SYSTEM_PROMPT },
+        { role: "system", content: GRADING_SYSTEM_PROMPT + buildLanguageDirective(body.language) },
         { role: "user", content: userPrompt },
       ],
       { model: CHEAP_MODEL, maxTokens: 1200, timeoutMs: 60_000, temperature: 0.2, bypassMock: true }

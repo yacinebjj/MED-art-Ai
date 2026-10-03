@@ -73,6 +73,10 @@ import { ChatDocumentPanel, CHAT_MODE_OPTIONS, type ChatDocumentPanelHandle } fr
 import { SOURCES_WIDTH, STUDIO_WIDTH, useWorkspaceLayout } from "@/hooks/useWorkspaceLayout";
 import { useHotkeys, useModKeyLabel } from "@/hooks/useHotkeys";
 import { LAB_TOOLS, type LabToolId } from "@/lib/workspace-lab";
+// Global AI-content language: read at REQUEST time (getContentLanguage), so a
+// plain tile click generates in the language chosen anywhere in the app — not
+// only when the student opens a tile's options popover.
+import { getContentLanguage } from "@/store/useLanguageStore";
 import type { ChatMode } from "@/lib/chat-constants";
 import type { CitationSourceText } from "@/lib/chat-citations";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
@@ -1365,7 +1369,7 @@ export default function ModuleWorkspacePage() {
           const res = await fetch("/api/studio/infographic", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ courseId, language: options?.language, model: options?.model }),
+            body: JSON.stringify({ courseId, language: options?.language ?? getContentLanguage(), model: options?.model }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || !data.success) {
@@ -1391,7 +1395,7 @@ export default function ModuleWorkspacePage() {
           // lib/heartbeat-fetch.ts's own comment), appended below so a
           // failure toast is actual forensic evidence, not another bare
           // "échec de génération".
-          const outcome = await postJsonWithHeartbeat("/api/studio/podcast", { courseId, dialect: options?.dialect }, 320_000);
+          const outcome = await postJsonWithHeartbeat("/api/studio/podcast", { courseId, dialect: options?.dialect ?? (getContentLanguage() === "en" ? "en" : undefined) }, 320_000);
           if (!outcome.ok || outcome.data.success !== true) {
             const baseError =
               outcome.status === 429
@@ -1420,7 +1424,7 @@ export default function ModuleWorkspacePage() {
           // NOT auto-retry" about logic that was in fact retrying.
           const result = await generateExplicationInParts(
             courseId,
-            { language: options?.language, customPrompt: options?.customPrompt },
+            { language: options?.language ?? getContentLanguage(), customPrompt: options?.customPrompt },
             (progress) => setExplicationProgress(progress)
           );
           setExplicationProgress(null);
@@ -1445,7 +1449,7 @@ export default function ModuleWorkspacePage() {
           // explicit product direction (single-shot, hyper-concise prompt
           // instead — see STUDIO_RESUME_SYSTEM_PROMPT's own comment).
           const { res, data } = await postStudioGenerate(id, courseId, {
-            language: options?.language,
+            language: options?.language ?? getContentLanguage(),
             customPrompt: options?.customPrompt,
           });
           if (!res.ok || !data.success) {
@@ -1544,7 +1548,7 @@ export default function ModuleWorkspacePage() {
         const res = await fetch("/api/studio/regenerate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ courseId, section: id }),
+          body: JSON.stringify({ courseId, section: id, language: getContentLanguage() }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) {

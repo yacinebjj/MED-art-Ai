@@ -1,5 +1,6 @@
 import { AuthProvider } from "@/providers/AuthProvider";
 import { PomodoroAuthSync } from "@/providers/PomodoroAuthSync";
+import { LanguageStoreHydrator } from "@/components/course/workspace/AiLanguageSelect";
 
 /**
  * Root layout for everything under /dashboard/**. Deliberately minimal —
@@ -15,6 +16,7 @@ export default function DashboardLayout({
   return (
     <AuthProvider>
       <PomodoroAuthSync />
+      <LanguageStoreHydrator />
       {children}
     </AuthProvider>
   );

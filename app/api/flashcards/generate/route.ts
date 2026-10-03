@@ -2,56 +2,136 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
-import { buildDefinitiveFlashcardSetPrompt } from "@/lib/ai/flashcard-prompts";
+import { CHEAP_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
+import { buildDefinitiveFlashcardSetPrompt, buildFlashcardExtensionPrompt } from "@/lib/ai/flashcard-prompts";
 import { FlashcardGenerationSchema } from "@/lib/ai/flashcard-schemas";
+import { buildLanguageDirective, parseContentLanguage, type ContentLanguage } from "@/lib/ai/language-directive";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
-import { lookupFlashcardsCacheBatch, storeFlashcardsCache, recordFlashcardsCacheHit, type FlashcardQA } from "@/lib/flashcards-content-cache";
+import {
+  appendFlashcardsCache,
+  lookupFlashcardsCacheBatch,
+  recordFlashcardsCacheHit,
+  storeFlashcardsCache,
+  type FlashcardQA,
+} from "@/lib/flashcards-content-cache";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
 export const runtime = "nodejs";
-// Raised with the 2026-10 timeout pass: the model call may now run up to the value below, so maxDuration leaves headroom for one fast transient retry.
+// At most ONE model call per request (90s timeout) + a few Supabase round trips.
 export const maxDuration = 120;
 
-/** One batch size for both the very first load and every background top-up — see this route's header comment. 60 / 20 = 3 calls fill an entire session. */
-const BATCH_SIZE = 20;
+/** One study batch. The deck asks for the next one when the student nears the end of the current one. */
+const BATCH_SIZE = 25;
 
-/** Hard ceiling on flashcards generated in one study session — protects API token spend and keeps the deck instantaneous. Mirrors ActiveFlashcardsDeck's own SESSION_CAP and /api/flashcards/pool's MAX_POOL_SIZE. */
-const SESSION_CAP = 60;
-
-/** Definitive-set size range — see buildDefinitiveFlashcardSetPrompt. Generous enough for real exam-relevant coverage of a full course, bounded so one course can't produce an unbounded deck. */
+/** First ("definitive") set of a course — see buildDefinitiveFlashcardSetPrompt. */
 const MIN_DEFINITIVE_CARDS = 20;
 const MAX_DEFINITIVE_CARDS = 30;
 
-/** Explication text bounded before being sent to the model — same discipline as every other user/course-derived input this session (MAX_SOURCE_CHARS, MAX_HIGHLIGHT_CHARS, MAX_MESSAGE_CHARS). A real explication rarely approaches this. */
+/** Cards added to a course's set each time a student has seen all of it. */
+const EXTENSION_SIZE = 25;
+
+/** Same bound as before on the explication text sent to the model. */
 const MAX_EXPLICATION_CHARS_FOR_FLASHCARDS = 24_000;
+
+/** Existing questions quoted to the model on an extension — enough to steer it away from repeats without blowing the prompt up. */
+const MAX_EXISTING_QUESTIONS_IN_PROMPT = 160;
+
+/** One card in a student's per-course history (studio_courses.flashcard_queue). `lang` is absent on cards served before languages existed — those were French. */
+interface QueueCard {
+  id: string;
+  question: string;
+  answer: string;
+  lang?: ContentLanguage;
+}
 
 interface StudioCourseRow {
   id: number;
   title: string;
   curriculum_module_id: number;
   explication: string | null;
-  flashcard_queue: { id: string; question: string; answer: string }[] | null;
+  flashcard_queue: QueueCard[] | null;
+}
+
+interface CandidateCard extends FlashcardQA {
+  course: StudioCourseRow;
+}
+
+/** Fisher-Yates — uniform, unlike `.sort(() => Math.random() - 0.5)`. */
+function shuffle<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+function questionKey(question: string): string {
+  return normalizeText(question);
 }
 
 /**
- * DEFINITIVE-SET ARCHITECTURE (replaces per-call random-excerpt sampling):
- * every course's explication has exactly ONE canonical, cross-student
- * flashcard set (see lib/flashcards-content-cache.ts), generated once ever
- * platform-wide and reused by every student who studies that course. This
- * route's job on each call is to serve the next unseen SLICE of that
- * course's definitive set to THIS student — "unseen" tracked by how many
- * cards this student's own `studio_courses.flashcard_queue` already holds
- * for that course (not `sessionCount`, which blends multiple courses in one
- * session and can't be used as a per-course offset).
+ * Cross-student cache key of one course's set IN ONE LANGUAGE. French keeps
+ * the historical key (sha256 of the normalized explication) so every set
+ * already cached stays valid; English gets a distinct ":en" row.
+ */
+function cacheKeyFor(explication: string, language: ContentLanguage): string {
+  const base = sha256(normalizeText(explication));
+  return language === "en" ? `${base}:en` : base;
+}
+
+/** Cards of `cached` this student has not been served yet in this language (matched by normalized question, so order and later extensions don't matter). */
+function unseenCards(course: StudioCourseRow, cached: FlashcardQA[], language: ContentLanguage): FlashcardQA[] {
+  const served = new Set(
+    (course.flashcard_queue ?? []).filter((card) => (card.lang ?? "fr") === language).map((card) => questionKey(card.question))
+  );
+  const result: FlashcardQA[] = [];
+  for (const card of cached) {
+    const key = questionKey(card.question);
+    if (served.has(key)) continue;
+    served.add(key); // also dedupes repeats inside the cached set itself
+    result.push(card);
+  }
+  return result;
+}
+
+function parseGeneratedCards(raw: string): FlashcardQA[] {
+  const parsed = parseJsonResponse(raw);
+  const result = FlashcardGenerationSchema.safeParse(parsed);
+  if (!result.success) {
+    console.error("[flashcards/generate] Validation zod échouée :", result.error.flatten());
+    throw new Error("La réponse de l'IA ne respecte pas le schéma attendu.");
+  }
+  return result.data.flashcards.map((fc) => ({
+    question: sanitizeForPostgres(fc.question.trim()),
+    answer: sanitizeForPostgres(fc.answer.trim()),
+  }));
+}
+
+/**
+ * POST /api/flashcards/generate — body `{ language?: "fr" | "en" }`.
  *
- * Body: `{ sessionCount?: number }` — how many cards the caller's current
- * session deck already holds, across ALL courses. Only used for the
- * session-wide SESSION_CAP guardrail; per-course pagination uses the
- * persisted queue length instead (see above).
+ * Returns the NEXT batch of up to 25 cards the student has not seen yet,
+ * MIXED across every course of the current selection (the courses ticked in
+ * the picker, or every course of the activated modules when none is ticked):
+ *  1. All unseen cards of all selected courses are pooled and shuffled
+ *     (Fisher-Yates) BEFORE the batch is cut — a batch is never "all of
+ *     course A, then course B".
+ *  2. If fewer than 25 unseen cards remain, ONE generation happens first:
+ *     a course with no set yet gets its first set; otherwise the course with
+ *     the fewest unseen cards gets an EXTENSION (new cards that don't repeat
+ *     its existing ones), appended to the cross-student cache. Either costs
+ *     one plan generation (refunded on failure). This is what makes the
+ *     study flow endless.
+ *  3. Served cards are appended to each course's flashcard_queue (with their
+ *     language), which is both the student's history and what "unseen"
+ *     is computed against.
+ * At most one model call per request bounds latency and spend; the deck
+ * only asks again once the student is close to the end of a batch.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -71,17 +151,9 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    // No body / empty body is fine — sessionCount just defaults to 0 below.
+    // An empty body is fine — defaults apply.
   }
-  const rawSessionCount = (body as { sessionCount?: unknown })?.sessionCount;
-  const sessionCount = typeof rawSessionCount === "number" && Number.isFinite(rawSessionCount) ? Math.max(0, rawSessionCount) : 0;
-
-  if (sessionCount >= SESSION_CAP) {
-    // The caller's deck already hit the session ceiling — nothing more to
-    // generate. Not an error: this is the expected, quiet end of a session.
-    return NextResponse.json({ success: true, items: [] });
-  }
-  const batchSize = Math.min(BATCH_SIZE, SESSION_CAP - sessionCount);
+  const language = parseContentLanguage((body as { language?: unknown })?.language);
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -105,10 +177,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Aucun module actif." }, { status: 400 });
   }
 
-  // STRICT course selection (same rule as /api/flashcards/pool): courses
-  // ticked in the picker modal are the ONLY ones flashcards are served or
-  // generated from — the query is restricted to their ids. Nothing ticked =
-  // every course of the activated modules, as before.
+  // STRICT course selection: ticked courses only (still inside the active
+  // modules, always the student's own rows); nothing ticked = whole modules.
   let coursesQuery = supabase
     .from("studio_courses")
     .select("id, title, curriculum_module_id, explication, flashcard_queue")
@@ -122,155 +192,135 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${coursesError.message}` }, { status: 500 });
   }
 
-  const eligibleCourses = (courses ?? []) as StudioCourseRow[];
+  const eligibleCourses = ((courses ?? []) as StudioCourseRow[]).filter((course) => course.explication && course.explication.trim());
   if (eligibleCourses.length === 0) {
     return NextResponse.json(
-      { success: false, error: "Aucun cours avec une Explication générée dans tes modules actifs." },
+      { success: false, error: "Aucun cours avec une Explication générée dans ta sélection." },
       { status: 400 }
     );
   }
 
-  // Load-balance across all eligible courses, same tie-break as before
-  // (fewest queued first) — but now iterated in order rather than picking
-  // just the top one, since the top pick might already be fully exhausted
-  // (every card in its definitive set already served to this student) and
-  // the route needs to fall through to the next course instead of returning
-  // nothing when other courses still have unseen content.
-  const orderedCourses = [...eligibleCourses].sort(
-    (a, b) => (a.flashcard_queue?.length ?? 0) - (b.flashcard_queue?.length ?? 0)
+  const cacheKeys = new Map(eligibleCourses.map((course) => [course.id, cacheKeyFor(course.explication!, language)]));
+  const cachedByKey = await lookupFlashcardsCacheBatch(Array.from(cacheKeys.values()));
+  const cachedSetFor = (course: StudioCourseRow) => cachedByKey.get(cacheKeys.get(course.id)!) ?? null;
+
+  const unseenByCourse = new Map<number, FlashcardQA[]>();
+  for (const course of eligibleCourses) {
+    const cached = cachedSetFor(course);
+    unseenByCourse.set(course.id, cached ? unseenCards(course, cached, language) : []);
+  }
+  const totalUnseen = () => Array.from(unseenByCourse.values()).reduce((sum, cards) => sum + cards.length, 0);
+
+  let generated: "definitive" | "extension" | null = null;
+  let quotaReached = false;
+
+  // ---- 2. ONE generation when needed: a selected course that has no set yet
+  // (so every ticked course really ends up in the mix), or — once all have
+  // one — an extension when fewer than a batch of unseen cards remain.
+  const withoutSet = eligibleCourses.filter((course) => !cachedSetFor(course));
+  if (withoutSet.length > 0 || totalUnseen() < BATCH_SIZE) {
+    const target =
+      withoutSet.length > 0
+        ? withoutSet[Math.floor(Math.random() * withoutSet.length)]
+        : [...eligibleCourses].sort((a, b) => (unseenByCourse.get(a.id)?.length ?? 0) - (unseenByCourse.get(b.id)?.length ?? 0))[0];
+    const mode: "definitive" | "extension" = withoutSet.length > 0 ? "definitive" : "extension";
+    const key = cacheKeys.get(target.id)!;
+    const existingSet = cachedSetFor(target) ?? [];
+
+    const gate = await reserveGeneration(user);
+    if (!gate.allowed) {
+      quotaReached = true;
+      if (totalUnseen() === 0) {
+        return NextResponse.json({ success: false, error: gate.reason, code: "quota" }, { status: 403 });
+      }
+    } else {
+      try {
+        const explication = target.explication!.slice(0, MAX_EXPLICATION_CHARS_FOR_FLASHCARDS);
+        const systemPrompt =
+          (mode === "definitive"
+            ? buildDefinitiveFlashcardSetPrompt(explication, MIN_DEFINITIVE_CARDS, MAX_DEFINITIVE_CARDS)
+            : buildFlashcardExtensionPrompt(
+                explication,
+                existingSet.slice(-MAX_EXISTING_QUESTIONS_IN_PROMPT).map((card) => card.question),
+                EXTENSION_SIZE
+              )) + buildLanguageDirective(language);
+        const raw = await callOpenRouterResilient(
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: mode === "definitive" ? "Génère l'ensemble définitif de flashcards demandé." : "Génère les nouvelles flashcards demandées." },
+          ],
+          { model: CHEAP_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 90_000 }
+        );
+        const cards = parseGeneratedCards(raw);
+
+        if (mode === "definitive") {
+          await storeFlashcardsCache(key, cards);
+          cachedByKey.set(key, cards);
+        } else {
+          // Only genuinely new questions are kept — a model that repeats itself must not grow the set with duplicates.
+          const existingKeys = new Set(existingSet.map((card) => questionKey(card.question)));
+          const fresh = cards.filter((card) => {
+            const k = questionKey(card.question);
+            if (existingKeys.has(k)) return false;
+            existingKeys.add(k);
+            return true;
+          });
+          if (fresh.length === 0) throw new Error("L'IA n'a produit aucune flashcard réellement nouvelle. Réessaie.");
+          await appendFlashcardsCache(key, fresh);
+          cachedByKey.set(key, [...existingSet, ...fresh]);
+        }
+        unseenByCourse.set(target.id, unseenCards(target, cachedByKey.get(key)!, language));
+        generated = mode;
+      } catch (error) {
+        await refundGeneration(user.id);
+        console.error(`[flashcards/generate] Échec génération (${mode}, cours ${target.id}):`, error);
+        // Still serve whatever unseen cards exist; only fail when there are none at all.
+        if (totalUnseen() === 0) {
+          return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
+        }
+      }
+    }
+  }
+
+  // ---- 1. Pool every unseen card of every selected course, shuffle, cut one batch.
+  const pool: CandidateCard[] = [];
+  for (const course of eligibleCourses) {
+    for (const card of unseenByCourse.get(course.id) ?? []) pool.push({ ...card, course });
+  }
+  const batch = shuffle(pool).slice(0, BATCH_SIZE);
+
+  if (batch.length === 0) {
+    return NextResponse.json({ success: true, items: [] satisfies FlashcardPoolItem[], generated, quotaReached, remainingUnseen: 0 });
+  }
+
+  // ---- 3. Record what was served, per course, in this language.
+  const servedByCourse = new Map<number, QueueCard[]>();
+  const items: FlashcardPoolItem[] = batch.map((card) => {
+    const id = randomUUID();
+    const list = servedByCourse.get(card.course.id) ?? [];
+    list.push({ id, question: card.question, answer: card.answer, lang: language });
+    servedByCourse.set(card.course.id, list);
+    return { id, question: card.question, answer: card.answer, courseTitle: card.course.title, moduleId: card.course.curriculum_module_id };
+  });
+
+  await Promise.all(
+    Array.from(servedByCourse.entries()).map(async ([courseId, served]) => {
+      const course = eligibleCourses.find((c) => c.id === courseId)!;
+      const { error } = await supabase
+        .from("studio_courses")
+        .update({ flashcard_queue: [...(course.flashcard_queue ?? []), ...served] })
+        .eq("id", courseId)
+        .eq("user_id", user.id);
+      if (error) console.error(`[flashcards/generate] Échec sauvegarde flashcard_queue (cours ${courseId}):`, error.message);
+      void recordFlashcardsCacheHit(cacheKeys.get(courseId)!);
+    })
   );
 
-  async function serveFromCache(course: StudioCourseRow, cachedCards: FlashcardQA[], contentHash: string) {
-    const alreadyServed = course.flashcard_queue?.length ?? 0;
-    const slice = cachedCards.slice(alreadyServed, alreadyServed + batchSize);
-    if (slice.length === 0) return null; // exhausted for this student — caller tries the next course
-
-    await recordFlashcardsCacheHit(contentHash);
-
-    const newItems = slice.map((fc) => ({ id: randomUUID(), question: fc.question, answer: fc.answer }));
-    const updatedQueue = [...(course.flashcard_queue ?? []), ...newItems];
-    const { error: updateError } = await supabase.from("studio_courses").update({ flashcard_queue: updatedQueue }).eq("id", course.id);
-    if (updateError) {
-      console.error("[flashcards/generate] Échec sauvegarde flashcard_queue (cache hit):", updateError);
-    }
-
-    const items: FlashcardPoolItem[] = newItems.map((item) => ({ ...item, courseTitle: course.title, moduleId: course.curriculum_module_id }));
-    return items;
-  }
-
-  try {
-    // Pass 1: serve from an already-cached, not-yet-exhausted course — zero
-    // API cost, zero quota reservation (cache hits never consume quota,
-    // same rule as every other cache in this app).
-    //
-    // PERFORMANCE: content hashes are computed synchronously (no await
-    // needed), so every candidate is resolved in ONE batched query up front
-    // instead of one sequential DB round trip per course — a real N+1
-    // whenever earlier-ordered courses lack a cross-student cache entry
-    // (common for newly-uploaded courses), previously forcing up to N
-    // blocking round trips before falling through to Pass 2.
-    const contentHashes = orderedCourses.map((course) => sha256(normalizeText(course.explication!)));
-    const cacheByHash = await lookupFlashcardsCacheBatch(contentHashes);
-
-    for (let i = 0; i < orderedCourses.length; i++) {
-      const course = orderedCourses[i];
-      const contentHash = contentHashes[i];
-      const cached = cacheByHash.get(contentHash);
-      if (!cached) continue; // no definitive set yet for this course — candidate for Pass 2
-
-      const items = await serveFromCache(course, cached, contentHash);
-      if (items) return NextResponse.json({ success: true, items });
-      // else: this course's set is exhausted for this student — try the next one
-    }
-
-    // Pass 2: no eligible course had unseen cached content — the first
-    // course with NO definitive set at all gets one generated now. Plan
-    // quota RESERVATION here (not per-card): this is now a single
-    // generation EVENT per course, ever, platform-wide, so it shares
-    // courseCap's "one real generation = one unit" semantics rather than
-    // the old per-card counting — see reserveGeneration's own comment.
-    const targetCourse = orderedCourses.find((course) => !course.flashcard_queue || course.flashcard_queue.length === 0)
-      ?? orderedCourses[0];
-    // ^ Prefer a course with zero queue (genuinely new to this student) as
-    // the generation target when multiple lack a cached set — arbitrary but
-    // deterministic tie-break, matching the old "fewest queued" spirit.
-
-    if (!targetCourse) {
-      return NextResponse.json({ success: true, items: [] }); // everything exhausted everywhere
-    }
-
-    const contentHash = sha256(normalizeText(targetCourse.explication!));
-
-    const quotaGate = await reserveGeneration(user);
-    if (!quotaGate.allowed) {
-      return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
-    }
-
-    let raw: string;
-    try {
-      const boundedExplication = targetCourse.explication!.slice(0, MAX_EXPLICATION_CHARS_FOR_FLASHCARDS);
-      const prompt = buildDefinitiveFlashcardSetPrompt(boundedExplication, MIN_DEFINITIVE_CARDS, MAX_DEFINITIVE_CARDS);
-      raw = await callOpenRouter(
-        [
-          { role: "system", content: prompt },
-          { role: "user", content: "Génère l'ensemble définitif de flashcards demandé." },
-        ],
-        // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
-        // This "definitive set" generation is cross-student CACHED
-        // (flashcards_content_cache, keyed by content hash) — a cheaper
-        // model only saves money on a genuine cache miss (first-ever
-        // generation for a given course), not per student, but every miss
-        // still costs real money once. Tested with one real call: clean
-        // schema, 26/26 medically-accurate cards — a knowingly-accepted
-        // tradeoff on a small sample, per the product owner's own explicit
-        // "runway over accuracy margin" decision.
-        { model: CHEAP_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 90_000 } // maxDuration is 120s — fail cleanly before the platform kills the route
-      );
-    } catch (error) {
-      await refundGeneration(user.id);
-      if (error instanceof OpenRouterError) {
-        return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-      }
-      console.error("[flashcards/generate] Échec appel IA (ensemble définitif):", error);
-      return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
-    }
-
-    let definitiveSet: FlashcardQA[];
-    try {
-      const parsed = parseJsonResponse(raw);
-      const result = FlashcardGenerationSchema.safeParse(parsed);
-      if (!result.success) {
-        console.error("[flashcards/generate] Validation zod échouée :", result.error.flatten());
-        throw new Error("La réponse de l'IA ne respecte pas le schéma attendu.");
-      }
-      definitiveSet = result.data.flashcards.map((fc) => ({
-        question: sanitizeForPostgres(fc.question),
-        answer: sanitizeForPostgres(fc.answer),
-      }));
-    } catch (error) {
-      await refundGeneration(user.id);
-      console.error("[flashcards/generate] Parsing/validation échoué :", error);
-      return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
-    }
-
-    // Store BEFORE serving — the next student (or this one, next call) to
-    // hit this content_hash benefits immediately. Fail-open: a caching
-    // hiccup can't block this student's own successful generation.
-    await storeFlashcardsCache(contentHash, definitiveSet);
-
-    const items = await serveFromCache(targetCourse, definitiveSet, contentHash);
-    // ^ Reuses the exact same slicing/persistence/response-shaping logic as
-    // a genuine cache hit — this student's own first slice of what they
-    // just paid to generate. Cannot be null: a brand-new set always has at
-    // least MIN_DEFINITIVE_CARDS, and alreadyServed was 0 or would have hit
-    // Pass 1 instead.
-
-    return NextResponse.json({ success: true, items: items ?? [] });
-  } catch (error) {
-    if (error instanceof OpenRouterError) {
-      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-    }
-    console.error("[flashcards/generate] Erreur non gérée:", error);
-    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
-  }
+  return NextResponse.json({
+    success: true,
+    items,
+    generated,
+    quotaReached,
+    remainingUnseen: Math.max(0, pool.length - batch.length),
+  });
 }

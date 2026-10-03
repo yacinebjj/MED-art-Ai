@@ -1,3 +1,4 @@
+import { buildLanguageDirective, parseContentLanguage } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
 import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import { STUDIO_BYPASS_MOCK, STUDIO_PROMPT_CONFIG, STUDIO_SECTION_KEYS, buildStudioSystemMessage } from "@/lib/ai/studio-prompts";
@@ -83,7 +84,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { courseId, section } = (body ?? {}) as { courseId?: unknown; section?: unknown };
+  const { courseId, section, language: languageRaw } = (body ?? {}) as { courseId?: unknown; section?: unknown; language?: unknown };
+  // Global AI-content language (store/useLanguageStore.ts) — the new QCM set follows it.
+  const language = parseContentLanguage(languageRaw);
   if (typeof courseId !== "number" || !Number.isFinite(courseId)) {
     return NextResponse.json({ success: false, error: "'courseId' est requis et doit être un nombre." }, { status: 400 });
   }
@@ -180,7 +183,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const systemContent = buildStudioSystemMessage(
     "qcm",
     sourceText.slice(0, MAX_SOURCE_CHARS),
-    `${STUDIO_PROMPT_CONFIG.qcm.systemPrompt}\n${regenerateInstruction}`
+    `${STUDIO_PROMPT_CONFIG.qcm.systemPrompt}\n${regenerateInstruction}${buildLanguageDirective(language)}`
   );
 
   let finalData: unknown = null;

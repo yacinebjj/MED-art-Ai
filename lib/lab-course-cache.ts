@@ -28,13 +28,25 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 
 /** One id per cached tool variant — the `tool_type` column. */
-export type LabToolType =
+export type BaseLabToolType =
   | "matrix:pharmaco"
   | "matrix:ddx"
   | "mindmap"
   | "case:externe"
   | "case:interne"
   | "case:concours";
+
+/**
+ * Cache/history key of one tool variant IN ONE LANGUAGE. French keeps the
+ * historical, unsuffixed key (every row stored before languages existed is
+ * French), English gets ":en". Without this split, a student generating in
+ * English would be served the French content another student had cached.
+ */
+export type LabToolType = BaseLabToolType | `${BaseLabToolType}:en`;
+
+export function labToolTypeFor(base: BaseLabToolType, language: "fr" | "en"): LabToolType {
+  return language === "en" ? `${base}:en` : base;
+}
 
 /** The stable content address for a course's source text. */
 export function labContentHash(rawText: string): string {

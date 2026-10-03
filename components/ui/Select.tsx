@@ -9,14 +9,20 @@ import { Label } from "./Label";
 const SelectContent = forwardRef<
   ElementRef<typeof SelectPrimitive.Content>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
+>(({ className, children, position = "popper", sideOffset = 5, collisionPadding = 8, ...props }, ref) => (
+  // Portaled to <body>, so no ancestor's overflow can clip it. z-[1100]
+  // (not z-50): it must float above the Studio's full-screen overlay
+  // (z-[999]), the command palette (z-[1000]) and the tile options popover
+  // (z-[1050]) when opened from inside any of them — at z-50 it rendered
+  // BEHIND those layers and looked cut off / missing.
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
       position={position}
-      sideOffset={6}
+      sideOffset={sideOffset}
+      collisionPadding={collisionPadding}
       className={cn(
-        "relative z-50 max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-2xl border border-border/60 bg-popover/95 text-popover-foreground shadow-glass backdrop-blur-xl dark:shadow-glass-dark",
+        "relative z-[1100] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-border/60 bg-popover/95 text-popover-foreground shadow-glass backdrop-blur-xl dark:shadow-glass-dark",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2",
         className
       )}
@@ -118,7 +124,8 @@ export function Select({
         <SelectPrimitive.Trigger
           id={selectId}
           className={cn(
-            "group flex w-full items-center justify-between rounded-xl border bg-card px-3.5 py-2.5 text-sm text-foreground shadow-soft transition-all duration-300",
+            // [&>span:first-child]:truncate — a long option label ("Français-Arabe (Darija Algérienne)") stays on one line with an ellipsis instead of wrapping the trigger; the open list shows it in full.
+            "group flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border bg-card px-3.5 py-2.5 text-left text-sm text-foreground shadow-soft transition-all duration-300 [&>span:first-child]:truncate",
             "hover:border-primary/40",
             "focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary",
             "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-input disabled:bg-muted/40",

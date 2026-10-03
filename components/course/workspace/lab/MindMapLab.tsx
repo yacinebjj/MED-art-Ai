@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { useAuth } from "@/providers/AuthProvider";
+import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { slugify } from "@/lib/course-generation-shared";
 import { cn } from "@/lib/utils";
@@ -775,8 +776,20 @@ async function renderPng(markup: string, width: number, height: number, backgrou
 // Cache + misc helpers
 // ---------------------------------------------------------------------------
 
-function cacheKey(userId: string, courseId: number): string {
-  return `medart:mindmap:${userId}:${courseId}`;
+/** Honest reminder of what the next generation will be written in — the selector itself lives in the Studio header. */
+const LANGUAGE_HINT: Record<ContentLanguage, string> = { fr: "Langue : Français", en: "Langue : English" };
+
+/**
+ * Suffix appended to every local identity of a map (localStorage key,
+ * in-flight key, history toolType). Empty for French so maps cached before the
+ * language switch existed stay valid; ":en" mirrors the server's toolType.
+ */
+function languageSuffix(language: ContentLanguage): string {
+  return language === "en" ? ":en" : "";
+}
+
+function cacheKey(userId: string, courseId: number, language: ContentLanguage): string {
+  return `medart:mindmap:${userId}:${courseId}${languageSuffix(language)}`;
 }
 
 function isMindMapNode(value: unknown, depth: number, counter: { count: number }): value is MindMapNode {
@@ -803,9 +816,9 @@ function isMindMapData(value: unknown): value is MindMapData {
   );
 }
 
-function readCachedMindMap(userId: string, courseId: number): CachedMindMap | null {
+function readCachedMindMap(userId: string, courseId: number, language: ContentLanguage): CachedMindMap | null {
   try {
-    const raw = window.localStorage.getItem(cacheKey(userId, courseId));
+    const raw = window.localStorage.getItem(cacheKey(userId, courseId, language));
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
@@ -817,9 +830,9 @@ function readCachedMindMap(userId: string, courseId: number): CachedMindMap | nu
   }
 }
 
-function writeCachedMindMap(userId: string, courseId: number, entry: CachedMindMap): void {
+function writeCachedMindMap(userId: string, courseId: number, language: ContentLanguage, entry: CachedMindMap): void {
   try {
-    window.localStorage.setItem(cacheKey(userId, courseId), JSON.stringify({ v: CACHE_VERSION, ...entry }));
+    window.localStorage.setItem(cacheKey(userId, courseId, language), JSON.stringify({ v: CACHE_VERSION, ...entry }));
   } catch {
     // Private mode / full storage: the cache is a convenience, the map itself is still displayed.
   }
@@ -843,7 +856,7 @@ type GenerationOutcome = { ok: true; entry: CachedMindMap } | { ok: false; error
 const GENERATION_FAILED = "La génération de la carte mentale a échoué. Réessaie.";
 
 /**
- * Generations in flight, keyed `${userId ?? "anon"}:${courseId}`.
+ * Generations in flight, keyed `${userId ?? "anon"}:${courseId}` (+ ":en" for English).
  * Module-level on purpose (same idea as ClinicalCaseSimulator's store): the
  * panel remounts when the Studio pane is expanded/collapsed, the Lab tool
  * changes, or the course changes and back. A request owned by component
@@ -855,16 +868,16 @@ const GENERATION_FAILED = "La génération de la carte mentale a échoué. Rées
  */
 const inFlight = new Map<string, Promise<GenerationOutcome>>();
 
-function inFlightKey(userId: string | null, courseId: number): string {
-  return `${userId ?? "anon"}:${courseId}`;
+function inFlightKey(userId: string | null, courseId: number, language: ContentLanguage): string {
+  return `${userId ?? "anon"}:${courseId}${languageSuffix(language)}`;
 }
 
-async function requestMindMap(userId: string | null, courseId: number): Promise<GenerationOutcome> {
+async function requestMindMap(userId: string | null, courseId: number, language: ContentLanguage): Promise<GenerationOutcome> {
   try {
     const res = await fetch("/api/studio/mindmap", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ courseId }),
+      body: JSON.stringify({ courseId, language }),
     });
     const data = ((await res.json().catch(() => null)) ?? {}) as { success?: unknown; error?: unknown; mindmap?: unknown };
     if (!res.ok || data.success !== true) {
@@ -877,7 +890,7 @@ async function requestMindMap(userId: string | null, courseId: number): Promise<
     }
     const entry: CachedMindMap = { generatedAt: new Date().toISOString(), mindmap: data.mindmap };
     // Cached even if no instance is mounted any more (or the student switched course): the generation was paid for, it must be there next time.
-    if (userId) writeCachedMindMap(userId, courseId, entry);
+    if (userId) writeCachedMindMap(userId, courseId, language, entry);
     return { ok: true, entry };
   } catch (failure) {
     return { ok: false, error: describeError(failure, GENERATION_FAILED) };
@@ -885,11 +898,11 @@ async function requestMindMap(userId: string | null, courseId: number): Promise<
 }
 
 /** Returns the generation already in flight for this key, or starts one — never two at once. */
-function startGeneration(userId: string | null, courseId: number): Promise<GenerationOutcome> {
-  const key = inFlightKey(userId, courseId);
+function startGeneration(userId: string | null, courseId: number, language: ContentLanguage): Promise<GenerationOutcome> {
+  const key = inFlightKey(userId, courseId, language);
   const existing = inFlight.get(key);
   if (existing) return existing;
-  const promise = requestMindMap(userId, courseId).finally(() => {
+  const promise = requestMindMap(userId, courseId, language).finally(() => {
     if (inFlight.get(key) === promise) inFlight.delete(key);
   });
   inFlight.set(key, promise);
@@ -955,9 +968,13 @@ function fetchLabHistory(userId: string, courseId: number): Promise<LabHistoryIt
   return promise;
 }
 
-/** Newest-first list, so the first mind map is the most recent; anything failing the cache validator is ignored. */
-function mindMapFromHistory(items: readonly LabHistoryItem[]): CachedMindMap | null {
-  const item = items.find((candidate) => candidate.toolType === "mindmap" && isMindMapData(candidate.content));
+/**
+ * Newest-first list, so the first mind map is the most recent; anything failing the cache validator is ignored.
+ * Exact toolType match: "mindmap" never matches "mindmap:en", so a French map is never shown as the English one.
+ */
+function mindMapFromHistory(items: readonly LabHistoryItem[], language: ContentLanguage): CachedMindMap | null {
+  const toolType = `mindmap${languageSuffix(language)}`;
+  const item = items.find((candidate) => candidate.toolType === toolType && isMindMapData(candidate.content));
   if (!item || !isMindMapData(item.content)) return null;
   const generatedAt = Number.isNaN(Date.parse(item.lastOpenedAt)) ? new Date().toISOString() : item.lastOpenedAt;
   return { generatedAt, mindmap: item.content };
@@ -1062,7 +1079,15 @@ function MindMapSkeleton({ label }: { label: string }) {
   );
 }
 
-function MindMapEmptyState({ error, onGenerate }: { error: string | null; onGenerate: () => void }) {
+function MindMapEmptyState({
+  language,
+  error,
+  onGenerate,
+}: {
+  language: ContentLanguage;
+  error: string | null;
+  onGenerate: () => void;
+}) {
   return (
     <div className="glass-card rounded-3xl p-5 shadow-soft dark:shadow-glass-dark">
       <div className="flex items-start gap-3">
@@ -1095,6 +1120,7 @@ function MindMapEmptyState({ error, onGenerate }: { error: string | null; onGene
           <Sparkles className="h-4 w-4" />
           Générer la carte mentale
         </Button>
+        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{LANGUAGE_HINT[language]}</p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           Générée une seule fois pour tous les étudiants : si elle existe déjà pour ce cours, elle s'affiche gratuitement ; sinon elle utilise 1 génération de ton forfait.
         </p>
@@ -2029,6 +2055,7 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, error }: MindMapViewer
 export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabProps) {
   const { user, loading: authLoading } = useAuth();
   const userId = user?.id ?? null;
+  const language = useLanguageStore((s) => s.language);
 
   const [entry, setEntry] = useState<CachedMindMap | null>(null);
   const [cacheReady, setCacheReady] = useState(false);
@@ -2037,8 +2064,11 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Guards against a response for a previous course/user landing in the current view.
-  const scope = `${userId ?? "anonyme"}:${courseId}`;
+  // Guards against a response for a previous course/user/language landing in
+  // the current view. The language is part of the scope so a switch re-reads the
+  // map of the new language; a result for the old one is still cached by
+  // requestMindMap, so switching back shows it again.
+  const scope = `${userId ?? "anonyme"}:${courseId}:${language}`;
   const scopeRef = useRef(scope);
   const mountedRef = useRef(false);
 
@@ -2053,7 +2083,7 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
    * Shows the generating state until `promise` (from startGeneration —
    * started by this instance or left running by a previous mount) settles,
    * then displays its result — only if this instance is still mounted and
-   * still on the same course/user.
+   * still on the same course/user/language.
    */
   const adopt = useCallback((promise: Promise<GenerationOutcome>) => {
     const requestScope = scopeRef.current;
@@ -2073,31 +2103,31 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
       setCacheReady(false);
       return;
     }
-    setEntry(userId ? readCachedMindMap(userId, courseId) : null);
+    setEntry(userId ? readCachedMindMap(userId, courseId, language) : null);
     setPending(false);
     setError(null);
     setCacheReady(true);
     // A generation started before a remount (or before switching course and
     // back) is still running: show it as such and pick up its result rather
     // than offering — and charging — a second one.
-    const running = inFlight.get(inFlightKey(userId, courseId));
+    const running = inFlight.get(inFlightKey(userId, courseId, language));
     if (running) adopt(running);
-  }, [adopt, authLoading, courseId, scope, userId]);
+  }, [adopt, authLoading, courseId, language, scope, userId]);
 
   // Restores the map from the server history when localStorage has none
   // (new device, cleared storage). Declared after the cache read above so it runs second.
   useEffect(() => {
-    if (authLoading || !userId || readCachedMindMap(userId, courseId)) {
+    if (authLoading || !userId || readCachedMindMap(userId, courseId, language)) {
       setHistoryLoading(false);
       return;
     }
     let cancelled = false;
     const hydrate = (items: readonly LabHistoryItem[]) => {
       // A generation in flight (or a result that landed meanwhile) is newer than anything in the history.
-      if (inFlight.has(inFlightKey(userId, courseId))) return;
-      const restored = mindMapFromHistory(items);
+      if (inFlight.has(inFlightKey(userId, courseId, language))) return;
+      const restored = mindMapFromHistory(items, language);
       if (!restored) return;
-      if (!readCachedMindMap(userId, courseId)) writeCachedMindMap(userId, courseId, restored);
+      if (!readCachedMindMap(userId, courseId, language)) writeCachedMindMap(userId, courseId, language, restored);
       setEntry((current) => current ?? restored);
     };
     const known = historyCache.get(historyKey(userId, courseId));
@@ -2115,12 +2145,12 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
     return () => {
       cancelled = true;
     };
-  }, [authLoading, courseId, userId]);
+  }, [authLoading, courseId, language, userId]);
 
   const generate = useCallback(() => {
     // startGeneration hands back the running request if there is one, so a double click never pays twice.
-    adopt(startGeneration(userId, courseId));
-  }, [adopt, courseId, userId]);
+    adopt(startGeneration(userId, courseId, language));
+  }, [adopt, courseId, language, userId]);
 
   let content: ReactNode;
   if (!cacheReady) {
@@ -2128,7 +2158,7 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
   } else if (entry) {
     content = (
       <MindMapViewer
-        key={entry.generatedAt}
+        key={`${language}:${entry.generatedAt}`}
         entry={entry}
         courseTitle={courseTitle}
         onAskInChat={onAskInChat}
@@ -2140,7 +2170,7 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
   } else if (historyLoading) {
     content = <MindMapSkeleton label="Chargement de ta carte mentale…" />;
   } else {
-    content = <MindMapEmptyState error={error} onGenerate={generate} />;
+    content = <MindMapEmptyState language={language} error={error} onGenerate={generate} />;
   }
 
   return (

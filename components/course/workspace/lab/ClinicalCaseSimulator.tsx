@@ -50,6 +50,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
+import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 
 export interface ClinicalCaseSimulatorProps {
   courseId: number;
@@ -115,6 +116,13 @@ interface CaseSnapshot {
   courseId: number;
   startedAt: number;
   difficulty: Difficulty;
+  /**
+   * Language the case was generated in. The correction is requested in THIS
+   * language, not the current global one, so a case started in French is graded
+   * in French even if the switch changes mid-case. Absent on snapshots saved
+   * before the language switch existed — those were French.
+   */
+  language?: ContentLanguage;
   caseData: PublicCase;
   token: string;
   obtained: ObtainedResult[];
@@ -242,6 +250,9 @@ const LOADING_LINES = [
 
 const CASE_STEPS = ["Observation", "Examens", "Diagnostic"] as const;
 
+/** Honest reminder of what the next case will be written in — the selector itself lives in the Studio header. */
+const LANGUAGE_HINT: Record<ContentLanguage, string> = { fr: "Langue : Français", en: "Langue : English" };
+
 /* ----------------------------------------------------------------------- */
 /* Formatting helpers                                                       */
 /* ----------------------------------------------------------------------- */
@@ -313,6 +324,7 @@ function isCaseSnapshot(value: unknown, courseId: number): value is CaseSnapshot
   if (!isRecord(value) || value.v !== 1 || value.courseId !== courseId) return false;
   if (typeof value.token !== "string" || typeof value.startedAt !== "number") return false;
   if (!DIFFICULTY_IDS.includes(value.difficulty as Difficulty)) return false;
+  if (value.language !== undefined && value.language !== "fr" && value.language !== "en") return false;
   if (typeof value.diagnosisDraft !== "string" || typeof value.reasoningDraft !== "string") return false;
   if (!Array.isArray(value.obtained)) return false;
   if (value.evaluation !== null && !isRecord(value.evaluation)) return false;
@@ -429,13 +441,13 @@ async function postSimulator<T>(payload: Record<string, unknown>): Promise<ApiRe
 
 const UNEXPECTED_RESPONSE: ApiFailure = { status: 502, message: "Réponse inattendue du serveur. Réessaie." };
 
-async function startCase(courseId: number): Promise<void> {
+async function startCase(courseId: number, language: ContentLanguage): Promise<void> {
   const current = getStore(courseId);
   if (current.starting || current.snapshot) return;
   const difficulty = current.difficulty;
   updateStore(courseId, (state) => ({ ...state, starting: true, startError: null }));
 
-  const result = await postSimulator<{ case: PublicCase; token: string }>({ action: "start", courseId, difficulty });
+  const result = await postSimulator<{ case: PublicCase; token: string }>({ action: "start", courseId, difficulty, language });
 
   updateStore(courseId, (state) => {
     if (!result.ok) return { ...state, starting: false, startError: result.failure };
@@ -449,6 +461,7 @@ async function startCase(courseId: number): Promise<void> {
         courseId,
         startedAt: Date.now(),
         difficulty,
+        language,
         caseData,
         token,
         obtained: [],
@@ -505,6 +518,8 @@ async function submitDiagnosis(courseId: number): Promise<void> {
     action: "diagnose",
     courseId,
     token,
+    // The case's own language (see CaseSnapshot.language), never the current global switch.
+    language: snapshot.language ?? "fr",
     diagnosis,
     reasoning: reasoning || undefined,
     requestedExamIds: snapshot.obtained.map((item) => item.examId),
@@ -801,12 +816,20 @@ function fetchLabHistory(userId: string, courseId: number): Promise<RawHistoryIt
   return promise;
 }
 
-/** Keeps only well-formed `case:*` items (newest first, as served) and reads nothing but the public summary. */
-function toPreviousCases(items: readonly RawHistoryItem[]): PreviousCase[] {
+/**
+ * Keeps only well-formed `case:*` items of `language` (newest first, as served) and reads nothing but the public summary.
+ * French cases are `case:<level>`, English ones `case:<level>:en`: listing only the current language means "Rejouer"
+ * (which starts in the current language) always replays a case in the language it is shown under.
+ */
+function toPreviousCases(items: readonly RawHistoryItem[], language: ContentLanguage): PreviousCase[] {
   const rows: PreviousCase[] = [];
   for (const item of items) {
-    const level = item.toolType.startsWith("case:") ? item.toolType.slice("case:".length) : null;
-    if (!level || !DIFFICULTY_IDS.includes(level as Difficulty)) continue;
+    if (!item.toolType.startsWith("case:")) continue;
+    const rest = item.toolType.slice("case:".length);
+    const itemLanguage: ContentLanguage = rest.endsWith(":en") ? "en" : "fr";
+    if (itemLanguage !== language) continue;
+    const level = itemLanguage === "en" ? rest.slice(0, -":en".length) : rest;
+    if (!DIFFICULTY_IDS.includes(level as Difficulty)) continue;
     const summary = item.caseSummary;
     if (!isRecord(summary) || typeof summary.title !== "string" || !summary.title.trim()) continue;
     const patient = summary.patient;
@@ -824,8 +847,11 @@ function formatOpenedAt(iso: string): string {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("fr-FR");
 }
 
-/** Loads the previous cases once per student/course while the setup screen is the active one. */
-function usePreviousCases(userId: string | null, courseId: number, refreshKey: number): PreviousCase[] {
+/**
+ * Loads the previous cases once per student/course while the setup screen is the active one.
+ * A language change re-derives the list from the cached history — no refetch.
+ */
+function usePreviousCases(userId: string | null, courseId: number, language: ContentLanguage, refreshKey: number): PreviousCase[] {
   const [cases, setCases] = useState<PreviousCase[]>([]);
 
   useEffect(() => {
@@ -835,18 +861,18 @@ function usePreviousCases(userId: string | null, courseId: number, refreshKey: n
     }
     const known = historyCache.get(historyKey(userId, courseId));
     if (known) {
-      setCases(toPreviousCases(known));
+      setCases(toPreviousCases(known, language));
       return;
     }
     setCases([]);
     let cancelled = false;
     void fetchLabHistory(userId, courseId).then((items) => {
-      if (!cancelled) setCases(toPreviousCases(items));
+      if (!cancelled) setCases(toPreviousCases(items, language));
     });
     return () => {
       cancelled = true;
     };
-  }, [userId, courseId, refreshKey]);
+  }, [userId, courseId, language, refreshKey]);
 
   return cases;
 }
@@ -901,6 +927,7 @@ function PreviousCases({ cases, disabled, onReplay }: { cases: PreviousCase[]; d
 function SetupScreen({
   courseTitle,
   state,
+  language,
   previousCases,
   onDifficultyChange,
   onStart,
@@ -909,6 +936,7 @@ function SetupScreen({
 }: {
   courseTitle: string;
   state: SimulatorState;
+  language: ContentLanguage;
   previousCases: PreviousCase[];
   onDifficultyChange: (value: Difficulty) => void;
   onStart: () => void;
@@ -968,6 +996,7 @@ function SetupScreen({
           {!state.starting && <Play className="h-4 w-4" aria-hidden />}
           Lancer le cas
         </Button>
+        <p className="mt-2 text-[12px] font-medium text-slate-600 dark:text-slate-300">{LANGUAGE_HINT[language]}</p>
         <p className="mt-2.5 flex items-start gap-1.5 text-[12px] leading-snug text-muted-foreground">
           <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
           Le cas d'un cours n'est généré qu'une seule fois pour tous les étudiants : s'il existe déjà, le lancer est gratuit ; sinon il utilise 1 génération de ton forfait. Les examens et la correction sont inclus.
@@ -1799,9 +1828,11 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  // Current global language: used to START a case and to filter the history. A running case keeps its own (snapshot.language).
+  const language = useLanguageStore((s) => s.language);
   // Bumped each time the setup screen comes back after a case, so the "previous cases" list picks up the case just played.
   const [historyRefresh, setHistoryRefresh] = useState(0);
-  const previousCases = usePreviousCases(userId, courseId, historyRefresh);
+  const previousCases = usePreviousCases(userId, courseId, language, historyRefresh);
 
   const snapshot = state.snapshot;
   const evaluation = snapshot?.evaluation ?? null;
@@ -1824,9 +1855,9 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
   const replayCase = useCallback(
     (difficulty: Difficulty) => {
       setDifficulty(courseId, difficulty);
-      void startCase(courseId);
+      void startCase(courseId, language);
     },
-    [courseId]
+    [courseId, language]
   );
 
   return (
@@ -1888,9 +1919,10 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
             <SetupScreen
               courseTitle={courseTitle}
               state={state}
+              language={language}
               previousCases={previousCases}
               onDifficultyChange={(value) => setDifficulty(courseId, value)}
-              onStart={() => void startCase(courseId)}
+              onStart={() => void startCase(courseId, language)}
               onReplay={replayCase}
               onDismissError={() => dismissErrors(courseId)}
             />

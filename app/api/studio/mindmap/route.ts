@@ -5,7 +5,8 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
-import { labContentHash, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
+import { labContentHash, labToolTypeFor, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
+import { buildLanguageDirective, parseContentLanguage } from "@/lib/ai/language-directive";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
 
@@ -232,7 +233,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { courseId } = (body ?? {}) as { courseId?: unknown };
+  const { courseId, language: languageRaw } = (body ?? {}) as { courseId?: unknown; language?: unknown };
+  // Global AI-content language (store/useLanguageStore.ts): drives the prompt AND the cache key.
+  const language = parseContentLanguage(languageRaw);
+  const toolType = labToolTypeFor("mindmap", language);
   if (typeof courseId !== "number" || !Number.isInteger(courseId) || courseId <= 0) {
     return NextResponse.json({ success: false, error: "'courseId' est requis (entier positif)." }, { status: 400 });
   }
@@ -267,9 +271,9 @@ export async function POST(request: NextRequest) {
   // Platform-wide cache FIRST (see lib/lab-course-cache.ts): a hit returns the
   // stored map for 0 tokens and 0 credits — before the quota gate.
   const contentHash = labContentHash(course.raw_text?.trim() ? course.raw_text : sourceText);
-  const cached = await lookupLabCache(contentHash, "mindmap");
+  const cached = await lookupLabCache(contentHash, toolType);
   if (isStoredMindMap(cached)) {
-    await recordLabHistory({ userId: user.id, contentHash, toolType: "mindmap", courseId: course.id, title: cached.title });
+    await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: cached.title });
     return NextResponse.json({ success: true, mindmap: cached, cached: true });
   }
 
@@ -281,7 +285,7 @@ export async function POST(request: NextRequest) {
   try {
     const raw = await callOpenRouterResilient(
       [
-        { role: "system", content: MINDMAP_SYSTEM_PROMPT },
+        { role: "system", content: MINDMAP_SYSTEM_PROMPT + buildLanguageDirective(language) },
         { role: "user", content: `Cours : "${course.title}"\n\nContenu du cours :\n"""\n${sourceText}\n"""` },
       ],
       // AbortController-backed timeout inside callOpenRouter; well under maxDuration so it fails cleanly (and refunds) before the platform kills the route.
@@ -307,8 +311,8 @@ export async function POST(request: NextRequest) {
     console.log(`[studio:mindmap] Carte générée (cours ${course.id}) : ${children.length} branches, ${countNodes(children) + 1} nœuds.`);
 
     const mindmap = { title, root: { label: rootLabel, children } };
-    await storeLabCache({ contentHash, toolType: "mindmap", courseId: course.id, content: mindmap });
-    await recordLabHistory({ userId: user.id, contentHash, toolType: "mindmap", courseId: course.id, title: mindmap.title });
+    await storeLabCache({ contentHash, toolType, courseId: course.id, content: mindmap });
+    await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: mindmap.title });
 
     return NextResponse.json({ success: true, mindmap, cached: false });
   } catch (error) {

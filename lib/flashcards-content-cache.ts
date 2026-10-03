@@ -108,3 +108,34 @@ export async function recordFlashcardsCacheHit(contentHash: string): Promise<voi
     console.error("[flashcards-content-cache:hit] Échec incrément — exception (non bloquant):", error instanceof Error ? error.message : error);
   }
 }
+
+/**
+ * Appends freshly generated EXTENSION cards to a course's cached set (the
+ * "infinite" study flow — see app/api/flashcards/generate/route.ts), so the
+ * next student who exhausts the same course gets them for free instead of
+ * paying for another generation. Read-modify-write; two simultaneous
+ * extensions of the same course can at worst both append (duplicates are
+ * filtered by question on read). Fail-open like storeFlashcardsCache.
+ */
+export async function appendFlashcardsCache(contentHash: string, newCards: FlashcardQA[]): Promise<void> {
+  if (!isSupabaseConfigured() || newCards.length === 0) return;
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("flashcards_content_cache")
+      .select("cards_data")
+      .eq("content_hash", contentHash)
+      .maybeSingle<{ cards_data: unknown }>();
+    if (error) {
+      console.error("[flashcards-content-cache:append] Échec lecture (fail-open):", error.message);
+      return;
+    }
+    const existing = Array.isArray(data?.cards_data) ? (data.cards_data as FlashcardQA[]) : [];
+    const { error: writeError } = await supabase
+      .from("flashcards_content_cache")
+      .upsert({ content_hash: contentHash, cards_data: [...existing, ...newCards] }, { onConflict: "content_hash" });
+    if (writeError) console.error("[flashcards-content-cache:append] Échec écriture (fail-open):", writeError.message);
+  } catch (error) {
+    console.error("[flashcards-content-cache:append] Exception (fail-open):", error instanceof Error ? error.message : error);
+  }
+}
