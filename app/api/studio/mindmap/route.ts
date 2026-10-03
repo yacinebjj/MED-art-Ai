@@ -3,12 +3,16 @@ import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
+import { labContentHash, lookupLabCache, storeLabCache } from "@/lib/lab-course-cache";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 120 (was 60): the model call below may now run up to 90s, with headroom for
+// one fast transient retry and the cache write.
+export const maxDuration = 120;
 
 type MindMapNodeKind = "etiologie" | "physiopathologie" | "clinique" | "diagnostic" | "traitement" | "complication" | "autre";
 
@@ -180,6 +184,20 @@ function countNodes(nodes: MindMapNode[]): number {
   return nodes.reduce((total, node) => total + 1 + countNodes(node.children ?? []), 0);
 }
 
+/** A cached row must still look like a renderable tree: a titled root with at least MIN_BRANCHES children, each node labelled. */
+function isStoredMindMap(value: unknown): value is { title: string; root: { label: string; children: MindMapNode[] } } {
+  if (!value || typeof value !== "object") return false;
+  const v = value as { title?: unknown; root?: { label?: unknown; children?: unknown } };
+  if (typeof v.title !== "string" || !v.root || typeof v.root.label !== "string" || !Array.isArray(v.root.children)) return false;
+  const validNode = (node: unknown): boolean => {
+    if (!node || typeof node !== "object") return false;
+    const n = node as { label?: unknown; kind?: unknown; children?: unknown };
+    if (typeof n.label !== "string" || typeof n.kind !== "string") return false;
+    return n.children === undefined || (Array.isArray(n.children) && n.children.every(validNode));
+  };
+  return v.root.children.length >= MIN_BRANCHES && v.root.children.every(validNode);
+}
+
 function pickSourceText(course: StudioCourseRow): string {
   const explication = course.explication?.trim();
   const source = explication ? explication : (course.raw_text ?? "").trim();
@@ -246,19 +264,27 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Platform-wide cache FIRST (see lib/lab-course-cache.ts): a hit returns the
+  // stored map for 0 tokens and 0 credits — before the quota gate.
+  const contentHash = labContentHash(course.raw_text?.trim() ? course.raw_text : sourceText);
+  const cached = await lookupLabCache(contentHash, "mindmap");
+  if (isStoredMindMap(cached)) {
+    return NextResponse.json({ success: true, mindmap: cached, cached: true });
+  }
+
   const gate = await reserveGeneration(user);
   if (!gate.allowed) {
     return NextResponse.json({ success: false, error: gate.reason }, { status: 403 });
   }
 
   try {
-    const raw = await callOpenRouter(
+    const raw = await callOpenRouterResilient(
       [
         { role: "system", content: MINDMAP_SYSTEM_PROMPT },
         { role: "user", content: `Cours : "${course.title}"\n\nContenu du cours :\n"""\n${sourceText}\n"""` },
       ],
-      // Route's own maxDuration is 60s — the call must fail cleanly before the platform kills it.
-      { model: CHEAP_MODEL, maxTokens: 5000, temperature: 0.2, timeoutMs: 50_000, bypassMock: true }
+      // AbortController-backed timeout inside callOpenRouter; well under maxDuration so it fails cleanly (and refunds) before the platform kills the route.
+      { model: CHEAP_MODEL, maxTokens: 5000, temperature: 0.2, timeoutMs: 90_000, bypassMock: true }
     );
 
     const parsed = parseJsonResponse(raw);
@@ -279,10 +305,10 @@ export async function POST(request: NextRequest) {
 
     console.log(`[studio:mindmap] Carte générée (cours ${course.id}) : ${children.length} branches, ${countNodes(children) + 1} nœuds.`);
 
-    return NextResponse.json({
-      success: true,
-      mindmap: { title, root: { label: rootLabel, children } },
-    });
+    const mindmap = { title, root: { label: rootLabel, children } };
+    await storeLabCache({ contentHash, toolType: "mindmap", courseId: course.id, content: mindmap });
+
+    return NextResponse.json({ success: true, mindmap, cached: false });
   } catch (error) {
     await refundGeneration(user.id);
     const status = error instanceof OpenRouterError ? upstreamStatusForClient(error.status) : 502;

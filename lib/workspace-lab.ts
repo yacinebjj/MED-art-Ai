@@ -1,4 +1,4 @@
-import { Brain, Layers3, Network, Stethoscope, Table2, Timer, type LucideIcon } from "lucide-react";
+import { Brain, Network, Stethoscope, Table2, type LucideIcon } from "lucide-react";
 
 /**
  * "MedArt Lab" — the interactive tools that live under the 7 Studio tiles in
@@ -6,7 +6,7 @@ import { Brain, Layers3, Network, Stethoscope, Table2, Timer, type LucideIcon } 
  * Unlike a Studio tile, a Lab tool is an interactive engine, not a single
  * generated document: each owns its own API route and its own state.
  */
-export type LabToolId = "case-simulator" | "flashcards" | "matrix" | "mindmap" | "focus";
+export type LabToolId = "case-simulator" | "matrix" | "mindmap";
 
 export interface LabToolDescriptor {
   id: LabToolId;
@@ -31,15 +31,6 @@ export const LAB_TOOLS: LabToolDescriptor[] = [
     keywords: ["simulateur", "cas clinique", "ecn", "diagnostic", "patient"],
   },
   {
-    id: "flashcards",
-    label: "Flashcards Leitner",
-    description: "Rappel actif et répétition espacée",
-    icon: Layers3,
-    tint: { bg: "bg-indigo-50/80 border-indigo-200/60 dark:bg-indigo-950/20 dark:border-indigo-900/40", icon: "text-indigo-600 dark:text-indigo-400" },
-    usesQuota: true,
-    keywords: ["anki", "srs", "revision", "cartes", "memorisation"],
-  },
-  {
     id: "matrix",
     label: "Matrice Pharmaco / DDx",
     description: "Tableaux comparatifs triables et exportables",
@@ -56,15 +47,6 @@ export const LAB_TOOLS: LabToolDescriptor[] = [
     tint: { bg: "bg-cyan-50/80 border-cyan-200/60 dark:bg-cyan-950/20 dark:border-cyan-900/40", icon: "text-cyan-600 dark:text-cyan-400" },
     usesQuota: true,
     keywords: ["mind map", "schema", "physiopathologie", "arbre"],
-  },
-  {
-    id: "focus",
-    label: "Chrono Focus",
-    description: "Pomodoro configurable, alertes sonores, cycles",
-    icon: Timer,
-    tint: { bg: "bg-emerald-50/80 border-emerald-200/60 dark:bg-emerald-950/20 dark:border-emerald-900/40", icon: "text-emerald-600 dark:text-emerald-400" },
-    usesQuota: false,
-    keywords: ["pomodoro", "minuteur", "concentration", "pause"],
   },
 ];
 

@@ -3476,3 +3476,42 @@ alter table studio_courses add column if not exists explication_reservation_pend
 -- deleted/edited message without needing a trigger to keep it in sync).
 -- ---------------------------------------------------------------------------
 alter table chat_members add column if not exists last_read_at timestamptz not null default now();
+
+-- ---------------------------------------------------------------------------
+-- lab_course_cache: platform-wide cache for the MedArt Lab's course-level
+-- tools (Patient virtuel, Matrice pharmaco / Diagnostic différentiel, Carte
+-- mentale — see lib/lab-course-cache.ts). Checked BEFORE the plan-quota
+-- reservation and BEFORE any model call: a hit costs 0 tokens and 0 credits.
+-- One row per (course source text, tool variant), ever, across all students.
+--
+-- content_hash is sha256(normalizeText(raw source text)) — the same address
+-- the other cross-student caches use — NOT studio_courses.id, which is per
+-- upload and so could never be shared. course_id only records which upload
+-- paid for the generation (no FK on purpose: deleting that student's course
+-- must not delete content other students are reading).
+-- tool_type: 'matrix:pharmaco' | 'matrix:ddx' | 'mindmap' |
+--            'case:externe' | 'case:interne' | 'case:concours'.
+-- Deny-all RLS: every access goes through the service-role client.
+-- ---------------------------------------------------------------------------
+create table if not exists lab_course_cache (
+  content_hash text not null,
+  tool_type text not null,
+  course_id bigint,
+  content jsonb not null,
+  hit_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_hit_at timestamptz,
+  primary key (content_hash, tool_type)
+);
+
+alter table lab_course_cache enable row level security;
+drop policy if exists "Deny all client access" on lab_course_cache;
+create policy "Deny all client access" on lab_course_cache for all using (false);
+
+create or replace function increment_lab_course_cache_hit_count(p_content_hash text, p_tool_type text)
+returns void
+language sql
+as $$
+  update lab_course_cache set hit_count = hit_count + 1, last_hit_at = now()
+  where content_hash = p_content_hash and tool_type = p_tool_type;
+$$;

@@ -28,7 +28,6 @@ import {
   Minus,
   Network,
   Plus,
-  RefreshCw,
   Scan,
   Sparkles,
   TriangleAlert,
@@ -1030,7 +1029,7 @@ function MindMapEmptyState({ error, onGenerate }: { error: string | null; onGene
           Générer la carte mentale
         </Button>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Utilise 1 génération du quota de ta formule. La carte est ensuite conservée sur cet appareil : la rouvrir ne coûte rien.
+          Générée une seule fois pour tous les étudiants : si elle existe déjà pour ce cours, elle s'affiche gratuitement ; sinon elle utilise 1 génération de ton forfait.
         </p>
       </div>
 
@@ -1223,12 +1222,10 @@ interface MindMapViewerProps {
   entry: CachedMindMap;
   courseTitle: string;
   onAskInChat?: (prompt: string) => void;
-  onRegenerate: () => void;
-  regenerating: boolean;
   error: string | null;
 }
 
-function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenerating, error }: MindMapViewerProps) {
+function MindMapViewer({ entry, courseTitle, onAskInChat, error }: MindMapViewerProps) {
   const { mindmap, generatedAt } = entry;
   const reduceMotion = Boolean(useReducedMotion());
   const tree = useMemo(() => flattenMindMap(mindmap), [mindmap]);
@@ -1246,7 +1243,6 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
   const [size, setSize] = useState<CanvasSize | null>(null);
   const [fontState, setFontState] = useState<{ family: string; epoch: number } | null>(null);
   const [panning, setPanning] = useState(false);
-  const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
   const [exporting, setExporting] = useState<"svg" | "png" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -1770,58 +1766,9 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, onRegenerate, regenera
               {exporting === "png" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileImage className="h-4 w-4" />}
             </IconButton>
           </WithTooltip>
-          <WithTooltip label="Régénérer (utilise 1 génération)">
-            <IconButton onClick={() => setConfirmingRegenerate(true)} disabled={regenerating} aria-label="Régénérer la carte mentale">
-              <RefreshCw className={cn("h-4 w-4", regenerating && "animate-spin")} />
-            </IconButton>
-          </WithTooltip>
         </div>
       </div>
 
-      <AnimatePresence initial={false}>
-        {confirmingRegenerate && !regenerating && (
-          <motion.div
-            key="confirm"
-            initial={reduceMotion ? false : { opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={reduceMotion ? undefined : { opacity: 0, height: 0 }}
-            transition={{ duration: 0.18 }}
-            className="overflow-hidden"
-          >
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-              <TriangleAlert className="h-4 w-4 shrink-0" />
-              <p className="min-w-[12rem] flex-1 leading-relaxed">
-                Régénérer remplace cette carte et utilise 1 génération du quota de ta formule.
-              </p>
-              <div className="flex gap-1.5">
-                <Button size="sm" variant="ghost" onClick={() => setConfirmingRegenerate(false)}>
-                  Annuler
-                </Button>
-                <Button
-                  size="sm"
-                  className={TEAL_BUTTON}
-                  onClick={() => {
-                    setConfirmingRegenerate(false);
-                    onRegenerate();
-                  }}
-                >
-                  Régénérer
-                </Button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {regenerating && (
-        <div
-          role="status"
-          className="flex items-center gap-2 rounded-2xl border border-primary-200 bg-primary-50/70 px-3 py-2 text-xs font-medium text-primary-800 dark:border-primary-900/60 dark:bg-primary-950/30 dark:text-primary-200"
-        >
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-          Régénération en cours — la carte actuelle reste affichée en attendant.
-        </div>
-      )}
       {error && <ErrorBanner message={error} />}
       {exportError && <ErrorBanner message={exportError} />}
 
@@ -2083,8 +2030,6 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
         entry={entry}
         courseTitle={courseTitle}
         onAskInChat={onAskInChat}
-        onRegenerate={generate}
-        regenerating={pending}
         error={error}
       />
     );

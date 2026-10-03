@@ -167,7 +167,7 @@ async function planPodcastScript(courseTitle: string, explicationExcerpt: string
       // ~1300-1500 words (see lib/ai/podcast-prompts.ts) — real headroom
       // above the ~2,500-3,200 tokens that length needs (mixed
       // français/darija tokenizes worse than plain prose).
-      { model: CHEAP_MODEL, maxTokens: 6000, bypassMock: true, timeoutMs: 60_000 }
+      { model: CHEAP_MODEL, maxTokens: 6000, bypassMock: true, timeoutMs: 60_000 } // NOT raised: script (60s) + narration (225s) must stay inside this route's 300s maxDuration — see the budget notes above
     );
     if (script.trim().length > 100) return script.trim();
     // Distinctly tagged (not just the generic catch below) so this is

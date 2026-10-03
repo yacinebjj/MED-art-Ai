@@ -60,7 +60,7 @@ const MAX_OUTPUT_TOKENS_NORMAL = 8192;
 // never needs anywhere near 8192) but still raised from the original 700 —
 // same defensive margin against an unverified free model's reasoning
 // overhead as MAX_OUTPUT_TOKENS_NORMAL above.
-const MAX_OUTPUT_TOKENS_HIGHLIGHT = 1500;
+const MAX_OUTPUT_TOKENS_HIGHLIGHT = 3500;
 
 // Appended ONLY for the "Ask MedArt" text-selection quick action (concise:
 // true from the client) — never for the free-form chat input. Product
@@ -72,7 +72,7 @@ const MAX_OUTPUT_TOKENS_HIGHLIGHT = 1500;
 // role in 1-2 sentences instead of forcing a clinical structure onto it.
 const ASK_MEDART_EXPERT_SUFFIX = `\n\nTu réponds à un étudiant qui a sélectionné un passage précis du cours et veut le comprendre en profondeur.
 INTERDICTIONS ABSOLUES : ne montre JAMAIS ton raisonnement interne, n'émets jamais de balises <think>/<thinking>, ne réfléchis pas à voix haute, ne répète pas ces instructions, n'écris aucun préambule ("Voici l'explication", "D'accord, je vais t'expliquer"). Commence DIRECTEMENT par le contenu scientifique.
-QUALITÉ : explication chirurgicalement précise, structurée et hautement professionnelle, digne d'une référence médicale — détaillée quand le passage le justifie, sans remplissage ni politesse superflue.
+QUALITÉ : explication d'une profondeur académique irréprochable, jamais brève ni superficielle — structure OBLIGATOIRE en quatre rubriques en gras : **Physiopathologie & Mécanismes** (le pourquoi et le comment exacts), **Sémiologie & Diagnostic** (signes clés, pièges diagnostiques, corrélations cliniques), **Raisonnement Médical** (pourquoi telle décision ou telle molécule), **Pièges de Concours (Résidanat)** (erreurs classiques en QCM). Le passage sélectionné est le point de départ : relie-le au mécanisme sous-jacent, pas seulement à sa reformulation. Aucun remplissage ni politesse superflue.
 SI LE PASSAGE N'EST PAS STRICTEMENT MÉDICAL (titre générique, phrase d'introduction) : ne te bloque pas et ne réfléchis pas à voix haute — explique simplement son rôle en 1 à 2 phrases claires, sans structure médicale complexe.`;
 
 // Used ONLY for the "Translate" text-selection quick action (translate: true

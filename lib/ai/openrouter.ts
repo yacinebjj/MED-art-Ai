@@ -1,3 +1,4 @@
+import { createReplyCleaner, stripReasoning } from "@/lib/strip-reasoning";
 import { Agent } from "undici";
 import dns from "dns";
 import { detectMockPayload } from "@/lib/ai/mock-data";
@@ -261,7 +262,17 @@ export const CHEAP_MODEL = "qwen/qwen-2.5-72b-instruct";
 // current $0.36/$0.40). Every OTHER CHEAP_MODEL call site stays on Qwen —
 // they never showed this regression, and moving them back would give up
 // Qwen's real cost savings for no demonstrated benefit.
-export const EXPLICATION_MODEL = "deepseek/deepseek-v3.2";
+// 2026-10 — DeepSeek DECOMMISSIONED by product direction: Explication now
+// runs on Qwen like every other call site, i.e. EXACTLY CHEAP_MODEL. The
+// history above is kept because it documents a real, earlier regression of
+// this model on THIS feature (~182s per-part timeouts and a drop in
+// exhaustive depth). If either resurfaces, tune
+// EXPLICATION_PART_MAX_TOKENS / CHUNKED_SLICE_CHARS /
+// EXPLICATION_PART_TIMEOUT_MS in lib/studio-explication-delta.ts first — the
+// pipeline retries and subdivides a slow part automatically — before
+// reconsidering the model. Kept as its own export so only this one line
+// changes if the model ever needs to differ again.
+export const EXPLICATION_MODEL = CHEAP_MODEL;
 
 // Shared free-tier (":free" suffix) fallback chain — genuinely zero
 // marginal cost, used by app/api/dashboard-assistant/route.ts,
@@ -752,7 +763,11 @@ export async function callOpenRouter(
 
   logUsage(`callOpenRouter model=${options?.model ?? MODEL}`, data?.usage);
 
-  return content;
+  // Same cleanup as the streaming path (reasoning blocks, leading prompt
+  // echo). Falls back to the raw text if cleaning would leave nothing, so a
+  // reply made ONLY of such text is never turned into an empty "success".
+  const cleaned = stripReasoning(content);
+  return cleaned.length > 0 ? cleaned : content;
 }
 
 // Studio "Infographie / Mindmap" tab — confirmed live against
@@ -1313,7 +1328,10 @@ export async function streamOpenRouter(
     },
   });
 
-  return res.body.pipeThrough(unwrapSse);
+  // Last stage: strip <think> reasoning and leading prompt-echo / meta
+  // commentary server-side, so no consumer of this stream (chat, assistant,
+  // persistence) can ever relay it to a student — see lib/strip-reasoning.ts.
+  return res.body.pipeThrough(unwrapSse).pipeThrough(createReplyCleaner());
 }
 
 // Fallback text extraction for uploaded documents that have NO real text

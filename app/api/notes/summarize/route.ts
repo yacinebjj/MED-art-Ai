@@ -5,7 +5,8 @@ import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openroute
 import { errorMessage } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Raised with the 2026-10 timeout pass: the model call may now run up to the value below, so maxDuration leaves headroom for one fast transient retry.
+export const maxDuration = 120;
 
 const SUMMARIZE_SYSTEM_PROMPT = `Tu es un assistant médical expert pour les étudiants en médecine.
 On te donne une note brute écrite par un étudiant. Génère un résumé "TL;DR" très court de cette note.
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
         { role: "system", content: SUMMARIZE_SYSTEM_PROMPT },
         { role: "user", content: content.slice(0, 12_000) },
       ],
-      { maxTokens: 400, model: CHEAP_MODEL, timeoutMs: 30_000 }
+      { maxTokens: 400, model: CHEAP_MODEL, timeoutMs: 75_000 }
     );
 
     const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "");

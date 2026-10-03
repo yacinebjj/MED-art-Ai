@@ -805,7 +805,7 @@ function SetupScreen({
         </Button>
         <p className="mt-2.5 flex items-start gap-1.5 text-[12px] leading-snug text-muted-foreground">
           <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-          Lancer un cas utilise 1 génération du quota de ta formule. Les examens et la correction sont inclus.
+          Le cas d'un cours n'est généré qu'une seule fois pour tous les étudiants : s'il existe déjà, le lancer est gratuit ; sinon il utilise 1 génération de ton forfait. Les examens et la correction sont inclus.
         </p>
       </motion.div>
 
@@ -1307,7 +1307,7 @@ function CaseScreen({
               caseIsDead ? (
                 <Button type="button" size="sm" variant="outline" onClick={() => resetCase(courseId)}>
                   <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-                  Lancer un nouveau cas
+                  Rejouer un cas
                 </Button>
               ) : undefined
             }
@@ -1599,7 +1599,7 @@ function ResultsScreen({
       >
         <Button type="button" variant={onAskInChat ? "outline" : "primary"} onClick={onNewCase} className="w-full sm:flex-1">
           <RotateCcw className="h-4 w-4" aria-hidden />
-          Nouveau cas
+          Rejouer un cas
         </Button>
         {onAskInChat && (
           <Button type="button" onClick={() => onAskInChat(buildDebriefPrompt(courseTitle, snapshot, evaluation))} className="w-full sm:flex-1">
@@ -1674,7 +1674,7 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
           >
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-800/60 dark:bg-amber-950/30">
               <p className="min-w-[10rem] flex-1 text-[13px] leading-snug text-amber-900 dark:text-amber-100">
-                Abandonner ce cas ? Il ne pourra pas être repris et la génération utilisée ne sera pas rendue.
+                Abandonner ce cas ? Il ne pourra pas être repris, mais tu pourras le rejouer gratuitement : il est conservé pour ce cours.
               </p>
               <div className="flex gap-1.5">
                 <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmingAbandon(false)}>

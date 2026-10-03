@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Lock, MoreVertical, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Lock, MoreVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import {
-  REGENERATABLE_SECTIONS,
   SECTIONS_WITH_OPTIONS_MENU,
   TILE_TINTS,
   TileOptionsMenu,
@@ -32,10 +31,6 @@ interface MobileStudioCardsProps {
   onItemClick: (id: DemoSectionId) => void;
   /** Point 5 fix — mirrors StudioPanelProps' own field verbatim: fires from a not-yet-generated card's ChevronDown options menu with the student's chosen language/prompt/model/dialect, instead of the plain default-options onItemClick above. Optional: a caller that omits this simply never renders the ChevronDown (every card falls back to its previous plain-click-only behavior). */
   onItemClickWithOptions?: (id: DemoSectionId, options: TileGenerationOptions) => void;
-  /** Optional — mirrors StudioPanelProps' own field of the same name verbatim (see that file's doc comment): omitted entirely by pages backed by a data model "Régénérer" doesn't support yet, in which case an already-generated card simply never shows the "Régénération en cours..." busy state, it has no way to reach one. */
-  regeneratingSections?: Set<DemoSectionId>;
-  /** Optional — mirrors StudioPanelProps' own field of the same name verbatim. Omitted entirely by pages backed by a data model "Régénérer" doesn't support yet, in which case an already-generated card's "..." menu simply doesn't render a "Régénérer" item (falls back to just "Supprimer") — see StudioPanel.tsx's own identical gate. */
-  onRegenerateSection?: (id: DemoSectionId) => void;
   /** The student's own curriculum level (StudentCurriculumProfile.academicYear.level, types/academic.ts) — only ever changes the "Cas Clinique" tile's own label (getSectionLabel, lib/translations/studio.ts); every other tile ignores it. Mirrors StudioPanelProps' own field of the same name verbatim. */
   studyYear?: number | null;
   /** Visual-only lock badge — mirrors StudioPanelProps.lockedSections verbatim (see that file's own doc comment). The real gate stays entirely in the caller's onItemClick. */
@@ -52,13 +47,7 @@ interface MobileStudioCardsProps {
  * unwired Supprimer — see that file for why Supprimer has no handler yet)
  * rather than inventing a second, divergent menu design for mobile.
  */
-function CardOptionsMenu({
-  sectionId,
-  onRegenerateSection,
-}: {
-  sectionId: DemoSectionId;
-  onRegenerateSection?: (id: DemoSectionId) => void;
-}) {
+function CardOptionsMenu() {
   const { language } = useLanguage();
 
   return (
@@ -75,14 +64,6 @@ function CardOptionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
-        {/* Examen QCM only, under Supprimer — mirrors StudioPanel's own
-            identical gate (REGENERATABLE_SECTIONS). */}
-        {onRegenerateSection && REGENERATABLE_SECTIONS.has(sectionId) && (
-          <DropdownMenuItem onSelect={() => onRegenerateSection(sectionId)}>
-            <RefreshCw className="h-4 w-4" />
-            {tStudio("regenerate", language)}
-          </DropdownMenuItem>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -131,8 +112,6 @@ export const MobileStudioCards = memo(function MobileStudioCards({
   generatingSections,
   onItemClick,
   onItemClickWithOptions,
-  regeneratingSections,
-  onRegenerateSection,
   studyYear,
   lockedSections,
   sectionMasteryPct,
@@ -184,7 +163,6 @@ export const MobileStudioCards = memo(function MobileStudioCards({
           }
 
           const isAvailable = status === "available";
-          const isRegenerating = regeneratingSections?.has(section.id) ?? false;
           const isLocked = lockedSections?.has(section.id) ?? false;
           const masteryPct = sectionMasteryPct?.[section.id];
           // Point 5 fix — same gate as StudioPanel.tsx's own showOptionsMenu:
@@ -222,19 +200,11 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                 <p className="line-clamp-2 break-words text-sm font-semibold text-foreground" title={getSectionLabel(section.id, language, studyYear)}>
                   {getSectionLabel(section.id, language, studyYear)}
                 </p>
-                {isRegenerating ? (
-                  <GeneratingRotatingLabel className="truncate text-xs text-muted-foreground" />
-                ) : (
-                  <p className="truncate text-xs text-muted-foreground">
-                    {isAvailable
-                      ? tStudio("alreadyGeneratedCaption", language)
-                      : tStudio("tapToGenerateCaption", language)}
-                  </p>
-                )}
+                <p className="truncate text-xs text-muted-foreground">
+                  {isAvailable ? tStudio("alreadyGeneratedCaption", language) : tStudio("tapToGenerateCaption", language)}
+                </p>
               </div>
-              {isRegenerating ? (
-                <RefreshCw aria-hidden className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-              ) : isAvailable ? (
+              {isAvailable ? (
                 <>
                   {typeof masteryPct === "number" ? (
                     <ProgressRing
@@ -249,7 +219,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                   ) : (
                     <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", tint.dot)} />
                   )}
-                  <CardOptionsMenu sectionId={section.id} onRegenerateSection={onRegenerateSection} />
+                  <CardOptionsMenu />
                 </>
               ) : showOptionsMenu ? (
                 <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>

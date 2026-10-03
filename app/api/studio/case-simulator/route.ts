@@ -4,12 +4,16 @@ import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
+import { labContentHash, lookupLabCache, storeLabCache } from "@/lib/lab-course-cache";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 120 (was 60): the generation call may now run up to 90s, with headroom for
+// one fast transient retry and the cache write.
+export const maxDuration = 120;
 
 /**
  * "Simulateur de patient virtuel" — an interactive clinical case built from
@@ -543,6 +547,15 @@ interface StudioCourseRow {
   raw_text: string | null;
 }
 
+/** A cached case must still satisfy the exact public/hidden shapes the sealed token and the client rely on — a row from an older generator is treated as a miss. */
+function parseStoredCase(value: unknown): { publicCase: z.infer<typeof PublicCaseSchema>; hidden: z.infer<typeof HiddenCaseSchema> } | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { publicCase?: unknown; hidden?: unknown };
+  const publicCase = PublicCaseSchema.safeParse(candidate.publicCase);
+  const hidden = HiddenCaseSchema.safeParse(candidate.hidden);
+  return publicCase.success && hidden.success ? { publicCase: publicCase.data, hidden: hidden.data } : null;
+}
+
 async function handleStart(user: { id: string; created_at?: string | null }, body: z.infer<typeof StartBodySchema>) {
   const limited = rateLimited(`case-simulator:${user.id}`, RATE_LIMITS.ai);
   if (limited) return limited;
@@ -577,6 +590,31 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
     return jsonError("Ce cours ne contient pas assez de texte pour construire un cas clinique.", 422);
   }
 
+  // Platform-wide cache FIRST (see lib/lab-course-cache.ts), one case per
+  // (course source text, difficulty). A hit costs 0 tokens and 0 credits and
+  // is checked BEFORE the quota gate. Only the case itself is shared: the
+  // sealed token below is minted per student request (bound to this user,
+  // course and time), so the hidden answer key still never reaches a client
+  // and one student's token is useless to another.
+  const contentHash = labContentHash(courseText);
+  const toolType = `case:${body.difficulty}` as const;
+  const cachedCase = parseStoredCase(await lookupLabCache(contentHash, toolType));
+  if (cachedCase) {
+    const token = sealPayload(
+      {
+        v: 1,
+        userId: user.id,
+        courseId: course.id,
+        issuedAt: Date.now(),
+        difficulty: body.difficulty,
+        publicCase: cachedCase.publicCase,
+        hidden: cachedCase.hidden,
+      },
+      key
+    );
+    return NextResponse.json({ success: true, case: cachedCase.publicCase, token, cached: true });
+  }
+
   const gate = await reserveGeneration(user);
   if (!gate.allowed) {
     return jsonError(gate.reason, 403);
@@ -589,12 +627,12 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
   ].join("\n\n");
 
   try {
-    const raw = await callOpenRouter(
+    const raw = await callOpenRouterResilient(
       [
         { role: "system", content: CASE_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      { model: CHEAP_MODEL, maxTokens: 3500, timeoutMs: 50_000, temperature: 0.7, bypassMock: true }
+      { model: CHEAP_MODEL, maxTokens: 3500, timeoutMs: 90_000, temperature: 0.7, bypassMock: true }
     );
 
     const validated = GeneratedCaseSchema.safeParse(parseJsonResponse(raw));
@@ -604,6 +642,7 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
     }
 
     const { publicCase, hidden } = buildCase(validated.data);
+    await storeLabCache({ contentHash, toolType, courseId: course.id, content: { publicCase, hidden } });
     const token = sealPayload(
       {
         v: 1,
@@ -687,12 +726,12 @@ async function handleDiagnose(user: { id: string }, body: z.infer<typeof Diagnos
   ].join("\n\n");
 
   try {
-    const raw = await callOpenRouter(
+    const raw = await callOpenRouterResilient(
       [
         { role: "system", content: GRADING_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      { model: CHEAP_MODEL, maxTokens: 1200, timeoutMs: 40_000, temperature: 0.2, bypassMock: true }
+      { model: CHEAP_MODEL, maxTokens: 1200, timeoutMs: 60_000, temperature: 0.2, bypassMock: true }
     );
 
     const graded = GradingSchema.safeParse(parseJsonResponse(raw));

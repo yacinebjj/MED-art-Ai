@@ -255,7 +255,20 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
  * Defensive top-level backstop — same rationale as
  * app/api/studio/generate/route.ts's own copy of this comment.
  */
+// Product decision: a Studio/Lab result is generated once and then only read
+// (it is also shared platform-wide through the content caches). The UI no
+// longer offers "Régénérer" anywhere; this switch makes the server refuse it
+// too, so a stale client or a hand-crafted request can't keep spending tokens.
+// Flip to true to restore the (capped) QCM regeneration without other changes.
+const REGENERATION_ENABLED = false as boolean;
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  if (!REGENERATION_ENABLED) {
+    return NextResponse.json(
+      { success: false, error: "La régénération est désactivée : le contenu déjà généré est conservé et partagé." },
+      { status: 410 }
+    );
+  }
   try {
     return await handlePost(request);
   } catch (error) {

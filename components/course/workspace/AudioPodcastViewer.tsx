@@ -39,6 +39,9 @@ type Speed = (typeof SPEED_OPTIONS)[number];
 const SPEED_STORAGE_KEY = "medart:podcast-speed";
 const BOOKMARKS_STORAGE_PREFIX = "medart:podcast-bookmarks:";
 
+/** Fixed per page load: a stable cache-busting query for the second playback attempt. */
+const CACHE_BUST_TOKEN = Date.now().toString(36);
+
 const SKIP_SECONDS = 15;
 const ARROW_SEEK_SECONDS = 5;
 const WAVEFORM_BARS = 160;
@@ -461,13 +464,91 @@ const BookmarkList = memo(function BookmarkList({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function AudioPodcastViewer({ audioUrl, courseTitle }: { audioUrl: string; courseTitle: string }) {
+/**
+ * Normalizes the stored podcast URL before the browser sees it: trims
+ * whitespace, and upgrades an http:// public-storage URL to https:// when
+ * the app itself is served over https — the browser silently blocks that
+ * mixed-content request, which surfaced as a bare "Lecture impossible".
+ */
+function normalizeAudioUrl(raw: string): string {
+  const url = raw.trim();
+  if (typeof window === "undefined") return url;
+  const isLocalHost = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(url);
+  if (window.location.protocol === "https:" && /^http:\/\//i.test(url) && !isLocalHost) {
+    return url.replace(/^http:/i, "https:");
+  }
+  return url;
+}
+
+/**
+ * Playback source ladder. A podcast that fails to start is not necessarily
+ * broken (a stale CDN entry, a wrong Content-Type from storage, a transient
+ * network error all produce the same MediaError), so the player tries, in
+ * order: the URL as stored → the same URL with a cache-busting query → the
+ * file fetched ourselves and handed to the element as a Blob with a forced
+ * audio/mpeg type. Only when all three fail does the error banner show.
+ */
+type SourceStage = "direct" | "cache-bust" | "blob";
+
+export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { audioUrl: string; courseTitle: string }) {
+  const audioUrl = useMemo(() => normalizeAudioUrl(storedAudioUrl), [storedAudioUrl]);
+  const [sourceStage, setSourceStage] = useState<SourceStage>("direct");
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const blobFallbackRunningRef = useRef(false);
   const { toast } = useToast();
   const reduceMotion = useReducedMotion() ?? false;
   const clipId = `podcast-played-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setSourceStage("direct");
+    setBlobUrl(null);
+    setPlaybackError(false);
+    blobFallbackRunningRef.current = false;
+  }, [audioUrl]);
+
+  // A blob URL holds the whole file in memory until revoked.
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [blobUrl]);
+
+  const playbackSrc =
+    sourceStage === "blob" && blobUrl ? blobUrl : sourceStage === "cache-bust" ? `${audioUrl}${audioUrl.includes("?") ? "&" : "?"}t=${CACHE_BUST_TOKEN}` : audioUrl;
+
+  const handleMediaError = useCallback(() => {
+    setIsPlaying(false);
+    setIsBuffering(false);
+    if (sourceStage === "direct") {
+      setSourceStage("cache-bust");
+      return;
+    }
+    if (sourceStage === "cache-bust" && !blobFallbackRunningRef.current) {
+      blobFallbackRunningRef.current = true;
+      void (async () => {
+        try {
+          const res = await fetch(audioUrl, { cache: "no-store" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const buffer = await res.arrayBuffer();
+          if (buffer.byteLength === 0) throw new Error("Fichier vide");
+          const declaredType = res.headers.get("Content-Type") ?? "";
+          const type = declaredType.startsWith("audio/") ? declaredType : "audio/mpeg";
+          setBlobUrl(URL.createObjectURL(new Blob([buffer], { type })));
+          setSourceStage("blob");
+        } catch {
+          setPlaybackError(true);
+        } finally {
+          blobFallbackRunningRef.current = false;
+        }
+      })();
+      return;
+    }
+    // Direct, cache-busted and blob sources have all failed.
+    if (sourceStage === "blob") setPlaybackError(true);
+  }, [sourceStage, audioUrl]);
   const waveRef = useRef<HTMLDivElement>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -944,7 +1025,7 @@ export function AudioPodcastViewer({ audioUrl, courseTitle }: { audioUrl: string
     <div ref={rootRef} className="mx-auto flex w-full max-w-2xl flex-col gap-4">
       <audio
         ref={audioRef}
-        src={audioUrl}
+        src={playbackSrc}
         preload="metadata"
         className="hidden"
         onPlay={() => {
@@ -983,11 +1064,7 @@ export function AudioPodcastViewer({ audioUrl, courseTitle }: { audioUrl: string
         onWaiting={() => setIsBuffering(true)}
         onPlaying={() => setIsBuffering(false)}
         onCanPlay={() => setIsBuffering(false)}
-        onError={() => {
-          setPlaybackError(true);
-          setIsPlaying(false);
-          setIsBuffering(false);
-        }}
+        onError={handleMediaError}
       />
 
       <section className="glass-card flex flex-col gap-4 rounded-3xl p-4 shadow-glass dark:shadow-glass-dark sm:p-5" aria-label="Lecteur du podcast">
@@ -1153,7 +1230,11 @@ export function AudioPodcastViewer({ audioUrl, courseTitle }: { audioUrl: string
             <button
               type="button"
               onClick={() => {
+                // Start the whole ladder again — the failure may have been transient.
                 setPlaybackError(false);
+                blobFallbackRunningRef.current = false;
+                setBlobUrl(null);
+                setSourceStage("direct");
                 audioRef.current?.load();
               }}
               className="rounded-lg px-2 py-0.5 font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

@@ -3,12 +3,16 @@ import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
+import { labContentHash, lookupLabCache, storeLabCache } from "@/lib/lab-course-cache";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 120 (was 60): the model call below may now run up to 90s, with headroom for
+// one fast transient retry and the cache write.
+export const maxDuration = 120;
 
 type MatrixKind = "pharmaco" | "ddx";
 
@@ -153,6 +157,23 @@ function toCells(row: AiRow, columns: readonly string[]): string[] {
   return columns.map((_, index) => cleanText(values[index], MAX_CELL_CHARS));
 }
 
+/** A cached row written by an older generator must still match the exact shape the client renders. */
+function isStoredMatrix(
+  value: unknown,
+  kind: MatrixKind,
+  columns: readonly string[]
+): value is { kind: MatrixKind; title: string; columns: string[]; rows: string[][]; notes: string[] } {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (v.kind !== kind || typeof v.title !== "string") return false;
+  if (!Array.isArray(v.columns) || v.columns.length !== columns.length || v.columns.some((c, i) => c !== columns[i])) return false;
+  if (!Array.isArray(v.notes) || v.notes.some((n) => typeof n !== "string")) return false;
+  return (
+    Array.isArray(v.rows) &&
+    v.rows.every((row) => Array.isArray(row) && row.length === columns.length && row.every((cell) => typeof cell === "string"))
+  );
+}
+
 function pickSourceText(course: StudioCourseRow): string {
   const explication = course.explication?.trim();
   const source = explication ? explication : (course.raw_text ?? "").trim();
@@ -224,21 +245,31 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const columns = MATRIX_COLUMNS[matrixKind];
+
+  // Platform-wide cache FIRST (see lib/lab-course-cache.ts): a hit returns the
+  // stored matrix for 0 tokens and 0 credits — before the quota gate, so a
+  // student whose plan is exhausted can still read an already-built matrix.
+  const contentHash = labContentHash(course.raw_text?.trim() ? course.raw_text : sourceText);
+  const toolType = `matrix:${matrixKind}` as const;
+  const cached = await lookupLabCache(contentHash, toolType);
+  if (isStoredMatrix(cached, matrixKind, columns)) {
+    return NextResponse.json({ success: true, matrix: cached, cached: true });
+  }
+
   const gate = await reserveGeneration(user);
   if (!gate.allowed) {
     return NextResponse.json({ success: false, error: gate.reason }, { status: 403 });
   }
 
-  const columns = MATRIX_COLUMNS[matrixKind];
-
   try {
-    const raw = await callOpenRouter(
+    const raw = await callOpenRouterResilient(
       [
         { role: "system", content: buildSystemPrompt(matrixKind) },
         { role: "user", content: `Cours : "${course.title}"\n\nContenu du cours :\n"""\n${sourceText}\n"""` },
       ],
-      // Route's own maxDuration is 60s — the call must fail cleanly before the platform kills it.
-      { model: CHEAP_MODEL, maxTokens: 4500, temperature: 0.2, timeoutMs: 50_000, bypassMock: true }
+      // AbortController-backed timeout inside callOpenRouter; well under maxDuration so it fails cleanly (and refunds) before the platform kills the route.
+      { model: CHEAP_MODEL, maxTokens: 4500, temperature: 0.2, timeoutMs: 90_000, bypassMock: true }
     );
 
     const parsed = parseJsonResponse(raw);
@@ -262,10 +293,13 @@ export async function POST(request: NextRequest) {
 
     const title = cleanText(validation.data.title, MAX_TITLE_CHARS) || `${DEFAULT_TITLES[matrixKind]} — ${course.title}`;
 
-    return NextResponse.json({
-      success: true,
-      matrix: { kind: matrixKind, title, columns: [...columns], rows, notes },
-    });
+    const matrix = { kind: matrixKind, title, columns: [...columns], rows, notes };
+    // Store the validated result for every later student. Empty results
+    // (rows: [] — "this course has no drugs") are cached too: that answer is
+    // just as final, and regenerating it would only burn another credit.
+    await storeLabCache({ contentHash, toolType, courseId: course.id, content: matrix });
+
+    return NextResponse.json({ success: true, matrix, cached: false });
   } catch (error) {
     await refundGeneration(user.id);
     const status = error instanceof OpenRouterError ? upstreamStatusForClient(error.status) : 502;

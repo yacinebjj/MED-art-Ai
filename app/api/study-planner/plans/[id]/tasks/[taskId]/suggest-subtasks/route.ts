@@ -8,7 +8,8 @@ import { reserveHighlightMessage, refundHighlightMessage } from "@/lib/subscript
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+// Raised with the 2026-10 timeout pass: the model call may now run up to the value below, so maxDuration leaves headroom for one fast transient retry.
+export const maxDuration = 90;
 
 const SuggestionsSchema = z
   .object({
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       [{ role: "system", content: buildPrompt(title.trim()) }],
       // HAIKU_MODEL — small, fast, cheap: a 2-4 item suggestion list for one
       // task title doesn't need a heavier tier.
-      { model: HAIKU_MODEL, maxTokens: 500, bypassMock: true, timeoutMs: 25_000 }
+      { model: HAIKU_MODEL, maxTokens: 500, bypassMock: true, timeoutMs: 60_000 }
     );
 
     const parsed = parseJsonResponse(raw);

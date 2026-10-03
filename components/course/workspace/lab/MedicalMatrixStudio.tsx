@@ -26,7 +26,6 @@ import {
   Loader2,
   MessageSquareText,
   Pill,
-  RefreshCw,
   Search,
   Sparkles,
   Stethoscope,
@@ -506,7 +505,7 @@ function MatrixEmptyState({
           Générer la matrice
         </Button>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Utilise 1 génération du quota de ta formule. La matrice est ensuite conservée sur cet appareil : la rouvrir ne coûte rien.
+          Générée une seule fois pour tous les étudiants : si elle existe déjà pour ce cours, elle s'affiche gratuitement ; sinon elle utilise 1 génération de ton forfait.
         </p>
       </div>
 
@@ -523,12 +522,10 @@ interface MatrixViewProps {
   entry: CachedMatrix;
   courseTitle: string;
   onAskInChat?: (prompt: string) => void;
-  onRegenerate: () => void;
-  regenerating: boolean;
   error: string | null;
 }
 
-function MatrixView({ entry, courseTitle, onAskInChat, onRegenerate, regenerating, error }: MatrixViewProps) {
+function MatrixView({ entry, courseTitle, onAskInChat, error }: MatrixViewProps) {
   const { matrix, generatedAt } = entry;
   const meta = KIND_META[matrix.kind];
   const MetaIcon = meta.icon;
@@ -537,7 +534,6 @@ function MatrixView({ entry, courseTitle, onAskInChat, onRegenerate, regeneratin
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortState | null>(null);
   const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<number>>(() => new Set());
-  const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   // Rows mounted in the very first commit fade in; rows that appear later (search cleared, column toggled) don't re-animate.
@@ -742,62 +738,8 @@ function MatrixView({ entry, courseTitle, onAskInChat, onRegenerate, regeneratin
           </>
         )}
 
-        <WithTooltip label="Régénérer (utilise 1 génération)">
-          <IconButton
-            onClick={() => setConfirmingRegenerate(true)}
-            disabled={regenerating}
-            aria-label="Régénérer la matrice"
-            className={cn(rowCount === 0 && "ml-auto")}
-          >
-            <RefreshCw className={cn("h-4 w-4", regenerating && "animate-spin")} />
-          </IconButton>
-        </WithTooltip>
       </div>
 
-      <AnimatePresence initial={false}>
-        {confirmingRegenerate && !regenerating && (
-          <motion.div
-            key="confirm"
-            initial={reduceMotion ? false : { opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={reduceMotion ? undefined : { opacity: 0, height: 0 }}
-            transition={{ duration: 0.18 }}
-            className="overflow-hidden"
-          >
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-              <TriangleAlert className="h-4 w-4 shrink-0" />
-              <p className="min-w-[12rem] flex-1 leading-relaxed">
-                Régénérer remplace cette matrice et utilise 1 génération du quota de ta formule.
-              </p>
-              <div className="flex gap-1.5">
-                <Button size="sm" variant="ghost" onClick={() => setConfirmingRegenerate(false)}>
-                  Annuler
-                </Button>
-                <Button
-                  size="sm"
-                  className={TEAL_BUTTON}
-                  onClick={() => {
-                    setConfirmingRegenerate(false);
-                    onRegenerate();
-                  }}
-                >
-                  Régénérer
-                </Button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {regenerating && (
-        <div
-          role="status"
-          className="flex items-center gap-2 rounded-2xl border border-primary-200 bg-primary-50/70 px-3 py-2 text-xs font-medium text-primary-800 dark:border-primary-900/60 dark:bg-primary-950/30 dark:text-primary-200"
-        >
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-          Régénération en cours — la matrice actuelle reste affichée en attendant.
-        </div>
-      )}
       {error && <ErrorBanner message={error} />}
       {actionError && <ErrorBanner message={actionError} />}
 
@@ -815,8 +757,7 @@ function MatrixView({ entry, courseTitle, onAskInChat, onRegenerate, regeneratin
         <>
           <div
             className={cn(
-              "relative max-h-[min(70vh,640px)] overflow-auto overscroll-contain rounded-2xl border border-slate-200 bg-white shadow-soft transition-opacity dark:border-slate-800 dark:bg-slate-900",
-              regenerating && "opacity-70"
+              "relative max-h-[min(70vh,640px)] overflow-auto overscroll-contain rounded-2xl border border-slate-200 bg-white shadow-soft transition-opacity dark:border-slate-800 dark:bg-slate-900"
             )}
           >
             <table className="w-max min-w-full border-separate border-spacing-0 text-left text-[13px] leading-snug">
@@ -1032,8 +973,6 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
         entry={entry}
         courseTitle={courseTitle}
         onAskInChat={onAskInChat}
-        onRegenerate={() => generate(kind)}
-        regenerating={pending[kind]}
         error={errors[kind]}
       />
     );

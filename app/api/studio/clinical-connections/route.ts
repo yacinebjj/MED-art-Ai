@@ -6,7 +6,8 @@ import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openroute
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Raised with the 2026-10 timeout pass: the model call may now run up to the value below, so maxDuration leaves headroom for one fast transient retry.
+export const maxDuration = 120;
 
 const CONNECTIONS_SYSTEM_PROMPT = `Tu es un médecin enseignant qui aide un étudiant en médecine à construire une carte mentale clinique entre les cours de son module.
 
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
         { role: "system", content: CONNECTIONS_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      { model: CHEAP_MODEL, maxTokens: 500, timeoutMs: 30_000 }
+      { model: CHEAP_MODEL, maxTokens: 500, timeoutMs: 75_000 }
     );
 
     const parsed = parseJsonResponse(raw);

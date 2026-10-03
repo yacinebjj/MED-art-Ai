@@ -27,7 +27,6 @@ import {
   Paperclip,
   PencilLine,
   Redo2,
-  RefreshCw,
   Sparkles,
   SquarePen,
   Trash2,
@@ -78,9 +77,6 @@ export interface TileGenerationOptions {
   dialect?: PodcastDialect;
 }
 
-/** Sections whose ⋮ menu offers "Régénérer" (under "Supprimer") — the Examen QCM tile only, by product direction. The server (app/api/studio/regenerate/route.ts) enforces the same rule and a 5-per-course cap. Exported so MobileStudioCards.tsx gates its own menu identically. */
-export const REGENERATABLE_SECTIONS: ReadonlySet<DemoSectionId> = new Set(["qcm"]);
-
 /** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. Exported so MobileStudioCards.tsx (a completely separate component tree for the mobile browse view) gates its own equivalent menu identically instead of drifting out of sync. */
 export const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
   "explication",
@@ -102,9 +98,6 @@ interface StudioPanelProps {
   getSectionStatus: (id: DemoSectionId) => SectionStatus;
   /** A Set, not a single id — several sections can now generate concurrently (a student clicking Résumé no longer blocks clicking Cas Clinique before the first finishes). Each tile checks its OWN membership (`.has(section.id)`), never a single shared value. */
   generatingSections: Set<DemoSectionId>;
-  /** Optional — omitted entirely by pages backed by a data model "Regénérer" doesn't support yet (see app/dashboard/demo/[slug]/page.tsx's legacy production pipeline), in which case the menu item is simply not rendered. Same Set-based shape as generatingSections. */
-  regeneratingSections?: Set<DemoSectionId>;
-  onRegenerateSection?: (id: DemoSectionId) => void;
   /** ISO timestamp of the active course's last section save (studio_courses.updated_at) — powers the "Récemment généré" list's relative-time label (RelativeTime). Same value for every row today (row-level, not per-section — see StudioCourseFull's own comment); null before anything has ever been generated. */
   lastGeneratedAt: string | null;
   isNoteOpen: boolean;
@@ -262,37 +255,17 @@ export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: 
 };
 
 /**
- * "..." trigger + Régénérer/Supprimer menu for the OPENED section's own
- * detail-view header (both the inline collapsed header and the fullscreen
- * overlay header below) — mirrors, item-for-item, the identical DropdownMenu
- * already used further down for each "Récemment généré" list row: same two
- * items, same conditional Régénérer gate (hidden entirely when the caller
- * omits `onRegenerateSection`), same bare/unwired Supprimer. While a
- * regeneration for THIS section is in flight, the trigger itself morphs into
- * a static spinning RefreshCw in the same slot — matching
- * MobileStudioCards' own CardOptionsMenu regenerating treatment — instead of
- * opening a menu with nothing new to offer mid-flight.
+ * "..." trigger + menu for the OPENED section's own detail-view header (both
+ * the inline collapsed header and the fullscreen overlay header below) —
+ * mirrors the identical DropdownMenu used further down for each "Récemment
+ * généré" list row. There is deliberately NO "Régénérer" entry anywhere in
+ * the Studio or the Lab: a generated result is generated once (and shared
+ * platform-wide through the content caches), after which students only view
+ * and interact with it — repeated regeneration was the main source of
+ * avoidable token spend.
  */
-function SectionOptionsMenu({
-  sectionId,
-  onRegenerateSection,
-  isRegenerating,
-  triggerClassName,
-}: {
-  sectionId: DemoSectionId;
-  onRegenerateSection?: (id: DemoSectionId) => void;
-  isRegenerating: boolean;
-  triggerClassName: string;
-}) {
+function SectionOptionsMenu({ triggerClassName }: { triggerClassName: string }) {
   const { language } = useLanguage();
-
-  if (isRegenerating) {
-    return (
-      <span aria-hidden className={triggerClassName}>
-        <RefreshCw className="h-4 w-4 animate-spin" />
-      </span>
-    );
-  }
 
   return (
     <DropdownMenu>
@@ -303,17 +276,6 @@ function SectionOptionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
-        {/* "Régénérer" is offered for the Examen QCM tile ONLY (product
-            direction), directly under Supprimer — see
-            REGENERATABLE_SECTIONS. Enforced again server-side in
-            app/api/studio/regenerate/route.ts, which rejects every other
-            section and caps QCM at 5 regenerations per course. */}
-        {onRegenerateSection && REGENERATABLE_SECTIONS.has(sectionId) && (
-          <DropdownMenuItem onSelect={() => onRegenerateSection(sectionId)}>
-            <RefreshCw className="h-4 w-4" />
-            {tStudio("regenerate", language)}
-          </DropdownMenuItem>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -473,8 +435,6 @@ export function StudioPanel({
   onCloseSection,
   getSectionStatus,
   generatingSections,
-  regeneratingSections,
-  onRegenerateSection,
   lastGeneratedAt,
   isNoteOpen,
   onOpenNote,
@@ -779,12 +739,7 @@ export function StudioPanel({
           ) : (
             <>
               {openedSection && !isCollapsed && (
-                <SectionOptionsMenu
-                  sectionId={openedSection}
-                  onRegenerateSection={onRegenerateSection}
-                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
-                  triggerClassName={PANEL_ICON_BUTTON_CLASSES}
-                />
+                <SectionOptionsMenu triggerClassName={PANEL_ICON_BUTTON_CLASSES} />
               )}
               {isDetailOpen && !isCollapsed && (
                 <Tooltip>
@@ -1021,21 +976,8 @@ export function StudioPanel({
                   {generations.map((section) => {
                     const Icon = section.icon;
                     const isGenerating = generatingSections.has(section.id);
-                    const isRegenerating = regeneratingSections?.has(section.id) ?? false;
 
                     if (isGenerating) {
-                      return (
-                        <div
-                          key={section.id}
-                          className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm text-muted-foreground"
-                        >
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                          <GeneratingRotatingLabel className="truncate" />
-                        </div>
-                      );
-                    }
-
-                    if (isRegenerating) {
                       return (
                         <div
                           key={section.id}
@@ -1089,12 +1031,6 @@ export function StudioPanel({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
-                            {onRegenerateSection && REGENERATABLE_SECTIONS.has(section.id) && (
-                              <DropdownMenuItem onSelect={() => onRegenerateSection(section.id)}>
-                                <RefreshCw className="h-4 w-4" />
-                                {tStudio("regenerate", language)}
-                              </DropdownMenuItem>
-                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -1145,7 +1081,7 @@ export function StudioPanel({
                           </TooltipTrigger>
                           <TooltipContent side="left" className="max-w-[16rem] whitespace-normal">
                             {tool.description}
-                            {tool.usesQuota ? " — une nouvelle génération peut utiliser 1 crédit de ton forfait." : " — n'utilise aucun crédit."}
+                            {" — généré une seule fois pour tous : gratuit s'il existe déjà pour ce cours, sinon 1 crédit de ton forfait."}
                           </TooltipContent>
                         </Tooltip>
                       );
@@ -1391,12 +1327,7 @@ export function StudioPanel({
               )}
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{openedSection ? openedLabel : openedLab?.label}</span>
               {openedSection && (
-                <SectionOptionsMenu
-                  sectionId={openedSection}
-                  onRegenerateSection={onRegenerateSection}
-                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
-                  triggerClassName={GLASS_ICON_BUTTON_CLASSES}
-                />
+                <SectionOptionsMenu triggerClassName={GLASS_ICON_BUTTON_CLASSES} />
               )}
               <button
                 type="button"

@@ -13,7 +13,8 @@ import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/cour
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Raised with the 2026-10 timeout pass: the model call may now run up to the value below, so maxDuration leaves headroom for one fast transient retry.
+export const maxDuration = 120;
 
 /** One batch size for both the very first load and every background top-up — see this route's header comment. 60 / 20 = 3 calls fill an entire session. */
 const BATCH_SIZE = 20;
@@ -217,7 +218,7 @@ export async function POST(request: NextRequest) {
         // schema, 26/26 medically-accurate cards — a knowingly-accepted
         // tradeoff on a small sample, per the product owner's own explicit
         // "runway over accuracy margin" decision.
-        { model: CHEAP_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 50_000 } // route's own maxDuration is 60s — fail cleanly before the platform kills it
+        { model: CHEAP_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 90_000 } // maxDuration is 120s — fail cleanly before the platform kills the route
       );
     } catch (error) {
       await refundGeneration(user.id);

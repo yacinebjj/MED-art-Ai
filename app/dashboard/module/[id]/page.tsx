@@ -34,7 +34,6 @@ import {
   Settings,
   SquarePen,
   SunMoon,
-  Timer,
   Trash2,
   TrendingUp,
   Workflow,
@@ -140,21 +139,12 @@ const ClinicalCaseSimulator = dynamic(
   () => import("@/components/course/workspace/lab/ClinicalCaseSimulator").then((m) => m.ClinicalCaseSimulator),
   { ssr: false, loading: () => <StudioTileSkeleton /> }
 );
-const FlashcardsLab = dynamic(
-  () => import("@/components/course/workspace/lab/FlashcardsLab").then((m) => m.FlashcardsLab),
-  { ssr: false, loading: () => <StudioTileSkeleton /> }
-);
 const MedicalMatrixStudio = dynamic(
   () => import("@/components/course/workspace/lab/MedicalMatrixStudio").then((m) => m.MedicalMatrixStudio),
   { ssr: false, loading: () => <StudioTileSkeleton /> }
 );
 const MindMapLab = dynamic(
   () => import("@/components/course/workspace/lab/MindMapLab").then((m) => m.MindMapLab),
-  { ssr: false, loading: () => <StudioTileSkeleton /> }
-);
-/** The Study Space's own Pomodoro (configurable durations/cycles, sound alerts, session stats) — shares PomodoroProvider's single global timer with the command bar chip. */
-const StudyDashboard = dynamic(
-  () => import("@/components/study/StudyDashboard").then((m) => m.StudyDashboard),
   { ssr: false, loading: () => <StudioTileSkeleton /> }
 );
 
@@ -1047,16 +1037,6 @@ export default function ModuleWorkspacePage() {
   const [generatingByKey, setGeneratingByKey] = useState<Set<string>>(() => new Set());
   const activeCourseIdForSections = activeCourse?.id ?? null;
   const generatingSections = useMemo(() => scopeToActiveCourse(generatingByKey, activeCourseIdForSections), [generatingByKey, activeCourseIdForSections]);
-  // "Régénérer" (Examen QCM only) — same course-scoped bookkeeping as
-  // generatingByKey above, kept separate because a section can be
-  // regenerating while it already HAS content (unlike a first generation).
-  const [regeneratingByKey, setRegeneratingByKey] = useState<Set<string>>(() => new Set());
-  const regeneratingSections = useMemo(() => scopeToActiveCourse(regeneratingByKey, activeCourseIdForSections), [regeneratingByKey, activeCourseIdForSections]);
-  // Bumped after each successful QCM regeneration and folded into the quiz's
-  // React key: the new set reuses question ids 1..15, so without a remount
-  // the quiz's internal answer state would carry the OLD answers onto the
-  // NEW questions.
-  const [qcmRegenNonce, setQcmRegenNonce] = useState(0);
   // Live per-part progress for the multi-request Explication pipeline — see
   // the onProgress call site below for why surfacing this matters.
   const [explicationProgress, setExplicationProgress] = useState<ExplicationProgressView | null>(null);
@@ -1523,72 +1503,6 @@ export default function ModuleWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCourse, generatingSections, toast, studyYear]);
 
-  /**
-   * "Régénérer" under "Supprimer" in the Examen QCM tile's ⋮ menu — a brand
-   * new set of questions from the same course (app/api/studio/regenerate,
-   * capped server-side at 5 per course). useCallback so MobileStudioCards'
-   * React.memo still holds. Registered with trackGeneration under a
-   * separate "regen:" namespace, like the original feature, so leaving the
-   * page mid-regeneration can't lead to a second paid call on return (see
-   * the reconciliation effect further down).
-   */
-  const handleRegenerateSection = useCallback(async (id: DemoSectionId) => {
-    if (!activeCourse || regeneratingSections.has(id) || generatingSections.has(id)) return;
-
-    const courseId = activeCourse.id;
-    const key = sectionKey(courseId, id);
-    setRegeneratingByKey((prev) => new Set(prev).add(key));
-
-    const regenerationPromise = (async () => {
-      try {
-        const res = await fetch("/api/studio/regenerate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ courseId, section: id }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) {
-          throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La régénération a échoué.");
-        }
-
-        const baseCourse = courseCacheRef.current.get(courseId);
-        if (baseCourse) {
-          const updated = { ...withSectionValue(baseCourse, id, data.data as StudioSectionValue), updatedAt: new Date().toISOString() };
-          courseCacheRef.current.set(courseId, updated);
-          setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
-        }
-        if (id === "qcm") setQcmRegenNonce((n) => n + 1);
-
-        const remaining = typeof data.remaining === "number" ? data.remaining : null;
-        toast({
-          variant: "success",
-          title: "Nouvelle série de QCM générée",
-          description:
-            remaining === null
-              ? undefined
-              : remaining > 0
-                ? `Il te reste ${remaining} régénération${remaining > 1 ? "s" : ""} pour ce cours.`
-                : "C'était ta dernière régénération pour ce cours.",
-        });
-      } catch (error) {
-        toast({
-          variant: "error",
-          title: "Échec de la régénération",
-          description: error instanceof Error ? error.message : "Erreur inconnue.",
-        });
-      } finally {
-        setRegeneratingByKey((prev) => {
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
-        });
-      }
-    })();
-
-    trackGeneration(courseId, `regen:${id}`, regenerationPromise);
-    await regenerationPromise;
-  }, [activeCourse, regeneratingSections, generatingSections, toast]);
-
   /** Stable reference so the desktop ModuleSourcesPanel instance's React.memo actually holds. */
   const handleToggleSourcesCollapsed = useCallback(() => setIsSourcesCollapsed((prev) => !prev), []);
 
@@ -1869,21 +1783,6 @@ export default function ModuleWorkspacePage() {
         setGeneratingByKey((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
         generating.then(() => refreshCourseFromServer(courseId));
       }
-      // Same for a "Régénérer" still running from a previous visit.
-      const regenerating = getInFlightGeneration(courseId, `regen:${section.id}`);
-      if (regenerating) {
-        const key = sectionKey(courseId, section.id);
-        setRegeneratingByKey((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-        regenerating.then(() => {
-          setRegeneratingByKey((prev) => {
-            const next = new Set(prev);
-            next.delete(key);
-            return next;
-          });
-          if (section.id === "qcm") setQcmRegenNonce((n) => n + 1);
-          return refreshCourseFromServer(courseId);
-        });
-      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCourse?.id]);
@@ -2157,7 +2056,7 @@ export default function ModuleWorkspacePage() {
     };
   }, [isPaletteOpen, paletteModules, curriculumSpecialtyName, studyYear]);
 
-  const pendingGenerations = generatingByKey.size + regeneratingByKey.size;
+  const pendingGenerations = generatingByKey.size;
   const syncState: WorkspaceSyncState = !isOnline ? "offline" : pendingGenerations + uploadsInFlight > 0 || isChatBusy ? "working" : "synced";
   const syncDetail = !isOnline
     ? "Hors ligne — tes cours et générations déjà enregistrés restent sur ton compte ; reconnecte-toi pour continuer."
@@ -2194,23 +2093,13 @@ export default function ModuleWorkspacePage() {
     );
   }
 
-  const labContent = !openedLabTool ? null : openedLabTool === "focus" ? (
-    <StudyDashboard />
-  ) : !activeCourse ? (
+  const labContent = !openedLabTool ? null : !activeCourse ? (
     <div className="animate-fade-in flex flex-col items-center justify-center gap-2 py-20 text-center">
       <p className="text-sm font-medium text-foreground">Ouvre une source pour utiliser cet outil</p>
       <p className="max-w-sm text-xs text-muted-foreground">Les outils du Lab travaillent sur le cours ouvert : importe ou sélectionne un cours dans le panneau Sources.</p>
     </div>
   ) : openedLabTool === "case-simulator" ? (
     <ClinicalCaseSimulator key={activeCourse.id} courseId={activeCourse.id} courseTitle={activeCourse.title} onAskInChat={handleSendPrompt} />
-  ) : openedLabTool === "flashcards" ? (
-    <FlashcardsLab
-      key={activeCourse.id}
-      courseId={activeCourse.id}
-      courseTitle={activeCourse.title}
-      hasExplication={Boolean(activeCourse.explication)}
-      onAskInChat={handleSendPrompt}
-    />
   ) : openedLabTool === "matrix" ? (
     <MedicalMatrixStudio key={activeCourse.id} courseId={activeCourse.id} courseTitle={activeCourse.title} onAskInChat={handleSendPrompt} />
   ) : (
@@ -2345,7 +2234,6 @@ export default function ModuleWorkspacePage() {
     { id: "nav-synthesis", group: "Navigation", label: "Synthèse du module", icon: Workflow, run: () => router.push(`/dashboard/workspace/module/${moduleId}`) },
     { id: "nav-notes", group: "Navigation", label: "Mes notes", icon: NotebookPen, run: () => router.push("/dashboard/notes") },
     { id: "nav-assistant", group: "Navigation", label: "MedArt Assistant", icon: MessageSquarePlus, run: () => router.push("/dashboard/assistant") },
-    { id: "nav-study", group: "Navigation", label: "Espace d'étude (flashcards, Pomodoro)", icon: Timer, run: () => router.push("/dashboard/study") },
     { id: "nav-settings", group: "Navigation", label: "Paramètres du compte", icon: Settings, run: () => router.push("/dashboard/settings") },
     ...(paletteModules ?? [])
       .filter((m) => m.id !== moduleId)
@@ -2451,8 +2339,6 @@ export default function ModuleWorkspacePage() {
       onCloseSection={() => setOpenedSection(null)}
       getSectionStatus={getSectionStatus}
       generatingSections={generatingSections}
-      regeneratingSections={regeneratingSections}
-      onRegenerateSection={handleRegenerateSection}
       lastGeneratedAt={activeCourse?.updatedAt ?? null}
       isNoteOpen={isNoteOpen}
       onOpenNote={() => setIsNoteOpen(true)}
@@ -2487,7 +2373,7 @@ export default function ModuleWorkspacePage() {
           <BrandLoader className="h-6 w-6" />
           <p className="text-sm text-muted-foreground">Chargement du cours...</p>
         </div>
-      ) : openedSection && (generatingSections.has(openedSection) || regeneratingSections.has(openedSection)) ? (
+      ) : openedSection && generatingSections.has(openedSection) ? (
         // A regenerating section shows the same loader as a first generation,
         // so the student never keeps answering questions that are about to
         // be replaced.
@@ -2561,7 +2447,7 @@ export default function ModuleWorkspacePage() {
             )}
             {openedSection === "qcm" && activeCourse.qcms && (
               <GastriteQcmsStudio
-                key={`${activeCourse.id}:${qcmRegenNonce}`}
+                key={activeCourse.id}
                 data={activeCourse.qcms}
                 courseSlug={`studio-course-${activeCourse.id}`}
                 explicationMarkdown={activeCourse.explication ?? undefined}
@@ -2738,8 +2624,6 @@ export default function ModuleWorkspacePage() {
                     sections={DEMO_SECTIONS}
                     getSectionStatus={getSectionStatus}
                     generatingSections={generatingSections}
-                    regeneratingSections={regeneratingSections}
-                    onRegenerateSection={handleRegenerateSection}
                     onItemClick={handleStudioItemClick}
                     onItemClickWithOptions={handleStudioItemClick}
                     studyYear={studyYear}
