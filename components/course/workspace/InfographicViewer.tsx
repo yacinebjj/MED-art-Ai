@@ -13,6 +13,7 @@ import { Download } from "lucide-react";
 export function InfographicViewer({ imageUrl, courseTitle }: { imageUrl: string; courseTitle: string }) {
   return (
     <div className="flex flex-col items-center gap-4">
+      {/* eslint-disable-next-line @next/next/no-img-element -- generated image of unknown size from storage; rendered as-is */}
       <img
         src={imageUrl}
         alt={`Infographie mindmap — ${courseTitle}`}

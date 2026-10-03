@@ -130,7 +130,7 @@ function GroupScreen({ fr }: { fr: boolean }) {
           <p className="text-[9px] text-emerald-300">{step >= 2 ? (fr ? "Sara est en train d'écrire…" : "Sara is typing…") : fr ? "6 en ligne" : "6 online"}</p>
         </div>
       </div>
-      <AnimatePresence>
+      {/* Messages only ever appear (step grows), so no AnimatePresence: it added exit bookkeeping for nothing. */}
         {step >= 1 && (
           <motion.div key="g1" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-[85%] rounded-xl rounded-tl-sm border border-white/10 bg-white/[0.06] px-2.5 py-1.5 text-[10px] text-slate-200">
             <span className="font-bold text-cyan-300">Amine</span> · {fr ? "Fiche choc cardiogénique 👇" : "Cardiogenic shock sheet 👇"}
@@ -171,7 +171,6 @@ function GroupScreen({ fr }: { fr: boolean }) {
             <span className="font-bold">Sara</span> · <span className="rounded bg-amber-300/30 px-1 font-bold">@{fr ? "toi" : "you"}</span> {fr ? "tu fais le cas clinique ?" : "can you take the clinical case?"}
           </motion.div>
         )}
-      </AnimatePresence>
     </div>
   );
 }

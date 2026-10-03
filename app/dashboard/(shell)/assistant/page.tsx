@@ -210,6 +210,7 @@ const ChatBubble = memo(function ChatBubble({
             </span>
           )}
           {attachment?.kind === IMAGE_ENVELOPE_KIND && (
+            // eslint-disable-next-line @next/next/no-img-element -- data: URL from the chat envelope; next/image cannot optimise it
             <img
               src={attachment.dataUrl}
               alt={attachment.fileName ?? "Image envoyée"}

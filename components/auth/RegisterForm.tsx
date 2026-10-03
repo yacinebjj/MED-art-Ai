@@ -3,12 +3,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { ArrowRight, Eye, EyeOff, GraduationCap, Lock, Mail, MailCheck, User } from "lucide-react";
-import { Input } from "@/components/ui/Input";
+import { motion, useAnimationControls } from "framer-motion";
+import { Eye, EyeOff, GraduationCap, Lock, Mail, MailCheck, User } from "lucide-react";
 import { Select } from "@/components/ui/Select";
-import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { AuthField } from "./AuthField";
+import { AuthSubmitButton } from "./AuthSubmitButton";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
@@ -18,6 +18,9 @@ import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
 
 const FACULTY_OPTIONS = ALGERIAN_FACULTIES.map((name) => ({ value: name, label: name }));
+
+/** Matches AuthField: dark glass, 56px tall, cyan focus. */
+const SELECT_CLASSES = "h-14 rounded-2xl border-white/10 bg-slate-900/80 text-[15px] text-white shadow-none hover:border-white/20 focus:border-cyan-400 focus:ring-cyan-400/30";
 
 /**
  * Maps a curriculum_specialties.name (the real, DB-backed row picked below)
@@ -62,9 +65,9 @@ export function RegisterForm() {
   const router = useRouter();
   const { toast } = useToast();
   const { language } = useLanguage();
+  const shake = useAnimationControls();
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
-  const [error, setError] = useState<string | null>(null);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -109,28 +112,34 @@ export function RegisterForm() {
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
-    setError(null);
   }
 
   function handleSpecialtyChange(value: string) {
     setSpecialtyId(Number(value));
-    setError(null);
   }
 
   function handleYearChange(value: string) {
     setAcademicYearId(Number(value));
-    setError(null);
+  }
+
+  /** Errors slide in as a toast and the card gives a short shake — no inline alert block. */
+  function showError(message: string) {
+    toast({ variant: "error", title: language === "fr" ? "Inscription impossible" : "Couldn't sign up", description: message });
+    void shake.start({ x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.4 } });
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!form.university) {
+      showError("Choisis ta faculté.");
+      return;
+    }
     if (specialtyId == null || academicYearId == null) {
-      setError("Choisis ta spécialité et ton année.");
+      showError("Choisis ta spécialité et ton année.");
       return;
     }
 
     setIsLoading(true);
-    setError(null);
 
     const specialtyName = specialties.find((s) => s.id === specialtyId)?.name ?? "";
     const yearName = years.find((y) => y.id === academicYearId)?.name ?? "";
@@ -152,7 +161,7 @@ export function RegisterForm() {
 
     if (signUpError) {
       setIsLoading(false);
-      setError(translateAuthError(signUpError.message));
+      showError(translateAuthError(signUpError.message));
       return;
     }
 
@@ -191,24 +200,24 @@ export function RegisterForm() {
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="rounded-2xl border border-border bg-card p-6 text-center sm:p-8"
+        className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-6 text-center sm:p-8"
       >
         <motion.div
           initial={{ scale: 0.6, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.35, ease: "easeOut" }}
-          className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
+          className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white shadow-[0_0_30px_rgba(34,211,238,0.45)]"
         >
           <MailCheck className="h-6 w-6" />
         </motion.div>
-        <h2 className="text-lg font-semibold text-foreground">{tAuth("verifyEmailTitle", language)}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          On a envoyé un lien de confirmation à <strong className="text-foreground">{form.email}</strong>. Clique
+        <h2 className="text-lg font-bold text-white">{tAuth("verifyEmailTitle", language)}</h2>
+        <p className="mt-2 text-sm text-slate-400">
+          On a envoyé un lien de confirmation à <strong className="text-white">{form.email}</strong>. Clique
           dessus pour activer ton compte, puis connecte-toi.
         </p>
         <Link
           href="/login"
-          className="mt-6 inline-block text-sm font-medium text-primary transition-colors hover:text-primary/80 hover:underline"
+          className="mt-6 inline-block text-sm font-semibold text-cyan-300 transition-colors hover:text-cyan-200 hover:underline"
         >
           Retour à la connexion
         </Link>
@@ -242,76 +251,70 @@ export function RegisterForm() {
   };
 
   return (
-    <motion.form
-      onSubmit={handleSubmit}
-      className="space-y-6"
-      initial="hidden"
-      animate="visible"
-      variants={{ visible: { transition: { staggerChildren: 0.08 } } }}
-    >
-      {error && (
-        <div className="animate-in fade-in-0 slide-in-from-top-1 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive duration-200">
-          {error}
-        </div>
-      )}
+    <motion.form onSubmit={handleSubmit} animate={shake} className="space-y-6">
+      <motion.div
+        className="space-y-6"
+        initial={false}
+        animate="visible"
+        variants={{ visible: { transition: { staggerChildren: 0.08 } } }}
+      >
 
       <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="space-y-4">
-        <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-300/80">
           <User className="h-3.5 w-3.5" />
           {language === "fr" ? "Tes informations" : "Your information"}
         </p>
 
-        <Input
+        <AuthField
           icon={<User className="h-4 w-4" />}
           label={tAuth("fullNameLabel", language)}
           name="fullName"
-          placeholder={tAuth("fullNamePlaceholder", language)}
+          autoComplete="name"
           required
           value={form.fullName}
           onChange={(e) => update("fullName", e.target.value)}
         />
 
-        <Input
+        <AuthField
           icon={<Mail className="h-4 w-4" />}
           label="Adresse e-mail"
           name="email"
           type="email"
-          placeholder="prenom.nom@etu.univ-dz.org"
+          autoComplete="email"
+          inputMode="email"
           required
           value={form.email}
           onChange={(e) => update("email", e.target.value)}
         />
 
-        <div className="relative">
-          <Input
-            icon={<Lock className="h-4 w-4" />}
-            label={tAuth("passwordLabel", language)}
-            name="password"
-            type={showPassword ? "text" : "password"}
-            placeholder="8 caractères minimum"
-            required
-            minLength={8}
-            value={form.password}
-            onChange={(e) => update("password", e.target.value)}
-            className="pr-10"
-          />
-
-          {hasPassword && (
-            <button
-              type="button"
-              onClick={() => setShowPassword((prev) => !prev)}
-              aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-              className="absolute bottom-0 right-3 h-11 text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-200"
-              tabIndex={-1}
-            >
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-          )}
-        </div>
+        <AuthField
+          icon={<Lock className="h-4 w-4" />}
+          label={tAuth("passwordLabel", language)}
+          name="password"
+          type={showPassword ? "text" : "password"}
+          autoComplete="new-password"
+          hint="8 caractères minimum"
+          required
+          minLength={8}
+          value={form.password}
+          onChange={(e) => update("password", e.target.value)}
+          trailing={
+            hasPassword ? (
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            ) : null
+          }
+        />
       </motion.div>
 
       <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="space-y-4">
-        <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-300/80">
           <GraduationCap className="h-3.5 w-3.5" />
           {language === "fr" ? "Ton cursus" : "Your program"}
         </p>
@@ -324,6 +327,7 @@ export function RegisterForm() {
           required
           value={form.university}
           onValueChange={(value) => update("university", value)}
+          className={SELECT_CLASSES}
         />
 
         <div className="grid grid-cols-2 gap-4">
@@ -335,6 +339,7 @@ export function RegisterForm() {
             required
             value={specialtyId != null ? String(specialtyId) : ""}
             onValueChange={handleSpecialtyChange}
+            className={SELECT_CLASSES}
           />
 
           <Select
@@ -347,27 +352,23 @@ export function RegisterForm() {
             value={academicYearId != null ? String(academicYearId) : ""}
             onValueChange={handleYearChange}
             onDisabledOptionClick={handleDisabledYearClick}
+            className={SELECT_CLASSES}
           />
         </div>
       </motion.div>
 
       <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}>
-        <Button
-          type="submit"
-          className="group relative w-full overflow-hidden shadow-[0_0_25px_rgba(20,184,166,0.35)] transition-shadow duration-300 hover:shadow-[0_0_40px_rgba(20,184,166,0.5)]"
-          size="lg"
-          isLoading={isLoading}
-        >
+        <AuthSubmitButton isLoading={isLoading} loadingLabel={language === "fr" ? "Création du compte…" : "Creating your account…"}>
           Créer mon compte
-          <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-        </Button>
+        </AuthSubmitButton>
 
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-6 text-center text-sm text-slate-400">
           Déjà inscrit ?{" "}
-          <Link href="/login" className="font-medium text-primary hover:underline">
+          <Link href="/login" className="font-semibold text-cyan-300 hover:underline">
             Connecte-toi
           </Link>
         </p>
+      </motion.div>
       </motion.div>
     </motion.form>
   );

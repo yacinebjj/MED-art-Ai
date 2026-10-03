@@ -103,6 +103,8 @@ export function ModuleStatsModal({
   const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
+    // Rebuilt from cacheKey so the effect is keyed on the ids' CONTENT, not the array identity.
+    const ids = cacheKey ? cacheKey.split(",").map(Number) : [];
     if (!open || ids.length === 0) return;
 
     const cached = cacheRef.current.get(cacheKey);
