@@ -189,7 +189,7 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
 
   const control =
     "href" in entry ? (
-      <Link href={entry.href} aria-current={isActive ? "page" : undefined} aria-label={collapsed ? label : undefined} className={className}>
+      <Link href={entry.href} prefetch aria-current={isActive ? "page" : undefined} aria-label={collapsed ? label : undefined} className={className}>
         {inner}
       </Link>
     ) : (

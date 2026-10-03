@@ -124,6 +124,9 @@ const ModuleCard = memo(function ModuleCard({
         role="link"
         tabIndex={0}
         onClick={() => router.push(href)}
+        // The card itself navigates programmatically: warm the route on intent so the click switches instantly.
+        onPointerEnter={() => router.prefetch(href)}
+        onFocus={() => router.prefetch(href)}
         onKeyDown={(e) => {
           if (e.key === "Enter") router.push(href);
         }}

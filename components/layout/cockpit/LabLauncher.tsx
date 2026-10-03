@@ -111,6 +111,7 @@ export function LabLauncher() {
                 key={group.moduleId}
                 type="button"
                 onClick={() => go(`/dashboard/module/${group.moduleId}/exam`)}
+                onPointerEnter={() => router.prefetch(`/dashboard/module/${group.moduleId}/exam`)}
                 className="group flex w-full items-center gap-3 rounded-xl border border-border/60 bg-background/50 px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-primary-300 hover:bg-primary-50/60 dark:hover:border-primary-800 dark:hover:bg-primary-950/30"
               >
                 <FolderOpen className="h-4 w-4 shrink-0 text-primary-500" />
@@ -133,6 +134,7 @@ export function LabLauncher() {
                       key={course.id}
                       type="button"
                       onClick={() => go(`/dashboard/module/${course.moduleId}?course=${course.id}&lab=${launcher?.kind === "lab" ? launcher.tool : ""}`)}
+                      onPointerEnter={() => router.prefetch(`/dashboard/module/${course.moduleId}`)}
                       className="group flex w-full items-center gap-3 rounded-xl border border-border/60 bg-background/50 px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-primary-300 hover:bg-primary-50/60 dark:hover:border-primary-800 dark:hover:bg-primary-950/30"
                     >
                       <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-primary-500" />

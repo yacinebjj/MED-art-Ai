@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
@@ -36,6 +36,18 @@ const GROUPS = {
   en: { ask: "AI assistant", nav: "Navigation", lab: "MedArt Lab", courses: "Courses", modules: "Modules", notes: "Notes", audio: "Audio smart notes", prefs: "Preferences" },
 } as const;
 
+const PREFETCH_ON_OPEN = [
+  "/dashboard",
+  "/dashboard/assistant",
+  "/dashboard/study",
+  "/dashboard/todo",
+  "/dashboard/notes",
+  "/dashboard/groups",
+  "/dashboard/billing",
+  "/dashboard/settings",
+  "/dashboard/audio-workspace",
+];
+
 /**
  * Global ⌘K / Ctrl+K Spotlight for the dashboard shell: every page, every
  * course, module, note, audio note and Lab tool of the student, plus a
@@ -57,6 +69,12 @@ export function Spotlight() {
   useHotkeys([{ combo: "mod+k", allowInInputs: true, handler: () => setOpen(!useCockpitUi.getState().spotlightOpen) }]);
 
   const g = GROUPS[language];
+
+  // Warm every top-level page while the palette is open, so picking one switches instantly.
+  useEffect(() => {
+    if (!open) return;
+    for (const href of PREFETCH_ON_OPEN) router.prefetch(href);
+  }, [open, router]);
 
   const items = useMemo<CommandItem[]>(() => {
     const go = (href: string) => () => router.push(href);

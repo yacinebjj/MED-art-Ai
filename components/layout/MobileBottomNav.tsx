@@ -82,6 +82,7 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
           <Link
             key={item.href}
             href={item.href}
+            prefetch
             aria-current={isActive ? "page" : undefined}
             className="relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl py-2.5 text-[11px] font-medium transition-all duration-150 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >

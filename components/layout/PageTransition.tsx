@@ -1,33 +1,35 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { usePathname } from "next/navigation";
 
 /**
- * Wrapped in AnimatePresence (mode="wait") so a route change plays a real
- * exit-then-enter sequence instead of a hard swap — the old page's content
- * fades/slides out fully before the new one fades in, which is what avoids
- * the "flash of blank/jumping content" a plain unmount+mount produces. Kept
- * to `mode="wait"` rather than a crossfade specifically because sibling
- * pages in this shell can have very different heights — overlapping their
- * enter/exit would stack both in flow at once and visibly jump the layout,
- * which is worse than the brief moment of empty space `wait` produces.
+ * ENTER-ONLY page transition: the new route mounts IMMEDIATELY and fades in.
+ *
+ * This used to be `<AnimatePresence mode="wait">` (exit the old page fully,
+ * THEN mount the new one). With the App Router that is a navigation hazard:
+ * the new segment is held back until the old one's exit animation reports
+ * completion, and an exit animation can stall — animation frames are
+ * throttled or paused while an installed PWA / standalone window isn't in
+ * the foreground, and App Router children swapped under an exiting
+ * AnimatePresence child are a known source of stuck transitions. The result
+ * was the "click → nothing happens until F5" freeze in the installed app.
+ * No exit phase means nothing can ever block the router: the click shows
+ * the new page (or its loading.tsx skeleton) on the very next frame.
  */
 export function PageTransition({ children, className }: { children: React.ReactNode; className?: string }) {
   const pathname = usePathname();
+  const reduceMotion = useReducedMotion();
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={pathname}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -4 }}
-        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-        className={className}
-      >
-        {children}
-      </motion.div>
-    </AnimatePresence>
+    <motion.div
+      key={pathname}
+      initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      className={className}
+    >
+      {children}
+    </motion.div>
   );
 }

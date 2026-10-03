@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -55,7 +55,20 @@ function highlightMatches(text: string, query: string) {
   );
 }
 
+/**
+ * useSearchParams() (the ?q= read below) must sit under a Suspense boundary
+ * in the App Router: without one, the read suspends the nearest boundary up
+ * the tree on a client-side navigation instead of just this page.
+ */
 export default function SearchPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-[100dvh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary-500" /></div>}>
+      <SearchPageContent />
+    </Suspense>
+  );
+}
+
+function SearchPageContent() {
   const { language } = useLanguage();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
