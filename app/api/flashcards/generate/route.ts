@@ -25,17 +25,22 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 /** One study batch. The deck asks for the next one when the student nears the end of the current one. */
-const BATCH_SIZE = 25;
+const BATCH_SIZE = 50;
 
-/** First ("definitive") set of a course — see buildDefinitiveFlashcardSetPrompt. */
-const MIN_DEFINITIVE_CARDS = 20;
-const MAX_DEFINITIVE_CARDS = 30;
+/**
+ * AI fallback is deliberately SMALL and targets ONE course per request: a
+ * short, fast call (15-20 cards from a bounded excerpt) that reliably fits
+ * the timeout, instead of a large set or several courses at once — which is
+ * what produced "Le modèle IA met trop de temps à répondre" with 20-40
+ * selected courses.
+ */
+const MIN_GENERATED_CARDS = 15;
+const MAX_GENERATED_CARDS = 20;
+const EXTENSION_SIZE = 20;
+const GENERATION_MAX_TOKENS = 4000;
 
-/** Cards added to a course's set each time a student has seen all of it. */
-const EXTENSION_SIZE = 25;
-
-/** Same bound as before on the explication text sent to the model. */
-const MAX_EXPLICATION_CHARS_FOR_FLASHCARDS = 24_000;
+/** Bounded course text for the targeted call — smaller input, faster answer. */
+const MAX_EXPLICATION_CHARS_FOR_FLASHCARDS = 14_000;
 
 /** Existing questions quoted to the model on an extension — enough to steer it away from repeats without blowing the prompt up. */
 const MAX_EXISTING_QUESTIONS_IN_PROMPT = 160;
@@ -58,6 +63,32 @@ interface StudioCourseRow {
 
 interface CandidateCard extends FlashcardQA {
   course: StudioCourseRow;
+}
+
+/**
+ * Round-robin draw over courses: 1 card from course 1, 1 from course 2, …
+ * up to course N, repeated until `size` cards are collected; a course that
+ * runs out is skipped. With 40 courses and 50 cards, every course gets 1-2
+ * cards. Each course's cards and the course order are shuffled first, so
+ * which card / which courses get the extra slot vary from batch to batch.
+ * Never indexes past an array (each course is consumed through its own
+ * cursor), so no undefined entries whatever N is.
+ */
+function roundRobinSample(groups: CandidateCard[][], size: number): CandidateCard[] {
+  const queues = shuffle(groups.filter((group) => group.length > 0)).map((group) => shuffle(group));
+  const cursors = queues.map(() => 0);
+  const result: CandidateCard[] = [];
+  let active = queues.length;
+  while (result.length < size && active > 0) {
+    active = 0;
+    for (let i = 0; i < queues.length && result.length < size; i++) {
+      if (cursors[i] >= queues[i].length) continue;
+      result.push(queues[i][cursors[i]]);
+      cursors[i] += 1;
+      if (cursors[i] < queues[i].length) active += 1;
+    }
+  }
+  return result;
 }
 
 /** Fisher-Yates — uniform, unlike `.sort(() => Math.random() - 0.5)`. */
@@ -115,13 +146,13 @@ function parseGeneratedCards(raw: string): FlashcardQA[] {
 /**
  * POST /api/flashcards/generate — body `{ language?: "fr" | "en" }`.
  *
- * Returns the NEXT batch of up to 25 cards the student has not seen yet,
+ * Returns the NEXT batch of up to 50 cards the student has not seen yet,
  * MIXED across every course of the current selection (the courses ticked in
  * the picker, or every course of the activated modules when none is ticked):
  *  1. All unseen cards of all selected courses are pooled and shuffled
  *     (Fisher-Yates) BEFORE the batch is cut — a batch is never "all of
  *     course A, then course B".
- *  2. If fewer than 25 unseen cards remain, ONE generation happens first:
+ *  2. If fewer than 50 unseen cards remain, ONE small generation (15-20 cards) runs first, for the least-covered course only:
  *     a course with no set yet gets its first set; otherwise the course with
  *     the fewest unseen cards gets an EXTENSION (new cards that don't repeat
  *     its existing ones), appended to the cross-student cache. Either costs
@@ -214,16 +245,17 @@ export async function POST(request: NextRequest) {
   let generated: "definitive" | "extension" | null = null;
   let quotaReached = false;
 
-  // ---- 2. ONE generation when needed: a selected course that has no set yet
-  // (so every ticked course really ends up in the mix), or — once all have
-  // one — an extension when fewer than a batch of unseen cards remain.
-  const withoutSet = eligibleCourses.filter((course) => !cachedSetFor(course));
-  if (withoutSet.length > 0 || totalUnseen() < BATCH_SIZE) {
-    const target =
-      withoutSet.length > 0
-        ? withoutSet[Math.floor(Math.random() * withoutSet.length)]
-        : [...eligibleCourses].sort((a, b) => (unseenByCourse.get(a.id)?.length ?? 0) - (unseenByCourse.get(b.id)?.length ?? 0))[0];
-    const mode: "definitive" | "extension" = withoutSet.length > 0 ? "definitive" : "extension";
+  // ---- 2. DATABASE FIRST. When the stored, unseen cards of the selection
+  // already make a full batch, NO model call and NO credit — the batch is
+  // served straight from Supabase. Only when they don't does ONE small,
+  // targeted generation run, for the single least-covered course (fewest
+  // unseen cards; a course with no set yet counts as 0, ties broken at
+  // random) — never for several courses at once.
+  if (totalUnseen() < BATCH_SIZE) {
+    const lowest = Math.min(...eligibleCourses.map((course) => unseenByCourse.get(course.id)?.length ?? 0));
+    const leastCovered = eligibleCourses.filter((course) => (unseenByCourse.get(course.id)?.length ?? 0) === lowest);
+    const target = leastCovered[Math.floor(Math.random() * leastCovered.length)];
+    const mode: "definitive" | "extension" = cachedSetFor(target) ? "extension" : "definitive";
     const key = cacheKeys.get(target.id)!;
     const existingSet = cachedSetFor(target) ?? [];
 
@@ -238,7 +270,7 @@ export async function POST(request: NextRequest) {
         const explication = target.explication!.slice(0, MAX_EXPLICATION_CHARS_FOR_FLASHCARDS);
         const systemPrompt =
           (mode === "definitive"
-            ? buildDefinitiveFlashcardSetPrompt(explication, MIN_DEFINITIVE_CARDS, MAX_DEFINITIVE_CARDS)
+            ? buildDefinitiveFlashcardSetPrompt(explication, MIN_GENERATED_CARDS, MAX_GENERATED_CARDS)
             : buildFlashcardExtensionPrompt(
                 explication,
                 existingSet.slice(-MAX_EXISTING_QUESTIONS_IN_PROMPT).map((card) => card.question),
@@ -249,7 +281,8 @@ export async function POST(request: NextRequest) {
             { role: "system", content: systemPrompt },
             { role: "user", content: mode === "definitive" ? "Génère l'ensemble définitif de flashcards demandé." : "Génère les nouvelles flashcards demandées." },
           ],
-          { model: CHEAP_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 90_000 }
+          // CHEAP_MODEL = qwen/qwen-2.5-72b-instruct. 90s AbortController-backed timeout (inside callOpenRouter), well under maxDuration.
+          { model: CHEAP_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true, timeoutMs: 90_000 }
         );
         const cards = parseGeneratedCards(raw);
 
@@ -274,7 +307,9 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         await refundGeneration(user.id);
         console.error(`[flashcards/generate] Échec génération (${mode}, cours ${target.id}):`, error);
-        // Still serve whatever unseen cards exist; only fail when there are none at all.
+        // Graceful fallback: a failed or timed-out generation never blocks the
+        // session — whatever unseen cards exist are served below. Only when
+        // there are none at all is there nothing to show.
         if (totalUnseen() === 0) {
           return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
         }
@@ -282,12 +317,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ---- 1. Pool every unseen card of every selected course, shuffle, cut one batch.
-  const pool: CandidateCard[] = [];
-  for (const course of eligibleCourses) {
-    for (const card of unseenByCourse.get(course.id) ?? []) pool.push({ ...card, course });
-  }
-  const batch = shuffle(pool).slice(0, BATCH_SIZE);
+  // ---- 1. Round-robin across ALL selected courses (uniform coverage), then
+  // a final Fisher-Yates so the batch isn't ordered course by course.
+  const groups: CandidateCard[][] = eligibleCourses.map((course) => (unseenByCourse.get(course.id) ?? []).map((card) => ({ ...card, course })));
+  const poolSize = groups.reduce((sum, group) => sum + group.length, 0);
+  const batch = shuffle(roundRobinSample(groups, BATCH_SIZE));
 
   if (batch.length === 0) {
     return NextResponse.json({ success: true, items: [] satisfies FlashcardPoolItem[], generated, quotaReached, remainingUnseen: 0 });
@@ -321,6 +355,6 @@ export async function POST(request: NextRequest) {
     items,
     generated,
     quotaReached,
-    remainingUnseen: Math.max(0, pool.length - batch.length),
+    remainingUnseen: Math.max(0, poolSize - batch.length),
   });
 }

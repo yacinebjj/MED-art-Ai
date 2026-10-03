@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** One study batch — the opening batch of a session (cards already served before, shuffled across the selected courses). Later batches come from /api/flashcards/generate. */
-const MAX_POOL_SIZE = 25;
+const MAX_POOL_SIZE = 50;
 
 interface StudioCourseFlashcardRow {
   id: number;

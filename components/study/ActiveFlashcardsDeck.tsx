@@ -2,16 +2,16 @@
 
 /**
  * "Flashcards" tab (see app/study/page.tsx) — a NotebookLM-style flip-card
- * deck, studied in BATCHES of 25 cards MIXED across every selected course
+ * deck, studied in BATCHES of 50 cards MIXED across every selected course
  * (the courses ticked in FlashcardCoursePicker, or every course of the
  * activated modules when none is ticked).
  *
  * Endless flow, no blocking "Bravo" screen:
  *  - the opening batch is the student's previously served cards, shuffled
- *    (/api/flashcards/pool), topped up with new ones if there are fewer than 25;
+ *    (/api/flashcards/pool), topped up with new ones if there are fewer than 50;
  *  - every later batch comes from /api/flashcards/generate, which pools the
  *    unseen cards of all selected courses, shuffles them (Fisher-Yates) and
- *    cuts 25 — and, when the selection runs low, first EXTENDS a course's set
+ *    samples 50 round-robin across the courses — and, when the selection runs low, first EXTENDS a course's set
  *    with brand-new AI cards (stored for every later student). So there is
  *    always a next batch;
  *  - the next batch is PREFETCHED in the background once 5 cards remain, so
@@ -49,7 +49,7 @@ import type { FlashcardPoolItem } from "@/types/flashcard";
 const GRADE_FEEDBACK_MS = 550;
 
 /** One batch — mirrors BATCH_SIZE in app/api/flashcards/generate/route.ts and MAX_POOL_SIZE in /pool. */
-const BATCH_SIZE = 25;
+const BATCH_SIZE = 50;
 
 /** The next batch is requested once this many cards (or fewer) remain in the current one. */
 const PREFETCH_AT_REMAINING = 5;
@@ -72,7 +72,7 @@ const COPY: Record<Language, Record<string, string>> = {
     batchDone: "Lot terminé",
     batchLabel: "Lot",
     reviewed: "cartes révisées dans cette session",
-    continue: "Continuer : 25 cartes suivantes",
+    continue: "Continuer : 50 cartes suivantes",
     preparing: "Préparation du lot suivant…",
     extended: "De nouvelles cartes inédites ont été générées pour tes cours.",
     retry: "Réessayer",
@@ -83,7 +83,7 @@ const COPY: Record<Language, Record<string, string>> = {
     batchDone: "Batch complete",
     batchLabel: "Batch",
     reviewed: "cards reviewed this session",
-    continue: "Continue: next 25 cards",
+    continue: "Continue: next 50 cards",
     preparing: "Preparing the next batch…",
     extended: "Brand-new cards were generated for your courses.",
     retry: "Try again",
