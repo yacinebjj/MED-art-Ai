@@ -240,3 +240,96 @@ export async function retrieveRelevantContext(question: string, source: ChunkSou
     return null;
   }
 }
+
+interface LabeledChunkRow extends ChunkRow {
+  course_id: number;
+}
+
+interface LabeledExplicationChapterRow extends ExplicationChapterRow {
+  course_id: number;
+}
+
+/**
+ * Workspace variant of retrieveRelevantContext for one OR several Workspace
+ * courses at once (the sources the student checked in the Sources panel).
+ * Same guarantees as the single-course function above — fixed top-K budget,
+ * the same per-slot truncation and Hybrid Validation Layer, fail-open to
+ * `null`, never the full raw text — with two differences:
+ *  - chunks from every listed course are ranked together, so the top-K
+ *    slots go to whichever course actually answers the question best;
+ *  - every slot is prefixed with `[Source : "<course title>"]`, which is
+ *    what lets the model attribute a citation to the right course (see
+ *    WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION) and the client verify it.
+ * `courses` MUST already be ownership-checked by the caller — this reads
+ * through the service-role client, which bypasses RLS.
+ */
+export async function retrieveRelevantContextForStudioCourses(
+  question: string,
+  courses: { id: number; title: string }[]
+): Promise<string | null> {
+  if (!isSupabaseConfigured() || courses.length === 0) return null;
+  const isBroad = BROAD_QUESTION_PATTERN.test(question);
+  // One extra slot per additional course (capped at the broad budget) so a
+  // second checked source isn't always crowded out by the first.
+  const topK = isBroad ? TOP_K_BROAD : Math.min(TOP_K + courses.length - 1, TOP_K_BROAD);
+  const courseIds = courses.map((c) => c.id);
+  const titleById = new Map(courses.map((c) => [c.id, c.title]));
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("studio_course_chunks")
+      .select("content, embedding, chunk_index, course_id")
+      .in("course_id", courseIds);
+
+    if (error) {
+      console.error("[chat-context-retrieval] Échec lecture des chunks multi-sources (fail-open):", error.message);
+      return null;
+    }
+    if (!data || data.length === 0) return null;
+
+    const [questionEmbedding, chapterFetch] = await Promise.all([
+      getEmbedding(question),
+      supabase.from("studio_course_explication_chapters").select("heading, content, source_chunk_indices, course_id").in("course_id", courseIds),
+    ]);
+
+    const ranked = (data as LabeledChunkRow[])
+      .map((row) => ({
+        content: row.content,
+        chunkIndex: row.chunk_index,
+        courseId: row.course_id,
+        similarity: cosineSimilarity(questionEmbedding, toEmbeddingArray(row.embedding)),
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, topK);
+
+    if (ranked.length === 0) return null;
+
+    const chapterByKey = new Map<string, LabeledExplicationChapterRow>();
+    if (chapterFetch.error) {
+      console.error("[chat-context-retrieval] Échec lecture chapitres multi-sources (fail-open, chunks bruts utilisés):", chapterFetch.error.message);
+    } else {
+      for (const chapter of (chapterFetch.data ?? []) as LabeledExplicationChapterRow[]) {
+        for (const idx of chapter.source_chunk_indices ?? []) {
+          const key = `${chapter.course_id}:${idx}`;
+          if (!chapterByKey.has(key)) chapterByKey.set(key, chapter);
+        }
+      }
+    }
+
+    const slots = ranked.map((r) => {
+      const header = `[Source : "${titleById.get(r.courseId) ?? "Cours"}"]`;
+      const chapter = r.chunkIndex !== undefined ? chapterByKey.get(`${r.courseId}:${r.chunkIndex}`) : undefined;
+      if (!chapter) return `${header}\n${truncateToBudget(r.content, MAX_CHUNK_CHARS_FOR_CHAT)}`;
+
+      const polished = truncateToBudget(chapter.content, EXPLICATION_SLOT_CHARS);
+      const anchor = truncateToBudget(r.content, ANCHOR_SLOT_CHARS);
+      return `${header}\n[Explication déjà validée — "${chapter.heading}"]\n${polished}\n\n[Extrait source original — référence de contrôle]\n${anchor}`;
+    });
+
+    return slots.join("\n\n---\n\n");
+  } catch (error) {
+    console.error("[chat-context-retrieval] Échec récupération multi-sources (fail-open):", error instanceof Error ? error.message : error);
+    return null;
+  }
+}

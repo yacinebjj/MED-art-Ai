@@ -2,14 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { motion } from "framer-motion";
 import {
   ArrowLeft,
   Bold,
   ChevronDown,
   ChevronRight,
   Code,
+  Eye,
+  FileDown,
+  Heading2,
   Italic,
   Link2,
+  List,
   Loader2,
   Lock,
   Maximize2,
@@ -17,6 +24,8 @@ import {
   MoreVertical,
   PanelRightClose,
   PanelRightOpen,
+  Paperclip,
+  PencilLine,
   Redo2,
   RefreshCw,
   Sparkles,
@@ -25,6 +34,12 @@ import {
   Undo2,
 } from "lucide-react";
 import { ProgressRing } from "@/components/ui/ProgressRing";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { Kbd } from "@/components/course/workspace/os/Kbd";
+import { useTheme } from "next-themes";
+import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES } from "@/lib/markdown";
+import { exportReplyToPdf } from "@/lib/assistant-export";
+import { LAB_HEADING_ICON, type LabToolDescriptor, type LabToolId } from "@/lib/workspace-lab";
 import { INFOGRAPHIC_MODEL_OPTIONS, type InfographicModelKey } from "@/lib/ai/infographic-prompts";
 import { type PodcastDialect } from "@/lib/ai/podcast-prompts";
 import { cn } from "@/lib/utils";
@@ -109,6 +124,8 @@ interface StudioPanelProps {
   courseSlug?: string;
   /** Notified whenever the internal collapse toggle fires — the panel's own root controls its ephemeral (w-20 vs w-full) width, but the page-level `<aside>` wrapping it may want to shrink/grow its own fixed width in lockstep (see app/dashboard/module/[id]/page.tsx). Optional: a caller that omits this still gets a fully working collapse, just without the outer wrapper reacting. */
   onCollapsedChange?: (collapsed: boolean) => void;
+  /** Controlled collapse — when provided, the caller owns the state (onCollapsedChange then just requests a change). Lets the page re-open the panel itself, e.g. for a quick note. Omitted, the panel keeps its own internal state. */
+  collapsed?: boolean;
   /** The student's own curriculum level (StudentCurriculumProfile.academicYear.level, types/academic.ts) — only ever changes the "Cas Clinique" tile's own label (see lib/translations/studio.ts's getSectionLabel); every other tile ignores it. Optional: a caller that omits this simply always gets the standard "Cas Cliniques" label. */
   studyYear?: number | null;
   /**
@@ -131,6 +148,18 @@ interface StudioPanelProps {
    * fabricated: a section with no entry here just keeps the plain dot.
    */
   sectionMasteryPct?: Partial<Record<DemoSectionId, number>>;
+  /** "MedArt Lab" tool cards rendered under the Studio tiles (see lib/workspace-lab.ts). Optional: omitted, no Lab section. */
+  labTools?: LabToolDescriptor[];
+  openedLabTool?: LabToolId | null;
+  onOpenLabTool?: (id: LabToolId) => void;
+  onCloseLabTool?: () => void;
+  /** The opened Lab tool's own UI, rendered by the caller (same pattern as `children` for a Studio section). */
+  labContent?: React.ReactNode;
+  /** Note editor title (defaults to the course title upstream). Optional: omitted, the editor shows a static heading. */
+  noteTitle?: string;
+  onNoteTitleChange?: (value: string) => void;
+  /** Markdown link back to the active course, inserted by the note editor's "Lier au cours" button — the note → course half of the link (the course → notes half is the command bar's notes counter). */
+  noteSourceLink?: { label: string; href: string } | null;
   children: React.ReactNode;
 }
 
@@ -461,17 +490,92 @@ export function StudioPanel({
   courseTitle,
   courseSlug,
   onCollapsedChange,
+  collapsed,
   studyYear,
   lockedSections,
   sectionMasteryPct,
+  labTools,
+  openedLabTool = null,
+  onOpenLabTool,
+  onCloseLabTool,
+  labContent,
+  noteTitle,
+  onNoteTitleChange,
+  noteSourceLink,
   children,
 }: StudioPanelProps) {
   const { language } = useLanguage();
   const [isSectionExpanded, setIsSectionExpanded] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const isCollapsed = collapsed ?? internalCollapsed;
   const [optionsMenuFor, setOptionsMenuFor] = useState<DemoSectionId | null>(null);
   const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const notePreviewRef = useRef<HTMLDivElement>(null);
+  const [isNotePreview, setIsNotePreview] = useState(false);
+  const [isExportingNote, setIsExportingNote] = useState(false);
+  // Only read by the note preview, which renders after a click — never during SSR.
+  const { resolvedTheme } = useTheme();
+  const isDarkTheme = resolvedTheme === "dark";
+  // A Lab tool only counts as "open" while no Studio section is — the two
+  // share the detail area, and a section always wins.
+  const openedLab = !openedSection && openedLabTool ? labTools?.find((tool) => tool.id === openedLabTool) ?? null : null;
+  const isDetailOpen = Boolean(openedSection || openedLab);
+  const detailContent = openedSection ? children : openedLab ? labContent : null;
+
+  /** Inserts `text` at the cursor (replacing any selection) — used by the heading/list/source-link buttons. */
+  function insertAtNoteCursor(text: string) {
+    const el = noteTextareaRef.current;
+    if (!el) {
+      onNoteContentChange(`${noteContent}${text}`);
+      return;
+    }
+    const { selectionStart, selectionEnd, value } = el;
+    const next = `${value.slice(0, selectionStart)}${text}${value.slice(selectionEnd)}`;
+    onNoteContentChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const cursor = selectionStart + text.length;
+      el.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  /** Prefixes the current line(s) with a Markdown block marker ("## ", "- "). */
+  function prefixNoteLines(prefix: string) {
+    const el = noteTextareaRef.current;
+    if (!el) return;
+    const { selectionStart, selectionEnd, value } = el;
+    const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
+    const block = value.slice(lineStart, selectionEnd);
+    const prefixed = block
+      .split("\n")
+      .map((line) => (line.startsWith(prefix) ? line : `${prefix}${line}`))
+      .join("\n");
+    onNoteContentChange(`${value.slice(0, lineStart)}${prefixed}${value.slice(selectionEnd)}`);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(lineStart, lineStart + prefixed.length);
+    });
+  }
+
+  /** Print-to-PDF through the same isolated iframe pipeline the Assistant's "Exporter en PDF" uses (lib/assistant-export.ts) — the app's own @media print guard never applies inside that iframe. */
+  async function handleExportNotePdf() {
+    if (!noteContent.trim()) return;
+    setIsNotePreview(true);
+    setIsExportingNote(true);
+    // One frame so the preview (the HTML source of the export) is mounted.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    try {
+      const html = notePreviewRef.current?.innerHTML ?? "";
+      await exportReplyToPdf({ title: noteTitle?.trim() || courseTitle || "Note MedArt", html });
+    } catch (error) {
+      console.error("[studio:note] Export PDF impossible:", error);
+    } finally {
+      setIsExportingNote(false);
+    }
+  }
+
+  const noteWordCount = noteContent.trim() ? noteContent.trim().split(/\s+/).length : 0;
 
   /**
    * The note editor is a plain <textarea> (Markdown source, rendered as
@@ -522,7 +626,11 @@ export function StudioPanel({
   }
 
   function toggleCollapsed() {
-    setIsCollapsed((prev) => {
+    if (collapsed !== undefined) {
+      onCollapsedChange?.(!collapsed);
+      return;
+    }
+    setInternalCollapsed((prev) => {
       const next = !prev;
       onCollapsedChange?.(next);
       return next;
@@ -536,7 +644,7 @@ export function StudioPanel({
   // expanded state over to content the student never asked to maximize.
   useEffect(() => {
     setIsSectionExpanded(false);
-  }, [openedSection]);
+  }, [openedSection, openedLabTool]);
 
   // Escape closes the expanded overlay, matching every real Dialog in this
   // app (Radix's DismissableLayer closes on Escape by default) — this
@@ -623,6 +731,24 @@ export function StudioPanel({
               </>
             )}
           </button>
+        ) : openedLab ? (
+          <button
+            type="button"
+            onClick={onCloseLabTool}
+            className="group flex min-w-0 items-center gap-2 rounded-lg py-1 pr-2 text-sm font-semibold text-foreground transition-all duration-300 hover:-translate-x-0.5"
+          >
+            <ArrowLeft className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+            {!isCollapsed && (
+              <>
+                <span className="hidden text-muted-foreground transition-colors group-hover:text-foreground sm:inline">Lab</span>
+                <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:inline" />
+                <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border shadow-glow", openedLab.tint.bg, openedLab.tint.icon)}>
+                  <openedLab.icon className="h-3.5 w-3.5" />
+                </span>
+                <span className="truncate">{openedLab.label}</span>
+              </>
+            )}
+          </button>
         ) : (
           // Browse-grid header: the "Studio" title, aligned with the middle
           // column's "MedArt Assistant" header (same top border + p-4 header
@@ -658,25 +784,35 @@ export function StudioPanel({
                   triggerClassName={PANEL_ICON_BUTTON_CLASSES}
                 />
               )}
-              {openedSection && !isCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => setIsSectionExpanded(true)}
-                  aria-label={tStudio("expandAria", language)}
-                  className={PANEL_ICON_BUTTON_CLASSES}
-                >
-                  <Maximize2 className="h-4 w-4" />
-                </button>
+              {isDetailOpen && !isCollapsed && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setIsSectionExpanded(true)}
+                      aria-label={tStudio("expandAria", language)}
+                      className={PANEL_ICON_BUTTON_CLASSES}
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Plein écran</TooltipContent>
+                </Tooltip>
               )}
-              <button
-                type="button"
-                onClick={toggleCollapsed}
-                aria-label={tStudio(isCollapsed ? "openPanelAria" : "collapsePanelAria", language)}
-                aria-pressed={isCollapsed}
-                className={PANEL_ICON_BUTTON_CLASSES}
-              >
-                {isCollapsed ? <PanelRightOpen className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={toggleCollapsed}
+                    aria-label={tStudio(isCollapsed ? "openPanelAria" : "collapsePanelAria", language)}
+                    aria-pressed={isCollapsed}
+                    className={PANEL_ICON_BUTTON_CLASSES}
+                  >
+                    {isCollapsed ? <PanelRightOpen className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left">{tStudio(isCollapsed ? "openPanelAria" : "collapsePanelAria", language)}</TooltipContent>
+              </Tooltip>
             </>
           )}
         </div>
@@ -692,6 +828,20 @@ export function StudioPanel({
               <div ref={containerRef} data-selectable className="text-select-stable p-2 md:p-4">
                 {children}
               </div>
+            )
+          ) : openedLab ? (
+            isSectionExpanded ? null : (
+              <motion.div
+                key={openedLab.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                ref={containerRef}
+                data-selectable
+                className="text-select-stable p-2 md:p-4"
+              >
+                {labContent}
+              </motion.div>
             )
           ) : (
             <div className={cn("space-y-3 p-2 pb-20 md:space-y-6 md:p-4 md:pb-24", isCollapsed && "px-2")}>
@@ -747,7 +897,7 @@ export function StudioPanel({
                           // p-3/md:p-4 + text-sm/md:text-base, reading as
                           // oversized blocks instead of an elegant, dense
                           // tool list.
-                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-foreground/80 transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-primary/50 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-none md:text-sm",
+                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-[color-mix(in_oklab,var(--foreground)_80%,transparent)] transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-primary/50 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-none md:text-sm",
                           isGenerating && "disabled:cursor-wait",
                           isLocked && "opacity-50 saturate-[0.4] hover:translate-y-0 hover:shadow-none",
                           // Fixed h-14 (uncollapsed) — CSS Grid rows stretch
@@ -794,7 +944,7 @@ export function StudioPanel({
                                 mastery ring/dot in the opposite corner, and
                                 the collapsed rail has no room for it. */}
                             {!isCollapsed && !isDone && (
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50 opacity-0 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100" />
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[color-mix(in_oklab,var(--muted-foreground)_50%,transparent)] opacity-0 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100" />
                             )}
                           </span>
                         )}
@@ -828,7 +978,7 @@ export function StudioPanel({
                         {isLocked && (
                           <span
                             aria-label={tStudio("lockedTileAriaLabel", language)}
-                            className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-sm"
+                            className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--background)_80%,transparent)] text-muted-foreground shadow-sm"
                           >
                             <Lock className="h-2.5 w-2.5" />
                           </span>
@@ -842,7 +992,7 @@ export function StudioPanel({
                             e.stopPropagation();
                             setOptionsMenuFor((prev) => (prev === section.id ? null : section.id));
                           }}
-                          className="absolute right-1.5 top-1.5 z-10 rounded-md p-0.5 text-foreground/50 transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+                          className="absolute right-1.5 top-1.5 z-10 rounded-md p-0.5 text-[color-mix(in_oklab,var(--foreground)_50%,transparent)] transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
                         >
                           <ChevronDown className="h-3.5 w-3.5" />
                         </button>
@@ -950,77 +1100,234 @@ export function StudioPanel({
                   })}
                 </div>
               )}
+
+              {labTools && labTools.length > 0 && onOpenLabTool && (
+                <section aria-label="MedArt Lab" className="space-y-1.5">
+                  {!isCollapsed && (
+                    <p className="flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <LAB_HEADING_ICON className="h-3 w-3" />
+                      MedArt Lab
+                    </p>
+                  )}
+                  <div className={cn("grid gap-1.5 md:gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-1 min-[420px]:grid-cols-2")}>
+                    {labTools.map((tool, index) => {
+                      const ToolIcon = tool.icon;
+                      return (
+                        <Tooltip key={tool.id}>
+                          <TooltipTrigger asChild>
+                            <motion.button
+                              type="button"
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: index * 0.04, type: "spring", stiffness: 420, damping: 32 }}
+                              whileHover={{ y: -2 }}
+                              whileTap={{ scale: 0.97 }}
+                              onClick={() => onOpenLabTool(tool.id)}
+                              aria-label={tool.label}
+                              className={cn(
+                                "group relative flex min-w-0 items-center gap-2.5 rounded-xl border text-left transition-shadow duration-200 hover:border-primary/50 hover:shadow-glow",
+                                isCollapsed ? "aspect-square justify-center p-2" : "px-3 py-2.5",
+                                tool.tint.bg
+                              )}
+                            >
+                              <span className={cn("flex shrink-0 items-center justify-center rounded-lg bg-white/70 shadow-sm dark:bg-white/5", isCollapsed ? "h-9 w-9" : "h-8 w-8", tool.tint.icon)}>
+                                <ToolIcon className={isCollapsed ? "h-5 w-5" : "h-4 w-4"} />
+                              </span>
+                              {!isCollapsed && (
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-xs font-semibold text-foreground md:text-sm">{tool.label}</span>
+                                  <span className="block truncate text-[11px] text-muted-foreground">{tool.description}</span>
+                                </span>
+                              )}
+                            </motion.button>
+                          </TooltipTrigger>
+                          <TooltipContent side="left" className="max-w-[16rem] whitespace-normal">
+                            {tool.description}
+                            {tool.usesQuota ? " — une nouvelle génération peut utiliser 1 crédit de ton forfait." : " — n'utilise aucun crédit."}
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </div>
 
-        {!openedSection && !isNoteOpen && (
-          <button
-            type="button"
-            onClick={onOpenNote}
-            title={isCollapsed ? "Add note" : undefined}
-            className={cn(
-              "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary-600 text-sm font-medium text-white shadow-glow transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 active:scale-[0.96] dark:bg-primary-500 dark:hover:bg-primary-400",
-              isCollapsed ? "p-3" : "px-6 py-3"
-            )}
-          >
-            <SquarePen className="h-4 w-4" />
-            {!isCollapsed && "Add note"}
-          </button>
+        {!openedSection && !openedLab && !isNoteOpen && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onOpenNote}
+                aria-label="Ajouter une note"
+                className={cn(
+                  "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary-600 text-sm font-medium text-white shadow-glow transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 active:scale-[0.96] dark:bg-primary-500 dark:hover:bg-primary-400",
+                  isCollapsed ? "p-3" : "px-6 py-3"
+                )}
+              >
+                <SquarePen className="h-4 w-4" />
+                {!isCollapsed && "Ajouter une note"}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="flex items-center gap-2">
+              Note rapide
+              <span className="flex items-center gap-0.5">
+                <Kbd tone="inverse">⇧</Kbd>
+                <Kbd tone="inverse">N</Kbd>
+              </span>
+            </TooltipContent>
+          </Tooltip>
         )}
 
         {isNoteOpen && (
           <div className="animate-fade-in absolute inset-0 z-20 flex flex-col rounded-3xl bg-card">
-            <div className="flex items-center gap-1 border-b border-border px-3 py-2">
-              <button type="button" aria-label={tStudio("undoAria", language)} onClick={() => triggerNoteHistory("undo")} className={TOOLBAR_BUTTON_CLASSES}>
+            <div className="flex flex-wrap items-center gap-0.5 gap-y-1 border-b border-border px-2 py-1.5">
+              <button type="button" aria-label={tStudio("undoAria", language)} title={tStudio("undoAria", language)} onClick={() => triggerNoteHistory("undo")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
                 <Undo2 className="h-4 w-4" />
               </button>
-              <button type="button" aria-label={tStudio("redoAria", language)} onClick={() => triggerNoteHistory("redo")} className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("redoAria", language)} title={tStudio("redoAria", language)} onClick={() => triggerNoteHistory("redo")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
                 <Redo2 className="h-4 w-4" />
               </button>
-              <span className="mx-1 h-4 w-px bg-border" />
+              <span className="mx-1 h-4 w-px shrink-0 bg-border" />
               <button
                 type="button"
                 onClick={clearNoteSelectionFormatting}
+                disabled={isNotePreview}
                 title="Retirer la mise en forme de la sélection"
                 className={cn(TOOLBAR_BUTTON_CLASSES, "px-2 text-xs font-medium")}
               >
                 {tStudio("normal", language)}
               </button>
-              <button type="button" aria-label={tStudio("boldAria", language)} onClick={() => wrapNoteSelection("**")} className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label="Titre de section" title="Titre de section" onClick={() => prefixNoteLines("## ")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
+                <Heading2 className="h-4 w-4" />
+              </button>
+              <button type="button" aria-label={tStudio("boldAria", language)} title={tStudio("boldAria", language)} onClick={() => wrapNoteSelection("**")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
                 <Bold className="h-4 w-4" />
               </button>
-              <button type="button" aria-label={tStudio("italicAria", language)} onClick={() => wrapNoteSelection("*")} className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("italicAria", language)} title={tStudio("italicAria", language)} onClick={() => wrapNoteSelection("*")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
                 <Italic className="h-4 w-4" />
               </button>
-              <button type="button" aria-label={tStudio("linkAria", language)} onClick={() => wrapNoteSelection("[", "](https://)")} className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label="Liste à puces" title="Liste à puces" onClick={() => prefixNoteLines("- ")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
+                <List className="h-4 w-4" />
+              </button>
+              <button type="button" aria-label={tStudio("linkAria", language)} title={tStudio("linkAria", language)} onClick={() => wrapNoteSelection("[", "](https://)")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
                 <Link2 className="h-4 w-4" />
               </button>
-              <button type="button" aria-label={tStudio("codeAria", language)} onClick={() => wrapNoteSelection("`")} className={TOOLBAR_BUTTON_CLASSES}>
+              <button type="button" aria-label={tStudio("codeAria", language)} title={tStudio("codeAria", language)} onClick={() => wrapNoteSelection("`")} disabled={isNotePreview} className={TOOLBAR_BUTTON_CLASSES}>
                 <Code className="h-4 w-4" />
               </button>
+              {noteSourceLink && (
+                <button
+                  type="button"
+                  aria-label="Lier la note au cours"
+                  title={`Insérer un lien vers « ${noteSourceLink.label} »`}
+                  onClick={() => insertAtNoteCursor(`\n> 📎 Source : [${noteSourceLink.label}](${noteSourceLink.href})\n`)}
+                  disabled={isNotePreview}
+                  className={TOOLBAR_BUTTON_CLASSES}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+              )}
+              <span className="ml-auto flex shrink-0 items-center rounded-lg border border-border p-0.5" role="group" aria-label="Mode d'affichage de la note">
+                <button
+                  type="button"
+                  onClick={() => setIsNotePreview(false)}
+                  aria-pressed={!isNotePreview}
+                  className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors", !isNotePreview ? "bg-primary-600 text-white dark:bg-primary-500" : "text-muted-foreground hover:text-foreground")}
+                >
+                  <PencilLine className="h-3 w-3" />
+                  Écrire
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsNotePreview(true)}
+                  aria-pressed={isNotePreview}
+                  className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors", isNotePreview ? "bg-primary-600 text-white dark:bg-primary-500" : "text-muted-foreground hover:text-foreground")}
+                >
+                  <Eye className="h-3 w-3" />
+                  Aperçu
+                </button>
+              </span>
             </div>
 
-            <p className="px-4 pt-3 text-sm font-semibold text-foreground">New note</p>
+            {onNoteTitleChange ? (
+              <input
+                value={noteTitle ?? ""}
+                onChange={(e) => onNoteTitleChange(e.target.value)}
+                placeholder="Titre de la note"
+                aria-label="Titre de la note"
+                maxLength={160}
+                className="mx-4 mt-3 border-b border-transparent bg-transparent pb-1 text-base font-semibold text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary-300"
+              />
+            ) : (
+              <p className="px-4 pt-3 text-sm font-semibold text-foreground">Nouvelle note</p>
+            )}
 
-            <textarea
-              ref={noteTextareaRef}
-              value={noteContent}
-              onChange={(e) => onNoteContentChange(e.target.value)}
-              placeholder={tStudio("notePlaceholder", language)}
-              className="text-reading flex-1 resize-none bg-transparent p-4 text-foreground outline-none placeholder:text-muted-foreground"
-            />
+            {isNotePreview ? (
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                {noteContent.trim() ? (
+                  <div ref={notePreviewRef} className={cn(isDarkTheme ? DARK_PROSE_CLASSES : PROSE_CLASSES, "prose-base md:prose-base max-w-none md:max-w-none")}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDarkTheme ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
+                      {noteContent}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Rien à afficher pour l&apos;instant — écris ta note en Markdown.</p>
+                )}
+              </div>
+            ) : (
+              <textarea
+                ref={noteTextareaRef}
+                value={noteContent}
+                onChange={(e) => onNoteContentChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+                    e.preventDefault();
+                    if (!isSavingNote && noteContent.trim()) onSaveNote();
+                  }
+                }}
+                placeholder={tStudio("notePlaceholder", language)}
+                autoFocus
+                className="text-reading min-h-0 flex-1 resize-none bg-transparent p-4 text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            )}
 
-            <div className="border-t border-border p-4">
-              <Button
-                size="sm"
-                className="w-full rounded-xl"
-                onClick={onSaveNote}
-                disabled={isSavingNote || !noteContent.trim()}
-              >
-                {isSavingNote && <Loader2 className="h-4 w-4 animate-spin" />}
-                {tStudio("save", language)}
-              </Button>
+            <div className="flex items-center gap-2 border-t border-border p-3">
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {noteWordCount} mot{noteWordCount > 1 ? "s" : ""}
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleExportNotePdf}
+                    disabled={!noteContent.trim() || isExportingNote}
+                    aria-label="Exporter la note en PDF"
+                    className="ml-auto flex h-8 items-center gap-1.5 rounded-xl border border-border px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+                  >
+                    {isExportingNote ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
+                    PDF
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Exporter la note en PDF</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" className="rounded-xl" onClick={onSaveNote} disabled={isSavingNote || !noteContent.trim()}>
+                    {isSavingNote && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {tStudio("save", language)}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="flex items-center gap-2">
+                  Enregistrer dans Mes notes
+                  <span className="flex items-center gap-0.5">
+                    <Kbd tone="inverse">Ctrl</Kbd>
+                    <Kbd tone="inverse">S</Kbd>
+                  </span>
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
         )}
@@ -1046,7 +1353,7 @@ export function StudioPanel({
       )}
 
       {isSectionExpanded &&
-        openedSection &&
+        isDetailOpen &&
         isMounted &&
         createPortal(
           // Rendered via a portal straight to <body> — deliberately, not for
@@ -1070,18 +1377,25 @@ export function StudioPanel({
             )}
           >
             <div className="flex items-center gap-2 border-b border-border p-4">
-              {openedTint && openedSectionData && (
+              {openedSection && openedTint && openedSectionData && (
                 <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-xl shadow-glow", openedTint.bg, openedTint.icon)}>
                   <openedSectionData.icon className="h-4 w-4" />
                 </span>
               )}
-              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{openedLabel}</span>
-              <SectionOptionsMenu
-                sectionId={openedSection}
-                onRegenerateSection={onRegenerateSection}
-                isRegenerating={regeneratingSections?.has(openedSection) ?? false}
-                triggerClassName={GLASS_ICON_BUTTON_CLASSES}
-              />
+              {openedLab && (
+                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border shadow-glow", openedLab.tint.bg, openedLab.tint.icon)}>
+                  <openedLab.icon className="h-4 w-4" />
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{openedSection ? openedLabel : openedLab?.label}</span>
+              {openedSection && (
+                <SectionOptionsMenu
+                  sectionId={openedSection}
+                  onRegenerateSection={onRegenerateSection}
+                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
+                  triggerClassName={GLASS_ICON_BUTTON_CLASSES}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setIsSectionExpanded(false)}
@@ -1093,7 +1407,7 @@ export function StudioPanel({
             </div>
             {/* text-select-stable — see its own comment in app/globals.css. */}
             <div ref={containerRef} data-selectable className="text-select-stable flex-1 overflow-y-auto p-6">
-              {children}
+              {detailContent}
             </div>
           </div>,
           document.body

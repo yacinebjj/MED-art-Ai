@@ -25,6 +25,7 @@ import { findBestMatchingSection } from "@/lib/weakness-matching";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
 import { createClient } from "@/lib/supabase/client";
+import { CalibrationReport, ConcoursModeBar, ConfidencePicker, type Confidence, type TimerMode } from "@/components/course/workspace/exam/ConcoursToolkit";
 
 /**
  * Shared interactive quiz engine — used by both GastriteQcmsStudio.tsx (the
@@ -424,6 +425,8 @@ interface PersistedQuizState {
   qcmAnswers: Record<number, QcmAnswerState>;
   revealedQrocs: Record<number, boolean>;
   gradedQrocs: Record<number, boolean>;
+  /** Mode Concours confidence ratings — absent in progress saved before that mode existed. */
+  confidence?: Record<number, Confidence>;
 }
 
 const QUIZ_PROGRESS_STORAGE_PREFIX = "medart:quiz-progress:";
@@ -464,10 +467,13 @@ export function InteractiveQuiz({
   courseSlug,
   explicationMarkdown,
   isPreview = false,
+  concoursTools = false,
 }: {
   qcms: Qcm[];
   qrocs: Qroc[];
   courseSlug: string;
+  /** Opt-in "Mode Concours" (module workspace only): confidence rating before each answer, a calibration report, and a concours-pace countdown — see ConcoursToolkit.tsx. Defaults to false: the showcase course pages are unchanged. */
+  concoursTools?: boolean;
   /** The course's Explication content — enables the "Voir le concept" modal to show the matched chapter instead of just the QCM's own explanation. */
   explicationMarkdown?: string;
   /** Studio preview mode (an ephemeral, unpersisted course): keeps every visual/interactive behavior (click-to-answer, score, explanations) but skips the /api/srs/attempt network write, which would 404/fail since courseSlug isn't a real Supabase row. Defaults to false — zero behavior change for the real Pleurésie/Gastrite/Appendicite pages. */
@@ -478,6 +484,9 @@ export function InteractiveQuiz({
   const [gradedQrocs, setGradedQrocs] = useState<Record<number, boolean>>({});
   const [gradingKey, setGradingKey] = useState<string | null>(null);
   const [conceptModal, setConceptModal] = useState<ConceptModalState | null>(null);
+  const [confidence, setConfidence] = useState<Record<number, Confidence>>({});
+  const [timerMode, setTimerMode] = useState<TimerMode>("libre");
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
   const { toast } = useToast();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -527,6 +536,7 @@ export function InteractiveQuiz({
       setQcmAnswers(saved.qcmAnswers);
       setRevealedQrocs(saved.revealedQrocs ?? {});
       setGradedQrocs(saved.gradedQrocs ?? {});
+      setConfidence(saved.confidence ?? {});
       toast({
         variant: "info",
         title: "Progression restaurée",
@@ -544,12 +554,18 @@ export function InteractiveQuiz({
     if (!userId) return;
     if (Object.keys(qcmAnswers).length === 0 && Object.keys(revealedQrocs).length === 0) return;
     try {
-      const state: PersistedQuizState = { qcmAnswers, revealedQrocs, gradedQrocs };
+      const state: PersistedQuizState = { qcmAnswers, revealedQrocs, gradedQrocs, ...(concoursTools ? { confidence } : {}) };
       localStorage.setItem(quizProgressStorageKey(userId, courseSlug), JSON.stringify(state));
     } catch {
       // Quota exceeded / private mode — losing the local save is not worth interrupting the quiz over.
     }
-  }, [courseSlug, userId, qcmAnswers, revealedQrocs, gradedQrocs]);
+  }, [courseSlug, userId, qcmAnswers, revealedQrocs, gradedQrocs, confidence, concoursTools]);
+
+  function handleTimerModeChange(mode: TimerMode) {
+    setTimerMode(mode);
+    // Every switch to a timed mode starts a fresh countdown from now.
+    setTimerStartedAt(mode === "libre" ? null : Date.now());
+  }
 
   function handleViewConcept(qcm: Qcm) {
     const matchedSection = explicationMarkdown
@@ -643,13 +659,44 @@ export function InteractiveQuiz({
           )}
         </div>
 
+        {concoursTools && (
+          <ConcoursModeBar
+            mode={timerMode}
+            onModeChange={handleTimerModeChange}
+            startedAt={timerStartedAt}
+            questionCount={qcms.length}
+            answeredCount={answeredCount}
+            finished={allAnswered}
+          />
+        )}
+
         {allAnswered && <EndScreen score20={score20} correctCount={correctCount} total={qcms.length} />}
+        {allAnswered && concoursTools && (
+          <CalibrationReport
+            items={qcms.map((qcm, index) => ({
+              questionNumber: index + 1,
+              confidence: confidence[qcm.id],
+              isCorrect: qcmAnswers[qcm.id]?.isCorrect ?? false,
+            }))}
+          />
+        )}
         {allAnswered && <WeakPointsPanel wrongQcms={wrongQcms} onViewConcept={handleViewConcept} />}
 
         <div className="space-y-4">
-          {qcms.map((qcm) => (
-            <QcmCard key={qcm.id} qcm={qcm} answer={qcmAnswers[qcm.id]} onAnswer={(selected) => handleAnswer(qcm, selected)} />
-          ))}
+          {qcms.map((qcm) =>
+            concoursTools ? (
+              <div key={qcm.id} className="space-y-1.5">
+                <ConfidencePicker
+                  value={confidence[qcm.id]}
+                  locked={Boolean(qcmAnswers[qcm.id])}
+                  onChange={(value) => setConfidence((prev) => ({ ...prev, [qcm.id]: value }))}
+                />
+                <QcmCard qcm={qcm} answer={qcmAnswers[qcm.id]} onAnswer={(selected) => handleAnswer(qcm, selected)} />
+              </div>
+            ) : (
+              <QcmCard key={qcm.id} qcm={qcm} answer={qcmAnswers[qcm.id]} onAnswer={(selected) => handleAnswer(qcm, selected)} />
+            )
+          )}
         </div>
       </section>
 

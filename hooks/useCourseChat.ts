@@ -4,6 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { isQuotedChatMessage } from "@/lib/demo-content";
 import { useToast } from "@/components/ui/Toast";
 import type { ChatMessage } from "@/lib/types";
+import type { ChatMode } from "@/lib/chat-constants";
+
+/**
+ * Per-request extras the module workspace sends with EVERY turn (including
+ * a "Régénérer") — the composer's answer mode, the extra checked sources,
+ * and the structured-format opt-in. Read through a ref at send time, so the
+ * value current when the student presses Send is the one used, never a
+ * stale closure. Omitted entirely by the demo pages.
+ */
+export interface CourseChatRequestExtras {
+  mode?: ChatMode;
+  sourceCourseIds?: number[];
+  structured?: boolean;
+}
 
 interface UseCourseChatResult {
   chatOpen: boolean;
@@ -35,8 +49,10 @@ interface UseCourseChatResult {
  * this exact logic — previously duplicated with a hardcoded static reply in
  * both files, now one real, streaming implementation).
  */
-export function useCourseChat(slug?: string): UseCourseChatResult {
+export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestExtras): UseCourseChatResult {
   const { toast } = useToast();
+  const requestExtrasRef = useRef<CourseChatRequestExtras | undefined>(requestExtras);
+  requestExtrasRef.current = requestExtras;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -134,6 +150,7 @@ export function useCourseChat(slug?: string): UseCourseChatResult {
           sourceText: options?.sourceText,
           selectedText: options?.selectedText,
           ...(options?.bypassCache ? { bypassCache: true } : {}),
+          ...(requestExtrasRef.current ?? {}),
         }),
       });
 

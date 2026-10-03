@@ -3,12 +3,43 @@
 import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Camera, Check, Columns2, FileText, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2, TrendingUp } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Camera,
+  Check,
+  ClipboardCheck,
+  Columns2,
+  FileText,
+  Focus,
+  FolderOpen,
+  Globe,
+  LayoutDashboard,
+  Loader2,
+  MessageSquarePlus,
+  MonitorCog,
+  MoreVertical,
+  NotebookPen,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  RotateCcw,
+  Rows3,
+  Search,
+  Settings,
+  SquarePen,
+  SunMoon,
+  Timer,
+  Trash2,
+  TrendingUp,
+  Workflow,
+  X,
+} from "lucide-react";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { ClinicalConnectionsPanel } from "@/components/course/workspace/ClinicalConnectionsPanel";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -35,8 +66,19 @@ import {
 } from "@/components/ui/DropdownMenu";
 import { CourseStatsModal } from "@/components/dashboard/CourseStatsModal";
 import { UploadModal } from "@/components/dashboard/UploadModal";
-import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
-import { ChatDocumentPanel, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
+import { WorkspaceCommandBar, type WorkspaceSyncState } from "@/components/course/workspace/os/WorkspaceCommandBar";
+import { CommandPalette, type CommandItem } from "@/components/course/workspace/os/CommandPalette";
+import { ResizeHandle } from "@/components/course/workspace/os/ResizeHandle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { ChatDocumentPanel, CHAT_MODE_OPTIONS, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
+import { SOURCES_WIDTH, STUDIO_WIDTH, useWorkspaceLayout } from "@/hooks/useWorkspaceLayout";
+import { useHotkeys, useModKeyLabel } from "@/hooks/useHotkeys";
+import { LAB_TOOLS, type LabToolId } from "@/lib/workspace-lab";
+import type { ChatMode } from "@/lib/chat-constants";
+import type { CitationSourceText } from "@/lib/chat-citations";
+import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
+import { OcrSuggestedError } from "@/lib/upload-client";
+import type { CurriculumYearData } from "@/types/academic";
 import { StudioPanel, type SectionStatus, type TileGenerationOptions } from "@/components/course/workspace/StudioPanel";
 import { FileViewerModal } from "@/components/course/workspace/FileViewerModal";
 import { StudioTileSkeleton } from "@/components/course/workspace/StudioTileSkeleton";
@@ -90,6 +132,30 @@ const InfographicViewer = dynamic(
 const AudioPodcastViewer = dynamic(
   () => import("@/components/course/workspace/AudioPodcastViewer").then((m) => m.AudioPodcastViewer),
   { ssr: false }
+);
+
+// MedArt Lab tools — same code-splitting reasoning as the Studio tiles
+// above: each is a full interactive engine most visits never open.
+const ClinicalCaseSimulator = dynamic(
+  () => import("@/components/course/workspace/lab/ClinicalCaseSimulator").then((m) => m.ClinicalCaseSimulator),
+  { ssr: false, loading: () => <StudioTileSkeleton /> }
+);
+const FlashcardsLab = dynamic(
+  () => import("@/components/course/workspace/lab/FlashcardsLab").then((m) => m.FlashcardsLab),
+  { ssr: false, loading: () => <StudioTileSkeleton /> }
+);
+const MedicalMatrixStudio = dynamic(
+  () => import("@/components/course/workspace/lab/MedicalMatrixStudio").then((m) => m.MedicalMatrixStudio),
+  { ssr: false, loading: () => <StudioTileSkeleton /> }
+);
+const MindMapLab = dynamic(
+  () => import("@/components/course/workspace/lab/MindMapLab").then((m) => m.MindMapLab),
+  { ssr: false, loading: () => <StudioTileSkeleton /> }
+);
+/** The Study Space's own Pomodoro (configurable durations/cycles, sound alerts, session stats) — shares PomodoroProvider's single global timer with the command bar chip. */
+const StudyDashboard = dynamic(
+  () => import("@/components/study/StudyDashboard").then((m) => m.StudyDashboard),
+  { ssr: false, loading: () => <StudioTileSkeleton /> }
 );
 
 /**
@@ -224,6 +290,72 @@ function fileTypeStyleFor(title: string): { label: string; className: string } {
   return FILE_TYPE_STYLES[ext] ?? { label: "DOC", className: "bg-primary-50 text-primary-600 dark:bg-primary-950/30 dark:text-primary-400" };
 }
 
+/** One full-text hit inside a source's extracted text (Sources panel search). */
+export interface SourceSearchHit {
+  courseId: number;
+  courseTitle: string;
+  before: string;
+  match: string;
+  after: string;
+}
+
+const SEARCH_COMBINING_MARKS = new RegExp("[\\u0300-\\u036f]", "g");
+const MAX_HITS_PER_SOURCE = 3;
+
+/**
+ * Accent/case-insensitive search through every loaded course's extracted
+ * text. Normalization keeps string length 1:1 (each character is folded on
+ * its own), so a match index in the folded text is the same index in the
+ * original — the snippet is cut from the real text.
+ */
+function searchCourseTexts(courses: StudioCourseFull[], query: string): SourceSearchHit[] {
+  // Per UTF-16 code unit, so the folded string's indices line up exactly
+  // with the original's (a character whose folded form isn't exactly one
+  // unit — a lone combining mark, a surrogate half — is kept as-is).
+  const fold = (text: string) => {
+    let out = "";
+    for (let i = 0; i < text.length; i++) {
+      const folded = text[i].normalize("NFD").replace(SEARCH_COMBINING_MARKS, "").toLowerCase();
+      out += folded.length === 1 ? folded : text[i];
+    }
+    return out;
+  };
+  const needle = fold(query.trim());
+  if (needle.length < 3) return [];
+  const hits: SourceSearchHit[] = [];
+  for (const course of courses) {
+    const original = course.rawText ?? "";
+    const folded = fold(original);
+    let from = 0;
+    let found = 0;
+    while (found < MAX_HITS_PER_SOURCE) {
+      const at = folded.indexOf(needle, from);
+      if (at === -1) break;
+      const start = Math.max(0, at - 70);
+      const end = Math.min(original.length, at + needle.length + 90);
+      hits.push({
+        courseId: course.id,
+        courseTitle: course.title,
+        before: `${start > 0 ? "…" : ""}${original.slice(start, at)}`.replace(/\s+/g, " "),
+        match: original.slice(at, at + needle.length),
+        after: `${original.slice(at + needle.length, end)}${end < original.length ? "…" : ""}`.replace(/\s+/g, " "),
+      });
+      found++;
+      from = at + needle.length;
+    }
+  }
+  return hits;
+}
+
+const GENERATED_SECTION_FIELDS: (keyof StudioCourseFull)[] = ["explication", "resume", "casClinique", "qcms", "exemplesAnalogies", "infographicUrl", "audioUrl"];
+
+function courseMeta(course: StudioCourseFull | undefined): string | null {
+  if (!course) return null;
+  const words = course.rawText ? course.rawText.trim().split(/\s+/).length : 0;
+  const generated = GENERATED_SECTION_FIELDS.filter((field) => Boolean(course[field])).length;
+  return `${words.toLocaleString("fr-FR")} mots · ${generated}/${GENERATED_SECTION_FIELDS.length} sections`;
+}
+
 // React.memo — the caller (ModuleWorkspacePage below) passes every handler
 // prop here as a useCallback-stabilized reference specifically so this skips
 // re-rendering on unrelated state changes (a chat-input keystroke, a note
@@ -245,6 +377,9 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   onToggleCollapse,
   selectedSourceIds,
   onToggleSource,
+  uploadRequestNonce = 0,
+  loadedCourses,
+  onSearchSources,
 }: {
   courses: StudioCourseSummary[];
   activeCourseId: number | null;
@@ -273,6 +408,12 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   /** Multi-select chat-context sources (Point 2) — a course can be "open" (the Studio tile source) independently of being "checked" (included in the Chat's context). Optional: a caller that omits both simply renders no checkboxes at all. */
   selectedSourceIds?: Set<number>;
   onToggleSource?: (id: number) => void;
+  /** Bumped by the caller (command palette "Ajouter une source") to open the upload modal from outside this panel. */
+  uploadRequestNonce?: number;
+  /** Full rows already loaded client-side — powers each card's word-count / generated-sections line. */
+  loadedCourses?: Map<number, StudioCourseFull>;
+  /** Full-text search through the module's sources (loads any course not fetched yet). Optional: omitted, the search box only searches the web. */
+  onSearchSources?: (query: string) => Promise<SourceSearchHit[]>;
 }) {
   const { language } = useLanguage();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -280,12 +421,55 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   const [deleteCourse, setDeleteCourse] = useState<StudioCourseSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [webSearchQuery, setWebSearchQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<SourceSearchHit[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchRunRef = useRef(0);
 
-  function handleWebSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
+  useEffect(() => {
+    if (uploadRequestNonce > 0) setUploadOpen(true);
+  }, [uploadRequestNonce]);
+
+  // Debounced in-source search — every keystroke past 3 characters reruns
+  // it 250 ms after typing stops; a stale (superseded) run never overwrites
+  // a newer one's results.
+  useEffect(() => {
+    const query = webSearchQuery.trim();
+    if (!onSearchSources || query.length < 3) {
+      setSearchHits(null);
+      setIsSearching(false);
+      return;
+    }
+    const run = ++searchRunRef.current;
+    setIsSearching(true);
+    const timer = setTimeout(() => {
+      onSearchSources(query)
+        .then((hits) => {
+          if (run === searchRunRef.current) setSearchHits(hits);
+        })
+        .catch(() => {
+          if (run === searchRunRef.current) setSearchHits([]);
+        })
+        .finally(() => {
+          if (run === searchRunRef.current) setIsSearching(false);
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [webSearchQuery, onSearchSources]);
+
+  function openWebSearch() {
     const query = webSearchQuery.trim();
     if (!query) return;
     window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer");
+  }
+
+  function handleWebSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Escape") {
+      setWebSearchQuery("");
+      return;
+    }
+    if (e.key !== "Enter") return;
+    // Enter searches the web only when there's no in-source search to show.
+    if (!onSearchSources) openWebSearch();
   }
 
   async function handleConfirmDelete() {
@@ -304,17 +488,33 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   return (
     <>
       {variant === "desktop" && (
-        <div className={cn("flex items-center border-b border-border p-2 md:p-4", isRail ? "justify-center" : "justify-between")}>
-          {!isRail && <h2 className="text-sm font-semibold text-foreground">{tModulePage("sourcesHeading", language)}</h2>}
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            aria-label={tModulePage(isRail ? "openPanelAriaLabel" : "collapsePanelAriaLabel", language)}
-            aria-pressed={isRail}
-            className="rounded-xl p-2 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
-          >
-            {isRail ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </button>
+        <div className={cn("flex h-12 shrink-0 items-center border-b border-[color-mix(in_oklab,var(--border)_70%,transparent)] px-2 md:h-14 md:px-4", isRail ? "justify-center" : "justify-between")}>
+          {!isRail && (
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <FolderOpen className="h-4 w-4 text-primary-500" />
+              {tModulePage("sourcesHeading", language)}
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-muted-foreground">{courses.length}</span>
+              {selectedSourceIds && selectedSourceIds.size > 0 && (
+                <span className="rounded-full bg-primary-100 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-primary-700 dark:bg-primary-900/50 dark:text-primary-300">
+                  {selectedSourceIds.size} en contexte
+                </span>
+              )}
+            </h2>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                aria-label={tModulePage(isRail ? "openPanelAriaLabel" : "collapsePanelAriaLabel", language)}
+                aria-pressed={isRail}
+                className="rounded-xl p-2 text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-[0.94]"
+              >
+                {isRail ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{tModulePage(isRail ? "openPanelAriaLabel" : "collapsePanelAriaLabel", language)}</TooltipContent>
+          </Tooltip>
         </div>
       )}
 
@@ -322,21 +522,83 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
         {variant === "desktop" && !isRail && (
           <>
             {/* Always enabled — adding a 2nd, 3rd, ... course never disables this, per the multi-course mandate. */}
-            <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => setUploadOpen(true)}>
+            <Button variant="outline" size="sm" className="w-full rounded-xl border-dashed" onClick={() => setUploadOpen(true)}>
               <Plus className="h-4 w-4" />
-              Add sources
+              {tModulePage("addSourceLabel", language)}
             </Button>
 
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder={tModulePage("searchWebPlaceholder", language)}
+                placeholder={onSearchSources ? "Rechercher dans tes sources…" : tModulePage("searchWebPlaceholder", language)}
                 value={webSearchQuery}
                 onChange={(e) => setWebSearchQuery(e.target.value)}
                 onKeyDown={handleWebSearchKeyDown}
-                className="border-none bg-muted pl-9 shadow-none"
+                aria-label="Rechercher dans tes sources"
+                className="border-none bg-muted pl-9 pr-16 shadow-none"
               />
+              <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                {isSearching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                {webSearchQuery && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={openWebSearch}
+                        aria-label="Rechercher sur le web"
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                      >
+                        <Globe className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Rechercher « {webSearchQuery.trim()} » sur le web</TooltipContent>
+                  </Tooltip>
+                )}
+                {webSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setWebSearchQuery("")}
+                    aria-label="Effacer la recherche"
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
+
+            <AnimatePresence initial={false}>
+              {searchHits !== null && (
+                <motion.div
+                  key="search-results"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-1.5 rounded-2xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--background)_60%,transparent)] p-2">
+                    <p className="px-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground">
+                      {searchHits.length === 0 ? "Aucun passage trouvé" : `${searchHits.length} passage${searchHits.length > 1 ? "s" : ""} trouvé${searchHits.length > 1 ? "s" : ""}`}
+                    </p>
+                    {searchHits.map((hit, index) => (
+                      <button
+                        key={`${hit.courseId}-${index}`}
+                        type="button"
+                        onClick={() => onShowCourseFile(hit.courseId)}
+                        className="block w-full rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent"
+                      >
+                        <span className="block truncate text-[11px] font-semibold text-primary-700 dark:text-primary-300">{hit.courseTitle}</span>
+                        <span className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+                          {hit.before}
+                          <mark className="rounded bg-primary-200/70 px-0.5 font-semibold text-foreground dark:bg-primary-500/30">{hit.match}</mark>
+                          {hit.after}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </>
         )}
 
@@ -378,10 +640,10 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
         ) : courses.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-8 text-center">
             <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
-              <FileText className="h-6 w-6 text-muted-foreground/50" />
+              <FileText className="h-6 w-6 text-[color-mix(in_oklab,var(--muted-foreground)_50%,transparent)]" />
             </motion.div>
             <p className="text-sm font-medium text-muted-foreground">{tModulePage("noSourcesEmptyState", language)}</p>
-            <p className="text-xs text-muted-foreground/70">
+            <p className="text-xs text-[color-mix(in_oklab,var(--muted-foreground)_70%,transparent)]">
               Ajoutez votre premier PDF ou texte pour commencer.
             </p>
           </div>
@@ -417,6 +679,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                       role="checkbox"
                       aria-checked={isChecked}
                       aria-label={tModulePage("selectSourceAriaLabel", language)}
+                      title={isChecked ? "Retirer du contexte du co-pilote" : "Ajouter au contexte du co-pilote"}
                       onClick={(e) => {
                         e.stopPropagation();
                         onToggleSource(course.id);
@@ -425,7 +688,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                         "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
                         isChecked
                           ? "border-primary-500 bg-primary-500 text-white"
-                          : "border-muted-foreground/40 bg-transparent hover:border-primary-400"
+                          : "border-[color-mix(in_oklab,var(--muted-foreground)_40%,transparent)] bg-transparent hover:border-primary-400"
                       )}
                     >
                       {isChecked && <Check className="h-3 w-3" />}
@@ -447,11 +710,19 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                       {fileTypeStyleFor(course.title).label}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className={cn("truncate text-sm font-medium", isActive ? "text-primary-900 dark:text-primary-200" : "text-foreground")}>
+                      <p className={cn("truncate text-sm font-medium", isActive ? "text-primary-900 dark:text-primary-200" : "text-foreground")} title={course.title}>
                         {course.title}
                       </p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {isActive ? tModulePage("activeCourseLabel", language) : tModulePage("clickToOpenLabel", language)}
+                      <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+                        {isActive && (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-600 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white dark:bg-primary-500">
+                            <span className="h-1 w-1 rounded-full bg-white" />
+                            Ouvert
+                          </span>
+                        )}
+                        <span className="truncate">
+                          {courseMeta(loadedCourses?.get(course.id)) ?? (isActive ? tModulePage("activeCourseLabel", language) : tModulePage("clickToOpenLabel", language))}
+                        </span>
                       </p>
                     </div>
                   </button>
@@ -641,6 +912,76 @@ export default function ModuleWorkspacePage() {
   const chatPanelRef = useRef<ChatDocumentPanelHandle>(null);
   const [isSplitScreen, setIsSplitScreen] = useState(false);
 
+  // --- MedArt OS shell state ---------------------------------------------
+  const router = useRouter();
+  const { setTheme } = useTheme();
+  const modKey = useModKeyLabel();
+  const { layout, resizeSources, resizeStudio, resetSources, resetStudio, setDensity } = useWorkspaceLayout();
+  const isCompact = layout.density === "compact";
+  /** Zen / Focus mode: only the co-pilot stays on screen (Sources and Studio hidden). */
+  const [isZen, setIsZen] = useState(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>("standard");
+  const [openedLabTool, setOpenedLabTool] = useState<LabToolId | null>(null);
+  const [noteTitle, setNoteTitle] = useState("");
+  /** Notes in "Mes notes" tied to this module — null until the first fetch lands. */
+  const [notesCount, setNotesCount] = useState<number | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
+  /** Bumped whenever courseCacheRef gains a row outside a state update (background fetches), so memos reading the cache recompute. */
+  const [cacheVersion, setCacheVersion] = useState(0);
+  const [uploadsInFlight, setUploadsInFlight] = useState(0);
+  const [uploadRequestNonce, setUploadRequestNonce] = useState(0);
+  const [paletteModules, setPaletteModules] = useState<{ id: number; title: string }[] | null>(null);
+
+  // The answer mode is a per-student habit, not a per-visit one.
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("medart:chat-mode");
+      if (stored && CHAT_MODE_OPTIONS.some((option) => option.id === stored)) setChatMode(stored as ChatMode);
+    } catch {
+      // Storage blocked — the default mode is fine.
+    }
+  }, []);
+
+  const handleChatModeChange = useCallback((mode: ChatMode) => {
+    setChatMode(mode);
+    try {
+      window.localStorage.setItem("medart:chat-mode", mode);
+    } catch {
+      // Storage blocked — the mode still applies for this visit.
+    }
+  }, []);
+
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!Number.isFinite(moduleId)) return;
+    let cancelled = false;
+    fetch("/api/notes")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { success?: boolean; notes?: { moduleId: number | null }[] } | null) => {
+        if (!cancelled && data?.success && Array.isArray(data.notes)) {
+          setNotesCount(data.notes.filter((note) => note.moduleId === moduleId).length);
+        }
+      })
+      .catch(() => {
+        // The counter simply stays hidden.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleId]);
+
   const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [noteContent, setNoteContent] = useState("");
@@ -741,7 +1082,14 @@ export default function ModuleWorkspacePage() {
   }, [activeCourse?.id]);
 
   const courseChatSlug = activeCourse ? `studio-course-${activeCourse.id}` : undefined;
-  const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, regenerateFrom, clearMessages } = useCourseChat(courseChatSlug);
+  // Sent with every chat turn: the checked sources become the server-side
+  // RAG context (ownership-checked there), `structured` turns on the medical
+  // callouts + verifiable citations this page renders.
+  const chatRequestExtras = useMemo(
+    () => ({ mode: chatMode, sourceCourseIds: Array.from(selectedSourceIds), structured: true }),
+    [chatMode, selectedSourceIds]
+  );
+  const { chatMessages, chatInput, setChatInput, isTyping, sendChatMessage, regenerateFrom, clearMessages } = useCourseChat(courseChatSlug, chatRequestExtras);
 
   useEffect(() => {
     if (!Number.isFinite(moduleId)) return;
@@ -1256,7 +1604,10 @@ export default function ModuleWorkspacePage() {
           fetch(`/api/studio/courses/${id}`)
             .then((res) => res.json())
             .then((data) => {
-              if (data?.success) courseCacheRef.current.set(id, data.course);
+              if (data?.success) {
+                courseCacheRef.current.set(id, data.course);
+                setCacheVersion((v) => v + 1);
+              }
             })
             .catch(() => {});
         }
@@ -1341,31 +1692,35 @@ export default function ModuleWorkspacePage() {
     return attempt;
   }
 
-  /**
-   * Joins every CHECKED source's raw text (Point 2 — multi-select chat
-   * context), not just the single active course. Falls back to the active
-   * course alone when nothing is explicitly checked yet (covers the brief
-   * window before the seeding effect above has run, and any caller that
-   * never touched selectedSourceIds) — never silently sends empty context.
-   * A course checked but not yet fetched (see handleToggleSelectedSource)
-   * simply contributes nothing yet, rather than blocking the send.
-   */
-  function buildSelectedSourceText(): string | undefined {
-    const ids = selectedSourceIds.size > 0 ? Array.from(selectedSourceIds) : activeCourse ? [activeCourse.id] : [];
-    const texts = ids
-      .map((id) => courseCacheRef.current.get(id))
-      .filter((c): c is StudioCourseFull => Boolean(c?.rawText))
-      .map((c) => (ids.length > 1 ? `### ${c.title}\n\n${c.rawText}` : c.rawText));
-    return texts.length > 0 ? texts.join("\n\n---\n\n") : undefined;
-  }
-
+  // Course context for the chat is resolved SERVER-side from the checked
+  // sources' indexed chunks (chatRequestExtras.sourceCourseIds — see
+  // app/api/courses/chat/route.ts). This page used to also inline every
+  // checked course's full raw text as `sourceText` on each message: the
+  // route never reads that field, so it was pure upload weight — and with a
+  // few long polycops checked it could push the request past the
+  // platform's ~4.5 MB body ceiling and fail the message outright.
   function handleSend() {
     const text = chatInput.trim();
     if (!text) return;
     if (isTyping) return;
 
     setChatInput("");
-    sendChatMessage(text, { sourceText: buildSelectedSourceText() });
+    sendChatMessage(text);
+  }
+
+  /** Starter suggestions and Lab tools ("Approfondir dans le chat") — sends a ready-made prompt straight away, bringing the chat into view first. */
+  function handleSendPrompt(prompt: string) {
+    if (isTyping) {
+      toast({ variant: "error", title: "MedArt répond déjà", description: "Attends la fin de la réponse en cours." });
+      return;
+    }
+    if (!activeCourse) {
+      toast({ variant: "info", title: "Ajoute une source", description: "Importe d'abord un cours dans Sources pour discuter avec le co-pilote." });
+      return;
+    }
+    setIsZen(false);
+    if (!isDesktop) setMobileTab("chat");
+    sendChatMessage(prompt);
   }
 
   /**
@@ -1411,7 +1766,6 @@ export default function ModuleWorkspacePage() {
     );
     setChatInput("");
     sendChatMessage(fullMessage, {
-      sourceText: buildSelectedSourceText(),
       concise: !isTranslate,
       translate: isTranslate,
       excludeFromHistory: true,
@@ -1511,6 +1865,7 @@ export default function ModuleWorkspacePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
+      if (activeCourse) setNotesCount((count) => (count === null ? count : count + 1));
       toast({ variant: "success", title: "Réponse enregistrée", description: "Retrouve-la dans « Mes notes »." });
     } catch (error) {
       toast({
@@ -1531,13 +1886,20 @@ export default function ModuleWorkspacePage() {
       const res = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: activeCourse?.title ?? moduleTitle, content }),
+        body: JSON.stringify({
+          title: noteTitle.trim() || activeCourse?.title || moduleTitle,
+          content,
+          moduleId,
+          ...(activeCourse ? { courseTitle: activeCourse.title } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
 
+      setNotesCount((count) => (count === null ? count : count + 1));
       setIsNoteOpen(false);
       setNoteContent("");
+      setNoteTitle("");
       toast({ variant: "success", title: "Note enregistrée", description: "Retrouve-la dans « Mes notes »." });
     } catch (error) {
       toast({
@@ -1549,6 +1911,202 @@ export default function ModuleWorkspacePage() {
       setIsSavingNote(false);
     }
   }
+
+  // ---------------------------------------------------------------------
+  // MedArt OS wiring — every hook below runs before the early returns.
+
+  // The Lab and a Studio section share the right pane's detail area: opening
+  // a section closes whichever Lab tool was open.
+  useEffect(() => {
+    if (openedSection) setOpenedLabTool(null);
+  }, [openedSection]);
+
+  // Deep link ?course=<id> — used by the "📎 Source" links the note editor
+  // inserts (note → course). Read once the module's course list is known.
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current || courses.length === 0) return;
+    deepLinkHandledRef.current = true;
+    const requested = Number(new URLSearchParams(window.location.search).get("course"));
+    if (Number.isInteger(requested) && courses.some((c) => c.id === requested)) void handleSelectCourse(requested);
+    // handleSelectCourse is intentionally not a dependency: this must run once, for the first list load only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courses]);
+
+  // Keeps ?course= in the address bar in sync with the open course, so a
+  // copied workspace link reopens the same polycop.
+  useEffect(() => {
+    if (!activeCourse) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("course") === String(activeCourse.id)) return;
+    url.searchParams.set("course", String(activeCourse.id));
+    window.history.replaceState(window.history.state, "", url.toString());
+  }, [activeCourse]);
+
+  const citationSources = useMemo<CitationSourceText[]>(() => {
+    const ids = new Set(selectedSourceIds);
+    if (activeCourse) ids.add(activeCourse.id);
+    return Array.from(ids)
+      .map((id) => courseCacheRef.current.get(id))
+      .filter((c): c is StudioCourseFull => Boolean(c))
+      .map((c) => ({ id: c.id, title: c.title, rawText: c.rawText, explication: c.explication }));
+    // cacheVersion: the cache is a ref — this is what makes a background-loaded source count.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSourceIds, activeCourse, cacheVersion]);
+
+  const loadedCourses = useMemo(
+    () => new Map(courseCacheRef.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeCourse, cacheVersion, courses]
+  );
+
+  const handleSearchSources = useCallback(
+    async (query: string): Promise<SourceSearchHit[]> => {
+      const missing = courses.filter((c) => !courseCacheRef.current.has(c.id));
+      if (missing.length > 0) {
+        await Promise.all(
+          missing.map((c) =>
+            fetch(`/api/studio/courses/${c.id}`)
+              .then((res) => res.json())
+              .then((data) => {
+                if (data?.success) courseCacheRef.current.set(c.id, data.course);
+              })
+              .catch(() => {})
+          )
+        );
+        setCacheVersion((v) => v + 1);
+      }
+      const loaded = courses.map((c) => courseCacheRef.current.get(c.id)).filter((c): c is StudioCourseFull => Boolean(c));
+      return searchCourseTexts(loaded, query);
+    },
+    [courses]
+  );
+
+  /** Files dropped on (or attached in) the co-pilot become new sources — same direct-to-storage pipeline as the Add-source modal. */
+  const handleImportFiles = useCallback(
+    async (files: File[]) => {
+      for (const file of files) {
+        if (file.size > 100 * 1024 * 1024) {
+          toast({ variant: "error", title: "Fichier trop volumineux", description: `${file.name} dépasse 100 Mo.` });
+          continue;
+        }
+        if (!ACCEPTED_FILE_TYPES.some((ext) => file.name.toLowerCase().endsWith(ext))) continue;
+        setUploadsInFlight((n) => n + 1);
+        toast({ variant: "info", title: "Import en cours", description: `${file.name} — extraction du texte…` });
+        try {
+          await handleFileSelected(file);
+        } catch (error) {
+          toast({
+            variant: "error",
+            title: error instanceof OcrSuggestedError ? "PDF scanné détecté" : "Import impossible",
+            description:
+              error instanceof OcrSuggestedError
+                ? `${file.name} ne contient pas de texte sélectionnable. Utilise « Ajouter une source » pour lancer la reconnaissance OCR.`
+                : error instanceof Error
+                  ? error.message
+                  : "Erreur inconnue.",
+          });
+        } finally {
+          setUploadsInFlight((n) => n - 1);
+        }
+      }
+    },
+    [handleFileSelected, toast]
+  );
+
+  const openLabTool = useCallback(
+    (id: LabToolId) => {
+      setIsZen(false);
+      setIsNoteOpen(false);
+      startNavTransition(() => {
+        setOpenedSection(null);
+        setOpenedLabTool(id);
+      });
+      setIsStudioCollapsed(false);
+      if (!isDesktop) setMobileTab("studio");
+    },
+    [isDesktop]
+  );
+
+  const openStudioSection = useCallback(
+    (id: DemoSectionId) => {
+      setIsZen(false);
+      setIsStudioCollapsed(false);
+      if (!isDesktop) setMobileTab("studio");
+      void handleStudioItemClick(id);
+    },
+    [isDesktop, handleStudioItemClick]
+  );
+
+  const openQuickNote = useCallback(() => {
+    setIsZen(false);
+    setIsStudioCollapsed(false);
+    startNavTransition(() => {
+      setOpenedSection(null);
+      setOpenedLabTool(null);
+    });
+    if (!isDesktop) setMobileTab("studio");
+    setNoteTitle((prev) => prev || activeCourse?.title || "");
+    setIsNoteOpen(true);
+  }, [isDesktop, activeCourse]);
+
+  const toggleZen = useCallback(() => {
+    setIsZen((prev) => {
+      const next = !prev;
+      if (next && !isDesktop) setMobileTab("chat");
+      return next;
+    });
+  }, [isDesktop]);
+
+  const toggleTheme = useCallback(() => setTheme(isDark ? "light" : "dark"), [isDark, setTheme]);
+
+  const focusComposer = useCallback(() => {
+    if (!isDesktop) setMobileTab("chat");
+    requestAnimationFrame(() => chatPanelRef.current?.focusInput());
+  }, [isDesktop]);
+
+  useHotkeys([
+    { combo: "mod+k", allowInInputs: true, handler: () => setIsPaletteOpen((open) => !open) },
+    { combo: "mod+/", allowInInputs: true, handler: toggleZen },
+    { combo: "mod+shift+l", allowInInputs: true, handler: toggleTheme },
+    { combo: "shift+n", handler: openQuickNote, enabled: !isPaletteOpen },
+    { combo: "/", handler: focusComposer, enabled: !isPaletteOpen },
+  ]);
+
+  // The palette's "Modules" group — the student's own curriculum year,
+  // loaded the first time the palette opens (same endpoint as the dashboard).
+  const curriculumSpecialtyName = curriculumProfile?.specialty?.name ?? null;
+  useEffect(() => {
+    if (!isPaletteOpen || paletteModules !== null || !curriculumSpecialtyName || studyYear == null) return;
+    let cancelled = false;
+    fetch(`/api/curriculum?specialty=${encodeURIComponent(curriculumSpecialtyName)}&level=${studyYear}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: CurriculumYearData | null) => {
+        if (cancelled || !data) return;
+        const all = [...data.teachingUnits.flatMap((unit) => unit.modules), ...data.independentModules];
+        setPaletteModules(all.map((m) => ({ id: m.id, title: m.title })));
+      })
+      .catch(() => {
+        if (!cancelled) setPaletteModules([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPaletteOpen, paletteModules, curriculumSpecialtyName, studyYear]);
+
+  const pendingGenerations = generatingByKey.size + regeneratingByKey.size;
+  const syncState: WorkspaceSyncState = !isOnline ? "offline" : pendingGenerations + uploadsInFlight > 0 || isTyping ? "working" : "synced";
+  const syncDetail = !isOnline
+    ? "Hors ligne — tes cours et générations déjà enregistrés restent sur ton compte ; reconnecte-toi pour continuer."
+    : syncState === "working"
+      ? [
+          pendingGenerations > 0 ? `${pendingGenerations} génération${pendingGenerations > 1 ? "s" : ""} en cours` : null,
+          uploadsInFlight > 0 ? `${uploadsInFlight} import${uploadsInFlight > 1 ? "s" : ""} en cours` : null,
+          isTyping ? "le co-pilote rédige" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "Synchronisé — chaque cours et chaque contenu généré est enregistré automatiquement sur ton compte.";
 
   if (loading) {
     return (
@@ -1573,6 +2131,171 @@ export default function ModuleWorkspacePage() {
     );
   }
 
+  const labContent = !openedLabTool ? null : openedLabTool === "focus" ? (
+    <StudyDashboard />
+  ) : !activeCourse ? (
+    <div className="animate-fade-in flex flex-col items-center justify-center gap-2 py-20 text-center">
+      <p className="text-sm font-medium text-foreground">Ouvre une source pour utiliser cet outil</p>
+      <p className="max-w-sm text-xs text-muted-foreground">Les outils du Lab travaillent sur le cours ouvert : importe ou sélectionne un cours dans le panneau Sources.</p>
+    </div>
+  ) : openedLabTool === "case-simulator" ? (
+    <ClinicalCaseSimulator key={activeCourse.id} courseId={activeCourse.id} courseTitle={activeCourse.title} onAskInChat={handleSendPrompt} />
+  ) : openedLabTool === "flashcards" ? (
+    <FlashcardsLab
+      key={activeCourse.id}
+      courseId={activeCourse.id}
+      courseTitle={activeCourse.title}
+      hasExplication={Boolean(activeCourse.explication)}
+      onAskInChat={handleSendPrompt}
+    />
+  ) : openedLabTool === "matrix" ? (
+    <MedicalMatrixStudio key={activeCourse.id} courseId={activeCourse.id} courseTitle={activeCourse.title} onAskInChat={handleSendPrompt} />
+  ) : (
+    <MindMapLab key={activeCourse.id} courseId={activeCourse.id} courseTitle={activeCourse.title} onAskInChat={handleSendPrompt} />
+  );
+
+  const PALETTE_GROUPS = ["Co-pilote", "Studio", "Lab", "Sources", "Espace de travail", "Navigation", "Modules"];
+  const paletteItems: CommandItem[] = [
+    {
+      id: "ask",
+      group: "Co-pilote",
+      label: "Poser une question au co-pilote",
+      icon: MessageSquarePlus,
+      shortcut: ["/"],
+      keywords: ["chat", "question", "assistant"],
+      run: focusComposer,
+    },
+    ...CHAT_MODE_OPTIONS.map<CommandItem>((option) => ({
+      id: `mode-${option.id}`,
+      group: "Co-pilote",
+      label: `${option.id === chatMode ? "✓ " : ""}Mode de réponse : ${option.label}`,
+      description: option.description,
+      icon: option.icon,
+      keywords: ["mode", option.id],
+      run: () => handleChatModeChange(option.id),
+    })),
+    {
+      id: "new-conversation",
+      group: "Co-pilote",
+      label: "Nouvelle conversation",
+      description: "Efface l'historique du chat pour ce cours",
+      icon: Trash2,
+      disabled: chatMessages.length === 0,
+      run: () => void clearMessages(),
+    },
+    ...DEMO_SECTIONS.map<CommandItem>((section) => ({
+      id: `studio-${section.id}`,
+      group: "Studio",
+      label: getSectionLabel(section.id, language, studyYear),
+      description: activeCourse && getSectionValue(activeCourse, section.id) ? "Déjà généré — ouvrir" : "Générer pour le cours ouvert",
+      icon: section.icon,
+      disabled: !activeCourse,
+      run: () => openStudioSection(section.id),
+    })),
+    ...LAB_TOOLS.map<CommandItem>((tool) => ({
+      id: `lab-${tool.id}`,
+      group: "Lab",
+      label: tool.label,
+      description: tool.description,
+      icon: tool.icon,
+      keywords: tool.keywords,
+      run: () => openLabTool(tool.id),
+    })),
+    {
+      id: "add-source",
+      group: "Sources",
+      label: "Ajouter une source",
+      description: "PDF, DOCX, PPTX, TXT, Google Drive ou texte collé",
+      icon: Plus,
+      keywords: ["importer", "upload", "polycop"],
+      run: () => {
+        setIsZen(false);
+        setIsSourcesCollapsed(false);
+        setIsSplitScreen(false);
+        if (!isDesktop) setMobileTab("sources");
+        setUploadRequestNonce((n) => n + 1);
+      },
+    },
+    ...courses.map<CommandItem>((course) => ({
+      id: `source-${course.id}`,
+      group: "Sources",
+      label: course.title,
+      description: course.id === activeCourse?.id ? "Cours ouvert — afficher le document" : "Ouvrir ce cours",
+      icon: course.id === activeCourse?.id ? BookOpen : FileText,
+      run: () => (course.id === activeCourse?.id ? void handleShowCourseFile(course.id) : void handleSelectCourse(course.id)),
+    })),
+    {
+      id: "quick-note",
+      group: "Espace de travail",
+      label: "Note rapide",
+      icon: SquarePen,
+      shortcut: ["⇧", "N"],
+      run: openQuickNote,
+    },
+    {
+      id: "zen",
+      group: "Espace de travail",
+      label: isZen ? "Quitter le mode Zen" : "Mode Zen — focus sur le co-pilote",
+      icon: Focus,
+      shortcut: [modKey, "/"],
+      run: toggleZen,
+    },
+    {
+      id: "split",
+      group: "Espace de travail",
+      label: isSplitScreen ? "Quitter l'écran partagé" : "Écran partagé Chat + Studio",
+      icon: Columns2,
+      disabled: !isDesktop,
+      run: () => setIsSplitScreen((prev) => !prev),
+    },
+    {
+      id: "theme",
+      group: "Espace de travail",
+      label: isDark ? "Passer en mode clair" : "Passer en mode sombre",
+      icon: SunMoon,
+      shortcut: [modKey, "⇧", "L"],
+      run: toggleTheme,
+    },
+    {
+      id: "density",
+      group: "Espace de travail",
+      label: isCompact ? "Densité confortable" : "Densité compacte",
+      icon: Rows3,
+      run: () => setDensity(isCompact ? "comfortable" : "compact"),
+    },
+    {
+      id: "reset-layout",
+      group: "Espace de travail",
+      label: "Réinitialiser la disposition des panneaux",
+      icon: RotateCcw,
+      run: () => {
+        resetSources();
+        resetStudio();
+        setIsSourcesCollapsed(false);
+        setIsStudioCollapsed(false);
+        setIsSplitScreen(false);
+        setIsZen(false);
+      },
+    },
+    { id: "nav-dashboard", group: "Navigation", label: "Tableau de bord", icon: LayoutDashboard, run: () => router.push("/dashboard") },
+    { id: "nav-exam", group: "Navigation", label: "Examen de module (Semaine Bloquée)", icon: ClipboardCheck, run: () => router.push(`/dashboard/module/${moduleId}/exam`) },
+    { id: "nav-synthesis", group: "Navigation", label: "Synthèse du module", icon: Workflow, run: () => router.push(`/dashboard/workspace/module/${moduleId}`) },
+    { id: "nav-notes", group: "Navigation", label: "Mes notes", icon: NotebookPen, run: () => router.push("/dashboard/notes") },
+    { id: "nav-assistant", group: "Navigation", label: "MedArt Assistant", icon: MessageSquarePlus, run: () => router.push("/dashboard/assistant") },
+    { id: "nav-study", group: "Navigation", label: "Espace d'étude (flashcards, Pomodoro)", icon: Timer, run: () => router.push("/dashboard/study") },
+    { id: "nav-settings", group: "Navigation", label: "Paramètres du compte", icon: Settings, run: () => router.push("/dashboard/settings") },
+    ...(paletteModules ?? [])
+      .filter((m) => m.id !== moduleId)
+      .map<CommandItem>((m) => ({
+        id: `module-${m.id}`,
+        group: "Modules",
+        label: m.title,
+        description: "Ouvrir le workspace de ce module",
+        icon: MonitorCog,
+        run: () => router.push(`/dashboard/module/${m.id}`),
+      })),
+  ];
+
   const chatPanel = (
     <ChatDocumentPanel
       ref={chatPanelRef}
@@ -1589,13 +2312,20 @@ export default function ModuleWorkspacePage() {
       onTranslateSelection={handleTranslateSelection}
       onRegenerate={regenerateFrom}
       onSaveToNotes={handleSaveMessageToNotes}
+      onSendPrompt={handleSendPrompt}
       pendingThinkingLabel={null}
       isSplitScreen={isSplitScreen}
       onToggleSplitScreen={() => setIsSplitScreen((prev) => !prev)}
+      showSplitScreenToggle={!isZen}
       dark={isDark}
       sources={courses.map((c) => ({ id: c.id, title: c.title }))}
       selectedSourceIds={selectedSourceIds}
       onToggleSource={handleToggleSelectedSource}
+      mode={chatMode}
+      onModeChange={handleChatModeChange}
+      citationSources={citationSources}
+      onOpenCitationSource={handleShowCourseFile}
+      onImportFiles={handleImportFiles}
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
       courseSlug={courseChatSlug}
@@ -1623,7 +2353,13 @@ export default function ModuleWorkspacePage() {
       onTranslateSelection={handleTranslateSelection}
       onRegenerate={regenerateFrom}
       onSaveToNotes={handleSaveMessageToNotes}
+      onSendPrompt={handleSendPrompt}
       onInputFocusChange={setIsMobileChatInputFocused}
+      mode={chatMode}
+      onModeChange={handleChatModeChange}
+      citationSources={citationSources}
+      onOpenCitationSource={handleShowCourseFile}
+      onImportFiles={handleImportFiles}
       pendingThinkingLabel={null}
       isSplitScreen={false}
       onToggleSplitScreen={() => {}}
@@ -1659,6 +2395,7 @@ export default function ModuleWorkspacePage() {
       onDeleteNote={() => {
         setIsNoteOpen(false);
         setNoteContent("");
+        setNoteTitle("");
       }}
       noteContent={noteContent}
       onNoteContentChange={setNoteContent}
@@ -1669,7 +2406,16 @@ export default function ModuleWorkspacePage() {
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
       onCollapsedChange={setIsStudioCollapsed}
+      collapsed={isStudioCollapsed}
       sectionMasteryPct={sectionMasteryPct}
+      labTools={LAB_TOOLS}
+      openedLabTool={openedLabTool}
+      onOpenLabTool={openLabTool}
+      onCloseLabTool={() => setOpenedLabTool(null)}
+      labContent={labContent}
+      noteTitle={noteTitle}
+      onNoteTitleChange={setNoteTitle}
+      noteSourceLink={activeCourse ? { label: activeCourse.title, href: `/dashboard/module/${moduleId}?course=${activeCourse.id}` } : null}
     >
       {isSwitchingCourse ? (
         <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
@@ -1754,6 +2500,7 @@ export default function ModuleWorkspacePage() {
                 data={activeCourse.qcms}
                 courseSlug={`studio-course-${activeCourse.id}`}
                 explicationMarkdown={activeCourse.explication ?? undefined}
+                concoursTools
               />
             )}
             {openedSection === "infographic" && activeCourse.infographicUrl && (
@@ -1775,136 +2522,229 @@ export default function ModuleWorkspacePage() {
     </StudioPanel>
   );
 
-  const panelShellClasses = "glass-card flex flex-col overflow-hidden rounded-3xl shadow-glass transition-all duration-300 dark:shadow-glass-dark";
+  const panelShellClasses = cn(
+    "glass-card flex flex-col overflow-hidden shadow-glass transition-[border-radius,box-shadow] duration-300 dark:shadow-glass-dark",
+    isCompact ? "rounded-2xl" : "rounded-3xl"
+  );
+  const showSourcesPane = !isZen && !isSplitScreen;
+  const showStudioPane = !isZen;
+
+  const sourcesPanelProps = {
+    courses,
+    activeCourseId: activeCourse?.id ?? null,
+    isSwitchingCourse,
+    onSubmitFile: handleFileSelected,
+    onSubmitText: handleTextSubmitted,
+    onRetryWithOcr: handleOcrRetry,
+    onSelectCourse: handleSelectCourse,
+    onShowCourseFile: handleShowCourseFile,
+    onDeleteCourse: handleDeleteCourse,
+    courseMasteryBySlug,
+    uploadRequestNonce,
+    loadedCourses,
+    onSearchSources: handleSearchSources,
+  };
 
   return (
-    <div className="aurora-canvas-bg relative flex h-dvh flex-col overflow-hidden">
+    <div className="aurora-canvas-bg relative flex h-dvh flex-col overflow-hidden" data-density={layout.density}>
       <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
-      <WorkspaceTopbar title={moduleTitle} />
+      <WorkspaceCommandBar
+        moduleTitle={moduleTitle}
+        moduleId={moduleId}
+        courseTitle={activeCourse?.title ?? null}
+        sourceCount={courses.length}
+        contextCount={selectedSourceIds.size}
+        notesCount={notesCount}
+        syncState={syncState}
+        syncDetail={syncDetail}
+        density={layout.density}
+        onDensityChange={setDensity}
+        zen={isZen}
+        onToggleZen={toggleZen}
+        onOpenPalette={() => setIsPaletteOpen(true)}
+        onQuickNote={openQuickNote}
+        modKey={modKey}
+      />
 
-      {/* Desktop (md+) — the original fixed-width 3-column shell, completely
-          unchanged. `isDesktop` (useMediaQuery, not a CSS class) gates which
-          of this block or the mobile one below actually mounts, so neither
-          pays the cost of the other sitting hidden in the DOM. */}
+      {/* Desktop (md+) — resizable 3-pane shell: Sources | Co-pilot | Studio & Lab.
+          Each side pane keeps its own icon-rail collapse; the splitters
+          between them drag (or ←/→ with the keyboard) and double-click to
+          reset. `isDesktop` (useMediaQuery) mounts exactly one of this block
+          or the mobile one below. */}
       {isDesktop && (
-        <div className="flex flex-1 flex-row gap-4 overflow-hidden p-4">
-          {!isSplitScreen && (
-            <aside className={cn(panelShellClasses, "shrink-0 transition-all duration-300", isSourcesCollapsed ? "w-20" : "w-80")}>
-              <ModuleSourcesPanel
-                courses={courses}
-                activeCourseId={activeCourse?.id ?? null}
-                isCollapsed={isSourcesCollapsed}
-                onToggleCollapse={handleToggleSourcesCollapsed}
-                selectedSourceIds={selectedSourceIds}
-                onToggleSource={handleToggleSelectedSource}
-                isSwitchingCourse={isSwitchingCourse}
-                onSubmitFile={handleFileSelected}
-                onSubmitText={handleTextSubmitted}
-                onRetryWithOcr={handleOcrRetry}
-                onSelectCourse={handleSelectCourse}
-                onShowCourseFile={handleShowCourseFile}
-                onDeleteCourse={handleDeleteCourse}
-                courseMasteryBySlug={courseMasteryBySlug}
-              />
-            </aside>
-          )}
-
-          <div
-            className={cn(
-              "grid flex-1 gap-4 overflow-hidden transition-all duration-300",
-              // Was `isSplitScreen ? "...lg:grid-cols-2" : "grid-cols-1"` — that
-              // ignored isStudioCollapsed entirely, so collapsing/closing
-              // Studio inside split-screen mode left the grid hardcoded at a
-              // 50/50 split with an empty collapsed-Studio cell, and Chat never
-              // reclaimed the freed width. Collapsed Studio now renders in its
-              // own w-20 rail OUTSIDE this grid (below) instead, so Chat's
-              // single remaining grid column can genuinely stretch full-width.
-              isSplitScreen && !isStudioCollapsed ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
+        <div className={cn("flex min-h-0 flex-1 flex-row overflow-hidden", isCompact ? "gap-2 p-2" : "gap-3 p-3 xl:gap-4 xl:p-4")}>
+          <AnimatePresence initial={false}>
+            {showSourcesPane && (
+              <motion.aside
+                key="sources-pane"
+                initial={{ opacity: 0, x: -16 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -16 }}
+                transition={{ type: "spring", stiffness: 420, damping: 38 }}
+                className={cn(panelShellClasses, "min-w-0")}
+                style={{
+                  flex: `0 1 ${isSourcesCollapsed ? 80 : layout.sourcesWidth}px`,
+                  minWidth: isSourcesCollapsed ? 80 : Math.round(SOURCES_WIDTH.min * 0.85),
+                }}
+              >
+                <ModuleSourcesPanel
+                  {...sourcesPanelProps}
+                  isCollapsed={isSourcesCollapsed}
+                  onToggleCollapse={handleToggleSourcesCollapsed}
+                  selectedSourceIds={selectedSourceIds}
+                  onToggleSource={handleToggleSelectedSource}
+                />
+              </motion.aside>
             )}
-          >
-            {/* min-w-0 on Chat's own cell — Tailwind's grid-cols-2 tracks
-                are `minmax(0, 1fr)` with no floor, so without an explicit
-                min-width somewhere, a genuinely wide chat message could
-                force this 50/50 split to squeeze the Studio cell arbitrarily
-                thin (overlapping text, deformed icons) instead of just
-                scrolling internally. min-w-0 here restores the normal
-                "this cell can shrink, its CONTENT scrolls instead of
-                pushing" grid behavior; the real floor is the min-w on
-                Studio's own aside below. */}
-            <main className={cn(panelShellClasses, "min-w-0")}>{chatPanel}</main>
-            {isSplitScreen && !isStudioCollapsed && (
-              <aside className={cn(panelShellClasses, "min-w-[260px]")}>{studioPanel}</aside>
+          </AnimatePresence>
+
+          {showSourcesPane && !isSourcesCollapsed && (
+            <ResizeHandle
+              onResize={resizeSources}
+              onReset={resetSources}
+              label="Redimensionner le panneau Sources"
+              valueNow={layout.sourcesWidth}
+              valueMin={SOURCES_WIDTH.min}
+              valueMax={SOURCES_WIDTH.max}
+              keyboardDirection={1}
+            />
+          )}
+
+          {/* min-w — the co-pilot is the one pane that must never be
+              squeezed unreadable; the side panes shrink first. */}
+          <main className={cn(panelShellClasses, "min-w-[320px] flex-1", isZen && "mx-auto w-full max-w-4xl")}>{chatPanel}</main>
+
+          {showStudioPane && !isStudioCollapsed && !isSplitScreen && (
+            <ResizeHandle
+              onResize={(delta) => resizeStudio(-delta)}
+              onReset={resetStudio}
+              label="Redimensionner le Studio"
+              valueNow={layout.studioWidth}
+              valueMin={STUDIO_WIDTH.min}
+              valueMax={STUDIO_WIDTH.max}
+              keyboardDirection={1}
+            />
+          )}
+
+          <AnimatePresence initial={false}>
+            {showStudioPane && (
+              <motion.aside
+                key="studio-pane"
+                initial={{ opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 16 }}
+                transition={{ type: "spring", stiffness: 420, damping: 38 }}
+                className={cn(panelShellClasses, "min-w-0")}
+                style={
+                  isSplitScreen && !isStudioCollapsed
+                    ? { flex: "1 1 0px", minWidth: 300 }
+                    : { flex: `0 1 ${isStudioCollapsed ? 80 : layout.studioWidth}px`, minWidth: isStudioCollapsed ? 80 : 280 }
+                }
+              >
+                {studioPanel}
+              </motion.aside>
             )}
-          </div>
-
-          {isSplitScreen && isStudioCollapsed && (
-            <aside className={cn(panelShellClasses, "w-20 shrink-0 transition-all duration-300")}>{studioPanel}</aside>
-          )}
-
-          {!isSplitScreen && (
-            <aside className={cn(panelShellClasses, "shrink-0 transition-all duration-300", isStudioCollapsed ? "w-20" : "w-96")}>
-              {studioPanel}
-            </aside>
-          )}
+          </AnimatePresence>
         </div>
       )}
 
-      {/* Mobile (<md) — NotebookLM-mobile-style: exactly one of
-          Sources/Chat/Studio visible at a time, switched via the bottom tab
-          bar, never split-screen (that's a wide-viewport-only concept). The
-          Studio tab shows the same detail view (studioPanel) as desktop once
-          a section is opened — only the "browse" grid gets a mobile-specific
-          large-card treatment (MobileStudioCards) instead of duplicating the
-          markdown/GastriteXXXStudio rendering logic a second time. */}
+      {/* Mobile (<md) — exactly one of Sources/Chat/Studio at a time,
+          switched via the bottom tab bar. The Studio tab shows the same
+          detail view (studioPanel) as desktop once a section, a Lab tool or
+          the note editor is opened; only the browse grid gets the large-card
+          mobile treatment. */}
       {!isDesktop && (
         <div
-          className="flex flex-1 flex-col overflow-hidden transition-[padding-bottom] duration-200 ease-out"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden transition-[padding-bottom] duration-200 ease-out"
           style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
         >
-          <div className={cn(panelShellClasses, "m-2 flex-1")}>
-            {mobileTab === "sources" && (
-              <ModuleSourcesPanel
-                variant="mobile"
-                courses={courses}
-                activeCourseId={activeCourse?.id ?? null}
-                isSwitchingCourse={isSwitchingCourse}
-                onSubmitFile={handleFileSelected}
-                onSubmitText={handleTextSubmitted}
-                onRetryWithOcr={handleOcrRetry}
-                onSelectCourse={handleSelectCourse}
-                onShowCourseFile={handleShowCourseFile}
-                onDeleteCourse={handleDeleteCourse}
-                courseMasteryBySlug={courseMasteryBySlug}
-              />
-            )}
-            {mobileTab === "chat" && mobileChatPanel}
+          <div className={cn(panelShellClasses, "m-2 min-h-0 flex-1")}>
+            {mobileTab === "sources" && !isZen && <ModuleSourcesPanel variant="mobile" {...sourcesPanelProps} />}
+            {(mobileTab === "chat" || isZen) && mobileChatPanel}
             {mobileTab === "studio" &&
-              (openedSection ? (
+              !isZen &&
+              (openedSection || openedLabTool || isNoteOpen ? (
                 studioPanel
               ) : (
-                <MobileStudioCards
-                  sections={DEMO_SECTIONS}
-                  getSectionStatus={getSectionStatus}
-                  generatingSections={generatingSections}
-                  regeneratingSections={regeneratingSections}
-                  onRegenerateSection={handleRegenerateSection}
-                  onItemClick={handleStudioItemClick}
-                  onItemClickWithOptions={handleStudioItemClick}
-                  studyYear={studyYear}
-                  sectionMasteryPct={sectionMasteryPct}
-                />
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                  <MobileStudioCards
+                    sections={DEMO_SECTIONS}
+                    getSectionStatus={getSectionStatus}
+                    generatingSections={generatingSections}
+                    regeneratingSections={regeneratingSections}
+                    onRegenerateSection={handleRegenerateSection}
+                    onItemClick={handleStudioItemClick}
+                    onItemClickWithOptions={handleStudioItemClick}
+                    studyYear={studyYear}
+                    sectionMasteryPct={sectionMasteryPct}
+                  />
+                  <section aria-label="MedArt Lab" className="space-y-2 px-3 pb-24 pt-1">
+                    <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">MedArt Lab</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {LAB_TOOLS.map((tool) => {
+                        const ToolIcon = tool.icon;
+                        return (
+                          <motion.button
+                            key={tool.id}
+                            type="button"
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => openLabTool(tool.id)}
+                            className={cn("flex min-h-[72px] flex-col items-start justify-between gap-2 rounded-2xl border p-3 text-left", tool.tint.bg)}
+                          >
+                            <ToolIcon className={cn("h-5 w-5", tool.tint.icon)} />
+                            <span className="text-xs font-semibold leading-tight text-foreground">{tool.label}</span>
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={openQuickNote}
+                      className="mt-1 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-600 py-3 text-sm font-semibold text-white shadow-glow dark:bg-primary-500"
+                    >
+                      <SquarePen className="h-4 w-4" />
+                      Ajouter une note
+                    </button>
+                  </section>
+                </div>
               ))}
           </div>
 
-          {/* Hidden while the chat composer is focused — see
-              isMobileChatInputFocused's own comment above: keeps this tab bar
-              from sitting uselessly underneath the on-screen keyboard, and
-              hands the reclaimed space to the composer instead. */}
-          {!(mobileTab === "chat" && isMobileChatInputFocused) && (
+          {/* Hidden while the chat composer is focused (keyboard open) and in Zen mode. */}
+          {!isZen && !(mobileTab === "chat" && isMobileChatInputFocused) && (
             <MobileWorkspaceTabBar active={mobileTab} onChange={handleMobileTabChange} />
           )}
         </div>
       )}
+
+      <AnimatePresence>
+        {isZen && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center max-md:bottom-24"
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={toggleZen}
+                  className="pointer-events-auto flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--card)_90%,transparent)] px-4 py-2 text-xs font-semibold text-foreground shadow-glass backdrop-blur-md transition-colors hover:border-primary-300"
+                >
+                  <Focus className="h-3.5 w-3.5 text-primary-500" />
+                  Mode Zen — afficher tous les panneaux
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {modKey} + / pour basculer
+              </TooltipContent>
+            </Tooltip>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <CommandPalette open={isPaletteOpen} onOpenChange={setIsPaletteOpen} items={paletteItems} groupOrder={PALETTE_GROUPS} />
 
       <FileViewerModal
         open={fileViewerCourse !== null}

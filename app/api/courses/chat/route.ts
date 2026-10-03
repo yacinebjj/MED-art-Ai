@@ -3,7 +3,8 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { retrieveRelevantContext } from "@/lib/chat-context-retrieval";
+import { retrieveRelevantContext, retrieveRelevantContextForStudioCourses } from "@/lib/chat-context-retrieval";
+import { MAX_CHAT_SOURCE_COURSES, isChatMode, type ChatMode } from "@/lib/chat-constants";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import {
   reserveChatMessage,
@@ -13,7 +14,12 @@ import {
   refundHighlightMessage,
 } from "@/lib/subscription";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
-import { CHAT_SYSTEM_PROMPT_BASE, buildSystemContent } from "@/lib/chat-system-prompt";
+import {
+  CHAT_SYSTEM_PROMPT_BASE,
+  WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION,
+  buildChatModeInstruction,
+  buildSystemContent,
+} from "@/lib/chat-system-prompt";
 import { stripReasoning } from "@/lib/strip-reasoning";
 
 export const runtime = "nodejs";
@@ -276,7 +282,16 @@ export async function POST(request: NextRequest) {
     translate,
     selectedText,
     adjacentContext,
+    mode,
+    sourceCourseIds,
+    structured,
   } = (body ?? {}) as {
+    /** Workspace composer's answer mode (CHAT_MODES) — anything else is treated as "standard". */
+    mode?: unknown;
+    /** Extra Workspace courses (studio_courses ids) checked as chat context in the Sources panel, on top of the course in `slug`. Ownership-checked below. */
+    sourceCourseIds?: unknown;
+    /** Workspace renderer opt-in for medical callouts + verifiable citations (WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION). */
+    structured?: unknown;
     slug?: unknown;
     message?: unknown;
     history?: unknown;
@@ -289,6 +304,11 @@ export async function POST(request: NextRequest) {
   };
   const isConcise = concise === true;
   const isTranslate = translate === true;
+  const chatMode: ChatMode = isChatMode(mode) ? mode : "standard";
+  const isStructured = structured === true;
+  const extraSourceCourseIds: number[] = Array.isArray(sourceCourseIds)
+    ? Array.from(new Set(sourceCourseIds.filter((id): id is number => typeof id === "number" && Number.isInteger(id) && id > 0)))
+    : [];
   // Both are "quick action" modes for cache-gating purposes below — a cached
   // full-length answer would defeat a concise ask, and a cached translation
   // has no business being served for a differently-phrased normal question.
@@ -424,6 +444,28 @@ export async function POST(request: NextRequest) {
             // Fails open to `null` (no course context, same as "not indexed yet")
             // rather than a distinguishable error — this must never become an
             // oracle for "does course id N exist".
+            // Workspace multi-source path: the active course plus every
+            // extra checked source, ranked together. Ownership-checked in ONE
+            // query for all ids (same IDOR reasoning as the single-course
+            // check below); the active course itself must be owned, exactly
+            // as before, or the turn gets no course context at all.
+            if (studioIdMatch && supabase && (isStructured || extraSourceCourseIds.length > 0)) {
+              const activeId = Number(studioIdMatch[1]);
+              const requestedIds = [activeId, ...extraSourceCourseIds.filter((id) => id !== activeId)].slice(0, MAX_CHAT_SOURCE_COURSES);
+              const { data: ownedRows } = await supabase
+                .from("studio_courses")
+                .select("id, title")
+                .in("id", requestedIds)
+                .eq("user_id", user.id);
+              const owned = (ownedRows ?? []) as { id: number; title: string }[];
+              if (!owned.some((row) => row.id === activeId)) return null;
+              // Active course first — purely cosmetic for the ranking (all
+              // chunks compete equally), but keeps the order deterministic.
+              owned.sort((a, b) => requestedIds.indexOf(a.id) - requestedIds.indexOf(b.id));
+              const retrievalQuery = [...historyTurns.slice(-2).map((turn) => turn.content), message].join("\n");
+              return await retrieveRelevantContextForStudioCourses(retrievalQuery, owned);
+            }
+
             let chunkSource: { studioCourseId: number } | { legacyCourseSlug: string } | null = studioIdMatch
               ? { studioCourseId: Number(studioIdMatch[1]) }
               : { legacyCourseSlug: courseSlug };
@@ -528,7 +570,10 @@ export async function POST(request: NextRequest) {
     : [
         {
           role: "system",
-          content: buildSystemContent(sourceText, false),
+          content: buildSystemContent(sourceText, false, [
+            buildChatModeInstruction(chatMode) ?? "",
+            isStructured ? WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION : "",
+          ]),
         },
         ...historyTurns.map((t): ChatMessageInput => ({ role: t.role, content: t.content })),
         { role: "user", content: message },

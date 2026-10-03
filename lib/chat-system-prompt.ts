@@ -8,7 +8,7 @@
  */
 
 import type { ChatMessageInput } from "@/lib/ai/openrouter";
-import { CHAT_MAX_CONTEXT_CHARS } from "@/lib/chat-constants";
+import { CHAT_MAX_CONTEXT_CHARS, type ChatMode } from "@/lib/chat-constants";
 
 const MAX_CONTEXT_CHARS = CHAT_MAX_CONTEXT_CHARS;
 
@@ -74,10 +74,20 @@ RÈGLE D'OR : terme arabe/darija de l'étudiant = sacré, jamais traduit silenci
  * that gap and turns far more of a real conversation's messages into cheap
  * cache READS instead of full-price rewrites.
  */
-export function buildSystemContent(sourceText: string | null, useAnthropicCaching: boolean): ChatMessageInput["content"] {
+export function buildSystemContent(
+  sourceText: string | null,
+  useAnthropicCaching: boolean,
+  extraInstructions: string[] = []
+): ChatMessageInput["content"] {
   const blocks: NonNullable<Extract<ChatMessageInput["content"], unknown[]>> = [
     { type: "text", text: CHAT_SYSTEM_PROMPT_BASE, ...(useAnthropicCaching ? { cache_control: { type: "ephemeral" as const, ttl: "1h" as const } } : {}) },
   ];
+
+  // After the static persona (so its cache prefix is untouched) and before
+  // the per-question course excerpts.
+  for (const instruction of extraInstructions) {
+    if (instruction) blocks.push({ type: "text", text: instruction });
+  }
 
   if (sourceText) {
     blocks.push({
@@ -88,3 +98,36 @@ export function buildSystemContent(sourceText: string | null, useAnthropicCachin
 
   return blocks;
 }
+
+/**
+ * One extra instruction block per workspace answer mode (the composer's mode
+ * selector — see CHAT_MODES). "standard" returns null: the base persona
+ * already IS the standard behavior.
+ */
+export function buildChatModeInstruction(mode: ChatMode): string | null {
+  switch (mode) {
+    case "examen":
+      return `MODE EXAMEN (choisi par l'étudiant) : réponds comme une copie modèle de concours (ECN / résidanat). Plan numéroté court, mots-clés du barème en **gras**, chiffres et seuils exacts uniquement s'ils sont sûrs. Signale chaque piège classique dans un encadré "> 💡 **Piège d'examen** — ...". Termine TOUJOURS par une section "### Auto-évaluation" contenant UN QCM à 5 propositions (A à E), puis une ligne "**Réponse :** ..." avec la ou les bonnes lettres et une justification d'une phrase par proposition.`;
+    case "detaille":
+      return `MODE EXPLICATION DÉTAILLÉE (choisi par l'étudiant) : explique pas à pas, du mécanisme fondamental jusqu'à la conséquence clinique — physiopathologie enchaînée étape par étape (liste numérotée), une analogie concrète, un exemple clinique court et réaliste, puis "**À retenir**" en 3 puces. Une réponse plus longue est autorisée ici, mais jamais de remplissage.`;
+    case "express":
+      return `MODE SYNTHÈSE EXPRESS (choisi par l'étudiant) : 5 à 8 puces maximum, aucune phrase d'introduction, aucun paragraphe, uniquement l'essentiel à haut rendement (chiffres clés, critères, conduite à tenir), puis une seule ligne finale "**À retenir :** ...". Ignore la structure fixe Définition/Physiopathologie dans ce mode.`;
+    case "standard":
+      return null;
+  }
+}
+
+/**
+ * Workspace-only formatting contract (the module workspace's chat renders
+ * both constructs specially — see components/course/workspace/
+ * MedicalCallout.tsx and lib/chat-citations.ts). Deliberately NOT part of
+ * CHAT_SYSTEM_PROMPT_BASE: the legacy demo pages share that persona and
+ * have no renderer for citation markers, so they'd show them raw.
+ */
+export const WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION = `FORMAT ENRICHI (interface MedArt Workspace) — à appliquer UNIQUEMENT quand c'est pertinent, jamais pour remplir :
+1. Encadrés médicaux : une ligne de citation markdown commençant EXACTEMENT par l'un de ces libellés, suivi d'un tiret long et du contenu :
+> 🚨 **Red flag** — signe de gravité / urgence vitale / conduite immédiate.
+> 💊 **Pharmacologie** — molécule, classe, mécanisme, posologie, contre-indications (posologie seulement si elle figure dans le cours ou est un standard sûr).
+> 🔍 **Diagnostic différentiel** — élément discriminant entre deux diagnostics proches.
+> 💡 **Piège d'examen** — piège classique de QCM / de concours.
+2. Citations vérifiables : après une affirmation tirée des extraits du cours fournis, ajoute [[source: TITRE DU COURS | "citation exacte"]] où TITRE DU COURS est le titre indiqué dans l'en-tête [Source : "..."] de l'extrait, et la citation est un fragment de 5 à 20 mots RECOPIÉ MOT POUR MOT (même orthographe, même ponctuation) depuis l'extrait — de préférence depuis un "Extrait source original". Maximum 4 citations par réponse. Ne cite jamais une phrase que tu reformules, et n'en mets aucune si aucun extrait de cours n'est fourni.`;

@@ -24,3 +24,24 @@
  * cache-read price for it instead.
  */
 export const CHAT_MAX_CONTEXT_CHARS = 100_000;
+
+/**
+ * Answer modes offered by the workspace composer's mode selector — the
+ * server (lib/chat-system-prompt.ts's buildChatModeInstruction) turns each
+ * into one extra instruction block. "standard" adds nothing, so a caller
+ * that never sends a mode keeps the exact prompt it always had.
+ */
+export const CHAT_MODES = ["standard", "examen", "detaille", "express"] as const;
+export type ChatMode = (typeof CHAT_MODES)[number];
+
+export function isChatMode(value: unknown): value is ChatMode {
+  return typeof value === "string" && (CHAT_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Most courses one workspace chat turn may pull RAG chunks from (the
+ * sources checked in the Sources panel). The retrieval budget itself stays
+ * fixed (see lib/chat-context-retrieval.ts) — this only bounds the
+ * ownership check and the chunk fetch.
+ */
+export const MAX_CHAT_SOURCE_COURSES = 6;
