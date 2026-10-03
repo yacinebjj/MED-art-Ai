@@ -30,6 +30,48 @@ interface PomodoroContextType {
   currentMode: PomodoroMode;
   setCurrentCycle: (cycle: number) => void;
   setCurrentMode: (mode: PomodoroMode) => void;
+  /**
+   * Seconds actually spent with the timer RUNNING, per local calendar day
+   * ("YYYY-MM-DD" → seconds), for this account on this device. Unlike
+   * `seconds` (the current session, zeroed by reset), this survives resets —
+   * it is what the dashboard's focus-time / streak widgets read.
+   */
+  focusLog: FocusLog;
+}
+
+export type FocusLog = Record<string, number>;
+
+/** Days kept in the focus log — enough for weekly stats and a long streak, small enough for localStorage. */
+const FOCUS_LOG_MAX_DAYS = 120;
+
+/** Local calendar day, "YYYY-MM-DD" (not UTC: a late-evening session must count for the student's own day). */
+export function localDayKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function readFocusLog(key: string): FocusLog {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
+    if (!parsed || typeof parsed !== "object") return {};
+    const log: FocusLog = {};
+    for (const [day, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day) && typeof value === "number" && Number.isFinite(value) && value > 0) log[day] = value;
+    }
+    return log;
+  } catch {
+    return {};
+  }
+}
+
+function pruneFocusLog(log: FocusLog): FocusLog {
+  const days = Object.keys(log).sort();
+  if (days.length <= FOCUS_LOG_MAX_DAYS) return log;
+  const kept: FocusLog = {};
+  for (const day of days.slice(-FOCUS_LOG_MAX_DAYS)) kept[day] = log[day];
+  return kept;
 }
 
 const PomodoroContext = createContext<PomodoroContextType | undefined>(undefined);
@@ -52,6 +94,7 @@ function keysFor(bucket: string) {
     seconds: `medart_pomo_seconds:${bucket}`,
     active: `medart_pomo_active:${bucket}`,
     visible: `medart_pomo_visible:${bucket}`,
+    focusLog: `medart_focus_log:${bucket}`,
   };
 }
 
@@ -62,6 +105,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const [isVisible, setIsVisible] = useState(true);
   const [currentCycle, setCurrentCycle] = useState(1);
   const [currentMode, setCurrentMode] = useState<PomodoroMode>("study");
+  const [focusLog, setFocusLog] = useState<FocusLog>({});
 
   // استرجاع الحالة الحقيقية من localStorage عند تحميل التطبيق — يعاد أيضاً
   // في كل مرة يتغيّر فيها bucket (تبديل حساب على نفس الجهاز، أو تحديد هوية
@@ -75,6 +119,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     setSeconds(savedSeconds ? parseInt(savedSeconds, 10) : 0);
     setIsActive(savedActive === "true");
     if (savedVisible !== null) setIsVisible(savedVisible === "true");
+    setFocusLog(readFocusLog(keys.focusLog));
   }, [bucket]);
 
   // تشغيل العداد وتحديث التخزين المحلي في الخلفية بشكل متزامن
@@ -85,6 +130,16 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
         setSeconds((prev) => {
           const next = prev + 1;
           localStorage.setItem(keysFor(bucket).seconds, next.toString());
+          return next;
+        });
+        setFocusLog((prev) => {
+          const day = localDayKey(new Date());
+          const next = pruneFocusLog({ ...prev, [day]: (prev[day] ?? 0) + 1 });
+          try {
+            localStorage.setItem(keysFor(bucket).focusLog, JSON.stringify(next));
+          } catch {
+            // Storage full or blocked: the in-memory log still counts this session.
+          }
           return next;
         });
       }, 1000);
@@ -136,6 +191,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
         currentMode,
         setCurrentCycle,
         setCurrentMode,
+        focusLog,
       }}
     >
       {children}

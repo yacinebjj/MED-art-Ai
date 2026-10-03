@@ -4,50 +4,30 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion } from "framer-motion";
-import { Mic, Settings, Sparkles } from "lucide-react";
-import { DashboardHero } from "@/components/dashboard/DashboardHero";
+import { GraduationCap, Settings } from "lucide-react";
 import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcons";
-import { CurriculumView, CurriculumViewSkeleton } from "@/components/curriculum/CurriculumView";
-import { LanguageToggle } from "@/components/LanguageToggle";
+import { CockpitHeader } from "@/components/dashboard/os/CockpitHeader";
+import { AnalyticsHub } from "@/components/dashboard/os/AnalyticsHub";
+import { QuickLaunchHub } from "@/components/dashboard/os/QuickLaunchHub";
+import { CurriculumHub, CurriculumHubSkeleton } from "@/components/dashboard/os/CurriculumHub";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tDashboard } from "@/lib/translations/dashboard";
+import { tCockpit } from "@/lib/translations/cockpit";
+import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import type { CurriculumYearData } from "@/types/academic";
 
-// One random quote per mount, same index used for both languages so
-// toggling fr/en mid-session doesn't change which quote is shown.
-const MOTIVATIONAL_QUOTES = {
-  fr: [
-    "Le succès est la somme de petits efforts, répétés jour après jour. 🌟",
-    "Chaque page lue aujourd'hui est une vie sauvée demain. 🩺",
-    "La médecine est une science d'incertitude et un art de probabilité. 🧠",
-    "Crois en toi. Il y a quelque chose en toi de plus grand que n'importe quel obstacle. 💪",
-    "N'oublie jamais pourquoi tu as commencé : pour faire la différence. ❤️",
-    "La fatigue passe, mais le titre de docteur reste. Ne lâche rien ! 📚",
-    "Les défis rendent la vie intéressante ; les surmonter lui donne un sens. 🚀"
-  ],
-  en: [
-    "Success is the sum of small efforts, repeated day in and day out. 🌟",
-    "Every page read today is a life saved tomorrow. 🩺",
-    "Medicine is a science of uncertainty and an art of probability. 🧠",
-    "Believe in yourself. There is something inside you that is greater than any obstacle. 💪",
-    "Never forget why you started: to make a difference. ❤️",
-    "Fatigue fades, but the title of Doctor remains. Don't give up! 📚",
-    "Challenges are what make life interesting; overcoming them is what makes life meaningful. 🚀"
-  ]
-};
-
+/**
+ * MedArt "Medical OS 3.0" home: cockpit header → Analytics & Productivity Hub
+ * → Quick-Launch (Lab tools, resume) → Curriculum 3.0. Every widget reads the
+ * shared /api/dashboard/overview (store/useCockpitStore, fetched once by the
+ * shell layout) or per-device data (Pomodoro focus log, flashcard session);
+ * the curriculum itself still comes from /api/curriculum.
+ */
 export default function DashboardPage() {
   const auth = useAuth() ?? {};
-  const profile = auth.profile;
   const curriculumProfile = auth.curriculumProfile;
   const { language } = useLanguage();
-
-  const [quoteIndex, setQuoteIndex] = useState(0);
-
-  useEffect(() => {
-    setQuoteIndex(Math.floor(Math.random() * MOTIVATIONAL_QUOTES.fr.length));
-  }, []);
 
   const [curriculumData, setCurriculumData] = useState<CurriculumYearData | null>(null);
   const [curriculumLoading, setCurriculumLoading] = useState(false);
@@ -93,88 +73,40 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curriculumSpecialtyName, curriculumLevel]);
 
-  const firstName = profile?.fullName?.split(" ")[0] || tDashboard("fallbackStudentName", language);
-
   return (
-    // relative — anchors FloatingMedicalIcons' absolute inset-0 layer to
-    // this page's own content height (not the shell layout, and not the
-    // viewport) — see that component's own comment for why it's scoped to
-    // this one page rather than every page under app/dashboard/(shell).
-    <div className="relative mx-auto max-w-7xl">
+    // relative — anchors FloatingMedicalIcons' absolute inset-0 layer to this page's own content height.
+    <div className="relative mx-auto max-w-[1600px] space-y-6 sm:space-y-8">
       <FloatingMedicalIcons />
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <DashboardHero firstName={firstName} academicYearName={curriculumProfile?.academicYear?.name ?? null} />
-          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground italic sm:line-clamp-none">
-            « {MOTIVATIONAL_QUOTES[language][quoteIndex]} »
-          </p>
-        </div>
-        <div className="mt-1 shrink-0">
-          <LanguageToggle />
-        </div>
-      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
-        className="mb-3 grid grid-cols-1 gap-2 sm:mb-6 sm:grid-cols-3 sm:gap-4 lg:mb-8"
-      >
-        {/* Remplace l'ancienne entrée "Importer un cours indépendant" — même
-            emplacement, même prééminence visuelle, nouvelle destination. */}
-        <Link
-          href="/dashboard/audio-workspace"
-          className="glass-card group flex items-center gap-3 rounded-2xl p-3 text-left shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-orange-500/20 dark:shadow-glass-dark sm:col-span-2 sm:gap-5 sm:rounded-3xl sm:p-6"
-        >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[0_0_20px_rgba(249,115,22,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-14 sm:w-14 sm:rounded-2xl">
-            <Mic className="h-5 w-5 sm:h-7 sm:w-7" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-foreground sm:text-lg">{tDashboard("audioNotesTitle", language)}</p>
-            <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block sm:text-sm">
-              {tDashboard("audioNotesSubtitle", language)}
-            </p>
-          </div>
-          <span className="hidden shrink-0 items-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-all duration-300 active:scale-95 sm:flex">
-            <Sparkles className="h-4 w-4" />
-            Ouvrir
-          </span>
-        </Link>
-
-        <Link
-          href="/dashboard/assistant"
-          className="glass-card group flex items-center justify-center gap-3 rounded-2xl p-3 text-center shadow-glass transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-violet-500/20 dark:shadow-glass-dark sm:flex-col sm:justify-center sm:p-6 sm:text-center lg:flex-row lg:justify-start lg:gap-3 sm:rounded-3xl"
-        >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-[0_0_16px_rgba(168,85,247,0.5)] transition-transform duration-300 group-hover:scale-110 sm:h-11 sm:w-11">
-            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
-          </span>
-          <span className="text-xs font-bold text-foreground sm:text-sm">
-            {tDashboard("assistantLabel", language)}
-          </span>
-        </Link>
-      </motion.div>
+      <CockpitHeader />
+      <AnalyticsHub />
+      <QuickLaunchHub />
 
       <motion.section
+        id="curriculum"
+        aria-labelledby="curriculum-heading"
+        className="scroll-mt-4"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
       >
-        <h2 className="mb-2 text-base font-bold tracking-tight text-foreground sm:mb-4 sm:text-xl">
-          {tDashboard("myCurriculumHeading", language)}
-          {curriculumProfile?.academicYear ? ` — ${curriculumProfile.academicYear.name}` : ""}
-        </h2>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 id="curriculum-heading" className="flex items-center gap-2 text-base font-bold tracking-tight text-foreground sm:text-lg">
+              <GraduationCap className="h-5 w-5 text-primary-500" />
+              {tCockpit("curriculumHeading", language)}
+              {curriculumProfile?.academicYear ? (
+                <span className="font-semibold text-muted-foreground">— {translateCurriculumName(curriculumProfile.academicYear.name, language)}</span>
+              ) : null}
+            </h2>
+            <p className="text-xs text-muted-foreground">{tCockpit("curriculumSub", language)}</p>
+          </div>
+        </div>
 
         {curriculumProfile === null || curriculumLoading ? (
-          <CurriculumViewSkeleton />
+          <CurriculumHubSkeleton />
         ) : !curriculumProfile?.academicYear ? (
-          <div className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed p-3 text-center sm:flex-row sm:items-center sm:gap-5 sm:text-left sm:p-6">
-            {/* Same chibi mascot set as DashboardHero (public/illustrations/),
-                a different pose — this empty state is the app's own "get
-                started" moment, exactly the kind of spot a friendly
-                illustration earns its keep. Shown on every breakpoint
-                (unlike the hero's desktop-only image): this card is the
-                ENTIRE above-the-fold content when it renders, so there's no
-                competing priority to protect on mobile. */}
+          <div className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed p-3 text-center sm:flex-row sm:items-center sm:gap-5 sm:p-6 sm:text-left">
             <div className="shrink-0 overflow-hidden rounded-2xl shadow-md">
               <Image
                 src="/illustrations/dashboard-empty-state-mascot.jpeg"
@@ -201,7 +133,7 @@ export default function DashboardPage() {
             {curriculumError}
           </p>
         ) : curriculumData ? (
-          <CurriculumView data={curriculumData} />
+          <CurriculumHub data={curriculumData} />
         ) : null}
       </motion.section>
     </div>

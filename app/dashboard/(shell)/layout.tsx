@@ -9,6 +9,11 @@ import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import { PageTransition } from "@/components/layout/PageTransition";
 import { SidebarProvider } from "@/providers/SidebarProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { useAuth } from "@/providers/AuthProvider";
+import { useCockpitSync } from "@/store/useCockpitStore";
+import { Spotlight } from "@/components/layout/cockpit/Spotlight";
+import { LabLauncher } from "@/components/layout/cockpit/LabLauncher";
+import { NightModeOverlay } from "@/components/layout/cockpit/ThemeModeSwitcher";
 import { t } from "@/lib/translations";
 import { cn } from "@/lib/utils";
 
@@ -87,6 +92,10 @@ function isGroupChatRoomRoute(pathname: string): boolean {
 // no bottom nav, no shell padding) — a full-screen chat, like ChatGPT/Claude.
 const CHROMELESS_MOBILE_ROUTES = ["/dashboard/assistant"];
 
+// The Medical OS home is a dense widget grid: it gets a wider reading frame
+// on large screens (1080p / 4K) than the text-first pages.
+const WIDE_ROUTES = ["/dashboard"];
+
 /**
  * "Native-app" no-scroll viewport architecture: the shell's own root is a
  * fixed `h-dvh` flex box that NEVER scrolls (`overflow-hidden`) — Topbar
@@ -113,6 +122,9 @@ export default function DashboardShellLayout({
 }) {
   const pathname = usePathname();
   const { language } = useLanguage();
+  const { user } = useAuth();
+  // One shared /api/dashboard/overview for Topbar, Sidebar and the dashboard page.
+  useCockpitSync(user?.id ?? null);
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
   const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname) || isGroupChatRoomRoute(pathname);
   const isChromelessOnMobile = CHROMELESS_MOBILE_ROUTES.includes(pathname);
@@ -219,6 +231,7 @@ export default function DashboardShellLayout({
                 // safe-area on top of the static value rather than instead of
                 // it — a fixed px number alone is enough on most phones but
                 // falls short on the ones with a home-indicator inset.
+                !isFullBleed && WIDE_ROUTES.includes(pathname) && "2xl:max-w-[1600px]",
                 !isFullBleed && "mx-auto w-full max-w-7xl px-2 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-1 sm:px-4 lg:px-8 lg:pb-6"
               )}
             >
@@ -229,6 +242,10 @@ export default function DashboardShellLayout({
 
         <MobileBottomNav hidden={navHidden || isChromelessOnMobile} />
       </div>
+      {/* Medical OS overlays — rendered once for the whole shell, opened from Topbar / Sidebar / dashboard / Ctrl+K. */}
+      <Spotlight />
+      <LabLauncher />
+      <NightModeOverlay />
     </SidebarProvider>
   );
 }

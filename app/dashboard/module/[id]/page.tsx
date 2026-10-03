@@ -73,6 +73,7 @@ import { ChatDocumentPanel, CHAT_MODE_OPTIONS, type ChatDocumentPanelHandle } fr
 import { SOURCES_WIDTH, STUDIO_WIDTH, useWorkspaceLayout } from "@/hooks/useWorkspaceLayout";
 import { useHotkeys, useModKeyLabel } from "@/hooks/useHotkeys";
 import { LAB_TOOLS, type LabToolId } from "@/lib/workspace-lab";
+import { recordLastOpenedCourse } from "@/lib/dashboard/local-activity";
 // Global AI-content language: read at REQUEST time (getContentLanguage), so a
 // plain tile click generates in the language chosen anywhere in the app — not
 // only when the student opens a tile's options popover.
@@ -854,7 +855,7 @@ export default function ModuleWorkspacePage() {
    * curriculum profile yet, or whose year is neither 1 nor 2, falls through
    * to the standard "Cas Cliniques" behavior.
    */
-  const { curriculumProfile } = useAuth();
+  const { curriculumProfile, user: authUser } = useAuth();
   const studyYear = curriculumProfile?.academicYear?.level ?? null;
 
   const [module, setModule] = useState<CurriculumModule | null>(null);
@@ -1983,11 +1984,29 @@ export default function ModuleWorkspacePage() {
   useEffect(() => {
     if (deepLinkHandledRef.current || courses.length === 0) return;
     deepLinkHandledRef.current = true;
-    const requested = Number(new URLSearchParams(window.location.search).get("course"));
+    const params = new URLSearchParams(window.location.search);
+    const requested = Number(params.get("course"));
     if (Number.isInteger(requested) && courses.some((c) => c.id === requested)) void handleSelectCourse(requested);
-    // handleSelectCourse is intentionally not a dependency: this must run once, for the first list load only.
+    // ?lab=<tool> — the dashboard's Lab launcher opens a Lab tool directly on the requested course.
+    const requestedLab = params.get("lab");
+    const labTool = LAB_TOOLS.find((tool) => tool.id === requestedLab);
+    if (labTool) openLabTool(labTool.id);
+    if (requestedLab !== null) {
+      // One-shot: a reload or a copied link must not re-open the tool.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("lab");
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
+    // handleSelectCourse / openLabTool are intentionally not dependencies: this must run once, for the first list load only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courses]);
+
+  // "Reprendre la révision" on the dashboard: the course actually OPENED last
+  // (studio_courses.updated_at only moves on generation, not on reading).
+  useEffect(() => {
+    if (!activeCourse || !authUser?.id) return;
+    recordLastOpenedCourse(authUser.id, { courseId: activeCourse.id, moduleId, title: activeCourse.title });
+  }, [activeCourse, authUser?.id, moduleId]);
 
   // Keeps ?course= in the address bar in sync with the open course, so a
   // copied workspace link reopens the same polycop.

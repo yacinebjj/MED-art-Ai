@@ -31,7 +31,7 @@ interface DashboardHeroProps {
  * against both a light and a dark backdrop before wiring it in here — see
  * this session's own scratch preview, not committed anywhere.
  */
-function HeroMascot({ className }: { className?: string }) {
+export function HeroMascot({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 100 100" className={className} aria-hidden role="presentation">
       {/* coat body */}

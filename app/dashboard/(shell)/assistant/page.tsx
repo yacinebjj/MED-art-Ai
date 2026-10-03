@@ -50,6 +50,7 @@ import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
 import { VoiceMeter } from "@/components/assistant/VoiceMeter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { useToast } from "@/components/ui/Toast";
+import { ASSISTANT_PREFILL_KEY } from "@/lib/dashboard/assistant-prefill";
 
 interface HistoryTurn {
   role: "user" | "assistant";
@@ -489,6 +490,23 @@ export default function AssistantPage() {
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Question typed in the dashboard's Ctrl+K Spotlight ("Ask the
+  // assistant…"), handed over in sessionStorage. Only PRE-FILLS the composer
+  // (the student still presses Send) and is consumed once.
+  useEffect(() => {
+    let prefill: string | null = null;
+    try {
+      prefill = sessionStorage.getItem(ASSISTANT_PREFILL_KEY);
+      sessionStorage.removeItem(ASSISTANT_PREFILL_KEY);
+    } catch {
+      return;
+    }
+    if (prefill?.trim()) {
+      setInput(prefill.slice(0, 4000));
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // MediaRecorder-based dictation (replaces the old browser SpeechRecognition

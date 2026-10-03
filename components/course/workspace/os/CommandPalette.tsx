@@ -60,6 +60,10 @@ interface CommandPaletteProps {
   items: CommandItem[];
   /** Order in which groups are listed when the query is empty. */
   groupOrder: string[];
+  /** Input placeholder; defaults to the module-workspace wording. */
+  placeholder?: string;
+  /** Called on every keystroke — lets a caller add query-dependent items (e.g. "Ask the assistant: <query>"). */
+  onQueryChange?: (query: string) => void;
 }
 
 /**
@@ -68,7 +72,7 @@ interface CommandPaletteProps {
  * keyboard-driven (↑/↓, Enter, Esc). Rendered in a portal so no transformed
  * ancestor can trap its fixed positioning.
  */
-export function CommandPalette({ open, onOpenChange, items, groupOrder }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, items, groupOrder, placeholder, onQueryChange }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [mounted, setMounted] = useState(false);
@@ -76,6 +80,9 @@ export function CommandPalette({ open, onOpenChange, items, groupOrder }: Comman
   const listRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const listboxId = useId();
+  // Ref, not an effect dependency: an inline callback from the caller must not re-run the open/reset effect on every render.
+  const onQueryChangeRef = useRef(onQueryChange);
+  onQueryChangeRef.current = onQueryChange;
 
   useEffect(() => setMounted(true), []);
 
@@ -83,6 +90,7 @@ export function CommandPalette({ open, onOpenChange, items, groupOrder }: Comman
     if (!open) return;
     restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setQuery("");
+    onQueryChangeRef.current?.("");
     setActiveIndex(0);
     requestAnimationFrame(() => inputRef.current?.focus());
     return () => {
@@ -188,8 +196,11 @@ export function CommandPalette({ open, onOpenChange, items, groupOrder }: Comman
                 // eslint-disable-next-line jsx-a11y/no-autofocus -- a command palette's whole purpose is typing immediately; focus is restored to the opener on close.
                 autoFocus
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Rechercher un outil, une source, une action…"
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  onQueryChange?.(e.target.value);
+                }}
+                placeholder={placeholder ?? "Rechercher un outil, une source, une action…"}
                 role="combobox"
                 aria-expanded="true"
                 aria-controls={listboxId}

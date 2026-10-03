@@ -3,9 +3,18 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Settings, LogOut, PlayCircle, Play, Pause, RotateCcw, EyeOff, Timer } from "lucide-react";
+import { Settings, LogOut, PlayCircle, Play, Pause, RotateCcw, EyeOff, Timer, Search, CreditCard, Crown, Cpu } from "lucide-react";
 import { AnimatedBrandMark } from "./AnimatedBrandMark";
-import { ThemeToggle } from "./ThemeToggle";
+import { THEME_MODE_ICONS, THEME_MODE_LABELS, ThemeModeSwitcher, useThemeMode, type ThemeMode } from "./cockpit/ThemeModeSwitcher";
+import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
+import { NotificationCenter } from "./cockpit/NotificationCenter";
+import { Kbd } from "@/components/course/workspace/os/Kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { useCockpitStore } from "@/store/useCockpitStore";
+import { useCockpitUi } from "@/store/useCockpitUi";
+import { tCockpit } from "@/lib/translations/cockpit";
+import { FLASHCARD_ENGINE_LABEL } from "@/lib/dashboard/engine";
+import { PLEURESIE_DEMO_SLUG } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
@@ -21,7 +30,6 @@ import { useAuth } from "@/providers/AuthProvider";
 import { usePomodoro } from "@/providers/PomodoroProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { t } from "@/lib/translations";
-import { PLEURESIE_DEMO_SLUG } from "@/lib/constants";
 
 // Focus ring shared by every icon-only control in this widget — keyboard
 // users get the same visible affordance mouse users get from hover.
@@ -118,13 +126,100 @@ function PomodoroWidget() {
   );
 }
 
+/** Plan badge: the real effective plan (lib/pricing.ts labels), trial countdown while trialing. */
+function PlanBadge() {
+  const { trial, isSubscribed } = useAuth();
+  const { language } = useLanguage();
+  const plan = useCockpitStore((state) => state.overview?.plan ?? null);
+
+  if (!isSubscribed && trial?.active && trial.daysRemaining > 0) {
+    return (
+      <Badge variant="warning" className="hidden xl:inline-flex">
+        {tCockpit("trialBadge", language).replace("{n}", String(trial.daysRemaining))}
+      </Badge>
+    );
+  }
+  if (!plan) return null;
+  return (
+    <Link
+      href="/dashboard/billing"
+      className={cn(
+        "hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all duration-200 hover:-translate-y-0.5 xl:inline-flex",
+        plan.paidActive
+          ? "border-amber-300/70 bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 dark:border-amber-700/50 dark:from-amber-950/40 dark:to-orange-950/40 dark:text-amber-300"
+          : "border-border/60 bg-background/60 text-muted-foreground"
+      )}
+    >
+      {plan.paidActive ? <Crown className="h-3 w-3" /> : <CreditCard className="h-3 w-3" />}
+      {plan.paidActive ? `${plan.label} ⚡` : plan.label}
+    </Link>
+  );
+}
+
+/**
+ * Shows the AI engine and whether this device can reach it right now
+ * (navigator.onLine + the last dashboard sync). Deliberately says nothing it
+ * can't know: it is a connectivity indicator, not a health check of the model.
+ */
+function EngineBadge() {
+  const { language } = useLanguage();
+  const status = useCockpitStore((state) => state.status);
+  const offline = status === "offline";
+  const degraded = status === "error";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="hidden items-center gap-1.5 rounded-full border border-border/60 bg-background/60 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground 2xl:inline-flex">
+          <Cpu className="h-3 w-3 text-primary-500" />
+          {FLASHCARD_ENGINE_LABEL}
+          <span className="relative flex h-2 w-2">
+            {!offline && !degraded && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />}
+            <span className={cn("relative inline-flex h-2 w-2 rounded-full", offline ? "bg-slate-400" : degraded ? "bg-amber-400" : "bg-emerald-500")} />
+          </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{offline ? tCockpit("engineOffline", language) : degraded ? tCockpit("engineDegraded", language) : tCockpit("engineOnline", language)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Spotlight trigger: a full search field on desktop, an icon on phones. */
+function SpotlightTrigger() {
+  const { language } = useLanguage();
+  const setSpotlightOpen = useCockpitUi((state) => state.setSpotlightOpen);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setSpotlightOpen(true)}
+        className="group hidden h-10 w-full max-w-md items-center gap-2.5 rounded-xl border border-border/60 bg-background/50 px-3 text-left text-sm text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.4)] transition-all duration-200 hover:border-primary-300/70 hover:bg-background/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:shadow-none dark:hover:border-primary-800/70 md:flex"
+      >
+        <Search className="h-4 w-4 shrink-0 text-primary-500 transition-transform duration-200 group-hover:scale-110" />
+        <span className="min-w-0 flex-1 truncate">{tCockpit("spotlightTrigger", language)}</span>
+        <span className="flex shrink-0 items-center gap-1">
+          <Kbd>Ctrl</Kbd>
+          <Kbd>K</Kbd>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => setSpotlightOpen(true)}
+        aria-label={tCockpit("spotlightTrigger", language)}
+        className="flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+      >
+        <Search className="h-4 w-4" />
+      </button>
+    </>
+  );
+}
+
 export function Topbar({ title, className }: { title: string; className?: string }) {
   const router = useRouter();
-  const { profile, signOut, trial, isSubscribed } = useAuth();
+  const { profile, signOut } = useAuth();
   const { language } = useLanguage();
+  const themeMode = useThemeMode();
 
   const initial = (profile?.fullName ?? "").trim().charAt(0).toUpperCase() || "E";
-  const showTrialBadge = !isSubscribed && trial?.active && trial.daysRemaining > 0;
 
   async function handleSignOut() {
     await signOut();
@@ -135,16 +230,22 @@ export function Topbar({ title, className }: { title: string; className?: string
   return (
     <header
       className={cn(
-        "glass-panel z-20 flex h-14 shrink-0 items-center justify-between rounded-2xl px-3 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6",
+        "glass-panel z-20 flex h-14 shrink-0 items-center justify-between gap-3 rounded-2xl px-3 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-5",
         className
       )}
     >
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3 lg:w-48 lg:shrink-0 xl:w-56">
         <AnimatedBrandMark size="sm" className="lg:hidden" />
         <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">{title}</h1>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="hidden min-w-0 flex-1 justify-center md:flex">
+        <SpotlightTrigger />
+      </div>
+
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        <EngineBadge />
+        <PlanBadge />
         {/* 👈 ويدجت البومودورو العالمي يظهر هنا في كل التطبيق */}
         <PomodoroWidget />
 
@@ -159,15 +260,14 @@ export function Topbar({ title, className }: { title: string; className?: string
           <PlayCircle className="h-3.5 w-3.5" />
           Voir la Démo
         </Link> */}
-        {showTrialBadge && (
-          <Badge variant="warning" className="hidden sm:inline-flex">
-            Essai gratuit : {trial.daysRemaining} jour{trial.daysRemaining > 1 ? "s" : ""} restant
-            {trial.daysRemaining > 1 ? "s" : ""}
-          </Badge>
-        )}
-        <ThemeToggle />
+        <div className="md:hidden">
+          <SpotlightTrigger />
+        </div>
+        <UnifiedLanguageSwitch className="hidden sm:flex" />
+        <ThemeModeSwitcher className="hidden sm:flex" />
+        <NotificationCenter />
         <DropdownMenu>
-          <DropdownMenuTrigger className="rounded-full transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+          <DropdownMenuTrigger className="ml-0.5 rounded-full transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
             <Avatar>
               {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} alt="" />}
               <AvatarFallback>{initial}</AvatarFallback>
@@ -178,6 +278,27 @@ export function Topbar({ title, className }: { title: string; className?: string
               {profile?.fullName || profile?.email || "Étudiant(e)"}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            {/* Phones: language + appearance live here (no room for them in the bar). */}
+            <div className="px-2 py-1.5 sm:hidden">
+              <UnifiedLanguageSwitch />
+            </div>
+            {(Object.keys(THEME_MODE_LABELS) as ThemeMode[]).map((mode) => {
+              const ModeIcon = THEME_MODE_ICONS[mode];
+              return (
+                <DropdownMenuItem key={mode} onSelect={() => themeMode.select(mode)} className="sm:hidden">
+                  <ModeIcon className={cn("h-4 w-4", mode === "night" && "text-amber-500")} />
+                  <span className="flex-1">{THEME_MODE_LABELS[mode][language]}</span>
+                  {themeMode.current === mode && <span className="h-1.5 w-1.5 rounded-full bg-primary-500" />}
+                </DropdownMenuItem>
+              );
+            })}
+            <DropdownMenuSeparator className="sm:hidden" />
+            <DropdownMenuItem asChild>
+              <Link href="/dashboard/billing">
+                <CreditCard className="h-4 w-4" />
+                {t("billing", language)}
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/dashboard/settings">
                 <Settings className="h-4 w-4" />
