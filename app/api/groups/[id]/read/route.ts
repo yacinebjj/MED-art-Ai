@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { assertAcceptedMember } from "@/lib/group-chat";
+import { assertAcceptedMember, isMissingColumnError } from "@/lib/group-chat";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -46,6 +46,8 @@ export async function POST(_request: Request, { params }: { params: { id: string
     .eq("group_id", groupId)
     .eq("user_id", user.id);
 
+  // Database without the last_read_at migration: nothing to record — not an error for the chat room.
+  if (isMissingColumnError(error)) return NextResponse.json({ success: true, tracked: false });
   if (error) {
     return NextResponse.json({ success: false, error: `Mise à jour échouée : ${error.message}` }, { status: 500 });
   }

@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { BookOpen, Bookmark, FolderOpen, Hash, Maximize2, MessageSquare, Minimize2, Search, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatMember, MyChatGroup } from "@/types/group-chat";
+import { previewText } from "@/lib/group-chat-envelope";
 import type { LocalChatMessage } from "./MessageBubble";
 
 interface CommandPaletteProps {
@@ -134,13 +135,13 @@ export function CommandPalette({
 
     if (q.length >= 1) {
       const messageRows: Row[] = messages
-        .filter((m) => m.type === "text" && m.contentText?.toLowerCase().includes(q))
+        .filter((m) => m.type === "text" && previewText(m.contentText).toLowerCase().includes(q))
         .slice(-8)
         .reverse()
         .map((m) => ({
           key: `msg-${m.id}`,
           icon: MessageSquare,
-          title: m.contentText ?? "",
+          title: previewText(m.contentText),
           subtitle: m.senderName ?? "Étudiant(e)",
           onSelect: () => onJumpToMessage(m.id),
         }));

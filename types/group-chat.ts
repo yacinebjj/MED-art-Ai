@@ -31,6 +31,8 @@ export interface ChatMember {
   /** Snapshotted display name — see chat_members.display_name's own schema comment. */
   displayName: string | null;
   joinedAt: string;
+  /** When this member last had the chat open (chat_members.last_read_at) — drives "Vu" receipts. Null when unknown or when the column isn't migrated yet. */
+  lastReadAt: string | null;
   /** Real curriculum year (e.g. "4ème Année Médecine"), joined server-side from profiles.academic_year_id -> curriculum_academic_years.name — see app/api/groups/[id]/members/route.ts. Null when the member hasn't set their year in Paramètres. There is no "Professeur"/role concept anywhere in this schema — never invent one. */
   academicYearName: string | null;
 }

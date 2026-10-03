@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   BookOpen,
@@ -66,7 +66,12 @@ export function Spotlight() {
   const openLauncher = useCockpitUi((state) => state.openLauncher);
   const [query, setQuery] = useState("");
 
-  useHotkeys([{ combo: "mod+k", allowInInputs: true, handler: () => setOpen(!useCockpitUi.getState().spotlightOpen) }]);
+  // A group chat room owns Ctrl+K (its own message/member search, components/groups/ChatRoom.tsx) — never open both.
+  const pathname = usePathname();
+  const isGroupChatRoom = /^\/dashboard\/groups\/[^/]+$/.test(pathname);
+  useHotkeys([
+    { combo: "mod+k", allowInInputs: true, enabled: !isGroupChatRoom, handler: () => setOpen(!useCockpitUi.getState().spotlightOpen) },
+  ]);
 
   const g = GROUPS[language];
 

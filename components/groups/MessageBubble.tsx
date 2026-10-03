@@ -1,19 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "next-themes";
-import { AnimatePresence, motion } from "framer-motion";
-import { Bookmark, Check, Clock, Copy, GraduationCap, Pin, PinOff, RotateCcw, ShieldCheck, SmilePlus } from "lucide-react";
+import { AnimatePresence, motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
+import { Bookmark, Check, CheckCheck, Clock, Copy, CornerUpLeft, GraduationCap, Pin, PinOff, Reply, RotateCcw, ShieldCheck, SmilePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/providers/AuthProvider";
 import { AudioPlayer } from "./AudioPlayer";
 import { ChatImage } from "./ChatImage";
 import { QUICK_REACTIONS } from "@/lib/group-chat-reactions";
+import { decodeEnvelope, isPollVoteKey, plainText } from "@/lib/group-chat-envelope";
+import { RichText } from "./RichText";
+import { PollCard } from "./PollCard";
+import { AttachmentCard } from "./AttachmentCard";
 import type { ChatTheme } from "@/lib/chat-themes";
 import type { ChatMessage } from "@/types/group-chat";
 
 export type MessageStatus = "sending" | "sent" | "failed";
+
+/**
+ * Receipt shown on MY messages, computed by ChatRoom from real signals only:
+ * "sent" = saved server-side · "delivered" = another member is connected
+ * right now (Realtime presence) or has opened the chat since · "seen" =
+ * another member had the chat open after it was sent (presence readAt or
+ * chat_members.last_read_at).
+ */
+export type MessageReceipt = "sending" | "sent" | "delivered" | "seen" | "failed";
+
+/** How far a touch swipe to the right must go to trigger "reply". */
+const SWIPE_REPLY_PX = 64;
 
 export interface LocalChatMessage extends ChatMessage {
   status: MessageStatus;
@@ -37,6 +53,10 @@ interface MessageBubbleProps {
   senderAcademicYear: string | null;
   isSaved: boolean;
   onToggleSave: (message: LocalChatMessage) => void;
+  receipt: MessageReceipt;
+  onReply: (message: LocalChatMessage) => void;
+  onVote: (messageId: string, optionId: string) => void;
+  onJumpTo: (messageId: string) => void;
 }
 
 function initial(name: string | null): string {
@@ -75,6 +95,10 @@ export function MessageBubble({
   senderAcademicYear,
   isSaved,
   onToggleSave,
+  receipt,
+  onReply,
+  onVote,
+  onJumpTo,
 }: MessageBubbleProps) {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -83,10 +107,28 @@ export function MessageBubble({
   const [hovered, setHovered] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const isNeonTheme = theme.id === "neon";
+  const envelope = useMemo(() => (message.type === "text" ? decodeEnvelope(message.contentText) : null), [message.type, message.contentText]);
+  const mentionsMe = !isMine && !!user && !!envelope?.mentions?.some((id) => id.toLowerCase() === user.id.toLowerCase());
+  const onColoredBubble = isMine && (!theme.isLight || isDark);
+
+  // Swipe-to-reply: touch screens only (a mouse drag must keep selecting text).
+  const [canSwipe, setCanSwipe] = useState(false);
+  useEffect(() => {
+    setCanSwipe(window.matchMedia("(pointer: coarse)").matches);
+  }, []);
+  const dragX = useMotionValue(0);
+  const replyHintOpacity = useTransform(dragX, [0, SWIPE_REPLY_PX], [0, 1]);
+  function handleDragEnd(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) {
+    if (info.offset.x >= SWIPE_REPLY_PX) {
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(12);
+      onReply(message);
+    }
+  }
 
   function copyText() {
-    if (!message.contentText) return;
-    navigator.clipboard.writeText(message.contentText).then(() => toast({ variant: "success", title: "Message copié." }));
+    const text = envelope ? (envelope.poll ? envelope.poll.question : plainText(envelope.text)) : message.contentText;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => toast({ variant: "success", title: "Message copié." }));
   }
 
   function handlePickReaction(emoji: string) {
@@ -94,7 +136,8 @@ export function MessageBubble({
     setReactionPickerOpen(false);
   }
 
-  const reactionEntries = Object.entries(message.reactions).filter(([, userIds]) => userIds.length > 0);
+  // Poll votes share the reactions map ("poll:" keys) — they are shown in the poll, never as emoji chips.
+  const reactionEntries = Object.entries(message.reactions).filter(([key, userIds]) => userIds.length > 0 && !isPollVoteKey(key));
 
   return (
     <motion.div
@@ -150,6 +193,16 @@ export function MessageBubble({
           >
             <button
               type="button"
+              onClick={() => onReply(message)}
+              className="rounded-full p-1.5 text-zinc-400 transition-all duration-150 hover:scale-110 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-cyan-300"
+              aria-label="Répondre"
+              title="Répondre"
+            >
+              <Reply className="h-3.5 w-3.5" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => setReactionPickerOpen((v) => !v)}
               className="rounded-full p-1.5 text-zinc-400 transition-all duration-150 hover:scale-110 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-cyan-300"
               aria-label="Réagir"
@@ -202,7 +255,7 @@ export function MessageBubble({
               {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
             </button>
 
-            {message.type === "text" && (
+            {message.type === "text" && !envelope?.attachment && (
               <button
                 type="button"
                 onClick={copyText}
@@ -230,10 +283,16 @@ export function MessageBubble({
             </button>
           </div>
 
-          <div
+          <motion.div
+            drag={canSwipe && message.status !== "sending" ? "x" : false}
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={{ left: 0, right: 0.45 }}
+            dragDirectionLock
+            onDragEnd={handleDragEnd}
+            style={{ x: dragX }}
             className={cn(
-              "relative text-[16px] leading-relaxed transition-all duration-200",
-              message.type === "text" && "whitespace-pre-wrap",
+              "relative min-w-0 text-[16px] leading-relaxed transition-[background-color,border-color,box-shadow] duration-200",
+              mentionsMe && "ring-2 ring-amber-400/80 ring-offset-1 ring-offset-transparent",
               // Image messages show the picture alone — no bubble background/padding/rounded-xl,
               // since ChatImage already carries its own rounded corners + lightbox chrome and a
               // wrapper bubble around it would double up as a visible frame.
@@ -252,7 +311,37 @@ export function MessageBubble({
               message.status === "sending" && "opacity-70"
             )}
           >
-            {message.type === "text" && message.contentText}
+            {canSwipe && (
+              <motion.span
+                aria-hidden
+                style={{ opacity: replyHintOpacity }}
+                className="pointer-events-none absolute -left-9 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-cyan-500 text-white shadow-md"
+              >
+                <CornerUpLeft className="h-4 w-4" />
+              </motion.span>
+            )}
+            {envelope?.replyTo && (
+              <button
+                type="button"
+                onClick={() => onJumpTo(envelope.replyTo!.id)}
+                className={cn(
+                  "mb-1.5 block w-full min-w-0 rounded-lg border-l-[3px] px-2.5 py-1.5 text-left text-xs transition-colors",
+                  onColoredBubble ? "border-white/80 bg-black/15 hover:bg-black/25" : "border-cyan-500 bg-zinc-200/70 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10"
+                )}
+              >
+                <span className={cn("block font-bold", onColoredBubble ? "text-white" : "text-cyan-700 dark:text-cyan-300")}>{envelope.replyTo.senderName ?? "Étudiant(e)"}</span>
+                <span className={cn("block truncate", onColoredBubble ? "text-white/85" : "text-zinc-600 dark:text-zinc-300")}>{envelope.replyTo.excerpt || "…"}</span>
+              </button>
+            )}
+            {envelope?.poll && (
+              <PollCard poll={envelope.poll} reactions={message.reactions} currentUserId={user?.id ?? null} onVote={(optionId) => onVote(message.id, optionId)} onColoredBubble={onColoredBubble} />
+            )}
+            {envelope?.attachment && <AttachmentCard attachment={envelope.attachment} onColoredBubble={onColoredBubble} />}
+            {envelope && !envelope.poll && envelope.text.trim() && (
+              <div className={cn(envelope.attachment && "mt-2")}>
+                <RichText text={envelope.text} onColoredBubble={onColoredBubble} currentUserId={user?.id ?? null} />
+              </div>
+            )}
             {message.type === "image" && message.mediaUrl && <ChatImage src={message.mediaUrl} />}
             {message.type === "video" && message.mediaUrl && <video src={message.mediaUrl} controls className="max-h-64 max-w-full rounded-lg" />}
             {message.type === "audio" && message.mediaUrl && (
@@ -262,9 +351,9 @@ export function MessageBubble({
               // AudioPlayer's "on a colored bubble" (light) controls just
               // like every other theme does, not the dark controls a truly
               // light bubble would need.
-              <AudioPlayer src={message.mediaUrl} onColoredBubble={isMine && (!theme.isLight || isDark)} />
+              <AudioPlayer src={message.mediaUrl} onColoredBubble={onColoredBubble} />
             )}
-          </div>
+          </motion.div>
         </div>
 
         {reactionEntries.length > 0 && (
@@ -293,7 +382,7 @@ export function MessageBubble({
 
         <p className="mt-1 flex items-center gap-1 px-1 text-[10px] tabular-nums text-zinc-400 dark:text-zinc-500">
           {TIME_FORMAT.format(new Date(message.createdAt))}
-          {isMine && <StatusIcon status={message.status} />}
+          {isMine && <ReceiptIcon receipt={receipt} />}
         </p>
 
         {message.status === "failed" && (
@@ -311,9 +400,11 @@ export function MessageBubble({
   );
 }
 
-/** Real states only: "sending" (optimistic, not yet confirmed by the server) and "sent" (saved server-side). No "read" tick — this app has no per-recipient read tracking (see this file's own header comment), so a double-check would be a fabricated signal, not a design omission. */
-function StatusIcon({ status }: { status: MessageStatus }) {
-  if (status === "sending") return <Clock className="h-2.5 w-2.5 animate-pulse" />;
-  if (status === "sent") return <Check className="h-2.5 w-2.5" />;
+/** ✓ sent · ✓✓ delivered · ✓✓ (cyan) seen — every state backed by a real signal (see MessageReceipt). */
+function ReceiptIcon({ receipt }: { receipt: MessageReceipt }) {
+  if (receipt === "sending") return <Clock className="h-2.5 w-2.5 animate-pulse" aria-label="Envoi…" />;
+  if (receipt === "sent") return <Check className="h-3 w-3" aria-label="Envoyé" />;
+  if (receipt === "delivered") return <CheckCheck className="h-3 w-3" aria-label="Distribué" />;
+  if (receipt === "seen") return <CheckCheck className="h-3 w-3 text-cyan-500 dark:text-cyan-400" aria-label="Vu" />;
   return null;
 }

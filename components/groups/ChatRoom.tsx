@@ -1,13 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowDown,
   ArrowLeft,
+  AtSign,
+  BarChart3,
   Bookmark,
   Check,
+  FileText,
   FolderOpen,
   ImageIcon,
   Loader2,
@@ -16,8 +19,10 @@ import {
   Minimize2,
   Pin,
   Plus,
+  Reply,
   Search,
   Send,
+  Settings2,
   Smile,
   Square,
   Stethoscope,
@@ -47,8 +52,11 @@ import { MemberDrawer } from "./MemberDrawer";
 import { MediaVaultPanel } from "./MediaVaultPanel";
 import { SavedMessagesPanel } from "./SavedMessagesPanel";
 import { CommandPalette } from "./CommandPalette";
-import { MessageBubble, type LocalChatMessage } from "./MessageBubble";
-import type { ChatMember, ChatMessage, MessageReactions } from "@/types/group-chat";
+import { MessageBubble, type LocalChatMessage, type MessageReceipt } from "./MessageBubble";
+import { GroupSettingsPanel } from "./GroupSettingsPanel";
+import { PollComposer } from "./PollComposer";
+import { applyPollVote, decodeEnvelope, encodeEnvelope, excerpt, previewText, type ChatPoll, type MessageEnvelope } from "@/lib/group-chat-envelope";
+import type { ChatGroup, ChatMember, ChatMessage, MessageReactions } from "@/types/group-chat";
 
 interface ChatRoomProps {
   groupId: string;
@@ -87,6 +95,19 @@ const TYPING_TIMEOUT_MS = 4000;
 const TYPING_BROADCAST_THROTTLE_MS = 2000;
 
 const GROUP_GAP_MS = 5 * 60 * 1000; // consecutive same-sender messages within 5 minutes visually merge into one block.
+
+/** Minimum gap between two "I've read up to now" updates (presence + last_read_at) while the chat is open. */
+const READ_MARK_THROTTLE_MS = 4000;
+const COMPOSER_MAX_HEIGHT_PX = 160;
+const ACCEPTED_DOCUMENT_TYPES = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt";
+
+/** The "@word" being typed right before the caret, if any (for the mention autocomplete). */
+function mentionQueryAt(text: string, caret: number): { start: number; query: string } | null {
+  const before = text.slice(0, caret);
+  const match = /(^|\s)@([\p{L}\p{N}_.-]{0,30})$/u.exec(before);
+  if (!match) return null;
+  return { start: caret - match[2].length - 1, query: match[2] };
+}
 
 /** mm:ss chronometer label for the live recording indicator (elapsed seconds since startRecording()). */
 function formatRecordingDuration(totalSeconds: number): string {
@@ -225,8 +246,9 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const { language } = useLanguage();
   const { theme, themeId, selectTheme } = useChatTheme();
 
-  const [groupName, setGroupName] = useState<string | null>(null);
-  const [groupAdminId, setGroupAdminId] = useState<string | null>(null);
+  const [group, setGroup] = useState<ChatGroup | null>(null);
+  const groupName = group?.name ?? null;
+  const groupAdminId = group?.adminId ?? null;
   const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [messages, setMessages] = useState<LocalChatMessage[]>([]);
@@ -239,6 +261,20 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const [isVaultOpen, setIsVaultOpen] = useState(false);
   const [isSavedOpen, setIsSavedOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPollComposerOpen, setIsPollComposerOpen] = useState(false);
+  const [replyTo, setReplyTo] = useState<LocalChatMessage | null>(null);
+  // Mentions picked from the autocomplete: display name -> user id. The
+  // textarea shows a readable "@Name"; it becomes a "@[Name](id)" token on send.
+  const pickedMentionsRef = useRef<Map<string, string>>(new Map());
+  const [mentionState, setMentionState] = useState<{ start: number; query: string; index: number } | null>(null);
+  // Live "read up to" per member from Realtime presence (who has the chat open, and until when).
+  const [presenceReadAt, setPresenceReadAt] = useState<Record<string, string>>({});
+  // Messages another member's client had a live connection for — sticky once true.
+  const [deliveredIds, setDeliveredIds] = useState<Set<string>>(new Set());
+  const presenceChannelRef = useRef<RealtimeChannel | null>(null);
+  const lastReadMarkRef = useRef(0);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   // Lifted out of MemberDrawer (which used to fetch its own copy only while
   // open) so ONE fetch of GET /api/groups/[id]/members can drive both the
   // drawer AND each MessageBubble's real academic-year badge below.
@@ -281,7 +317,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   // Closes a real race: startRecording awaits getUserMedia before it sets
   // mediaRecorderRef/isRecording, so two rapid clicks on the mic button
@@ -388,8 +424,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         setAccessError(groupRes.error ?? "Impossible d'accéder à ce groupe.");
         return;
       }
-      setGroupName(groupRes.group.name);
-      setGroupAdminId(groupRes.group.adminId);
+      setGroup(groupRes.group as ChatGroup);
       setPinnedMessageId(groupRes.group.pinnedMessageId ?? null);
       markAsRead();
     }
@@ -487,8 +522,13 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "chat_groups", filter: `id=eq.${groupId}` },
         (payload) => {
-          const row = payload.new as { pinned_message_id: string | null };
+          const row = payload.new as { pinned_message_id: string | null; name?: string; admin_id?: string; join_code?: string };
           setPinnedMessageId(row.pinned_message_id ?? null);
+          setGroup((prev) =>
+            prev
+              ? { ...prev, name: row.name ?? prev.name, adminId: row.admin_id ?? prev.adminId, joinCode: row.join_code ?? prev.joinCode }
+              : prev
+          );
         }
       )
       .subscribe();
@@ -512,11 +552,22 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     const presenceChannel = supabase.channel(`presence-group-${groupId}`, { config: { presence: { key: user.id } } });
     presenceChannel
       .on("presence", { event: "sync" }, () => {
-        setOnlineUserIds(new Set(Object.keys(presenceChannel.presenceState())));
+        const state = presenceChannel.presenceState<{ userId?: string; readAt?: string | null }>();
+        setOnlineUserIds(new Set(Object.keys(state)));
+        const readAt: Record<string, string> = {};
+        for (const [key, metas] of Object.entries(state)) {
+          const latest = metas.map((m) => m.readAt).filter((v): v is string => typeof v === "string").sort().pop();
+          if (latest) readAt[key] = latest;
+        }
+        setPresenceReadAt(readAt);
       })
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") void presenceChannel.track({ userId: user.id, displayName });
+        if (status === "SUBSCRIBED") {
+          const visible = document.visibilityState === "visible";
+          void presenceChannel.track({ userId: user.id, displayName, readAt: visible ? new Date().toISOString() : null });
+        }
       });
+    presenceChannelRef.current = presenceChannel;
 
     const typingChannel = supabase.channel(`typing-group-${groupId}`);
     typingChannel
@@ -544,6 +595,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     return () => {
       clearInterval(pruneInterval);
       typingChannelRef.current = null;
+      presenceChannelRef.current = null;
       supabase.removeChannel(presenceChannel);
       supabase.removeChannel(typingChannel);
     };
@@ -558,6 +610,70 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     lastTypingBroadcastAtRef.current = now;
     const displayName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
     void typingChannelRef.current.send({ type: "broadcast", event: "typing", payload: { userId: user.id, displayName } });
+  }
+
+  /**
+   * "I've seen everything up to now": refreshes my presence readAt (live
+   * "Vu" for whoever is connected) and chat_members.last_read_at (persistent
+   * "Vu" + lobby unread badge). Only while the tab is visible and the feed is
+   * near its bottom; throttled.
+   */
+  function markSeenNow(force = false) {
+    if (!user || document.visibilityState !== "visible") return;
+    const el = feedRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight > 200) return;
+    const now = Date.now();
+    if (!force && now - lastReadMarkRef.current < READ_MARK_THROTTLE_MS) return;
+    lastReadMarkRef.current = now;
+    const displayName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
+    void presenceChannelRef.current?.track({ userId: user.id, displayName, readAt: new Date(now).toISOString() });
+    fetch(`/api/groups/${groupId}/read`, { method: "POST" }).catch(() => {});
+  }
+
+  // New messages arriving while I'm looking at the bottom of the chat count as seen.
+  useEffect(() => {
+    markSeenNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
+
+  // Delivered: another member's client is connected while my message exists (sticky).
+  useEffect(() => {
+    if (!user) return;
+    const othersOnline = Array.from(onlineUserIds).some((id) => id !== user.id);
+    if (!othersOnline) return;
+    setDeliveredIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const m of messages) {
+        if (m.userId === user.id && m.status === "sent" && !next.has(m.id)) {
+          next.add(m.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [onlineUserIds, messages, user]);
+
+  /** Latest moment each OTHER member is known to have had the chat open (presence, else persisted last_read_at). */
+  const othersReadAt = useMemo(() => {
+    const readAt: string[] = [];
+    const ids = new Set<string>([...Object.keys(presenceReadAt), ...(members ?? []).map((m) => m.userId)]);
+    for (const id of ids) {
+      if (id === user?.id) continue;
+      const live = presenceReadAt[id];
+      const stored = members?.find((m) => m.userId === id)?.lastReadAt ?? null;
+      const best = [live, stored].filter((v): v is string => typeof v === "string").sort().pop();
+      if (best) readAt.push(best);
+    }
+    return readAt.sort().pop() ?? null;
+  }, [presenceReadAt, members, user?.id]);
+
+  function receiptFor(message: LocalChatMessage): MessageReceipt {
+    if (message.status === "sending") return "sending";
+    if (message.status === "failed") return "failed";
+    if (othersReadAt && othersReadAt >= message.createdAt) return "seen";
+    if (deliveredIds.has(message.id)) return "delivered";
+    return "sent";
   }
 
   /**
@@ -597,9 +713,34 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     el?.setSelectionRange(caret, caret);
   }, [input]);
 
-  /** Sends (or re-sends, on retry) a text message. `existing` is set only when retrying an already-optimistic, failed message — reuses its id instead of minting a new temp one. */
-  async function sendText(text: string, existing?: LocalChatMessage) {
+  /** Sends (or re-sends, on retry) a text message — optionally a reply and/or a poll. `existing` is set only when retrying an already-optimistic, failed message — reuses its id instead of minting a new temp one. */
+  async function sendText(text: string, existing?: LocalChatMessage, extras?: { replyTo?: LocalChatMessage | null; poll?: { question: string; options: string[]; multi: boolean } }) {
     const tempId = existing?.id ?? `temp-${generateId()}`;
+    // Optimistic envelope, so the reply quote / poll render instantly; the server rebuilds and validates its own.
+    const replyRef = extras?.replyTo
+      ? {
+          id: extras.replyTo.id,
+          senderName: extras.replyTo.senderName,
+          excerpt: excerpt(extras.replyTo.type === "text" ? previewText(extras.replyTo.contentText) : extras.replyTo.type === "image" ? "📷 Photo" : extras.replyTo.type === "video" ? "🎥 Vidéo" : "🎤 Message vocal"),
+        }
+      : undefined;
+    const optimisticPoll: ChatPoll | undefined = extras?.poll
+      ? { question: extras.poll.question, options: extras.poll.options.map((label, i) => ({ id: `o${i + 1}`, label })), multi: extras.poll.multi }
+      : undefined;
+    const optimisticContent = existing
+      ? existing.contentText
+      : encodeEnvelope({ text, ...(replyRef ? { replyTo: replyRef } : {}), ...(optimisticPoll ? { poll: optimisticPoll } : {}) } satisfies MessageEnvelope);
+    // On retry, rebuild the request from the failed message's own envelope.
+    const retryEnvelope = existing ? decodeEnvelope(existing.contentText) : null;
+    const requestBody = {
+      contentText: existing ? retryEnvelope?.text ?? text : text,
+      replyToId: existing ? retryEnvelope?.replyTo?.id : replyRef?.id,
+      poll: existing
+        ? retryEnvelope?.poll
+          ? { question: retryEnvelope.poll.question, options: retryEnvelope.poll.options.map((o) => o.label), multi: retryEnvelope.poll.multi }
+          : undefined
+        : extras?.poll,
+    };
 
     if (existing) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, status: "sending" } : m)));
@@ -609,7 +750,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         groupId,
         userId: user?.id ?? "",
         type: "text",
-        contentText: text,
+        contentText: optimisticContent,
         mediaUrl: null,
         senderName: typeof user?.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null,
         createdAt: new Date().toISOString(),
@@ -623,7 +764,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       const res = await fetch(`/api/groups/${groupId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contentText: text }),
+        body: JSON.stringify(requestBody),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "L'envoi a échoué.");
@@ -643,12 +784,27 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
     }
   }
 
-  async function handleSend(e: FormEvent) {
-    e.preventDefault();
+  /** "@Name" picked from the autocomplete → "@[Name](userId)" tokens the server can validate. */
+  function withMentionTokens(text: string): string {
+    let result = text;
+    for (const [name, id] of pickedMentionsRef.current) {
+      if (!result.includes(`@${name}`)) continue;
+      result = result.split(`@${name}`).join(`@[${name}](${id})`);
+    }
+    return result;
+  }
+
+  async function handleSend(e?: FormEvent) {
+    e?.preventDefault();
     const text = input.trim();
     if (!text) return;
+    const reply = replyTo;
     setInput("");
-    sendText(text);
+    setReplyTo(null);
+    setMentionState(null);
+    const finalText = withMentionTokens(text);
+    pickedMentionsRef.current = new Map();
+    sendText(finalText, undefined, { replyTo: reply });
   }
 
   function handleRetry(message: LocalChatMessage) {
@@ -656,6 +812,103 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       sendText(message.contentText, message);
     }
   }
+
+  function startReply(message: LocalChatMessage) {
+    setReplyTo(message);
+    requestAnimationFrame(() => messageInputRef.current?.focus());
+  }
+
+  function handlePublishPoll(poll: { question: string; options: string[]; multi: boolean }) {
+    sendText("", undefined, { poll, replyTo: null });
+  }
+
+  /** Optimistic vote (same reactions-map logic as the server), reconciled with the server's answer. */
+  async function handleVote(messageId: string, optionId: string) {
+    if (!user) return;
+    const userId = user.id;
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const poll = decodeEnvelope(m.contentText).poll;
+        return poll ? { ...m, reactions: applyPollVote(m.reactions, poll, optionId, userId) } : m;
+      })
+    );
+    try {
+      const res = await fetch(`/api/groups/${groupId}/messages/${messageId}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optionId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Le vote a échoué.");
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions ?? {} } : m)));
+    } catch (err) {
+      toast({ variant: "error", title: err instanceof Error ? err.message : "Le vote a échoué." });
+    }
+  }
+
+  // ---- Mention autocomplete
+  const mentionCandidates = useMemo(() => {
+    if (!mentionState) return [];
+    const q = mentionState.query.toLowerCase();
+    return (members ?? [])
+      .filter((m) => m.userId !== user?.id && (m.displayName ?? "").toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [mentionState, members, user?.id]);
+
+  function updateMentionState(value: string, caret: number) {
+    const found = mentionQueryAt(value, caret);
+    setMentionState(found ? { ...found, index: 0 } : null);
+  }
+
+  function pickMention(member: ChatMember) {
+    if (!mentionState) return;
+    const name = (member.displayName ?? "Étudiant").replace(/[[\]()]/g, "").trim() || "Étudiant";
+    pickedMentionsRef.current.set(name, member.userId);
+    const el = messageInputRef.current;
+    const caret = el?.selectionStart ?? input.length;
+    const next = `${input.slice(0, mentionState.start)}@${name} ${input.slice(caret)}`;
+    pendingCaretRef.current = mentionState.start + name.length + 2;
+    setInput(next);
+    setMentionState(null);
+  }
+
+  function handleComposerKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (mentionState && mentionCandidates.length > 0) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        setMentionState((s) => (s ? { ...s, index: (s.index + delta + mentionCandidates.length) % mentionCandidates.length } : s));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        pickMention(mentionCandidates[mentionState.index] ?? mentionCandidates[0]);
+        return;
+      }
+      if (e.key === "Escape") {
+        setMentionState(null);
+        return;
+      }
+    }
+    if (e.key === "Escape" && replyTo) {
+      setReplyTo(null);
+      return;
+    }
+    // Enter sends, Shift+Enter = new line (desktop). On touch keyboards Enter inserts a line; the Send button sends.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia("(pointer: fine)").matches) {
+      e.preventDefault();
+      void handleSend();
+    }
+  }
+
+  // Auto-grow the composer up to COMPOSER_MAX_HEIGHT_PX.
+  useLayoutEffect(() => {
+    const el = messageInputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`;
+  }, [input]);
 
   /** Optimistic toggle — flips the reaction locally right away (matches this file's own sendText pattern), then reconciles with the server's real map. The realtime UPDATE listener above will also deliver this same change to every OTHER open tab/member; this optimistic update is purely to avoid a visible round-trip delay for the person who just tapped it. */
   async function handleReact(messageId: string, emoji: string) {
@@ -972,6 +1225,16 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
             <Users className="h-4 w-4" />
           </button>
 
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            className="rounded-full p-1.5 text-zinc-500 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-cyan-600 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-cyan-300 dark:hover:shadow-[0_0_12px_-2px_rgba(34,211,238,0.5)] active:scale-90"
+            aria-label="Paramètres et invitation"
+            title="Paramètres et invitation"
+          >
+            <Settings2 className="h-4 w-4" />
+          </button>
+
           <ThemePicker themeId={themeId} onSelect={selectTheme} />
 
           {/* Medical background-theme picker — separate button/popover from ThemePicker above (different icon, different concern: room background vs. my own bubble color). */}
@@ -1092,7 +1355,11 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
               title="Aller au message épinglé"
             >
               <p className="truncate font-medium text-amber-900 dark:text-amber-200">
-                {messages.find((m) => m.id === pinnedMessageId)?.contentText ?? tGroups("pinnedMessageFallback", language)}
+                {(() => {
+                  const pinned = messages.find((m) => m.id === pinnedMessageId);
+                  if (!pinned) return tGroups("pinnedMessageFallback", language);
+                  return pinned.type === "text" ? previewText(pinned.contentText) || tGroups("pinnedMessageFallback", language) : pinned.type === "image" ? "📷 Photo" : pinned.type === "video" ? "🎥 Vidéo" : "🎤 Message vocal";
+                })()}
               </p>
               {(() => {
                 const pinnedSender = messages.find((m) => m.id === pinnedMessageId)?.senderName;
@@ -1112,7 +1379,39 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         )}
 
         {/* z-10 relative is load-bearing here: without it, this scroll region would sit in the same stacking context as the absolutely-positioned pattern layer above and could end up behind it, breaking message legibility and audio-player clicks. chat-scrollbar (app/globals.css) is the thin dark scrollbar treatment, scoped to this one scroll region rather than globally. */}
-        <div ref={feedRef} onScroll={handleFeedScroll} className="chat-scrollbar relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
+        <div
+          ref={feedRef}
+          onScroll={() => {
+            handleFeedScroll();
+            markSeenNow();
+          }}
+          className="chat-scrollbar relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1"
+        >
+          {feed.length === 0 && group && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-3 rounded-3xl border border-cyan-200/60 bg-white/70 px-6 py-8 text-center shadow-lg backdrop-blur-md dark:border-cyan-900/40 dark:bg-zinc-900/60"
+            >
+              <motion.div animate={{ y: [0, -6, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+                <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-[0_0_30px_rgba(34,211,238,0.45)]">
+                  <Stethoscope className="h-8 w-8" />
+                </span>
+              </motion.div>
+              <p className="text-base font-extrabold text-zinc-900 dark:text-white">Le bloc est prêt. La garde commence.</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                Invite tes collègues avec le code <span className="font-mono font-bold text-cyan-600 dark:text-cyan-300">{group.joinCode}</span>, lance un sondage ou partage ton premier cours.
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button type="button" onClick={() => setIsSettingsOpen(true)} className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-cyan-500/30">
+                  Inviter
+                </button>
+                <button type="button" onClick={() => setIsPollComposerOpen(true)} className="rounded-xl border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:text-zinc-200 dark:hover:bg-white/5">
+                  Créer un sondage
+                </button>
+              </div>
+            </motion.div>
+          )}
           <AnimatePresence initial={false}>
             {feed.map((item) =>
               item.kind === "day" ? (
@@ -1130,6 +1429,10 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
                   onTogglePin={handleTogglePin}
                   isSenderAdmin={!!groupAdminId && item.message.userId === groupAdminId}
                   senderAcademicYear={academicYearByUserId.get(item.message.userId) ?? null}
+                  receipt={receiptFor(item.message)}
+                  onReply={startReply}
+                  onVote={handleVote}
+                  onJumpTo={jumpToMessage}
                   isSaved={isSaved(item.message.id)}
                   onToggleSave={(m) =>
                     toggleSaved({
@@ -1138,7 +1441,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
                       groupName: groupName ?? "Groupe",
                       senderName: m.senderName,
                       type: m.type,
-                      contentText: m.contentText,
+                      contentText: m.type === "text" ? previewText(m.contentText) : m.contentText,
                       mediaUrl: m.mediaUrl,
                       createdAt: m.createdAt,
                     })
@@ -1196,7 +1499,41 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
             Three 44px controls instead of six ~32px ones — the old row
             couldn't fit the input's intrinsic width on a phone, which pushed
             Send out of the clipped container. */}
-        <form onSubmit={handleSend} className="relative z-10 flex shrink-0 items-center gap-2">
+        {/* Reply preview */}
+        <AnimatePresence>
+          {replyTo && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="relative z-10 -mb-1 flex items-center gap-2 rounded-2xl border border-cyan-300/50 bg-white/90 px-3 py-2 shadow-md backdrop-blur-md dark:border-cyan-800/50 dark:bg-zinc-900/90"
+            >
+              <Reply className="h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-400" />
+              <button type="button" onClick={() => jumpToMessage(replyTo.id)} className="min-w-0 flex-1 border-l-2 border-cyan-500 pl-2 text-left">
+                <span className="block text-xs font-bold text-cyan-700 dark:text-cyan-300">Réponse à {replyTo.senderName ?? "Étudiant(e)"}</span>
+                <span className="block truncate text-xs text-zinc-600 dark:text-zinc-300">
+                  {replyTo.type === "text" ? previewText(replyTo.contentText) : replyTo.type === "image" ? "📷 Photo" : replyTo.type === "video" ? "🎥 Vidéo" : "🎤 Message vocal"}
+                </span>
+              </button>
+              <button type="button" onClick={() => setReplyTo(null)} aria-label="Annuler la réponse" className="rounded-full p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-white/10 dark:hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <form onSubmit={handleSend} className="relative z-10 flex shrink-0 items-end gap-2">
+          <input
+            ref={documentInputRef}
+            type="file"
+            accept={ACCEPTED_DOCUMENT_TYPES}
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) uploadMedia(f);
+              e.target.value = "";
+            }}
+          />
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f); e.target.value = ""; }} />
           <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f); e.target.value = ""; }} />
 
@@ -1249,6 +1586,28 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
                       <Video className="h-5 w-5 shrink-0 text-cyan-600 dark:text-cyan-400" />
                       {tGroups("sendVideoAriaLabel", language)}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAttachMenuOpen(false);
+                        documentInputRef.current?.click();
+                      }}
+                      className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-100 active:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10 dark:active:bg-white/10"
+                    >
+                      <FileText className="h-5 w-5 shrink-0 text-rose-500 dark:text-rose-400" />
+                      Document (PDF, Word, PPT…)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAttachMenuOpen(false);
+                        setIsPollComposerOpen(true);
+                      }}
+                      className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-100 active:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-white/10 dark:active:bg-white/10"
+                    >
+                      <BarChart3 className="h-5 w-5 shrink-0 text-violet-500 dark:text-violet-400" />
+                      Sondage
+                    </button>
                   </motion.div>
                 </>
               )}
@@ -1274,24 +1633,80 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
               <span className="shrink-0 text-xs font-semibold tabular-nums text-rose-600 dark:text-rose-400">{formatRecordingDuration(recordingSeconds)}</span>
             </div>
           ) : (
-            <div className="flex h-11 min-w-0 flex-1 items-center rounded-full bg-white pl-4 pr-1 shadow-md shadow-zinc-300/30 ring-1 ring-zinc-200 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-cyan-500/40 dark:bg-zinc-900 dark:shadow-black/40 dark:ring-white/10">
-              <input
+            <div className="relative flex min-h-11 min-w-0 flex-1 items-end rounded-[22px] bg-white py-1 pl-4 pr-1 shadow-md shadow-zinc-300/30 ring-1 ring-zinc-200 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-cyan-500/40 dark:bg-zinc-900 dark:shadow-black/40 dark:ring-white/10">
+              {/* @mention autocomplete */}
+              <AnimatePresence>
+                {mentionState && mentionCandidates.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
+                    className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-white/10 dark:bg-zinc-900"
+                    role="listbox"
+                  >
+                    {mentionCandidates.map((member, index) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        role="option"
+                        aria-selected={index === mentionState.index}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          pickMention(member);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm",
+                          index === mentionState.index ? "bg-cyan-50 text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-200" : "text-zinc-700 dark:text-zinc-200"
+                        )}
+                      >
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-xs font-bold dark:bg-zinc-800">
+                          {(member.displayName ?? "?").trim().charAt(0).toUpperCase() || "?"}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{member.displayName ?? "Étudiant(e)"}</span>
+                        {onlineUserIds.has(member.userId) && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <textarea
                 ref={messageInputRef}
                 value={input}
+                rows={1}
                 onChange={(e) => {
                   setInput(e.target.value);
+                  updateMentionState(e.target.value, e.target.selectionStart ?? e.target.value.length);
                   notifyTyping();
                 }}
+                onKeyDown={handleComposerKeyDown}
+                onClick={(e) => updateMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
                 onPaste={handlePaste}
                 placeholder={tGroups("messagePlaceholder", language)}
-                // min-w-0: without it an <input>'s intrinsic ~20-character width
-                // refuses to shrink, overflowing the row on narrow phones.
-                className="h-full min-w-0 flex-1 bg-transparent text-[15px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-white dark:placeholder:text-zinc-500"
+                aria-label={tGroups("messagePlaceholder", language)}
+                // min-w-0: without it the field's intrinsic width refuses to shrink on narrow phones.
+                className="max-h-40 min-h-9 min-w-0 flex-1 resize-none bg-transparent py-2 text-[15px] leading-5 text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-white dark:placeholder:text-zinc-500"
               />
+              <button
+                type="button"
+                onClick={() => {
+                  const el = messageInputRef.current;
+                  const caret = el?.selectionStart ?? input.length;
+                  const prefix = caret > 0 && !/\s$/.test(input.slice(0, caret)) ? " @" : "@";
+                  const next = input.slice(0, caret) + prefix + input.slice(caret);
+                  pendingCaretRef.current = caret + prefix.length;
+                  setInput(next);
+                  setMentionState({ start: caret + prefix.length - 1, query: "", index: 0 });
+                }}
+                className="mb-0.5 hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-transform duration-150 hover:text-cyan-600 active:scale-90 dark:text-zinc-400 dark:hover:text-cyan-300 sm:flex"
+                aria-label="Mentionner un membre"
+                title="Mentionner (@)"
+              >
+                <AtSign className="h-[18px] w-[18px]" />
+              </button>
 
               {/* Deliberately NOT `relative`: the picker anchors to the full-width
                   form instead, so its 18rem panel stays on-screen on 320px phones. */}
-              <div className="shrink-0">
+              <div className="mb-0.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsEmojiPickerOpen((v) => !v)}
@@ -1389,6 +1804,18 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       />
 
       <MediaVaultPanel groupId={groupId} isOpen={isVaultOpen} onClose={() => setIsVaultOpen(false)} />
+
+      <GroupSettingsPanel
+        group={group}
+        members={members}
+        currentUserId={user?.id ?? null}
+        onlineUserIds={onlineUserIds}
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onGroupUpdated={(updated) => setGroup(updated)}
+      />
+
+      <PollComposer open={isPollComposerOpen} onOpenChange={setIsPollComposerOpen} onSubmit={handlePublishPoll} />
 
       <SavedMessagesPanel
         isOpen={isSavedOpen}

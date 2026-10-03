@@ -13,7 +13,10 @@ export interface QuickReaction {
 
 export const QUICK_REACTIONS: QuickReaction[] = [
   { emoji: "👍", label: "D'accord" },
+  { emoji: "🔥", label: "Excellent" },
   { emoji: "❤️", label: "Merci" },
+  { emoji: "🧠", label: "À mémoriser" },
+  { emoji: "🩺", label: "Clinique" },
   { emoji: "🔁", label: "À revoir" },
   { emoji: "⚠️", label: "Cas important" },
   { emoji: "😂", label: "Ahah" },

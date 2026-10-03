@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, Clock, Copy, MessageCircle, ShieldCheck, Users } from "lucide-react";
+import { ChevronDown, Clock, Copy, Loader2, MessageCircle, ShieldCheck, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 import { Avatar, AvatarFallback } from "@/components/ui/Avatar";
@@ -14,9 +14,11 @@ import type { MyChatGroup } from "@/types/group-chat";
 
 interface GroupCardProps {
   group: MyChatGroup;
+  /** Optimistic card shown the instant "Créer" is clicked, before the server confirms. */
+  creating?: boolean;
 }
 
-export function GroupCard({ group }: GroupCardProps) {
+export function GroupCard({ group, creating = false }: GroupCardProps) {
   const { toast } = useToast();
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(group.pendingCount);
@@ -65,7 +67,7 @@ export function GroupCard({ group }: GroupCardProps) {
             ) : (
               <p className="truncate text-xs italic text-muted-foreground/70">Aucun message pour le moment</p>
             )}
-            {group.isAdmin && (
+            {group.isAdmin && !creating && (
               <button
                 type="button"
                 onClick={copyJoinCode}
@@ -82,8 +84,14 @@ export function GroupCard({ group }: GroupCardProps) {
           {group.lastMessage && (
             <RelativeTime timestamp={group.lastMessage.createdAt} className="text-[10px] text-muted-foreground" />
           )}
-          {group.myStatus === "accepted" ? (
+          {creating ? (
+            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Création…
+            </span>
+          ) : group.myStatus === "accepted" ? (
             <Link
+              prefetch
               href={`/dashboard/groups/${group.id}`}
               className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-soft transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-glow active:scale-95"
             >
@@ -99,7 +107,7 @@ export function GroupCard({ group }: GroupCardProps) {
         </div>
       </div>
 
-      {group.isAdmin && (
+      {group.isAdmin && !creating && (
         <div className="mt-3 border-t border-border pt-1">
           <button
             type="button"

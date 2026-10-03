@@ -151,10 +151,21 @@ export async function dispatchFlashcardPushToUser(userId: string): Promise<numbe
  * failure must never turn an otherwise-successful generation into an error.
  */
 export async function dispatchStudioGenerationPush(userId: string, courseTitle: string, sectionId: string, url: string): Promise<void> {
+  const sectionLabel = STUDIO_SECTION_PUSH_LABELS[sectionId] ?? "Le contenu";
+  await dispatchPushToUser(userId, { title: "✅ MedArt AI", body: `${sectionLabel} de "${courseTitle}" est prêt.`, url });
+}
+
+/**
+ * One push notification to every registered device of one user (e.g. a
+ * group-chat @mention). Fail-open: no VAPID config, no subscription or a
+ * delivery error never throws — a notification must never break the action
+ * that triggered it. Expired subscriptions (404/410) are pruned.
+ */
+export async function dispatchPushToUser(userId: string, message: { title: string; body: string; url: string }): Promise<void> {
   try {
     ensureVapidConfigured();
   } catch (error) {
-    console.warn("[push] VAPID non configuré — notification de fin de génération ignorée:", error instanceof Error ? error.message : error);
+    console.warn("[push] VAPID non configuré — notification ignorée:", error instanceof Error ? error.message : error);
     return;
   }
 
@@ -169,12 +180,7 @@ export async function dispatchStudioGenerationPush(userId: string, courseTitle: 
   const subscriptions = profile.push_subscriptions ?? [];
   if (subscriptions.length === 0) return;
 
-  const sectionLabel = STUDIO_SECTION_PUSH_LABELS[sectionId] ?? "Le contenu";
-  const payload = JSON.stringify({
-    title: "✅ MedArt AI",
-    body: `${sectionLabel} de "${courseTitle}" est prêt.`,
-    url,
-  });
+  const payload = JSON.stringify(message);
 
   const results = await Promise.allSettled(subscriptions.map((subscription) => webpush.sendNotification(subscription, payload)));
 

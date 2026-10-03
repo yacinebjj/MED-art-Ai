@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { isMissingColumnError } from "@/lib/group-chat";
 import type { ChatMember } from "@/types/group-chat";
 
 export const runtime = "nodejs";
@@ -12,6 +13,7 @@ interface ChatMemberRow {
   status: "pending" | "accepted";
   display_name: string | null;
   joined_at: string;
+  last_read_at?: string | null;
 }
 
 function toMember(row: ChatMemberRow, academicYearName: string | null): ChatMember {
@@ -22,6 +24,7 @@ function toMember(row: ChatMemberRow, academicYearName: string | null): ChatMemb
     status: row.status,
     displayName: row.display_name,
     joinedAt: row.joined_at,
+    lastReadAt: row.last_read_at ?? null,
     academicYearName,
   };
 }
@@ -116,15 +119,19 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: false, error: "Tu n'es pas membre de ce groupe." }, { status: 403 });
   }
 
-  let query = supabase.from("chat_members").select("id, group_id, user_id, status, display_name, joined_at").eq("group_id", groupId);
-  if (!isAdmin) query = query.eq("status", "accepted");
-
-  const { data, error } = await query.order("joined_at", { ascending: true });
+  // last_read_at feeds the "Vu" receipts; tolerated when the live database predates its migration.
+  const runQuery = (columns: string) => {
+    let query = supabase.from("chat_members").select(columns).eq("group_id", groupId);
+    if (!isAdmin) query = query.eq("status", "accepted");
+    return query.order("joined_at", { ascending: true });
+  };
+  let { data, error } = await runQuery("id, group_id, user_id, status, display_name, joined_at, last_read_at");
+  if (isMissingColumnError(error)) ({ data, error } = await runQuery("id, group_id, user_id, status, display_name, joined_at"));
   if (error) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${error.message}` }, { status: 500 });
   }
 
-  const rows = (data ?? []) as ChatMemberRow[];
+  const rows = (data ?? []) as unknown as ChatMemberRow[];
   const yearByUserId = await academicYearNamesByUserId(supabase, rows.map((r) => r.user_id));
 
   return NextResponse.json({

@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Download, FileAudio, ImageIcon, Loader2, Video, X } from "lucide-react";
+import { Download, ExternalLink, FileAudio, FileText, ImageIcon, Link2, Loader2, Video, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
 import { AudioPlayer } from "./AudioPlayer";
 import { ChatImage } from "./ChatImage";
+import { AttachmentCard } from "./AttachmentCard";
 import type { ChatMessage } from "@/types/group-chat";
 
 interface MediaVaultPanelProps {
@@ -17,13 +18,40 @@ interface MediaVaultPanelProps {
 
 const TIME_FORMAT = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
-type VaultTab = "image" | "video" | "audio";
+type VaultTab = "image" | "video" | "audio" | "documents" | "links";
 
 const TABS: { id: VaultTab; label: string; icon: typeof ImageIcon }[] = [
+  { id: "documents", label: "Docs", icon: FileText },
   { id: "image", label: "Images", icon: ImageIcon },
   { id: "video", label: "Vidéos", icon: Video },
   { id: "audio", label: "Vocaux", icon: FileAudio },
+  { id: "links", label: "Liens", icon: Link2 },
 ];
+
+interface VaultDocument {
+  messageId: string;
+  senderName: string | null;
+  createdAt: string;
+  name: string;
+  url: string;
+  mime: string;
+  size: number;
+}
+
+interface VaultLink {
+  messageId: string;
+  senderName: string | null;
+  createdAt: string;
+  url: string;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
 
 /**
  * The Media Vault — every image/video/voice note ever shared in the group,
@@ -36,7 +64,9 @@ const TABS: { id: VaultTab; label: string; icon: typeof ImageIcon }[] = [
  */
 export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelProps) {
   const [media, setMedia] = useState<ChatMessage[] | null>(null);
-  const [activeTab, setActiveTab] = useState<VaultTab>("image");
+  const [documents, setDocuments] = useState<VaultDocument[]>([]);
+  const [links, setLinks] = useState<VaultLink[]>([]);
+  const [activeTab, setActiveTab] = useState<VaultTab>("documents");
   const { sheetProps, startDrag } = useBottomSheetMotion(onClose);
 
   useEffect(() => {
@@ -49,6 +79,11 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
       .then((data) => {
         if (cancelled || !data.success) return;
         setMedia(data.media as ChatMessage[]);
+        setDocuments(Array.isArray(data.documents) ? (data.documents as VaultDocument[]) : []);
+        setLinks(Array.isArray(data.links) ? (data.links as VaultLink[]) : []);
+      })
+      .catch(() => {
+        if (!cancelled) setMedia([]);
       });
 
     return () => {
@@ -57,11 +92,14 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
   }, [isOpen, groupId]);
 
   const items = (media ?? []).filter((m) => m.type === activeTab);
-  const counts = {
+  const counts: Record<VaultTab, number> = {
+    documents: documents.length,
     image: (media ?? []).filter((m) => m.type === "image").length,
     video: (media ?? []).filter((m) => m.type === "video").length,
     audio: (media ?? []).filter((m) => m.type === "audio").length,
+    links: links.length,
   };
+  const activeCount = counts[activeTab];
 
   return (
     <AnimatePresence>
@@ -81,7 +119,7 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
           >
             <BottomSheetHandle onPointerDown={startDrag} />
             <div className="flex shrink-0 items-center justify-between p-4 pb-2 max-sm:pt-1">
-              <h2 className="text-sm font-bold tracking-tight text-zinc-900 dark:text-white">Vault Médical</h2>
+              <h2 className="text-sm font-bold tracking-tight text-zinc-900 dark:text-white">Bibliothèque du groupe</h2>
               <button
                 type="button"
                 onClick={onClose}
@@ -92,7 +130,7 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
               </button>
             </div>
 
-            <div className="flex shrink-0 gap-1 px-4 pb-3">
+            <div className="chat-scrollbar flex shrink-0 gap-1 overflow-x-auto px-4 pb-3">
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = tab.id === activeTab;
@@ -102,7 +140,7 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
                     className={cn(
-                      "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition-all duration-150",
+                      "flex shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-all duration-150",
                       isActive
                         ? "bg-zinc-900 text-white dark:bg-white/10 dark:text-white"
                         : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/5"
@@ -122,8 +160,48 @@ export function MediaVaultPanel({ groupId, isOpen, onClose }: MediaVaultPanelPro
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Chargement…
                 </div>
-              ) : items.length === 0 ? (
-                <p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">Rien ici pour l&apos;instant.</p>
+              ) : activeCount === 0 ? (
+                <p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                  {activeTab === "documents"
+                    ? "Aucun document partagé — envoie un PDF ou un cours avec le bouton +."
+                    : activeTab === "links"
+                      ? "Aucun lien partagé pour l'instant."
+                      : "Rien ici pour l'instant."}
+                </p>
+              ) : activeTab === "documents" ? (
+                <div className="space-y-2">
+                  {documents.map((doc) => (
+                    <div key={doc.messageId}>
+                      <AttachmentCard attachment={doc} compact />
+                      <p className="px-1 pt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+                        {doc.senderName ?? "Étudiant(e)"} · {TIME_FORMAT.format(new Date(doc.createdAt))}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : activeTab === "links" ? (
+                <div className="space-y-2">
+                  {links.map((link) => (
+                    <a
+                      key={`${link.messageId}-${link.url}`}
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                      className="flex items-center gap-3 rounded-xl border border-zinc-200 p-3 transition-colors hover:border-cyan-300 hover:bg-cyan-50/50 dark:border-white/5 dark:hover:border-cyan-800 dark:hover:bg-cyan-500/5"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-300">
+                        <Link2 className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-white">{hostOf(link.url)}</span>
+                        <span className="block truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                          {link.senderName ?? "Étudiant(e)"} · {TIME_FORMAT.format(new Date(link.createdAt))}
+                        </span>
+                      </span>
+                      <ExternalLink className="h-4 w-4 shrink-0 text-zinc-400" />
+                    </a>
+                  ))}
+                </div>
               ) : activeTab === "image" ? (
                 <div className="grid grid-cols-2 gap-2">
                   {items.map((item) => (

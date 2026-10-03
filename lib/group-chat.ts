@@ -28,3 +28,16 @@ export async function assertAcceptedMember(
   }
   return { ok: true };
 }
+
+/**
+ * Postgres "undefined_column" (42703) / PostgREST "column not found in
+ * schema cache" (PGRST204). The live database can lag behind
+ * supabase/schema.sql (a migration not run yet) — group routes must DEGRADE
+ * (drop the optional feature) instead of failing whole: a missing
+ * chat_members.last_read_at once made GET /api/groups fail on every call,
+ * so every group looked deleted.
+ */
+export function isMissingColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return error.code === "42703" || error.code === "PGRST204" || /column .* does not exist|could not find the .* column/i.test(error.message ?? "");
+}
