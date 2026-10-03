@@ -74,11 +74,18 @@ export async function GET(_request: NextRequest) {
       return NextResponse.json({ success: true, items: [], activeModuleCount: 0, activeModuleIds: [], activeCourseIds: [] });
     }
 
-    const { data: courses, error: coursesError } = await supabase
+    // STRICT course selection: when the student ticked specific courses in
+    // the picker modal, ONLY those courses' flashcards may appear — the query
+    // itself is restricted to their ids (still inside the activated modules,
+    // and always the student's own rows). With nothing ticked, the whole
+    // activated modules apply, as before.
+    let coursesQuery = supabase
       .from("studio_courses")
       .select("id, title, curriculum_module_id, flashcard_queue")
       .eq("user_id", user.id)
       .in("curriculum_module_id", activeModuleIds);
+    if (activeCourseIds.length > 0) coursesQuery = coursesQuery.in("id", activeCourseIds);
+    const { data: courses, error: coursesError } = await coursesQuery;
 
     if (coursesError) {
       console.error("[flashcards/pool] Échec lecture studio_courses:", coursesError);

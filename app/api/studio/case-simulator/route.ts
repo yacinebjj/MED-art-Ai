@@ -6,7 +6,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
-import { labContentHash, lookupLabCache, storeLabCache } from "@/lib/lab-course-cache";
+import { labContentHash, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
@@ -600,6 +600,7 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
   const toolType = `case:${body.difficulty}` as const;
   const cachedCase = parseStoredCase(await lookupLabCache(contentHash, toolType));
   if (cachedCase) {
+    await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: cachedCase.publicCase.title });
     const token = sealPayload(
       {
         v: 1,
@@ -643,6 +644,7 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
 
     const { publicCase, hidden } = buildCase(validated.data);
     await storeLabCache({ contentHash, toolType, courseId: course.id, content: { publicCase, hidden } });
+    await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: publicCase.title });
     const token = sealPayload(
       {
         v: 1,

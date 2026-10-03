@@ -5,7 +5,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
-import { labContentHash, lookupLabCache, storeLabCache } from "@/lib/lab-course-cache";
+import { labContentHash, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
 
@@ -254,6 +254,7 @@ export async function POST(request: NextRequest) {
   const toolType = `matrix:${matrixKind}` as const;
   const cached = await lookupLabCache(contentHash, toolType);
   if (isStoredMatrix(cached, matrixKind, columns)) {
+    await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: cached.title });
     return NextResponse.json({ success: true, matrix: cached, cached: true });
   }
 
@@ -298,6 +299,7 @@ export async function POST(request: NextRequest) {
     // (rows: [] — "this course has no drugs") are cached too: that answer is
     // just as final, and regenerating it would only burn another credit.
     await storeLabCache({ contentHash, toolType, courseId: course.id, content: matrix });
+    await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: matrix.title });
 
     return NextResponse.json({ success: true, matrix, cached: false });
   } catch (error) {

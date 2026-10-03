@@ -5,7 +5,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
-import { labContentHash, lookupLabCache, storeLabCache } from "@/lib/lab-course-cache";
+import { labContentHash, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
 
@@ -269,6 +269,7 @@ export async function POST(request: NextRequest) {
   const contentHash = labContentHash(course.raw_text?.trim() ? course.raw_text : sourceText);
   const cached = await lookupLabCache(contentHash, "mindmap");
   if (isStoredMindMap(cached)) {
+    await recordLabHistory({ userId: user.id, contentHash, toolType: "mindmap", courseId: course.id, title: cached.title });
     return NextResponse.json({ success: true, mindmap: cached, cached: true });
   }
 
@@ -307,6 +308,7 @@ export async function POST(request: NextRequest) {
 
     const mindmap = { title, root: { label: rootLabel, children } };
     await storeLabCache({ contentHash, toolType: "mindmap", courseId: course.id, content: mindmap });
+    await recordLabHistory({ userId: user.id, contentHash, toolType: "mindmap", courseId: course.id, title: mindmap.title });
 
     return NextResponse.json({ success: true, mindmap, cached: false });
   } catch (error) {

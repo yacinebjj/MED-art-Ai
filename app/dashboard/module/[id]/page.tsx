@@ -78,7 +78,7 @@ import type { CitationSourceText } from "@/lib/chat-citations";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { OcrSuggestedError } from "@/lib/upload-client";
 import type { CurriculumYearData } from "@/types/academic";
-import { StudioPanel, type SectionStatus, type TileGenerationOptions } from "@/components/course/workspace/StudioPanel";
+import { QCM_REGENERATE_CAP, StudioPanel, type SectionStatus, type TileGenerationOptions } from "@/components/course/workspace/StudioPanel";
 import { FileViewerModal } from "@/components/course/workspace/FileViewerModal";
 import { StudioTileSkeleton } from "@/components/course/workspace/StudioTileSkeleton";
 import { MobileWorkspaceTabBar, type MobileWorkspaceTab } from "@/components/course/workspace/MobileWorkspaceTabBar";
@@ -1037,6 +1037,16 @@ export default function ModuleWorkspacePage() {
   const [generatingByKey, setGeneratingByKey] = useState<Set<string>>(() => new Set());
   const activeCourseIdForSections = activeCourse?.id ?? null;
   const generatingSections = useMemo(() => scopeToActiveCourse(generatingByKey, activeCourseIdForSections), [generatingByKey, activeCourseIdForSections]);
+  // "Régénérer" (Examen QCM ONLY, capped at QCM_REGENERATE_CAP per course) —
+  // same course-scoped bookkeeping as generatingByKey above, kept separate
+  // because a section can be regenerating while it already HAS content.
+  const [regeneratingByKey, setRegeneratingByKey] = useState<Set<string>>(() => new Set());
+  const regeneratingSections = useMemo(() => scopeToActiveCourse(regeneratingByKey, activeCourseIdForSections), [regeneratingByKey, activeCourseIdForSections]);
+  // Bumped after each successful QCM regeneration and folded into the quiz's
+  // React key: the new set reuses question ids 1..15, so without a remount
+  // the quiz's internal answer state would carry the OLD answers onto the
+  // NEW questions.
+  const [qcmRegenNonce, setQcmRegenNonce] = useState(0);
   // Live per-part progress for the multi-request Explication pipeline — see
   // the onProgress call site below for why surfacing this matters.
   const [explicationProgress, setExplicationProgress] = useState<ExplicationProgressView | null>(null);
@@ -1134,6 +1144,9 @@ export default function ModuleWorkspacePage() {
   // has no entry) simply passes undefined, so the tile keeps its plain dot.
   const activeCourseMastery = activeCourse ? courseMasteryBySlug.get(`studio-course-${activeCourse.id}`) : undefined;
   const sectionMasteryPct = activeCourseMastery ? { qcm: Math.round(activeCourseMastery.qcmSuccessPct) } : undefined;
+  /** Régénérations de l'Examen QCM restantes pour le cours ouvert (undefined tant que le serveur ne l'a pas renvoyé). */
+  const qcmRegenerationsLeft =
+    activeCourse?.qcmRegenerateCount !== undefined ? Math.max(0, QCM_REGENERATE_CAP - activeCourse.qcmRegenerateCount) : undefined;
 
   const today = new Date().toLocaleDateString("fr-FR");
   const openedSectionLabel = openedSection ? getSectionLabel(openedSection, language, studyYear) : "";
@@ -1503,6 +1516,92 @@ export default function ModuleWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCourse, generatingSections, toast, studyYear]);
 
+  /**
+   * "Régénérer" in the Examen QCM tile's ⋮ menu — a brand new set of
+   * questions from the same course (app/api/studio/regenerate). The server
+   * enforces QCM_REGENERATE_CAP per course atomically (reserve_qcm_regenerate)
+   * and answers with how many remain; that number is mirrored onto the course
+   * (qcmRegenerateCount) so the menu entry disables itself at the limit
+   * without another round trip. Registered with trackGeneration under a
+   * separate "regen:" namespace so leaving the page mid-regeneration can't
+   * lead to a second paid call on return (see the reconciliation effect).
+   * Only ever reachable for "qcm" — no other tile or Lab tool has the entry.
+   */
+  const handleRegenerateSection = useCallback(async (id: DemoSectionId) => {
+    if (id !== "qcm") return;
+    if (!activeCourse || regeneratingSections.has(id) || generatingSections.has(id)) return;
+    if (QCM_REGENERATE_CAP - (activeCourse.qcmRegenerateCount ?? 0) <= 0) {
+      toast({ variant: "error", title: "Limite atteinte", description: `Tu as utilisé tes ${QCM_REGENERATE_CAP} régénérations pour l'Examen QCM de ce cours.` });
+      return;
+    }
+
+    const courseId = activeCourse.id;
+    const key = sectionKey(courseId, id);
+    setRegeneratingByKey((prev) => new Set(prev).add(key));
+
+    const regenerationPromise = (async () => {
+      try {
+        const res = await fetch("/api/studio/regenerate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ courseId, section: id }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          // The server is the authority on the cap: when it says 0 remain, sync the counter so the entry disables.
+          if (typeof data?.remaining === "number" && data.remaining <= 0) {
+            const base = courseCacheRef.current.get(courseId);
+            if (base) {
+              const synced = { ...base, qcmRegenerateCount: QCM_REGENERATE_CAP };
+              courseCacheRef.current.set(courseId, synced);
+              setActiveCourse((prev) => (prev && prev.id === courseId ? synced : prev));
+            }
+          }
+          throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La régénération a échoué.");
+        }
+
+        const remaining = typeof data.remaining === "number" ? data.remaining : null;
+        const baseCourse = courseCacheRef.current.get(courseId);
+        if (baseCourse) {
+          const updated = {
+            ...withSectionValue(baseCourse, id, data.data as StudioSectionValue),
+            ...(remaining !== null ? { qcmRegenerateCount: QCM_REGENERATE_CAP - remaining } : {}),
+            updatedAt: new Date().toISOString(),
+          };
+          courseCacheRef.current.set(courseId, updated);
+          setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
+        }
+        setQcmRegenNonce((n) => n + 1);
+
+        toast({
+          variant: "success",
+          title: "Nouvelle série de QCM générée",
+          description:
+            remaining === null
+              ? undefined
+              : remaining > 0
+                ? `Il te reste ${remaining} régénération${remaining > 1 ? "s" : ""} pour ce cours.`
+                : "C'était ta dernière régénération pour ce cours.",
+        });
+      } catch (error) {
+        toast({
+          variant: "error",
+          title: "Échec de la régénération",
+          description: error instanceof Error ? error.message : "Erreur inconnue.",
+        });
+      } finally {
+        setRegeneratingByKey((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    })();
+
+    trackGeneration(courseId, `regen:${id}`, regenerationPromise);
+    await regenerationPromise;
+  }, [activeCourse, regeneratingSections, generatingSections, toast]);
+
   /** Stable reference so the desktop ModuleSourcesPanel instance's React.memo actually holds. */
   const handleToggleSourcesCollapsed = useCallback(() => setIsSourcesCollapsed((prev) => !prev), []);
 
@@ -1783,6 +1882,21 @@ export default function ModuleWorkspacePage() {
         setGeneratingByKey((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
         generating.then(() => refreshCourseFromServer(courseId));
       }
+      // Same for an Examen QCM "Régénérer" still running from a previous visit.
+      const regenerating = getInFlightGeneration(courseId, `regen:${section.id}`);
+      if (regenerating) {
+        const key = sectionKey(courseId, section.id);
+        setRegeneratingByKey((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+        regenerating.then(() => {
+          setRegeneratingByKey((prev) => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+          if (section.id === "qcm") setQcmRegenNonce((n) => n + 1);
+          return refreshCourseFromServer(courseId);
+        });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCourse?.id]);
@@ -2056,7 +2170,7 @@ export default function ModuleWorkspacePage() {
     };
   }, [isPaletteOpen, paletteModules, curriculumSpecialtyName, studyYear]);
 
-  const pendingGenerations = generatingByKey.size;
+  const pendingGenerations = generatingByKey.size + regeneratingByKey.size;
   const syncState: WorkspaceSyncState = !isOnline ? "offline" : pendingGenerations + uploadsInFlight > 0 || isChatBusy ? "working" : "synced";
   const syncDetail = !isOnline
     ? "Hors ligne — tes cours et générations déjà enregistrés restent sur ton compte ; reconnecte-toi pour continuer."
@@ -2339,6 +2453,9 @@ export default function ModuleWorkspacePage() {
       onCloseSection={() => setOpenedSection(null)}
       getSectionStatus={getSectionStatus}
       generatingSections={generatingSections}
+      regeneratingSections={regeneratingSections}
+      onRegenerateSection={handleRegenerateSection}
+      qcmRegenerationsLeft={qcmRegenerationsLeft}
       lastGeneratedAt={activeCourse?.updatedAt ?? null}
       isNoteOpen={isNoteOpen}
       onOpenNote={() => setIsNoteOpen(true)}
@@ -2373,7 +2490,7 @@ export default function ModuleWorkspacePage() {
           <BrandLoader className="h-6 w-6" />
           <p className="text-sm text-muted-foreground">Chargement du cours...</p>
         </div>
-      ) : openedSection && generatingSections.has(openedSection) ? (
+      ) : openedSection && (generatingSections.has(openedSection) || regeneratingSections.has(openedSection)) ? (
         // A regenerating section shows the same loader as a first generation,
         // so the student never keeps answering questions that are about to
         // be replaced.
@@ -2447,7 +2564,7 @@ export default function ModuleWorkspacePage() {
             )}
             {openedSection === "qcm" && activeCourse.qcms && (
               <GastriteQcmsStudio
-                key={activeCourse.id}
+                key={`${activeCourse.id}:${qcmRegenNonce}`}
                 data={activeCourse.qcms}
                 courseSlug={`studio-course-${activeCourse.id}`}
                 explicationMarkdown={activeCourse.explication ?? undefined}
@@ -2624,6 +2741,9 @@ export default function ModuleWorkspacePage() {
                     sections={DEMO_SECTIONS}
                     getSectionStatus={getSectionStatus}
                     generatingSections={generatingSections}
+                    regeneratingSections={regeneratingSections}
+                    onRegenerateSection={handleRegenerateSection}
+                    qcmRegenerationsLeft={qcmRegenerationsLeft}
                     onItemClick={handleStudioItemClick}
                     onItemClickWithOptions={handleStudioItemClick}
                     studyYear={studyYear}

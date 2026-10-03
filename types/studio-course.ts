@@ -16,6 +16,8 @@ export interface StudioCourseSummary {
  * time (see app/dashboard/module/[id]/page.tsx).
  */
 export interface StudioCourseFull {
+  /** Examen QCM regenerations already used on this course (studio_courses.qcm_regenerate_count). Absent on a database without that migration. */
+  qcmRegenerateCount?: number;
   id: number;
   title: string;
   rawText: string;

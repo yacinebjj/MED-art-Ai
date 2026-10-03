@@ -27,6 +27,7 @@ import {
   Paperclip,
   PencilLine,
   Redo2,
+  RefreshCw,
   Sparkles,
   SquarePen,
   Trash2,
@@ -34,6 +35,7 @@ import {
 } from "lucide-react";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { Select } from "@/components/ui/Select";
 import { Kbd } from "@/components/course/workspace/os/Kbd";
 import { useTheme } from "next-themes";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES } from "@/lib/markdown";
@@ -77,6 +79,34 @@ export interface TileGenerationOptions {
   dialect?: PodcastDialect;
 }
 
+/**
+ * The ONLY section that offers "Régénérer" (⋮ menu, next to "Supprimer"):
+ * the Examen QCM tile, capped at QCM_REGENERATE_CAP per course. Every other
+ * Studio tile and every Lab tool is generated once (and shared platform-wide
+ * through the content caches), then only viewed. Exported so
+ * MobileStudioCards gates its own menu identically.
+ */
+export const REGENERATABLE_SECTIONS: ReadonlySet<DemoSectionId> = new Set(["qcm"]);
+
+/** Mirrors QCM_REGENERATE_CAP in app/api/studio/regenerate/route.ts — the server is the real enforcer; this only labels the menu. */
+export const QCM_REGENERATE_CAP = 5;
+
+/** The "Régénérer" menu entry, with the remaining-attempts counter. Disabled — not hidden — once the cap is reached, so the student sees why. */
+export function RegenerateMenuItem({ onSelect, left }: { onSelect: () => void; left?: number }) {
+  const { language } = useLanguage();
+  const exhausted = left !== undefined && left <= 0;
+  return (
+    <DropdownMenuItem disabled={exhausted} onSelect={onSelect}>
+      <RefreshCw className="h-4 w-4" />
+      {exhausted
+        ? `${tStudio("regenerate", language)} — limite atteinte (${QCM_REGENERATE_CAP}/${QCM_REGENERATE_CAP})`
+        : left !== undefined
+          ? `${tStudio("regenerate", language)} (${left} restante${left > 1 ? "s" : ""})`
+          : tStudio("regenerate", language)}
+    </DropdownMenuItem>
+  );
+}
+
 /** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. Exported so MobileStudioCards.tsx (a completely separate component tree for the mobile browse view) gates its own equivalent menu identically instead of drifting out of sync. */
 export const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
   "explication",
@@ -98,6 +128,12 @@ interface StudioPanelProps {
   getSectionStatus: (id: DemoSectionId) => SectionStatus;
   /** A Set, not a single id — several sections can now generate concurrently (a student clicking Résumé no longer blocks clicking Cas Clinique before the first finishes). Each tile checks its OWN membership (`.has(section.id)`), never a single shared value. */
   generatingSections: Set<DemoSectionId>;
+  /** Sections currently regenerating (Examen QCM only). Same Set shape as generatingSections. */
+  regeneratingSections?: Set<DemoSectionId>;
+  /** Fires from the Examen QCM "Régénérer" menu entry. Omitted: the entry isn't rendered. */
+  onRegenerateSection?: (id: DemoSectionId) => void;
+  /** Régénérations restantes de l'Examen QCM de ce cours (plafond serveur). Drives the counter / the disabled state. */
+  qcmRegenerationsLeft?: number;
   /** ISO timestamp of the active course's last section save (studio_courses.updated_at) — powers the "Récemment généré" list's relative-time label (RelativeTime). Same value for every row today (row-level, not per-section — see StudioCourseFull's own comment); null before anything has ever been generated. */
   lastGeneratedAt: string | null;
   isNoteOpen: boolean;
@@ -258,14 +294,32 @@ export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: 
  * "..." trigger + menu for the OPENED section's own detail-view header (both
  * the inline collapsed header and the fullscreen overlay header below) —
  * mirrors the identical DropdownMenu used further down for each "Récemment
- * généré" list row. There is deliberately NO "Régénérer" entry anywhere in
- * the Studio or the Lab: a generated result is generated once (and shared
- * platform-wide through the content caches), after which students only view
- * and interact with it — repeated regeneration was the main source of
- * avoidable token spend.
+ * généré" list row. "Régénérer" appears ONLY for the Examen QCM (see
+ * REGENERATABLE_SECTIONS); while that regeneration is running the trigger
+ * morphs into a spinning RefreshCw instead of opening a menu.
  */
-function SectionOptionsMenu({ triggerClassName }: { triggerClassName: string }) {
+function SectionOptionsMenu({
+  sectionId,
+  onRegenerateSection,
+  isRegenerating,
+  regenerationsLeft,
+  triggerClassName,
+}: {
+  sectionId: DemoSectionId;
+  onRegenerateSection?: (id: DemoSectionId) => void;
+  isRegenerating: boolean;
+  regenerationsLeft?: number;
+  triggerClassName: string;
+}) {
   const { language } = useLanguage();
+
+  if (isRegenerating) {
+    return (
+      <span aria-hidden className={triggerClassName}>
+        <RefreshCw className="h-4 w-4 animate-spin" />
+      </span>
+    );
+  }
 
   return (
     <DropdownMenu>
@@ -276,13 +330,29 @@ function SectionOptionsMenu({ triggerClassName }: { triggerClassName: string }) 
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
+        {onRegenerateSection && REGENERATABLE_SECTIONS.has(sectionId) && (
+          <RegenerateMenuItem onSelect={() => onRegenerateSection(sectionId)} left={regenerationsLeft} />
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-const LANGUAGE_SELECT_CLASSES =
-  "w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground outline-none transition-colors focus:border-primary-400";
+/** Compact trigger for the shared Radix `Select` (components/ui/Select.tsx) inside a tile's generation-options popover. */
+const TILE_SELECT_TRIGGER_CLASSES = "rounded-lg px-2.5 py-1.5 text-left text-xs font-medium shadow-none [&>span:first-child]:line-clamp-1";
+
+/** The single language list used by every generation-options popover — Studio tiles (desktop and mobile share TileOptionsMenu). */
+const LANGUAGE_OPTIONS = [
+  { value: "fr", label: "🇫🇷 Français" },
+  { value: "en", label: "🇬🇧 Anglais" },
+];
+
+const PODCAST_DIALECT_OPTIONS = [
+  { value: "fr", label: "🇫🇷 Français" },
+  { value: "en", label: "🇬🇧 English" },
+  { value: "fr-darija", label: "🇫🇷🇩🇿 Français-Arabe (Darija Algérienne)" },
+  { value: "en-darija", label: "🇬🇧🇩🇿 English-Arabic (Darija Algérienne)" },
+];
 
 /**
  * Pre-generation options popover for one grid tile — a hand-rolled floating
@@ -345,17 +415,12 @@ export function TileOptionsMenu({
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {language === "fr" ? "Langue / dialecte" : "Language / dialect"}
             </p>
-            <select
+            <Select
               value={draftDialect}
-              onChange={(e) => setDraftDialect(e.target.value as PodcastDialect)}
-              onClick={(e) => e.stopPropagation()}
-              className={LANGUAGE_SELECT_CLASSES}
-            >
-              <option value="fr">🇫🇷 Français</option>
-              <option value="en">🇬🇧 English</option>
-              <option value="fr-darija">🇫🇷🇩🇿 Français-Arabe (Darija Algérienne)</option>
-              <option value="en-darija">🇬🇧🇩🇿 English-Arabic (Darija Algérienne)</option>
-            </select>
+              onValueChange={(value) => setDraftDialect(value as PodcastDialect)}
+              options={PODCAST_DIALECT_OPTIONS}
+              className={TILE_SELECT_TRIGGER_CLASSES}
+            />
           </div>
         ) : (
           <>
@@ -364,33 +429,27 @@ export function TileOptionsMenu({
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {language === "fr" ? "Modèle" : "Model"}
                 </p>
-                <select
+                <Select
                   value={draftModel}
-                  onChange={(e) => setDraftModel(e.target.value as InfographicModelKey)}
-                  onClick={(e) => e.stopPropagation()}
-                  className={LANGUAGE_SELECT_CLASSES}
-                >
-                  {Object.entries(INFOGRAPHIC_MODEL_OPTIONS).map(([key, opt]) => (
-                    <option key={key} value={key}>
-                      {language === "fr" ? opt.labelFr : opt.labelEn}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setDraftModel(value as InfographicModelKey)}
+                  options={Object.entries(INFOGRAPHIC_MODEL_OPTIONS).map(([key, opt]) => ({
+                    value: key,
+                    label: language === "fr" ? opt.labelFr : opt.labelEn,
+                  }))}
+                  className={TILE_SELECT_TRIGGER_CLASSES}
+                />
               </div>
             )}
             <div className="space-y-1">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {language === "fr" ? "Langue" : "Language"}
               </p>
-              <select
+              <Select
                 value={draftLanguage}
-                onChange={(e) => setDraftLanguage(e.target.value as "fr" | "en")}
-                onClick={(e) => e.stopPropagation()}
-                className={LANGUAGE_SELECT_CLASSES}
-              >
-                <option value="fr">🇫🇷 Français</option>
-                <option value="en">🇬🇧 Anglais</option>
-              </select>
+                onValueChange={(value) => setDraftLanguage(value as "fr" | "en")}
+                options={LANGUAGE_OPTIONS}
+                className={TILE_SELECT_TRIGGER_CLASSES}
+              />
             </div>
             {sectionId === "explication" && (
               <div className="space-y-1">
@@ -451,6 +510,9 @@ export function StudioPanel({
   courseSlug,
   onCollapsedChange,
   collapsed,
+  regeneratingSections,
+  onRegenerateSection,
+  qcmRegenerationsLeft,
   studyYear,
   lockedSections,
   sectionMasteryPct,
@@ -739,7 +801,13 @@ export function StudioPanel({
           ) : (
             <>
               {openedSection && !isCollapsed && (
-                <SectionOptionsMenu triggerClassName={PANEL_ICON_BUTTON_CLASSES} />
+                <SectionOptionsMenu
+                  sectionId={openedSection}
+                  onRegenerateSection={onRegenerateSection}
+                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
+                  regenerationsLeft={qcmRegenerationsLeft}
+                  triggerClassName={PANEL_ICON_BUTTON_CLASSES}
+                />
               )}
               {isDetailOpen && !isCollapsed && (
                 <Tooltip>
@@ -975,7 +1043,7 @@ export function StudioPanel({
                   </p>
                   {generations.map((section) => {
                     const Icon = section.icon;
-                    const isGenerating = generatingSections.has(section.id);
+                    const isGenerating = generatingSections.has(section.id) || (regeneratingSections?.has(section.id) ?? false);
 
                     if (isGenerating) {
                       return (
@@ -1031,6 +1099,9 @@ export function StudioPanel({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
+                            {onRegenerateSection && REGENERATABLE_SECTIONS.has(section.id) && (
+                              <RegenerateMenuItem onSelect={() => onRegenerateSection(section.id)} left={qcmRegenerationsLeft} />
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -1327,7 +1398,13 @@ export function StudioPanel({
               )}
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{openedSection ? openedLabel : openedLab?.label}</span>
               {openedSection && (
-                <SectionOptionsMenu triggerClassName={GLASS_ICON_BUTTON_CLASSES} />
+                <SectionOptionsMenu
+                  sectionId={openedSection}
+                  onRegenerateSection={onRegenerateSection}
+                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
+                  regenerationsLeft={qcmRegenerationsLeft}
+                  triggerClassName={GLASS_ICON_BUTTON_CLASSES}
+                />
               )}
               <button
                 type="button"

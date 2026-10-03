@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
-import { errorMessage } from "@/lib/course-generation-shared";
+import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { waitUntil } from "@vercel/functions";
 import { retrieveRelevantContext, retrieveRelevantContextForStudioCourses } from "@/lib/chat-context-retrieval";
 import { MAX_CHAT_SOURCE_COURSES, isChatMode, type ChatMode } from "@/lib/chat-constants";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -203,7 +204,9 @@ export async function GET(request: NextRequest) {
     .select("id, role, content, created_at")
     .eq("user_id", user.id)
     .eq("course_slug", slug)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    // id as a tie-break: a question and its reply written within the same millisecond must keep their order.
+    .order("id", { ascending: true });
 
   if (error) {
     console.error("[courses/chat GET] Échec lecture historique:", { code: error.code, message: error.message });
@@ -697,10 +700,18 @@ export async function POST(request: NextRequest) {
   // assistant's reply to course_chat_history. Vercel keeps the serverless
   // function execution context alive until both branches of the tee are
   // fully consumed, so the background write won't get cut off mid-stream.
+  //
+  // The reply's DB write happens AFTER the stream's last byte, i.e. after the
+  // client already has its response — and a serverless function is only
+  // guaranteed to keep running past the response when that work is handed to
+  // waitUntil(). Without it the insert below could be frozen/killed before it
+  // ran, which is exactly the "questions survive a refresh, answers don't"
+  // bug: the student's row is written up-front (while the function is surely
+  // alive), the assistant's row is the one written after the response ended.
   let accumulatedReply = "";
   const [streamForClient, streamForPersistence] = responseStream.tee();
 
-  (async () => {
+  const persistReply = (async () => {
     try {
       const reader = streamForPersistence.getReader();
       const decoder = new TextDecoder();
@@ -744,7 +755,8 @@ export async function POST(request: NextRequest) {
       if (shouldPersist && supabase && user) {
         const { error: insertError } = await supabase
           .from("course_chat_history")
-          .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: finalTrimmed });
+          // sanitizeForPostgres: a stray NUL in model output makes Postgres reject the whole row (22P05).
+          .insert({ user_id: user.id, course_slug: courseSlug, role: "assistant", content: sanitizeForPostgres(finalTrimmed) });
         if (insertError) {
           console.error("[courses/chat POST background] Échec sauvegarde réponse assistant:", { code: insertError.code, message: insertError.message });
         }
@@ -753,6 +765,7 @@ export async function POST(request: NextRequest) {
       console.error("[courses/chat POST background] Erreur inattendue pendant la persistance:", bgError);
     }
   })();
+  waitUntil(persistReply);
 
   return new NextResponse(streamForClient, {
     status: 200,

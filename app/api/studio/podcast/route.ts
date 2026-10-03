@@ -98,7 +98,18 @@ async function persistAudioUrl(
 /** Mirrors app/api/studio/infographic/route.ts's ensureInfographicBucket exactly — a concurrent request can win the race to create the bucket, which is not a real failure. */
 async function ensurePodcastBucket(supabase: ReturnType<typeof getSupabaseAdmin>): Promise<void> {
   const { data: buckets } = await supabase.storage.listBuckets();
-  if (buckets?.some((bucket: { name: string }) => bucket.name === PODCAST_BUCKET)) return;
+  const existing = buckets?.find((bucket: { name: string }) => bucket.name === PODCAST_BUCKET);
+  if (existing) {
+    // A bucket created earlier as PRIVATE (dashboard default, an older
+    // version) serves every getPublicUrl() link as a 400 — the browser then
+    // reports a bare media error ("Lecture impossible"). Make sure it is
+    // public; updateBucket is idempotent.
+    if (!(existing as { public?: boolean }).public) {
+      const { error: updateError } = await supabase.storage.updateBucket(PODCAST_BUCKET, { public: true });
+      if (updateError) console.error("[studio/podcast] Impossible de rendre le bucket public:", updateError.message);
+    }
+    return;
+  }
 
   const { error } = await supabase.storage.createBucket(PODCAST_BUCKET, { public: true });
   if (error && !/already exists/i.test(error.message)) {
@@ -294,6 +305,8 @@ export async function POST(request: NextRequest) {
     const cachedUrl = await lookupStudioPodcastCache(contentHash);
     if (cachedUrl) {
       await recordStudioPodcastCacheHit(contentHash);
+      // A cached URL is only playable if its bucket is public — verify on every hit, not just on generation.
+      await ensurePodcastBucket(supabase).catch((error) => console.error("[studio/podcast] ensurePodcastBucket (cache hit) a échoué:", error));
       // Persist even on a cache hit — this student's row may not yet point at
       // it, and the reload path now reads audio_url directly.
       await persistAudioUrl(supabase, courseId, user.id, cachedUrl);

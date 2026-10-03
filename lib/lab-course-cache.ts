@@ -98,3 +98,41 @@ export async function storeLabCache(params: {
     console.error(`[lab-course-cache:store] ${params.toolType} — exception :`, error instanceof Error ? error.message : error);
   }
 }
+
+/**
+ * Links a Lab result to the STUDENT'S OWN history (user_lab_history) — called
+ * on every generation AND every cache hit, so what a student has opened
+ * survives a refresh, a new device or a re-login. The row is a pointer
+ * (user + content hash + tool variant); the content itself stays in
+ * lab_course_cache and is joined back by GET /api/studio/lab-history.
+ * Fail-open: a history failure is logged and never blocks the result.
+ */
+export async function recordLabHistory(params: {
+  userId: string;
+  contentHash: string;
+  toolType: LabToolType;
+  courseId: number;
+  title: string | null;
+}): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  try {
+    const { error } = await getSupabaseAdmin()
+      .from("user_lab_history")
+      .upsert(
+        {
+          user_id: params.userId,
+          content_hash: params.contentHash,
+          tool_type: params.toolType,
+          course_id: params.courseId,
+          title: params.title,
+          last_opened_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,content_hash,tool_type" }
+      );
+    if (error) {
+      console.error(`[lab-history:record] ${params.toolType} — écriture impossible (le résultat est tout de même renvoyé) :`, error.message);
+    }
+  } catch (error) {
+    console.error(`[lab-history:record] ${params.toolType} — exception :`, error instanceof Error ? error.message : error);
+  }
+}

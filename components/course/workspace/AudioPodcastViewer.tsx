@@ -471,7 +471,10 @@ const BookmarkList = memo(function BookmarkList({
  * mixed-content request, which surfaced as a bare "Lecture impossible".
  */
 function normalizeAudioUrl(raw: string): string {
-  const url = raw.trim();
+  let url = raw.trim();
+  // A Supabase SIGNED url (/object/sign/…?token=…) expires; the bucket is
+  // public, so the permanent public form of the same object is always right.
+  url = url.replace("/storage/v1/object/sign/", "/storage/v1/object/public/").replace(/[?&]token=[^&]*/i, "");
   if (typeof window === "undefined") return url;
   const isLocalHost = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(url);
   if (window.location.protocol === "https:" && /^http:\/\//i.test(url) && !isLocalHost) {
@@ -534,7 +537,10 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const buffer = await res.arrayBuffer();
           if (buffer.byteLength === 0) throw new Error("Fichier vide");
-          const declaredType = res.headers.get("Content-Type") ?? "";
+          // Storage sometimes answers application/octet-stream or text/plain,
+          // which a <audio> element given a Blob URL refuses to decode — only
+          // trust a real audio/* type, otherwise force audio/mpeg (the file is an MP3).
+          const declaredType = (res.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
           const type = declaredType.startsWith("audio/") ? declaredType : "audio/mpeg";
           setBlobUrl(URL.createObjectURL(new Blob([buffer], { type })));
           setSourceStage("blob");

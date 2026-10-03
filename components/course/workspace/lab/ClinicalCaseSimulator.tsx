@@ -49,6 +49,7 @@ import { Button } from "@/components/ui/Button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
 
 export interface ClinicalCaseSimulatorProps {
   courseId: number;
@@ -737,17 +738,181 @@ function DifficultyPicker({ value, onChange, disabled }: { value: Difficulty; on
   );
 }
 
+/* ----------------------------------------------------------------------- */
+/* Previous cases (server-side history)                                     */
+/* ----------------------------------------------------------------------- */
+
+/** Display-only projection of a `case:*` history item — it never carries anything about the hidden answer. */
+interface PreviousCase {
+  difficulty: Difficulty;
+  title: string;
+  patientLine: string | null;
+  lastOpenedAt: string;
+}
+
+interface RawHistoryItem {
+  toolType: string;
+  lastOpenedAt: string;
+  caseSummary: unknown;
+}
+
+const HISTORY_ENDPOINT = "/api/studio/lab-history";
+const HISTORY_TIMEOUT_MS = 8000;
+
+/**
+ * Items fetched from GET /api/studio/lab-history, keyed `${userId}:${courseId}`.
+ * Module-level so remounts never refetch; only successful responses are stored,
+ * so a failure retries on the next mount instead of being remembered.
+ */
+const historyCache = new Map<string, RawHistoryItem[]>();
+const historyInFlight = new Map<string, Promise<RawHistoryItem[]>>();
+
+function historyKey(userId: string, courseId: number): string {
+  return `${userId}:${courseId}`;
+}
+
+/** Never rejects: history is a convenience, any failure resolves to an empty list and the setup screen stays as it was. */
+function fetchLabHistory(userId: string, courseId: number): Promise<RawHistoryItem[]> {
+  const key = historyKey(userId, courseId);
+  const existing = historyInFlight.get(key);
+  if (existing) return existing;
+  const promise = (async (): Promise<RawHistoryItem[]> => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), HISTORY_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${HISTORY_ENDPOINT}?courseId=${encodeURIComponent(String(courseId))}`, { signal: controller.signal });
+      if (!res.ok) return [];
+      const data = (await res.json().catch(() => null)) as { success?: unknown; items?: unknown } | null;
+      if (!data || data.success !== true || !Array.isArray(data.items)) return [];
+      const items = data.items.filter(
+        (item): item is RawHistoryItem => isRecord(item) && typeof item.toolType === "string" && typeof item.lastOpenedAt === "string"
+      );
+      historyCache.set(key, items);
+      return items;
+    } catch {
+      return [];
+    } finally {
+      window.clearTimeout(timer);
+    }
+  })().finally(() => {
+    historyInFlight.delete(key);
+  });
+  historyInFlight.set(key, promise);
+  return promise;
+}
+
+/** Keeps only well-formed `case:*` items (newest first, as served) and reads nothing but the public summary. */
+function toPreviousCases(items: readonly RawHistoryItem[]): PreviousCase[] {
+  const rows: PreviousCase[] = [];
+  for (const item of items) {
+    const level = item.toolType.startsWith("case:") ? item.toolType.slice("case:".length) : null;
+    if (!level || !DIFFICULTY_IDS.includes(level as Difficulty)) continue;
+    const summary = item.caseSummary;
+    if (!isRecord(summary) || typeof summary.title !== "string" || !summary.title.trim()) continue;
+    const patient = summary.patient;
+    const patientLine =
+      isRecord(patient) && typeof patient.age === "number" && Number.isFinite(patient.age) && (patient.sexe === "F" || patient.sexe === "M")
+        ? `${formatAge(patient.age)}, ${patient.sexe}`
+        : null;
+    rows.push({ difficulty: level as Difficulty, title: summary.title.trim(), patientLine, lastOpenedAt: item.lastOpenedAt });
+  }
+  return rows;
+}
+
+function formatOpenedAt(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("fr-FR");
+}
+
+/** Loads the previous cases once per student/course while the setup screen is the active one. */
+function usePreviousCases(userId: string | null, courseId: number, refreshKey: number): PreviousCase[] {
+  const [cases, setCases] = useState<PreviousCase[]>([]);
+
+  useEffect(() => {
+    if (!userId) {
+      setCases([]);
+      return;
+    }
+    const known = historyCache.get(historyKey(userId, courseId));
+    if (known) {
+      setCases(toPreviousCases(known));
+      return;
+    }
+    setCases([]);
+    let cancelled = false;
+    void fetchLabHistory(userId, courseId).then((items) => {
+      if (!cancelled) setCases(toPreviousCases(items));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, courseId, refreshKey]);
+
+  return cases;
+}
+
+function PreviousCases({ cases, disabled, onReplay }: { cases: PreviousCase[]; disabled: boolean; onReplay: (difficulty: Difficulty) => void }) {
+  if (cases.length === 0) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...SPRING, delay: 0.1 }}
+      className="glass-card rounded-2xl p-4 shadow-soft"
+    >
+      <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-primary-700 dark:text-primary-300">
+        <History className="h-3 w-3" aria-hidden />
+        Tes cas précédents
+      </p>
+      <ul className="space-y-2">
+        {cases.map((item) => {
+          const date = formatOpenedAt(item.lastOpenedAt);
+          const meta = [difficultyLabel(item.difficulty), item.patientLine, date].filter(Boolean).join(" · ");
+          return (
+            <li
+              key={`${item.difficulty}:${item.lastOpenedAt}`}
+              className="flex items-center gap-2.5 rounded-xl border border-border bg-background/60 px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold leading-snug" title={item.title}>
+                  {item.title}
+                </p>
+                <p className="truncate text-[11.5px] leading-snug text-muted-foreground">{meta}</p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => onReplay(item.difficulty)}
+                aria-label={`Rejouer le cas : ${item.title}`}
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                Rejouer
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </motion.div>
+  );
+}
+
 function SetupScreen({
   courseTitle,
   state,
+  previousCases,
   onDifficultyChange,
   onStart,
+  onReplay,
   onDismissError,
 }: {
   courseTitle: string;
   state: SimulatorState;
+  previousCases: PreviousCase[];
   onDifficultyChange: (value: Difficulty) => void;
   onStart: () => void;
+  onReplay: (difficulty: Difficulty) => void;
   onDismissError: () => void;
 }) {
   const steps: Array<{ icon: LucideIcon; text: string }> = [
@@ -808,6 +973,8 @@ function SetupScreen({
           Le cas d'un cours n'est généré qu'une seule fois pour tous les étudiants : s'il existe déjà, le lancer est gratuit ; sinon il utilise 1 génération de ton forfait. Les examens et la correction sont inclus.
         </p>
       </motion.div>
+
+      <PreviousCases cases={previousCases} disabled={state.starting} onReplay={onReplay} />
 
       <AnimatePresence>
         {state.startError && (
@@ -1630,6 +1797,11 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
   const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  // Bumped each time the setup screen comes back after a case, so the "previous cases" list picks up the case just played.
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+  const previousCases = usePreviousCases(userId, courseId, historyRefresh);
 
   const snapshot = state.snapshot;
   const evaluation = snapshot?.evaluation ?? null;
@@ -1641,8 +1813,21 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
     if (previousPhase.current === phase) return;
     previousPhase.current = phase;
     setConfirmingAbandon(false);
+    if (phase === "setup" && userId) {
+      historyCache.delete(historyKey(userId, courseId));
+      setHistoryRefresh((value) => value + 1);
+    }
     rootRef.current?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
-  }, [phase, reduceMotion]);
+  }, [phase, reduceMotion, userId, courseId]);
+
+  // Replaying a stored case goes through the regular start flow: the server hands the stored case back for free.
+  const replayCase = useCallback(
+    (difficulty: Difficulty) => {
+      setDifficulty(courseId, difficulty);
+      void startCase(courseId);
+    },
+    [courseId]
+  );
 
   return (
     <div ref={rootRef} className="w-full min-w-0 scroll-mt-4 space-y-3.5 text-foreground">
@@ -1703,8 +1888,10 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
             <SetupScreen
               courseTitle={courseTitle}
               state={state}
+              previousCases={previousCases}
               onDifficultyChange={(value) => setDifficulty(courseId, value)}
               onStart={() => void startCase(courseId)}
+              onReplay={replayCase}
               onDismissError={() => dismissErrors(courseId)}
             />
           </motion.div>

@@ -256,11 +256,12 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
  * app/api/studio/generate/route.ts's own copy of this comment.
  */
 // Product decision: a Studio/Lab result is generated once and then only read
-// (it is also shared platform-wide through the content caches). The UI no
-// longer offers "Régénérer" anywhere; this switch makes the server refuse it
-// too, so a stale client or a hand-crafted request can't keep spending tokens.
-// Flip to true to restore the (capped) QCM regeneration without other changes.
-const REGENERATION_ENABLED = false as boolean;
+// (it is also shared platform-wide through the content caches) — with ONE
+// exception: the Examen QCM, which can be regenerated up to
+// QCM_REGENERATE_CAP times per course (atomic server-side counter,
+// studio_courses.qcm_regenerate_count). The route already rejects every
+// other section. Set to false to refuse even that.
+const REGENERATION_ENABLED = true as boolean;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!REGENERATION_ENABLED) {

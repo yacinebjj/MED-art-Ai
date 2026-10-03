@@ -105,12 +105,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Aucun module actif." }, { status: 400 });
   }
 
-  const { data: courses, error: coursesError } = await supabase
+  // STRICT course selection (same rule as /api/flashcards/pool): courses
+  // ticked in the picker modal are the ONLY ones flashcards are served or
+  // generated from — the query is restricted to their ids. Nothing ticked =
+  // every course of the activated modules, as before.
+  let coursesQuery = supabase
     .from("studio_courses")
     .select("id, title, curriculum_module_id, explication, flashcard_queue")
     .eq("user_id", user.id)
     .in("curriculum_module_id", activeModuleIds)
     .not("explication", "is", null);
+  if (activeCourseIds.length > 0) coursesQuery = coursesQuery.in("id", activeCourseIds);
+  const { data: courses, error: coursesError } = await coursesQuery;
 
   if (coursesError) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${coursesError.message}` }, { status: 500 });

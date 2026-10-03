@@ -381,6 +381,76 @@ function startGeneration(userId: string | null, courseId: number, kind: MatrixKi
 }
 
 // ---------------------------------------------------------------------------
+// Server-side history (cross-device restore)
+// ---------------------------------------------------------------------------
+
+interface LabHistoryItem {
+  toolType: string;
+  lastOpenedAt: string;
+  content: unknown;
+}
+
+/**
+ * Items fetched from GET /api/studio/lab-history, keyed `${userId}:${courseId}`.
+ * Module-level so a remount (pane collapsed/expanded, tool switched) never
+ * refetches; only successful responses are stored, so a failure retries on the
+ * next mount instead of being remembered.
+ */
+const historyCache = new Map<string, LabHistoryItem[]>();
+const historyInFlight = new Map<string, Promise<LabHistoryItem[]>>();
+
+const HISTORY_TIMEOUT_MS = 8000;
+
+function historyKey(userId: string, courseId: number): string {
+  return `${userId}:${courseId}`;
+}
+
+/** Never rejects: history is a convenience, any failure resolves to "nothing to restore" so the empty state shows. */
+function fetchLabHistory(userId: string, courseId: number): Promise<LabHistoryItem[]> {
+  const key = historyKey(userId, courseId);
+  const existing = historyInFlight.get(key);
+  if (existing) return existing;
+  const promise = (async (): Promise<LabHistoryItem[]> => {
+    const controller = new AbortController();
+    // A hung request must not keep the skeleton up forever.
+    const timer = window.setTimeout(() => controller.abort(), HISTORY_TIMEOUT_MS);
+    try {
+      const res = await fetch(`/api/studio/lab-history?courseId=${encodeURIComponent(String(courseId))}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) return [];
+      const data = (await res.json().catch(() => null)) as { success?: unknown; items?: unknown } | null;
+      if (!data || data.success !== true || !Array.isArray(data.items)) return [];
+      const items = data.items.filter(
+        (item): item is LabHistoryItem =>
+          !!item &&
+          typeof item === "object" &&
+          typeof (item as { toolType?: unknown }).toolType === "string" &&
+          typeof (item as { lastOpenedAt?: unknown }).lastOpenedAt === "string"
+      );
+      historyCache.set(key, items);
+      return items;
+    } catch {
+      return [];
+    } finally {
+      window.clearTimeout(timer);
+    }
+  })().finally(() => {
+    historyInFlight.delete(key);
+  });
+  historyInFlight.set(key, promise);
+  return promise;
+}
+
+/** Newest-first list, so the first item of a kind is its most recent matrix; anything failing the cache validator is ignored. */
+function matrixFromHistory(items: readonly LabHistoryItem[], kind: MatrixKind): CachedMatrix | null {
+  const item = items.find((candidate) => candidate.toolType === `matrix:${kind}` && isMedicalMatrix(candidate.content, kind));
+  if (!item || !isMedicalMatrix(item.content, kind)) return null;
+  const generatedAt = Number.isNaN(Date.parse(item.lastOpenedAt)) ? new Date().toISOString() : item.lastOpenedAt;
+  return { generatedAt, matrix: item.content };
+}
+
+// ---------------------------------------------------------------------------
 // Small presentational pieces
 // ---------------------------------------------------------------------------
 
@@ -898,6 +968,8 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
   const [pending, setPending] = useState<PerKind<boolean>>({ pharmaco: false, ddx: false });
   const [errors, setErrors] = useState<PerKind<string | null>>({ pharmaco: null, ddx: null });
   const [cacheReady, setCacheReady] = useState(false);
+  // True while the server history is being fetched for a kind with no local entry — keeps the skeleton up instead of flashing the empty state.
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Guards against a response for a previous course/user landing in the current view.
   const scope = `${userId ?? "anonyme"}:${courseId}`;
@@ -952,6 +1024,46 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
     }
   }, [adopt, authLoading, courseId, scope, userId]);
 
+  // Restores matrices from the server history when localStorage has none
+  // (new device, cleared storage). Declared after the cache read above so it runs second.
+  useEffect(() => {
+    if (authLoading || !userId) {
+      setHistoryLoading(false);
+      return;
+    }
+    const missing = MATRIX_KINDS.filter((target) => !readCachedMatrix(userId, courseId, target));
+    if (missing.length === 0) {
+      setHistoryLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const hydrate = (items: readonly LabHistoryItem[]) => {
+      for (const target of missing) {
+        // A generation in flight (or a result that landed meanwhile) is newer than anything in the history.
+        if (inFlight.has(inFlightKey(userId, courseId, target))) continue;
+        const restored = matrixFromHistory(items, target);
+        if (!restored) continue;
+        if (!readCachedMatrix(userId, courseId, target)) writeCachedMatrix(userId, courseId, target, restored);
+        setEntries((current) => (current[target] ? current : { ...current, [target]: restored }));
+      }
+    };
+    const known = historyCache.get(historyKey(userId, courseId));
+    if (known) {
+      setHistoryLoading(false);
+      hydrate(known);
+      return;
+    }
+    setHistoryLoading(true);
+    void fetchLabHistory(userId, courseId).then((items) => {
+      if (cancelled || !mountedRef.current) return;
+      hydrate(items);
+      setHistoryLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, courseId, userId]);
+
   const generate = useCallback(
     (target: MatrixKind) => {
       // startGeneration hands back the running request if there is one, so a double click never pays twice.
@@ -978,6 +1090,8 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
     );
   } else if (pending[kind]) {
     content = <MatrixSkeleton columns={meta.expectedColumns} label={meta.loadingLabel} />;
+  } else if (historyLoading) {
+    content = <MatrixSkeleton columns={meta.expectedColumns} label="Chargement de ta matrice…" />;
   } else {
     content = <MatrixEmptyState kind={kind} pending={pending[kind]} error={errors[kind]} onGenerate={() => generate(kind)} />;
   }
