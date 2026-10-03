@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { CHEAP_MODEL } from "@/lib/ai/openrouter";
+import { CHEAP_MODEL, FLASHCARD_MODEL, callOpenRouter, type OpenRouterResponseFormat } from "@/lib/ai/openrouter";
 import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
 import { buildDefinitiveFlashcardSetPrompt, buildFlashcardExtensionPrompt } from "@/lib/ai/flashcard-prompts";
 import { FlashcardGenerationSchema } from "@/lib/ai/flashcard-schemas";
@@ -38,6 +38,43 @@ const MIN_GENERATED_CARDS = 15;
 const MAX_GENERATED_CARDS = 20;
 const EXTENSION_SIZE = 20;
 const GENERATION_MAX_TOKENS = 4000;
+
+/**
+ * Strict structured output: OpenRouter constrains FLASHCARD_MODEL's decoding
+ * to this schema, so the answer IS {flashcards:[{question,answer}]} — no
+ * prose, no markdown fence, no missing key. Zod still validates afterwards.
+ */
+const FLASHCARD_RESPONSE_FORMAT: OpenRouterResponseFormat = {
+  type: "json_schema",
+  json_schema: {
+    name: "flashcards",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        flashcards: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { question: { type: "string" }, answer: { type: "string" } },
+            required: ["question", "answer"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["flashcards"],
+      additionalProperties: false,
+    },
+  },
+};
+
+/**
+ * Time budget, inside maxDuration (120s): FLASHCARD_MODEL gets 40s (plus at
+ * most one quick retry on a 429/5xx within 15s — callOpenRouterResilient),
+ * then CHEAP_MODEL one last 55s attempt. Worst case ~110s.
+ */
+const PRIMARY_TIMEOUT_MS = 40_000;
+const FALLBACK_TIMEOUT_MS = 55_000;
 
 /** Bounded course text for the targeted call — smaller input, faster answer. */
 const MAX_EXPLICATION_CHARS_FOR_FLASHCARDS = 14_000;
@@ -128,6 +165,36 @@ function unseenCards(course: StudioCourseRow, cached: FlashcardQA[], language: C
     result.push(card);
   }
   return result;
+}
+
+/**
+ * FLASHCARD_MODEL with strict JSON first; on ANY failure (timeout, provider
+ * error, JSON/schema mismatch) one attempt on CHEAP_MODEL (json_object), so a
+ * hiccup of the cheap model never costs the student their batch.
+ */
+async function generateCards(messages: Parameters<typeof callOpenRouter>[0]): Promise<FlashcardQA[]> {
+  try {
+    const raw = await callOpenRouterResilient(messages, {
+      model: FLASHCARD_MODEL,
+      maxTokens: GENERATION_MAX_TOKENS,
+      bypassMock: true,
+      temperature: 0.3,
+      timeoutMs: PRIMARY_TIMEOUT_MS,
+      responseFormat: FLASHCARD_RESPONSE_FORMAT,
+    });
+    return parseGeneratedCards(raw);
+  } catch (error) {
+    console.warn(`[flashcards/generate] ${FLASHCARD_MODEL} a échoué — repli sur ${CHEAP_MODEL} :`, error);
+    const raw = await callOpenRouter(messages, {
+      model: CHEAP_MODEL,
+      maxTokens: GENERATION_MAX_TOKENS,
+      bypassMock: true,
+      temperature: 0.3,
+      timeoutMs: FALLBACK_TIMEOUT_MS,
+      responseFormat: { type: "json_object" },
+    });
+    return parseGeneratedCards(raw);
+  }
 }
 
 function parseGeneratedCards(raw: string): FlashcardQA[] {
@@ -276,15 +343,10 @@ export async function POST(request: NextRequest) {
                 existingSet.slice(-MAX_EXISTING_QUESTIONS_IN_PROMPT).map((card) => card.question),
                 EXTENSION_SIZE
               )) + buildLanguageDirective(language);
-        const raw = await callOpenRouterResilient(
-          [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: mode === "definitive" ? "Génère l'ensemble définitif de flashcards demandé." : "Génère les nouvelles flashcards demandées." },
-          ],
-          // CHEAP_MODEL = qwen/qwen-2.5-72b-instruct. 90s AbortController-backed timeout (inside callOpenRouter), well under maxDuration.
-          { model: CHEAP_MODEL, maxTokens: GENERATION_MAX_TOKENS, bypassMock: true, timeoutMs: 90_000 }
-        );
-        const cards = parseGeneratedCards(raw);
+        const cards = await generateCards([
+          { role: "system", content: systemPrompt },
+          { role: "user", content: mode === "definitive" ? "Génère l'ensemble définitif de flashcards demandé." : "Génère les nouvelles flashcards demandées." },
+        ]);
 
         if (mode === "definitive") {
           await storeFlashcardsCache(key, cards);

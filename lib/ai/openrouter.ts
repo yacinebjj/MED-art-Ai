@@ -274,6 +274,37 @@ export const CHEAP_MODEL = "qwen/qwen-2.5-72b-instruct";
 // changes if the model ever needs to differ again.
 export const EXPLICATION_MODEL = CHEAP_MODEL;
 
+// FLASHCARD-ONLY MODEL, 2026-10-03 — /api/flashcards/generate. Chosen from
+// the live OpenRouter catalog on three criteria: cost, speed (the route must
+// never time out) and strict-JSON reliability on medical content.
+//   - qwen/qwen3-30b-a3b-instruct-2507: $0.048/M input, $0.193/M output —
+//     ~7x cheaper on input and ~2x on output than CHEAP_MODEL
+//     (qwen-2.5-72b-instruct, $0.36/$0.40).
+//   - Mixture-of-experts with only 3.3B ACTIVE parameters per token: decodes
+//     several times faster than a dense 72B, so a 15-20 card answer
+//     (~3-4k tokens) comes back in seconds, not tens of seconds.
+//   - NON-reasoning ("Instruct-2507" is the no-thinking variant): no hidden
+//     <think> tokens eating the max_tokens budget or the timeout.
+//   - Supports response_format AND structured_outputs on OpenRouter, so the
+//     route sends a strict json_schema — the answer is valid JSON of the
+//     exact {flashcards:[{question,answer}]} shape by construction.
+//   - Same Qwen family as every other call site ("Qwen only" directive).
+// Cheaper models exist but were rejected: reasoning models (gpt-oss-20b,
+// qwen3.7-flash) burn hidden tokens and latency, DeepSeek is decommissioned,
+// and 8-12B dense models (llama-3.1-8b, gemma-3-12b, mistral-nemo) are too
+// weak on medical precision for a deck reused by every student of a course.
+// The route falls back to CHEAP_MODEL if this model fails.
+export const FLASHCARD_MODEL = "qwen/qwen3-30b-a3b-instruct-2507";
+
+/**
+ * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
+ * decoding to the schema (structured outputs); `json_object` only guarantees
+ * syntactically valid JSON.
+ */
+export type OpenRouterResponseFormat =
+  | { type: "json_object" }
+  | { type: "json_schema"; json_schema: { name: string; strict?: boolean; schema: Record<string, unknown> } };
+
 // Shared free-tier (":free" suffix) fallback chain — genuinely zero
 // marginal cost, used by app/api/dashboard-assistant/route.ts,
 // app/api/courses/chat/route.ts, and app/api/assistant/route.ts's
@@ -619,6 +650,10 @@ export async function callOpenRouter(
     // hidden thinking — it switches thinking ON. Only a model that always
     // reasons (e.g. Gemini Flash) is actually capped by `effort`.
     reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean; enabled?: boolean };
+    // Forces JSON output. When set, `provider.require_parameters` is sent too,
+    // so OpenRouter only routes to providers that actually honor it — never to
+    // one that would silently ignore the format and answer free text.
+    responseFormat?: OpenRouterResponseFormat;
   }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
@@ -691,6 +726,9 @@ export async function callOpenRouter(
         max_tokens: options?.maxTokens ?? 8192,
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
+        ...(options?.responseFormat
+          ? { response_format: options.responseFormat, provider: { require_parameters: true } }
+          : {}),
       }),
       signal: timeoutController.signal,
     });

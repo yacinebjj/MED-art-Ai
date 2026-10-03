@@ -20,8 +20,11 @@ RÈGLES :
 - Format question/réponse ouvert uniquement — aucune notation à choix multiples (A/B/C/D), jamais d'options.
 - Cet ensemble sera réutilisé tel quel par des centaines d'autres étudiants étudiant le même cours — il doit être la meilleure référence possible, pas un tirage parmi d'autres.
 
-Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans texte autour, sans balises markdown :
-{"flashcards": [{"question": "...", "answer": "..."}]}`;
+FORMAT DE SORTIE — JSON STRICT, OBLIGATOIRE :
+- Ta réponse est UNIQUEMENT un objet JSON valide de cette forme exacte : {"flashcards": [{"question": "...", "answer": "..."}]}
+- Le premier caractère de ta réponse est "{" et le dernier est "}". Aucun texte avant ou après, aucune balise markdown (pas de \`\`\`json), aucun commentaire.
+- Une seule clé racine "flashcards" ; chaque élément a exactement deux clés, "question" et "answer", toutes deux des chaînes non vides.
+- Guillemets doubles uniquement ; aucune virgule finale ; les guillemets doubles à l'intérieur d'un texte sont échappés (\\") ; pas de retour à la ligne brut dans une chaîne (utilise \\n si nécessaire).`;
 
 export function buildDefinitiveFlashcardSetPrompt(fullExplicationText: string, minCount: number, maxCount: number): string {
   return `${DEFINITIVE_FLASHCARD_SET_SYSTEM_PROMPT}
@@ -48,8 +51,11 @@ RÈGLES :
 - Ne jamais inventer d'information absente du texte fourni ni d'une connaissance médicale standard et vérifiée.
 - Format question/réponse ouvert uniquement — jamais d'options A/B/C/D.
 
-Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans texte autour, sans balises markdown :
-{"flashcards": [{"question": "...", "answer": "..."}]}`;
+FORMAT DE SORTIE — JSON STRICT, OBLIGATOIRE :
+- Ta réponse est UNIQUEMENT un objet JSON valide de cette forme exacte : {"flashcards": [{"question": "...", "answer": "..."}]}
+- Le premier caractère de ta réponse est "{" et le dernier est "}". Aucun texte avant ou après, aucune balise markdown (pas de \`\`\`json), aucun commentaire.
+- Une seule clé racine "flashcards" ; chaque élément a exactement deux clés, "question" et "answer", toutes deux des chaînes non vides.
+- Guillemets doubles uniquement ; aucune virgule finale ; les guillemets doubles à l'intérieur d'un texte sont échappés (\\") ; pas de retour à la ligne brut dans une chaîne (utilise \\n si nécessaire).`;
 
 export function buildFlashcardExtensionPrompt(fullExplicationText: string, existingQuestions: string[], count: number): string {
   return `${FLASHCARD_EXTENSION_SYSTEM_PROMPT}
