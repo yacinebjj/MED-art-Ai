@@ -1,63 +1,80 @@
 /**
- * Dashboard "Audio to Smart Notes" — Phase 2 (extraction). Takes the raw
- * transcript from OpenRouter's transcription endpoint (lib/ai/openrouter.ts's
- * transcribeAudioViaOpenRouter) of a 1-2h lecture and restructures it into
- * concise, exam-focused Smart Notes, entirely in French, via CHEAP_MODEL
- * (deepseek/deepseek-v3.2) — see app/api/lecture-notes/process/route.ts.
+ * Dashboard "Audio to Smart Notes" — prompts.
  *
- * Deliberately ONE call over the FULL transcript, never chunked: a 2h
- * lecture is ~22-24k tokens, and CHEAP_MODEL's context window is 163,840
- * tokens — chunking here would only add cost (the system prompt re-billed
- * per chunk) and risk fragmenting a lecture's continuous narrative across
- * chunk boundaries, for zero real benefit.
+ * Phase 1 (Whisper, per 4-minute chunk): LECTURE_TRANSCRIPTION_PROMPT is
+ * Whisper's optional `prompt` — a vocabulary/style primer, not an
+ * instruction. It biases decoding toward correct medical spelling (drug
+ * names, units, eponyms) and toward keeping French/Arabic/Darija as spoken,
+ * without forcing a language (forcing one also triples the billed rate —
+ * see lib/ai/openrouter.ts).
  *
- * No separate "detect French vs French/Darija mix" step either — a single
- * prompt that always instructs "translate literally any Darija into French"
- * already degrades gracefully to a no-op on a 100%-French lecture, so a
- * dedicated detection call would just be an extra billed request for a
- * result the extraction call already produces on its own.
- *
- * HARDENED (product direction, after real hallucination reports) — the
- * system prompt now leads with an explicit anti-hallucination "règle d'or"
- * and the "adapt Darija smoothly" framing was deliberately walked back to
- * "translate literally, omit rather than invent when unsure": the model was
- * taking creative liberties (adding content, over-interpreting darija)
- * instead of staying strictly faithful to what was actually said. The
- * extraction call (app/api/lecture-notes/process/route.ts) also now passes
- * a low `temperature` for the same reason — factual fidelity over fluency.
+ * Phase 2 (extraction, ONE call over the full transcript): runs on
+ * ECONOMY_MODEL (1M-token context) — a 2-hour lecture is ~30-40k tokens of
+ * French, which no longer fits the 32k context of the current CHEAP_MODEL.
+ * Fidelity rules come first: nothing that was not said, every number/dose
+ * kept verbatim, Darija translated literally or omitted, never embellished.
  */
 
-// Generous defensive ceiling, not a normal-case constraint — CHEAP_MODEL's
-// 163,840-token context (minus prompt + output budget) comfortably covers a
-// transcript far longer than any single real lecture. This only protects
-// against a pathological outlier upload (a multi-lecture recording, a file
-// picked by mistake), so it can afford to be generous.
-export const MAX_TRANSCRIPT_CHARS_FOR_EXTRACTION = 400_000;
+// Defensive ceiling only (a multi-lecture file picked by mistake); a real
+// 2-hour lecture is ~120-160k characters.
+export const MAX_TRANSCRIPT_CHARS_FOR_EXTRACTION = 600_000;
 
-export const LECTURE_NOTES_SYSTEM_PROMPT = `Tu es un assistant médical de transcription stricte. Règle d'or : NE TRADUIS PAS le texte si ce n'est pas explicitement demandé. Reste 100% fidèle aux paroles exactes de l'audio. N'invente rien (zéro hallucination). Extrais les termes médicaux et les perles cliniques exactement tels qu'ils ont été prononcés.
+export const LECTURE_TRANSCRIPTION_PROMPT =
+  "Cours magistral de médecine, faculté d'Alger. Le professeur parle en français, parfois en arabe ou en darija algérienne. " +
+  "Vocabulaire : posologie, mg/kg/j, mmol/L, mEq/L, g/dL, ionogramme, natrémie, kaliémie, créatininémie, DFG, HTA, AVC, IDM, BPCO, " +
+  "amoxicilline, céphalosporines, IEC, ARA II, bêtabloquants, héparine, AVK, corticothérapie, diagnostic différentiel, physiopathologie, sémiologie.";
 
-Ta tâche précise : reprendre le transcript brut d'un cours magistral (1 à 2 heures) et le restructurer en Smart Notes concises et exploitables pour réviser — une restructuration fidèle, jamais une réinvention.
+export const LECTURE_NOTES_SYSTEM_PROMPT = `Tu es un assistant médical de restructuration STRICTEMENT FIDÈLE de cours magistraux enregistrés (faculté de médecine, Algérie).
 
-RÈGLE DE LANGUE (stricte, mais sans inventer) : Le transcript peut être 100% français ou un mélange français/darija algérienne (arabe dialectal). La sortie finale reste en français académique et médical clair pour rester exploitable à la révision — mais la SEULE traduction autorisée est celle, strictement littérale, des passages en darija vers leur équivalent français direct, jamais une "adaptation" ou une reformulation créative qui ajouterait un sens, un exemple ou une nuance absente de l'original. Si un passage en darija est incompréhensible ou trop dégradé pour être traduit fidèlement, ne l'invente pas : omets-le plutôt que de fabriquer un contenu plausible.
+RÈGLE D'OR — FIDÉLITÉ ABSOLUE :
+1. N'ajoute AUCUN fait, chiffre, mécanisme, molécule, dose ou critère qui n'a pas été prononcé dans le transcript. Zéro hallucination, zéro « complément » tiré de tes connaissances générales — même si tu es sûr qu'il est vrai.
+2. Conserve VERBATIM toutes les données chiffrées dites : posologies (dose, unité, voie, fréquence, durée), valeurs seuils, critères diagnostiques, scores, classifications, pourcentages, délais. Ne les arrondis pas, ne les convertis pas.
+3. N'omets aucun détail clinique réellement enseigné : signes, examens complémentaires, critères, contre-indications, effets indésirables, conduites à tenir.
+4. Conserve l'insistance du professeur : tout passage qu'il souligne (« retenez », « c'est important », « je vais vous le demander », « c'est tombé ») doit apparaître.
+5. Langue de sortie : français médical clair. Les passages en darija/arabe sont traduits LITTÉRALEMENT ; un passage incompréhensible est omis, jamais deviné.
+6. Le transcript vient d'une reconnaissance vocale : corrige une faute d'orthographe évidente d'un terme médical (ex. « amoxicyline » → « amoxicilline ») mais ne réinterprète jamais le sens.
+7. Ignore le bruit : bavardages, logistique, répétitions, « euh », « d'accord ? ».
 
-TRANSCRIPT BRUITÉ : Le transcript vient d'une reconnaissance vocale automatique et peut contenir des erreurs, surtout sur les passages en darija. Si un fragment est réellement incompréhensible, ignore-le plutôt que de deviner ou d'inventer ce qu'il aurait pu vouloir dire — un point réellement dit et légèrement mal transcrit peut être reconstruit avec prudence, mais un fait médical qui n'apparaît nulle part dans le transcript ne doit JAMAIS être ajouté.
+STRUCTURE DE SORTIE (Markdown, ces titres exacts, dans cet ordre ; omets une section seulement si le cours ne contient vraiment rien qui s'y rapporte) :
 
-FILTRAGE (obligatoire) : Ignore complètement le bruit de fond, les discussions d'étudiants hors-sujet, les répétitions, et le remplissage oral ("euh", "donc voilà", "d'accord ?"). N'inclus QUE le contenu médical réel du cours.
+## Résumé structuré
+Hiérarchie médicale fidèle au plan réel du cours : un \`### Titre\` par grande partie enseignée (définition, épidémiologie, physiopathologie, clinique, paraclinique, diagnostic, traitement, évolution — selon ce qui a été dit), avec des paragraphes courts et des listes à puces.
+Dans le corps, place les encadrés au fil du texte, uniquement quand le contenu le justifie :
+> 💡 Perle clinique : une notion clinique décisive réellement énoncée.
+> ⚠️ Piège d'examen : une confusion classique ou un point que le professeur a signalé comme piège.
+> 🔵 Physiopathologie : un mécanisme expliqué par le professeur.
 
-INDICES D'EXAMEN (priorité absolue) : Repère chaque moment où le professeur signale explicitement l'importance d'un point pour l'examen ("ça c'est important", "je vais vous poser cette question", "retenez bien ça", "c'est tombé l'année dernière", etc.) et mets-le en évidence dans une section dédiée — c'est l'information la plus précieuse de toute la note.
+## Algorithmes diagnostiques et thérapeutiques
+Les démarches/étapes réellement décrites, en listes numérotées (1., 2., 3.…). Si aucune démarche n'a été décrite, écris « Aucun algorithme explicite dans ce cours. »
 
-STRUCTURE DE SORTIE (Markdown, avec ces 3 titres exacts) :
-## Résumé du cours
-Synthèse structurée des points médicaux réellement enseignés, en paragraphes courts ou listes à puces.
+## Posologies et valeurs clés
+Un tableau Markdown | Élément | Valeur exacte dite | Contexte | listant CHAQUE dose, seuil ou valeur chiffrée prononcé(e). Si aucun chiffre n'a été donné, écris « Aucune valeur chiffrée donnée dans ce cours. »
 
 ## Points cliniques clés
-Les mécanismes, signes cliniques, diagnostics et traitements les plus importants, en liste à puces.
+Les notions essentielles à retenir, en liste à puces concises.
 
 ## Indices d'examen
-Chaque signal d'importance repéré dans le cours, reformulé clairement. Si le professeur n'en a donné aucun, écris "Aucun indice d'examen explicite repéré dans ce cours."
+Chaque signal d'importance donné par le professeur, reformulé clairement (cite le passage entre guillemets quand c'est possible). S'il n'y en a aucun : « Aucun indice d'examen explicite repéré dans ce cours. »
 
-LONGUEUR : 800 à 1200 mots au total — une vraie synthèse condensée, jamais une paraphrase proportionnelle à la durée du cours source.`;
+LONGUEUR : proportionnelle à la densité réelle du contenu médical (typiquement 1 200 à 3 500 mots pour 1 à 2 heures) — exhaustif sur les données cliniques, sans remplissage ni paraphrase du bavardage.`;
 
 export function buildLectureNotesUserMessage(transcript: string): string {
-  return `Voici le transcript brut du cours magistral. Génère les Smart Notes demandées.\n\n"""\n${transcript}\n"""`;
+  return `Voici le transcript brut et intégral du cours magistral. Produis les Smart Notes demandées en respectant strictement la règle d'or.\n\n"""\n${transcript}\n"""`;
 }
+
+export const STUDY_KIT_SYSTEM_PROMPT = `Tu es un professeur de médecine qui prépare un kit de révision à partir des Smart Notes d'un cours magistral (déjà fidèles au cours).
+
+Règle absolue : chaque élément doit être vérifiable DANS les notes fournies. N'ajoute aucun fait extérieur.
+
+Réponds UNIQUEMENT avec un JSON valide, sans texte autour, de la forme exacte :
+{
+  "flashcards": [{"front": "question courte et précise", "back": "réponse exacte, concise"}],
+  "highYield": [{"point": "notion à forte probabilité d'examen", "why": "pourquoi elle tombe / ce qu'il faut retenir", "trap": "piège classique associé ou chaîne vide"}],
+  "mindmap": {"center": "thème central du cours", "branches": [{"label": "grande partie", "children": ["notion", "notion"]}]}
+}
+
+Contraintes :
+- "flashcards" : 12 à 20 cartes, une notion par carte, en priorité les définitions, critères, chiffres et posologies présents dans les notes.
+- "highYield" : 6 à 12 points, triés du plus au moins probable à l'examen ; reprends en priorité la section « Indices d'examen ».
+- "mindmap" : 4 à 7 branches, 2 à 6 enfants par branche, libellés de 2 à 8 mots.
+- Français médical, aucune balise Markdown dans les valeurs.`;

@@ -48,12 +48,151 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 
+/**
+ * One vibrant identity per feature. Every class is a literal so the Tailwind
+ * JIT sees it: icon = glyph color, tile = the 3D icon chip, glow = hover/active
+ * aura, active = the row tint + rail + label color when the route is current.
+ */
+interface NavHue {
+  icon: string;
+  tile: string;
+  glow: string;
+  activeGlow: string;
+  activeRow: string;
+  rail: string;
+  activeText: string;
+}
+
+const HUES = {
+  teal: {
+    icon: "text-teal-600 dark:text-teal-400",
+    tile: "from-teal-400/25 to-teal-600/10 ring-teal-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(20,184,166,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(20,184,166,0.65)]",
+    activeRow: "bg-teal-500/[0.12] dark:bg-teal-400/[0.12]",
+    rail: "bg-teal-400",
+    activeText: "text-teal-700 dark:text-teal-300",
+  },
+  fuchsia: {
+    icon: "text-fuchsia-600 dark:text-fuchsia-400",
+    tile: "from-fuchsia-400/25 to-fuchsia-600/10 ring-fuchsia-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(217,70,239,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(217,70,239,0.65)]",
+    activeRow: "bg-fuchsia-500/[0.12] dark:bg-fuchsia-400/[0.12]",
+    rail: "bg-fuchsia-400",
+    activeText: "text-fuchsia-700 dark:text-fuchsia-300",
+  },
+  orange: {
+    icon: "text-orange-600 dark:text-orange-400",
+    tile: "from-orange-400/25 to-orange-600/10 ring-orange-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(249,115,22,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(249,115,22,0.65)]",
+    activeRow: "bg-orange-500/[0.12] dark:bg-orange-400/[0.12]",
+    rail: "bg-orange-400",
+    activeText: "text-orange-700 dark:text-orange-300",
+  },
+  lime: {
+    icon: "text-lime-600 dark:text-lime-400",
+    tile: "from-lime-400/25 to-lime-600/10 ring-lime-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(132,204,22,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(132,204,22,0.65)]",
+    activeRow: "bg-lime-500/[0.12] dark:bg-lime-400/[0.12]",
+    rail: "bg-lime-400",
+    activeText: "text-lime-700 dark:text-lime-300",
+  },
+  emerald: {
+    icon: "text-emerald-600 dark:text-emerald-400",
+    tile: "from-emerald-400/25 to-emerald-600/10 ring-emerald-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(16,185,129,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(16,185,129,0.65)]",
+    activeRow: "bg-emerald-500/[0.12] dark:bg-emerald-400/[0.12]",
+    rail: "bg-emerald-400",
+    activeText: "text-emerald-700 dark:text-emerald-300",
+  },
+  purple: {
+    icon: "text-purple-600 dark:text-purple-400",
+    tile: "from-purple-400/25 to-purple-600/10 ring-purple-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(139,92,246,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(139,92,246,0.65)]",
+    activeRow: "bg-purple-500/[0.12] dark:bg-purple-400/[0.12]",
+    rail: "bg-purple-400",
+    activeText: "text-purple-700 dark:text-purple-300",
+  },
+  rose: {
+    icon: "text-rose-600 dark:text-rose-400",
+    tile: "from-rose-400/25 to-rose-600/10 ring-rose-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(244,63,94,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(244,63,94,0.65)]",
+    activeRow: "bg-rose-500/[0.12] dark:bg-rose-400/[0.12]",
+    rail: "bg-rose-400",
+    activeText: "text-rose-700 dark:text-rose-300",
+  },
+  amber: {
+    icon: "text-amber-600 dark:text-amber-400",
+    tile: "from-amber-400/25 to-amber-600/10 ring-amber-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(245,158,11,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(245,158,11,0.65)]",
+    activeRow: "bg-amber-500/[0.12] dark:bg-amber-400/[0.12]",
+    rail: "bg-amber-400",
+    activeText: "text-amber-700 dark:text-amber-300",
+  },
+  red: {
+    icon: "text-red-600 dark:text-red-400",
+    tile: "from-red-400/25 to-red-600/10 ring-red-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(239,68,68,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(239,68,68,0.65)]",
+    activeRow: "bg-red-500/[0.12] dark:bg-red-400/[0.12]",
+    rail: "bg-red-400",
+    activeText: "text-red-700 dark:text-red-300",
+  },
+  cyan: {
+    icon: "text-cyan-600 dark:text-cyan-400",
+    tile: "from-cyan-400/25 to-cyan-600/10 ring-cyan-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(6,182,212,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(6,182,212,0.65)]",
+    activeRow: "bg-cyan-500/[0.12] dark:bg-cyan-400/[0.12]",
+    rail: "bg-cyan-400",
+    activeText: "text-cyan-700 dark:text-cyan-300",
+  },
+  indigo: {
+    icon: "text-indigo-600 dark:text-indigo-400",
+    tile: "from-indigo-400/25 to-indigo-600/10 ring-indigo-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(99,102,241,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(99,102,241,0.65)]",
+    activeRow: "bg-indigo-500/[0.12] dark:bg-indigo-400/[0.12]",
+    rail: "bg-indigo-400",
+    activeText: "text-indigo-700 dark:text-indigo-300",
+  },
+  blue: {
+    icon: "text-blue-600 dark:text-blue-400",
+    tile: "from-blue-400/25 to-blue-600/10 ring-blue-500/25",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(59,130,246,0.65)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(59,130,246,0.65)]",
+    activeRow: "bg-blue-500/[0.12] dark:bg-blue-400/[0.12]",
+    rail: "bg-blue-400",
+    activeText: "text-blue-700 dark:text-blue-300",
+  },
+  slate: {
+    icon: "text-slate-500 dark:text-slate-400",
+    tile: "from-slate-300/30 to-slate-500/10 ring-slate-400/30",
+    glow: "group-hover:drop-shadow-[0_0_12px_rgba(148,163,184,0.7)]",
+    activeGlow: "drop-shadow-[0_0_12px_rgba(148,163,184,0.7)]",
+    activeRow: "bg-slate-500/[0.12] dark:bg-slate-400/[0.12]",
+    rail: "bg-slate-400",
+    activeText: "text-slate-700 dark:text-slate-200",
+  },
+} satisfies Record<string, NavHue>;
+
+type HueName = keyof typeof HUES;
+
+/** Lab tools get their sidebar identity here (LAB_TOOLS' own tints serve the Studio cards). */
+const LAB_HUES: Record<string, HueName> = { "case-simulator": "lime", matrix: "emerald", mindmap: "purple" };
+
 type NavEntry = {
   id: string;
   labelKey: CockpitKey;
   icon: LucideIcon;
-  /** Literal Tailwind class for the icon tint (the JIT must see it verbatim). */
-  tint?: string;
+  hue: HueName;
 } & ({ href: string; isActive?: (pathname: string, tab: string | null) => boolean } | { launch: LauncherTarget });
 
 interface NavSection {
@@ -70,11 +209,12 @@ const SECTIONS: NavSection[] = [
         labelKey: "navDashboard",
         icon: LayoutDashboard,
         href: "/dashboard",
+        hue: "teal",
         // Also lit inside the course workspaces reached FROM the dashboard (module, audio).
         isActive: (p) => p === "/dashboard" || p.startsWith("/dashboard/module/") || p.startsWith("/dashboard/workspace/"),
       },
-      { id: "assistant", labelKey: "navAssistant", icon: Sparkles, href: "/dashboard/assistant", tint: "text-violet-500" },
-      { id: "evaluation", labelKey: "navEvaluation", icon: FileQuestion, launch: { kind: "exam" }, tint: "text-primary-500" },
+      { id: "assistant", labelKey: "navAssistant", icon: Sparkles, href: "/dashboard/assistant", hue: "fuchsia" },
+      { id: "evaluation", labelKey: "navEvaluation", icon: FileQuestion, launch: { kind: "exam" }, hue: "orange" },
     ],
   },
   {
@@ -84,10 +224,10 @@ const SECTIONS: NavSection[] = [
         id: `lab-${tool.id}`,
         labelKey: `lab_${tool.id}` as CockpitKey,
         icon: tool.icon,
-        tint: tool.tint.icon,
+        hue: LAB_HUES[tool.id] ?? "slate",
         launch: { kind: "lab", tool: tool.id },
       })),
-      { id: "audio", labelKey: "navAudio", icon: Mic, href: "/dashboard/audio-workspace", tint: "text-orange-500" },
+      { id: "audio", labelKey: "navAudio", icon: Mic, href: "/dashboard/audio-workspace", hue: "rose" },
     ],
   },
   {
@@ -98,6 +238,7 @@ const SECTIONS: NavSection[] = [
         labelKey: "navFlashcards",
         icon: Brain,
         href: "/dashboard/study?tab=flashcards",
+        hue: "amber",
         isActive: (p, tab) => p === "/dashboard/study" && tab !== "session",
       },
       {
@@ -105,21 +246,22 @@ const SECTIONS: NavSection[] = [
         labelKey: "navPomodoro",
         icon: Timer,
         href: "/dashboard/study?tab=session",
+        hue: "red",
         isActive: (p, tab) => p === "/dashboard/study" && tab === "session",
       },
-      { id: "todo", labelKey: "navTodo", icon: ListTodo, href: "/dashboard/todo" },
-      { id: "notes", labelKey: "navNotes", icon: NotebookPen, href: "/dashboard/notes" },
+      { id: "todo", labelKey: "navTodo", icon: ListTodo, href: "/dashboard/todo", hue: "cyan" },
+      { id: "notes", labelKey: "navNotes", icon: NotebookPen, href: "/dashboard/notes", hue: "indigo" },
     ],
   },
   {
     titleKey: "sectionCommunity",
-    items: [{ id: "groups", labelKey: "navGroups", icon: Users, href: "/dashboard/groups", isActive: (p) => p.startsWith("/dashboard/groups") }],
+    items: [{ id: "groups", labelKey: "navGroups", icon: Users, href: "/dashboard/groups", hue: "blue", isActive: (p) => p.startsWith("/dashboard/groups") }],
   },
   {
     titleKey: "sectionSystem",
     items: [
-      { id: "billing", labelKey: "navBilling", icon: CreditCard, href: "/dashboard/billing" },
-      { id: "settings", labelKey: "navSettings", icon: Settings, href: "/dashboard/settings" },
+      { id: "billing", labelKey: "navBilling", icon: CreditCard, href: "/dashboard/billing", hue: "emerald" },
+      { id: "settings", labelKey: "navSettings", icon: Settings, href: "/dashboard/settings", hue: "slate" },
     ],
   },
 ];
@@ -156,12 +298,13 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
   const label = tCockpit(entry.labelKey, language);
   const Icon = entry.icon;
   const isActive = "href" in entry ? (entry.isActive ? entry.isActive(pathname, tab) : pathname === entry.href) : false;
+  const hue = HUES[entry.hue];
 
   const className = cn(
-    "group relative flex w-full items-center gap-3 rounded-xl py-2 text-[13px] transition-all duration-200 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-    collapsed ? "justify-center px-0" : "px-3",
+    "group relative flex w-full items-center gap-3 rounded-xl py-1.5 text-[13px] transition-all duration-200 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    collapsed ? "justify-center px-0" : "px-2.5",
     isActive
-      ? "font-semibold text-primary-700 dark:text-primary-300"
+      ? cn("font-semibold", hue.activeText)
       : "font-medium text-muted-foreground hover:bg-white/50 hover:text-foreground dark:hover:bg-white/5",
     !isActive && !collapsed && "hover:translate-x-0.5"
   );
@@ -170,19 +313,28 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
     <>
       {isActive && (
         <>
+          <motion.span layoutId="sidebar-active-pill" className={cn("absolute inset-0 rounded-xl", hue.activeRow)} transition={{ type: "spring", stiffness: 500, damping: 40 }} />
+          {/* 4px accent rail in the feature's own color — the "border-l-4" of the active route. */}
           <motion.span
             layoutId="sidebar-active-rail"
-            className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-gradient-to-b from-primary-400 to-violet-400"
-            transition={{ type: "spring", stiffness: 500, damping: 40 }}
-          />
-          <motion.span
-            layoutId="sidebar-active-pill"
-            className="absolute inset-0 rounded-xl bg-gradient-to-r from-primary-500/15 to-violet-500/10 shadow-glow"
+            className={cn("absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full shadow-[0_0_10px_currentColor]", hue.rail, hue.activeText)}
             transition={{ type: "spring", stiffness: 500, damping: 40 }}
           />
         </>
       )}
-      <Icon className={cn("relative z-10 h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110", !isActive && entry.tint)} />
+      {/* 3D icon chip: gradient body + inner top highlight + ring, lifted/tilted on hover with a colored aura. */}
+      <span
+        className={cn(
+          "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br ring-1 ring-inset",
+          "shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_4px_10px_-4px_rgba(0,0,0,0.35)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_6px_14px_-6px_rgba(0,0,0,0.8)]",
+          "transition-all duration-300 ease-out will-change-transform group-hover:-translate-y-0.5 group-hover:rotate-3 group-hover:scale-[1.15] motion-reduce:transform-none",
+          hue.tile,
+          hue.glow,
+          isActive && cn("scale-105", hue.activeGlow)
+        )}
+      >
+        <Icon className={cn("h-[17px] w-[17px]", hue.icon)} strokeWidth={2.2} />
+      </span>
       {!collapsed && <span className="relative z-10 truncate">{label}</span>}
     </>
   );
@@ -336,7 +488,7 @@ export function Sidebar() {
             {collapsed ? <AnimatedBrandMark size="sm" /> : <Logo size="lg" />}
           </div>
 
-          <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-3 pb-2 [scrollbar-width:thin]" aria-label="Navigation principale">
+          <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-3 pb-2 [scrollbar-color:rgba(100,116,139,0.35)_transparent] [scrollbar-width:thin]" aria-label="Navigation principale">
             <Suspense fallback={<NavSections collapsed={collapsed} pathname={pathname} tab={null} language={language} />}>
               <NavSectionsWithTab collapsed={collapsed} pathname={pathname} language={language} />
             </Suspense>

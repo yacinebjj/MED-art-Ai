@@ -120,8 +120,8 @@ export const RATE_LIMITS = {
   chatMessage: { limit: 120, windowMs: 5 * 60 * 1000 },
   /** app/api/dashboard-assistant/route.ts's free-tier (":free" models) assistant — per-student, so one student can't alone consume a disproportionate share of the shared daily ceiling in lib/platform-spend-guard.ts's reserveDashboardAssistantCapacity. */
   freeAssistant: { limit: 15, windowMs: 60 * 1000 },
-  /** app/api/lecture-notes/transcribe-chunk/route.ts — one real billed OpenRouter call PER CHUNK of a single lecture upload (~15 chunks for a 2h recording at 8 min/chunk), genuinely more calls per legitimate use than RATE_LIMITS.ai's single-call-per-feature-use routes. Not individually quota-gated via reserveGeneration (see that route's own comment) — this rate limit is this endpoint's only real cost guardrail. */
-  lectureChunk: { limit: 40, windowMs: 10 * 60 * 1000 },
+  /** app/api/lecture-notes/transcribe-chunk/route.ts (and its upload-url signer, counted separately) — one real billed OpenRouter call PER CHUNK of a single lecture upload (30 chunks for a 2h recording at 4 min/chunk, plus a few automatic retries), genuinely more calls per legitimate use than RATE_LIMITS.ai's single-call-per-feature-use routes. Not individually quota-gated via reserveGeneration (see that route's own comment) — this rate limit is this endpoint's only real cost guardrail. */
+  lectureChunk: { limit: 70, windowMs: 10 * 60 * 1000 },
   /** app/api/assistant/transcribe/route.ts — one short Whisper call per voice-dictated question in the MedArt Assistant composer (replaces the old browser SpeechRecognition dictation). A student can plausibly redo a short clip a few times in a row (mis-heard, changed their mind), so this is looser than `ai`'s general cap but still bounded — same guardrail role as `lectureChunk`, just for single-shot clips instead of a chunked lecture upload. */
   assistantDictation: { limit: 30, windowMs: 5 * 60 * 1000 },
 } satisfies Record<string, RateLimitConfig>;

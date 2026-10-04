@@ -1,92 +1,109 @@
 /**
  * BROWSER-ONLY — uses AudioContext/OfflineAudioContext, never import this
- * from server code. Exists because a real lecture recording (50-300+ Mo)
- * blows past OpenRouter's confirmed HARD 50 MiB request-body ceiling
- * (52,428,800 bytes exactly — confirmed live, 2026-09-02, via a real 413) no
- * matter which of its two input modes is used (multipart caps at a
- * documented 25 Mo; JSON base64 has no documented cap but is subject to the
- * SAME 50 MiB platform-wide limit, confirmed by the same real error). There
- * is no "streamed/chunked upload" parameter on this endpoint — HTTP
- * multipart is a content-type, not a resumable-upload protocol; the whole
- * request body still has to fit in one shot either way.
+ * from server code.
  *
- * The fix: decode the ENTIRE file once using the browser's own built-in
- * codecs (m4a/mp3/wav/ogg — whatever the browser can play, it can decode via
- * decodeAudioData, no server-side ffmpeg needed at all), resample down to
- * 16kHz mono (Whisper's own internal working rate — this loses nothing the
- * model wouldn't already discard, while shrinking raw PCM ~3-6x versus a
- * typical 44.1/48kHz source), then slice the resulting PCM into fixed-
- * duration WAV chunks small enough to always take the safe multipart path
- * server-side (see lib/ai/openrouter.ts's MULTIPART_SAFE_MAX_BYTES).
+ * Turns any recording the browser can play (MP3, M4A, WAV, OGG, WEBM, FLAC…)
+ * into small, self-contained 16 kHz mono WAV chunks for Whisper:
  *
- * UNVERIFIED on a genuine 2-hour file: decodeAudioData decodes the WHOLE
- * file into memory before any chunking happens (there's no way to decode
- * only part of a compressed container without proper demuxing) — a 2h
- * source at a typical 44.1kHz stereo native rate is well over 1 GB of raw
- * PCM in memory, however briefly. This has only been reasoned through, never
- * tested on a file that long; a lower-end phone browser could plausibly run
- * out of memory partway through. Only confirmed to work at the ~53 Mo scale
- * that just failed.
+ *  - Decoded ONCE, directly at 16 kHz (Whisper's working rate): the decode
+ *    context is created with `sampleRate: 16000`, so decodeAudioData resamples
+ *    while decoding instead of materialising the source's native 44.1/48 kHz
+ *    PCM first. For a 2-hour mono lecture that is ~460 MB of float PCM instead
+ *    of ~1.3 GB, and the old full-length OfflineAudioContext copy and the full
+ *    Int16 copy are gone entirely — each chunk is downmixed/encoded on demand.
+ *    Browsers that refuse a 16 kHz context fall back to native-rate decoding
+ *    plus per-chunk resampling (still no full-length copies).
+ *  - Chunks are 4 minutes (~7.7 MB WAV): small enough to upload reliably over
+ *    a phone connection, and they double as the transcript's timestamp grid.
+ *  - Each chunk is peak-normalised (bounded gain) so a quiet amphitheatre
+ *    recording reaches Whisper at a healthy level.
+ *
+ * Chunks are uploaded straight to Supabase Storage by the caller (see
+ * lib/audio/lecture-pipeline.ts) — never through a Next.js route body.
  */
 
-// Matches Whisper's own internal expected sample rate.
-const TARGET_SAMPLE_RATE = 16000;
+export const TARGET_SAMPLE_RATE = 16000;
+export const CHUNK_SECONDS = 4 * 60;
 
-// 8 min * 16000 samples/s * 2 bytes/sample = ~15.4 MB per chunk (mono
-// 16-bit PCM + a 44-byte WAV header) — comfortably under
-// MULTIPART_SAFE_MAX_BYTES (24 MB) with real margin, even accounting for
-// a source whose actual chunk boundaries land a little unevenly.
-const CHUNK_DURATION_SECONDS = 8 * 60;
+/** Peak target (~-1 dBFS) and the maximum boost applied to a quiet chunk. */
+const NORMALIZE_TARGET = 0.89;
+const NORMALIZE_MAX_GAIN = 4;
 
-/** Decodes the whole file via the browser's own codecs, then resamples to mono TARGET_SAMPLE_RATE via OfflineAudioContext (which does real resampling when its own sampleRate differs from the source's, not just a naive re-tag). */
-async function decodeToResampledMono(file: File): Promise<Float32Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const decodeContext = new AudioContextCtor();
+export interface PreparedLectureAudio {
+  buffer: AudioBuffer;
+  durationSec: number;
+  chunkCount: number;
+}
 
-  let decoded: AudioBuffer;
+type AudioContextCtor = typeof AudioContext;
+
+function getAudioContextCtor(): AudioContextCtor {
+  const ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext;
+  if (!ctor) throw new Error("Ton navigateur ne sait pas décoder l'audio (Web Audio indisponible).");
+  return ctor;
+}
+
+export async function prepareLectureAudio(file: File): Promise<PreparedLectureAudio> {
+  const Ctor = getAudioContextCtor();
+  let context: AudioContext;
   try {
-    decoded = await decodeContext.decodeAudioData(arrayBuffer);
+    context = new Ctor({ sampleRate: TARGET_SAMPLE_RATE });
+  } catch {
+    context = new Ctor();
+  }
+  try {
+    const buffer = await context.decodeAudioData(await file.arrayBuffer());
+    return { buffer, durationSec: buffer.duration, chunkCount: Math.max(1, Math.ceil(buffer.duration / CHUNK_SECONDS)) };
+  } catch {
+    throw new Error("Ce fichier audio n'a pas pu être décodé. Essaie un MP3, M4A, WAV ou OGG.");
   } finally {
-    // Not awaited — releasing the context's own resources is best-effort
-    // cleanup, not something the caller needs to wait on.
-    void decodeContext.close?.();
+    void context.close?.();
   }
-
-  const offlineContext = new OfflineAudioContext(1, Math.ceil(decoded.duration * TARGET_SAMPLE_RATE), TARGET_SAMPLE_RATE);
-  const source = offlineContext.createBufferSource();
-  source.buffer = decoded;
-  // Connecting a multi-channel buffer to a 1-channel destination triggers
-  // the Web Audio API's own standard downmix — no manual stereo averaging.
-  source.connect(offlineContext.destination);
-  source.start(0);
-
-  const resampled = await offlineContext.startRendering();
-  return resampled.getChannelData(0);
 }
 
-function floatTo16BitPCM(float32: Float32Array): Int16Array {
-  const int16 = new Int16Array(float32.length);
-  for (let i = 0; i < float32.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32[i]));
-    int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+/** Mono 16 kHz samples for [startSec, startSec + durSec). */
+async function monoWindow(buffer: AudioBuffer, startSec: number, durSec: number): Promise<Float32Array> {
+  if (buffer.sampleRate === TARGET_SAMPLE_RATE) {
+    const from = Math.floor(startSec * TARGET_SAMPLE_RATE);
+    const to = Math.min(buffer.length, from + Math.ceil(durSec * TARGET_SAMPLE_RATE));
+    const out = new Float32Array(Math.max(0, to - from));
+    const channels = buffer.numberOfChannels;
+    for (let c = 0; c < channels; c++) {
+      const data = buffer.getChannelData(c);
+      for (let i = 0; i < out.length; i++) out[i] += data[from + i];
+    }
+    if (channels > 1) for (let i = 0; i < out.length; i++) out[i] /= channels;
+    return out;
   }
-  return int16;
+  // Fallback path: resample just this window.
+  const length = Math.max(1, Math.ceil(Math.min(durSec, buffer.duration - startSec) * TARGET_SAMPLE_RATE));
+  const offline = new OfflineAudioContext(1, length, TARGET_SAMPLE_RATE);
+  const source = offline.createBufferSource();
+  source.buffer = buffer;
+  source.connect(offline.destination);
+  source.start(0, startSec, durSec);
+  const rendered = await offline.startRendering();
+  return rendered.getChannelData(0);
 }
 
-/** Browser-safe equivalent of lib/audio/mp3-encoder.ts's server-side WAV wrapping — Buffer isn't available here, so this builds the same 44-byte header directly on an ArrayBuffer via DataView. */
-function encodeMonoWav(samples: Int16Array, sampleRate: number): Blob {
-  const blockAlign = 2; // mono, 16-bit
-  const byteRate = sampleRate * blockAlign;
+function normalize(samples: Float32Array): void {
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.abs(samples[i]);
+    if (v > peak) peak = v;
+  }
+  if (peak < 0.001 || peak >= NORMALIZE_TARGET) return;
+  const gain = Math.min(NORMALIZE_MAX_GAIN, NORMALIZE_TARGET / peak);
+  for (let i = 0; i < samples.length; i++) samples[i] *= gain;
+}
+
+function encodeMonoWav(samples: Float32Array, sampleRate: number): Blob {
   const dataSize = samples.length * 2;
-
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
-
-  function writeString(offset: number, str: string) {
+  const writeString = (offset: number, str: string) => {
     for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-  }
-
+  };
   writeString(0, "RIFF");
   view.setUint32(4, 36 + dataSize, true);
   writeString(8, "WAVE");
@@ -95,36 +112,44 @@ function encodeMonoWav(samples: Int16Array, sampleRate: number): Blob {
   view.setUint16(20, 1, true); // PCM
   view.setUint16(22, 1, true); // mono
   view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
   writeString(36, "data");
   view.setUint32(40, dataSize, true);
-
   let offset = 44;
   for (let i = 0; i < samples.length; i++, offset += 2) {
-    view.setInt16(offset, samples[i], true);
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
   }
-
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-/**
- * Decodes `file` and splits it into an ordered array of small, standalone
- * mono 16kHz WAV blobs — each one independently uploadable/transcribable,
- * safely under the server's multipart-safe size ceiling. The caller
- * (components/dashboard/LectureNotesUploader.tsx) uploads them in order to
- * app/api/lecture-notes/transcribe-chunk, one request per chunk.
- */
-export async function decodeAndChunkAudioFile(file: File): Promise<Blob[]> {
-  const mono = await decodeToResampledMono(file);
-  const pcm16 = floatTo16BitPCM(mono);
+/** Encodes chunk `index` (0-based) as a normalised mono 16 kHz WAV. */
+export async function encodeLectureChunk(prepared: PreparedLectureAudio, index: number): Promise<Blob> {
+  const start = index * CHUNK_SECONDS;
+  const samples = await monoWindow(prepared.buffer, start, Math.min(CHUNK_SECONDS, prepared.durationSec - start));
+  normalize(samples);
+  return encodeMonoWav(samples, TARGET_SAMPLE_RATE);
+}
 
-  const samplesPerChunk = TARGET_SAMPLE_RATE * CHUNK_DURATION_SECONDS;
-  const chunks: Blob[] = [];
-  for (let start = 0; start < pcm16.length; start += samplesPerChunk) {
-    const slice = pcm16.subarray(start, Math.min(start + samplesPerChunk, pcm16.length));
-    chunks.push(encodeMonoWav(slice, TARGET_SAMPLE_RATE));
+/** Bar heights (0..1) for a waveform overview — strided scan, fast even on a 2-hour buffer. */
+export function computePeaks(buffer: AudioBuffer, bars = 480): number[] {
+  const data = buffer.getChannelData(0);
+  const block = Math.max(1, Math.floor(data.length / bars));
+  const step = Math.max(1, Math.floor(block / 1500));
+  const peaks: number[] = [];
+  let max = 0;
+  for (let b = 0; b < bars; b++) {
+    let peak = 0;
+    const from = b * block;
+    const to = Math.min(data.length, from + block);
+    for (let i = from; i < to; i += step) {
+      const v = Math.abs(data[i]);
+      if (v > peak) peak = v;
+    }
+    peaks.push(peak);
+    if (peak > max) max = peak;
   }
-  return chunks;
+  return max > 0 ? peaks.map((p) => p / max) : peaks;
 }

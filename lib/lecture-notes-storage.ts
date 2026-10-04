@@ -53,3 +53,21 @@ export async function ensureLectureRecordingsBucket(supabase: ReturnType<typeof 
     throw error;
   }
 }
+
+/** Upload ids are client-generated UUIDs; chunk indexes are bounded (a 4-min grid covers 13+ hours at 200). */
+export const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
+export const MAX_CHUNK_INDEX = 199;
+
+/** Always under the caller's own user id — a student can never sign, read or transcribe another student's chunk. */
+export function lectureChunkPath(userId: string, uploadId: string, chunkIndex: number): string {
+  return `${userId}/${uploadId}/chunk-${chunkIndex}.wav`;
+}
+
+let bucketReadyAt = 0;
+
+/** ensureLectureRecordingsBucket at most once per warm instance every 10 minutes — it is called once per chunk now. */
+export async function ensureLectureRecordingsBucketCached(supabase: ReturnType<typeof getSupabaseAdmin>): Promise<void> {
+  if (Date.now() - bucketReadyAt < 10 * 60 * 1000) return;
+  await ensureLectureRecordingsBucket(supabase);
+  bucketReadyAt = Date.now();
+}

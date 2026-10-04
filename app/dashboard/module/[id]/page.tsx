@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { ClinicalConnectionsPanel } from "@/components/course/workspace/ClinicalConnectionsPanel";
+import { ExplicationReader } from "@/components/course/workspace/ExplicationReader";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { tModulePage } from "@/lib/translations/modulePage";
@@ -2534,12 +2535,11 @@ export default function ModuleWorkspacePage() {
       ) : openedSection && activeCourse && getSectionValue(activeCourse, openedSection) ? (
         <div className="animate-fade-in">
           {openedSection === "explication" && (
-            <article dir="auto" className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none")}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
-                {normalizeCallouts(activeCourse.explication!)}
-              </ReactMarkdown>
-              <ClinicalConnectionsPanel key={activeCourse.id} courseId={activeCourse.id} />
-            </article>
+            <ExplicationReader
+              key={activeCourse.id}
+              markdown={activeCourse.explication!}
+              footer={<ClinicalConnectionsPanel key={activeCourse.id} courseId={activeCourse.id} />}
+            />
           )}
           {openedSection === "exemples_analogies" && (
             <article dir="auto" className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none")}>

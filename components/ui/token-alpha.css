@@ -53,6 +53,10 @@
   background-color: color-mix(in oklch, var(--card) 80%, transparent);
 }
 
+.bg-card\/95 {
+  background-color: color-mix(in oklch, var(--card) 95%, transparent);
+}
+
 .bg-destructive\/10 {
   background-color: color-mix(in oklch, var(--destructive) 10%, transparent);
 }
@@ -121,6 +125,10 @@
   border-color: color-mix(in oklch, var(--destructive) 30%, transparent);
 }
 
+.border-destructive\/40 {
+  border-color: color-mix(in oklch, var(--destructive) 40%, transparent);
+}
+
 .border-destructive\/50 {
   border-color: color-mix(in oklch, var(--destructive) 50%, transparent);
 }
@@ -131,10 +139,6 @@
 
 .border-primary\/30 {
   border-color: color-mix(in oklch, var(--primary) 30%, transparent);
-}
-
-.border-primary\/60 {
-  border-color: color-mix(in oklch, var(--primary) 60%, transparent);
 }
 
 .dark\:bg-background\/30:is(.dark *) {
@@ -171,14 +175,12 @@
   --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
 }
 
-.from-primary\/10 {
-  --tw-gradient-from: color-mix(in oklch, var(--primary) 10%, transparent) var(--tw-gradient-from-position);
-  --tw-gradient-to: transparent var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-}
-
 .hover\:bg-accent\/40:hover {
   background-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+
+.hover\:bg-accent\/60:hover {
+  background-color: color-mix(in oklch, var(--accent) 60%, transparent);
 }
 
 .hover\:bg-accent\/70:hover {
@@ -233,19 +235,8 @@
   border-color: color-mix(in oklch, var(--primary) 50%, transparent);
 }
 
-.hover\:from-primary\/5:hover {
-  --tw-gradient-from: color-mix(in oklch, var(--primary) 5%, transparent) var(--tw-gradient-from-position);
-  --tw-gradient-to: transparent var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-}
-
 .hover\:text-primary\/80:hover {
   color: color-mix(in oklch, var(--primary) 80%, transparent);
-}
-
-.hover\:via-muted\/40:hover {
-  --tw-gradient-to: transparent var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), color-mix(in oklch, var(--muted) 40%, transparent) var(--tw-gradient-via-position), var(--tw-gradient-to);
 }
 
 .ring-destructive\/40 {
@@ -296,9 +287,4 @@
 .via-muted\/30 {
   --tw-gradient-to: transparent var(--tw-gradient-to-position);
   --tw-gradient-stops: var(--tw-gradient-from), color-mix(in oklch, var(--muted) 30%, transparent) var(--tw-gradient-via-position), var(--tw-gradient-to);
-}
-
-.via-primary\/5 {
-  --tw-gradient-to: transparent var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), color-mix(in oklch, var(--primary) 5%, transparent) var(--tw-gradient-via-position), var(--tw-gradient-to);
 }
