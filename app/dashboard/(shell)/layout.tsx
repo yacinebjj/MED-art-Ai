@@ -96,6 +96,10 @@ const CHROMELESS_MOBILE_ROUTES = ["/dashboard/assistant"];
 // on large screens (1080p / 4K) than the text-first pages.
 const WIDE_ROUTES = ["/dashboard"];
 
+// These pages sit on their own opaque Cyber-Medical stage: the 3D DNA behind
+// them would be rendered every frame for nothing, so it is not mounted there.
+const OPAQUE_STAGE_ROUTES = ["/dashboard/study", "/dashboard/notes", "/dashboard/todo"];
+
 /**
  * "Native-app" no-scroll viewport architecture: the shell's own root is a
  * fixed `h-dvh` flex box that NEVER scrolls (`overflow-hidden`) — Topbar
@@ -194,7 +198,7 @@ export default function DashboardShellLayout({
       </a>
       <div className="aurora-canvas-bg relative flex h-dvh w-full overflow-hidden">
         <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
-        <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />
+        {!OPAQUE_STAGE_ROUTES.includes(pathname) && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
 
         <div className="hidden shrink-0 lg:block lg:p-3">
           <Sidebar />

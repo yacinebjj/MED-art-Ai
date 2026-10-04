@@ -97,7 +97,7 @@ interface ExamAttempt {
 
 const MAX_ATTEMPTS = 5;
 
-const panelShellClasses = "cyber-glass flex flex-col overflow-hidden rounded-3xl transition-all duration-300";
+const panelShellClasses = "cyber-glass flex min-w-0 max-w-full flex-col overflow-hidden rounded-3xl";
 
 const RESULTS_STAGGER_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
 const RESULT_CARD_VARIANTS = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
@@ -546,7 +546,7 @@ export default function ExamGeneratorPage() {
         <label
           key={course.id}
           className={cn(
-            "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all duration-200 active:scale-[0.99]",
+            "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 min-w-0 break-words text-sm font-medium transition-[transform,border-color,background-color] duration-200 active:scale-[0.99]",
             selected
               ? "border-primary-300 bg-primary-50 text-primary-800 shadow-glow dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-200"
               : "border-transparent text-foreground hover:-translate-y-0.5 hover:border-border hover:bg-accent hover:shadow-soft"
@@ -570,7 +570,7 @@ export default function ExamGeneratorPage() {
             type="button"
             onClick={() => handleViewExam(exam)}
             className={cn(
-              "flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-all duration-200 active:scale-[0.98]",
+              "flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-[transform,border-color,background-color] duration-200 active:scale-[0.98]",
               activeExamId === exam.id
                 ? "border border-primary-300 bg-primary-50 font-semibold text-primary-800 shadow-glow dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-200"
                 : "border border-transparent text-foreground hover:-translate-y-0.5 hover:border-border hover:bg-accent hover:shadow-soft"
@@ -740,19 +740,20 @@ export default function ExamGeneratorPage() {
             exit={{ x: slideDirection > 0 ? -60 : 60, opacity: 0 }}
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
             drag="x"
+            dragDirectionLock
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.15}
             onDragEnd={(_event, info) => {
               if (info.offset.x < -80) goToQuestion(currentQuestionIndex + 1);
               else if (info.offset.x > 80) goToQuestion(currentQuestionIndex - 1);
             }}
-            className="cursor-grab touch-pan-y rounded-2xl border border-white/[0.08] bg-[linear-gradient(160deg,rgba(15,23,42,0.85),rgba(2,6,23,0.9))] p-4 shadow-[0_20px_60px_-30px_rgba(34,211,238,0.5)] active:cursor-grabbing sm:p-6"
+            className="cursor-grab touch-pan-y rounded-2xl border border-white/[0.08] cyber-surface-deep p-4 shadow-[0_20px_60px_-30px_rgba(34,211,238,0.5)] active:cursor-grabbing sm:p-6"
           >
             <div className="mb-4 flex items-center gap-2">
               <Badge variant="primary">Q{currentQuestionIndex + 1} / {questions.length}</Badge>
               {answers[currentQuestion.id] && <Badge variant="success">Répondue</Badge>}
             </div>
-            <p className="mb-5 text-base font-medium leading-relaxed text-white">{currentQuestion.vignette}</p>
+            <p className="mb-5 break-words text-base font-medium leading-relaxed text-white [overflow-wrap:anywhere]">{currentQuestion.vignette}</p>
             <p className="mb-3 hidden text-[10px] font-semibold text-slate-500 sm:block">Raccourcis : A–E pour répondre · ← → pour naviguer</p>
             <div className="space-y-2.5" role="radiogroup" aria-label={`Options question ${currentQuestionIndex + 1}`}>
               {currentQuestion.options.map((opt) => {
@@ -761,7 +762,7 @@ export default function ExamGeneratorPage() {
                   <label
                     key={opt.label}
                     className={cn(
-                      "relative flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition-all duration-200 active:scale-[0.99]",
+                      "relative flex min-h-12 min-w-0 cursor-pointer items-center gap-3 overflow-hidden rounded-xl border p-3 text-sm transition-[transform,border-color,background-color,box-shadow] duration-200 active:scale-[0.99]",
                       selected
                         ? "border-cyan-300/80 bg-cyan-400/10 shadow-[0_0_26px_-6px_rgba(34,211,238,0.7)]"
                         : "border-white/[0.08] bg-slate-950/40 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-white/[0.03]"
@@ -787,7 +788,7 @@ export default function ExamGeneratorPage() {
                     >
                       {opt.label}
                     </span>
-                    <span className="text-slate-100">{opt.text}</span>
+                    <span className="min-w-0 break-words text-slate-100 [overflow-wrap:anywhere]">{opt.text}</span>
                   </label>
                 );
               })}
@@ -828,7 +829,7 @@ export default function ExamGeneratorPage() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
+      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
     >
       {testingInnerContent}
     </motion.div>
@@ -964,7 +965,7 @@ export default function ExamGeneratorPage() {
   );
 
   const resultsInnerContent = (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+    <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
       {/* Stats first on phones/tablets (no scrolling past 40+ questions to see the score); right column on xl. */}
       <div className="xl:order-2">{statsPanel}</div>
       <div className="min-w-0 xl:order-1">
@@ -1043,7 +1044,7 @@ export default function ExamGeneratorPage() {
                 )}
               >
                 <div className="mb-3 flex items-start justify-between gap-3">
-                  <p className="text-sm font-medium leading-relaxed text-slate-100">
+                  <p className="min-w-0 break-words text-sm font-medium leading-relaxed text-slate-100 [overflow-wrap:anywhere]">
                     <span className="mr-2 font-black text-cyan-300">Q{index + 1}.</span>
                     {q.vignette}
                   </p>
@@ -1068,7 +1069,7 @@ export default function ExamGeneratorPage() {
                         )}
                       >
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-current text-xs font-black text-slate-400">{opt.label}</span>
-                        <span className="flex-1 text-slate-100">{opt.text}</span>
+                        <span className="min-w-0 flex-1 break-words text-slate-100 [overflow-wrap:anywhere]">{opt.text}</span>
                         {isUserChoice && opt.isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />}
                         {isUserChoice && !opt.isCorrect && <XCircle className="h-4 w-4 shrink-0 text-rose-300" />}
                         {!isUserChoice && opt.isCorrect && (
@@ -1085,7 +1086,7 @@ export default function ExamGeneratorPage() {
                   <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-sky-300">
                     <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
                   </p>
-                  <ul className="space-y-1.5 text-sm text-slate-200">
+                  <ul className="space-y-1.5 break-words text-sm text-slate-200 [overflow-wrap:anywhere]">
                     {q.options.map((opt) => (
                       <li key={opt.label}>
                         <span className="font-bold text-white">{opt.label}.</span> {opt.explanation}
@@ -1148,7 +1149,7 @@ export default function ExamGeneratorPage() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full flex-col overflow-y-auto p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
+      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
     >
       {resultsInnerContent}
     </motion.div>
@@ -1173,7 +1174,7 @@ export default function ExamGeneratorPage() {
     // Point 2 fix — explicit w-full max-w-full alongside the existing
     // overflow-hidden, matching the sibling workspace/module page's own
     // identical root treatment.
-    <div className="dark cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden rounded-none border-0 text-foreground">
+    <div className="cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
       <WorkspaceTopbar title="Générateur d'Examen" />
 
       {/* Mobile-first UX rework — below `md`, aside/main never render side
@@ -1194,7 +1195,7 @@ export default function ExamGeneratorPage() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-3 sm:p-4 md:flex-row">
+      <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-4 overflow-hidden p-3 sm:p-4 md:flex-row">
         {isDesktopOrTablet ? (
           <>
             {/* Panneau Gauche — Sources + Historique (desktop) */}
@@ -1205,7 +1206,7 @@ export default function ExamGeneratorPage() {
                   refuses to actually clip/scroll without it (flex items
                   default to min-height: auto, so they grow to fit content
                   instead of shrinking to the parent's bound). */}
-              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
                 {courseListContent}
                 {savedExams.length > 0 && <div className="mt-2 border-t border-border pt-2">{savedExamsContent}</div>}
               </div>
@@ -1230,7 +1231,7 @@ export default function ExamGeneratorPage() {
               <>
                 {courseHeaderBlock}
                 <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={setStyleProfile} disabled={isGenerating} />
-                <div className="min-h-0 flex-1 overflow-y-auto p-2">{courseListContent}</div>
+                <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">{courseListContent}</div>
                 {generateButtonBlock}
               </>
             )}
@@ -1308,7 +1309,7 @@ export default function ExamGeneratorPage() {
         onClose={() => setIsExamFullscreen(false)}
         title={examState === "results" ? "Résultats de l'examen" : "Épreuve Clinique"}
       >
-        <div className="dark cyber-stage min-h-full rounded-none border-0 p-4 text-foreground sm:p-6">
+        <div className="cyber-stage min-h-full max-w-full overflow-x-hidden rounded-none border-0 p-4 text-foreground sm:p-6">
           {examState === "testing" ? testingInnerContent : examState === "results" ? resultsInnerContent : null}
         </div>
       </FullscreenViewerModal>

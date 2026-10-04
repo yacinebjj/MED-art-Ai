@@ -8,7 +8,7 @@
  * Self-contained: ActiveFlashcardsDeck only supplies data and handlers.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
 import { motion } from "framer-motion";
 import { Brain, ChevronLeft, ChevronRight, Eye, Flame, Gauge, RotateCcw, Sparkles, Zap } from "lucide-react";
@@ -70,7 +70,17 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function RatingButton({ rating, language, disabled, onRate }: { rating: FlashcardRating; language: Language; disabled: boolean; onRate: (rating: FlashcardRating) => void }) {
+const RatingButton = memo(function RatingButton({
+  rating,
+  language,
+  disabled,
+  onRate,
+}: {
+  rating: FlashcardRating;
+  language: Language;
+  disabled: boolean;
+  onRate: (rating: FlashcardRating) => void;
+}) {
   const ref = useMagnetic<HTMLButtonElement>(0.18);
   const style = RATING_STYLE[rating];
   const copy = RATING_COPY[language][rating];
@@ -82,21 +92,21 @@ function RatingButton({ rating, language, disabled, onRate }: { rating: Flashcar
       onClick={() => onRate(rating)}
       disabled={disabled}
       className={cn(
-        "cyber-magnetic group relative flex min-h-[3.75rem] flex-col items-center justify-center gap-0.5 overflow-hidden rounded-2xl border px-2 transition-[background-color,border-color,box-shadow] duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-40",
+        "cyber-magnetic group relative flex min-h-[3.25rem] min-w-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-2xl border px-1.5 transition-[background-color,border-color,box-shadow] duration-200 active:scale-95 sm:min-h-[3.75rem] sm:px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-40",
         style.className
       )}
     >
       <span aria-hidden className="cyber-sheen" />
-      <span className="flex items-center gap-1.5 text-sm font-black">
-        <Icon className="h-4 w-4" />
-        {copy.label}
+      <span className="flex min-w-0 max-w-full items-center gap-1.5 text-sm font-black">
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="truncate">{copy.label}</span>
       </span>
-      <span className="text-[10px] font-semibold opacity-70">
+      <span className="hidden max-w-full truncate text-[10px] font-semibold opacity-70 min-[400px]:block">
         {copy.hint} <kbd className="ml-1 hidden rounded border border-current/30 px-1 font-mono sm:inline">{style.key}</kbd>
       </span>
     </button>
   );
-}
+});
 
 interface FlipFlashcardProps {
   item: FlashcardPoolItem;
@@ -201,27 +211,33 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
     setDragX(0);
   }
 
-  // Space flips, 1 / 2 / 3 rate — never while typing in a field, never during the feedback beat.
+  // Space flips, 1 / 2 / 3 rate, arrows navigate — never while typing, never during the feedback beat.
+  // One listener for the card's lifetime: it reads the latest props through a ref (no re-subscribe per render).
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    if (isLocked || e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+    if (e.code === "Space") {
+      e.preventDefault();
+      onFlip();
+    } else if (e.key === "1") rate("hard");
+    else if (e.key === "2") rate("medium");
+    else if (e.key === "3") rate("easy");
+    else if (e.key === "ArrowRight") onNext();
+    else if (e.key === "ArrowLeft" && canGoPrev) onPrev();
+  };
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
+  // Stable identity so the memoized rating buttons don't re-render on every parent render.
   const rateRef = useRef(rate);
   rateRef.current = rate;
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (isLocked || e.metaKey || e.ctrlKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
-      if (e.code === "Space") {
-        e.preventDefault();
-        onFlip();
-      } else if (e.key === "1") rateRef.current("hard");
-      else if (e.key === "2") rateRef.current("medium");
-      else if (e.key === "3") rateRef.current("easy");
-      else if (e.key === "ArrowRight") onNext();
-      else if (e.key === "ArrowLeft" && canGoPrev) onPrev();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onFlip, onNext, onPrev, canGoPrev, isLocked]);
+  const stableRate = useCallback((rating: FlashcardRating) => rateRef.current(rating), []);
 
   const progressPct = ((index + 1) / Math.max(total, 1)) * 100;
 
@@ -243,9 +259,9 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
           <motion.div
-            className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-sky-400 to-violet-500 shadow-[0_0_12px_rgba(34,211,238,0.6)]"
+            className="h-full w-full origin-left rounded-full bg-gradient-to-r from-cyan-400 via-sky-400 to-violet-500 shadow-[0_0_12px_rgba(34,211,238,0.6)]"
             initial={false}
-            animate={{ width: `${progressPct}%` }}
+            animate={{ scaleX: progressPct / 100 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>
@@ -273,45 +289,60 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
         >
           {/* Desktop 3D micro-tilt layer (CSS vars, no re-render). */}
           <div ref={tiltRef} className="cyber-tilt relative rounded-[1.75rem] [perspective:1400px]">
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={isLocked ? -1 : 0}
+              aria-disabled={isLocked}
               onClick={() => {
+                if (isLocked) return;
                 if (draggedRef.current) {
                   draggedRef.current = false;
                   return;
                 }
                 onFlip();
               }}
-              disabled={isLocked}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !isLocked) {
+                  e.preventDefault();
+                  onFlip();
+                }
+              }}
               aria-label={flipped ? tStudyTools("ariaReturnToQuestion", language) : tStudyTools("ariaSeeAnswer", language)}
               className={cn(
-                "grid min-h-[300px] w-full cursor-pointer rounded-[1.75rem] text-left [transform-style:preserve-3d] transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 disabled:cursor-default sm:min-h-[340px]",
+                // Height follows the screen, never the text: long cards scroll inside their face,
+                // so the rating buttons below always stay on screen.
+                "grid h-[clamp(260px,46dvh,440px)] w-full cursor-pointer rounded-[1.75rem] text-left [transform-style:preserve-3d] transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60",
+                isLocked && "cursor-default",
                 flipped && "[transform:rotateY(180deg)]"
               )}
             >
               {/* Front — Question */}
-              <div className="relative flex flex-col items-center justify-center gap-4 overflow-hidden rounded-[1.75rem] border border-cyan-400/25 bg-[linear-gradient(145deg,rgba(15,23,42,0.96),rgba(8,47,73,0.85))] p-7 text-center shadow-[0_30px_80px_-30px_rgba(34,211,238,0.45)] [backface-visibility:hidden] [grid-area:1/1]">
+              <div className="relative flex min-h-0 flex-col items-center gap-3 overflow-hidden rounded-[1.75rem] border border-cyan-400/25 cyber-face-front p-5 text-center shadow-[0_30px_80px_-30px_rgba(34,211,238,0.45)] [backface-visibility:hidden] [grid-area:1/1] sm:p-7">
                 <span aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(34,211,238,0.18),transparent_60%)]" />
                 <span aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.06)_1px,transparent_1px)] bg-[size:28px_28px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
-                <span className="relative flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">
+                <span className="relative flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">
                   <Brain className="h-3 w-3" />
                   {tStudyTools("questionLabel", language)}
                 </span>
-                <p className="relative text-lg font-bold leading-relaxed text-white sm:text-xl">{item.question}</p>
-                <span className="relative mt-1 text-[11px] text-slate-400">{tStudyTools("frontHint", language)}</span>
+                <div className="cyber-scrollbar relative flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain">
+                  <p className={cn("my-auto break-words font-bold leading-relaxed text-white [overflow-wrap:anywhere]", item.question.length > 180 ? "text-base sm:text-lg" : "text-lg sm:text-xl")}>{item.question}</p>
+                </div>
+                <span className="relative shrink-0 text-[11px] text-slate-400">{tStudyTools("frontHint", language)}</span>
               </div>
 
               {/* Back — Answer */}
-              <div className="relative flex flex-col items-center justify-center gap-4 overflow-hidden rounded-[1.75rem] border border-violet-400/35 bg-[linear-gradient(145deg,rgba(15,23,42,0.96),rgba(46,16,101,0.85))] p-7 text-center shadow-[0_30px_80px_-30px_rgba(139,92,246,0.5)] [backface-visibility:hidden] [grid-area:1/1] [transform:rotateY(180deg)]">
+              <div className="relative flex min-h-0 flex-col items-center gap-3 overflow-hidden rounded-[1.75rem] border border-violet-400/35 cyber-face-back p-5 text-center shadow-[0_30px_80px_-30px_rgba(139,92,246,0.5)] [backface-visibility:hidden] [grid-area:1/1] [transform:rotateY(180deg)] sm:p-7">
                 <span aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(139,92,246,0.22),transparent_60%)]" />
-                <span className="relative flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-violet-200">
+                <span className="relative flex shrink-0 items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-violet-200">
                   <Sparkles className="h-3 w-3" />
                   {tStudyTools("answerLabel", language)}
                 </span>
-                <p className="relative text-base font-medium leading-relaxed text-slate-100 sm:text-lg">{item.answer}</p>
-                <span className="relative mt-1 text-[11px] text-slate-400">{tStudyTools("backHint", language)}</span>
+                <div className="cyber-scrollbar relative flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain">
+                  <p className={cn("my-auto break-words font-medium leading-relaxed text-slate-100 [overflow-wrap:anywhere]", item.answer.length > 260 ? "text-sm sm:text-base" : "text-base sm:text-lg")}>{item.answer}</p>
+                </div>
+                <span className="relative shrink-0 text-[11px] text-slate-400">{tStudyTools("backHint", language)}</span>
               </div>
-            </button>
+            </div>
             <span aria-hidden className="cyber-reflect" />
           </div>
         </div>
@@ -333,13 +364,13 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-2 sm:gap-3">
         <button
           type="button"
           aria-label={tStudyTools("ariaPrevCard", language)}
           onClick={onPrev}
           disabled={!canGoPrev || isLocked}
-          className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition-colors hover:border-white/25 hover:text-white disabled:opacity-30"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition-colors hover:border-white/25 hover:text-white disabled:opacity-30"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -347,10 +378,10 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
           type="button"
           onClick={onFlip}
           disabled={isLocked}
-          className="flex min-h-11 items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 text-sm font-bold text-cyan-100 transition-colors hover:bg-cyan-400/20 disabled:opacity-40"
+          className="flex min-h-11 min-w-0 items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 text-sm font-bold text-cyan-100 transition-colors hover:bg-cyan-400/20 disabled:opacity-40 sm:px-4"
         >
-          {flipped ? <RotateCcw className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          {flipped ? tStudyTools("buttonSeeQuestion", language) : tStudyTools("ariaSeeAnswer", language)}
+          {flipped ? <RotateCcw className="h-4 w-4 shrink-0" /> : <Eye className="h-4 w-4 shrink-0" />}
+          <span className="truncate">{flipped ? tStudyTools("buttonSeeQuestion", language) : tStudyTools("ariaSeeAnswer", language)}</span>
           <kbd className="ml-1 hidden rounded border border-cyan-300/30 px-1.5 font-mono text-[10px] sm:inline">Espace</kbd>
         </button>
         <button
@@ -358,15 +389,15 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
           aria-label={tStudyTools("ariaNextCard", language)}
           onClick={onNext}
           disabled={isLocked}
-          className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition-colors hover:border-white/25 hover:text-white disabled:opacity-30"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition-colors hover:border-white/25 hover:text-white disabled:opacity-30"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5">
         {(["hard", "medium", "easy"] as const).map((rating) => (
-          <RatingButton key={rating} rating={rating} language={language} disabled={isLocked} onRate={rate} />
+          <RatingButton key={rating} rating={rating} language={language} disabled={isLocked} onRate={stableRate} />
         ))}
       </div>
     </div>

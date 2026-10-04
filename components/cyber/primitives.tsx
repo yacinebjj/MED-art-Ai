@@ -1,7 +1,8 @@
 "use client";
 
 import "./cyber.css";
-import { forwardRef, useId, type CSSProperties, type ComponentType, type HTMLAttributes, type ReactNode } from "react";
+import "./cyber-light.css";
+import { forwardRef, useId, useMemo, type CSSProperties, type ComponentType, type HTMLAttributes, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useCyberTilt } from "./hooks";
@@ -40,7 +41,7 @@ export function CyberStage({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("dark cyber-stage rounded-[1.75rem] text-foreground", className)} style={{ ...accentVars(accent), ...style }}>
+    <div className={cn("cyber-stage rounded-[1.75rem] text-foreground", className)} style={{ ...accentVars(accent), ...style }}>
       {children}
     </div>
   );
@@ -148,6 +149,30 @@ export function NeonRing({
   const radius = (size - stroke) / 2 - (ticks > 0 ? 8 : 0);
   const circumference = 2 * Math.PI * radius;
   const center = size / 2;
+  // Graduations only change when another one lights up — not on every timer tick.
+  const litTicks = ticks > 0 ? Math.floor(clamped * ticks + 1e-9) : 0;
+  const tickLines = useMemo(
+    () =>
+      Array.from({ length: ticks }, (_, i) => {
+        const angle = (i / ticks) * Math.PI * 2;
+        const major = i % 5 === 0;
+        const r1 = size / 2 - 1;
+        const r2 = r1 - (major ? 7 : 4);
+        return (
+          <line
+            key={i}
+            x1={round2(center + Math.cos(angle) * r1)}
+            y1={round2(center + Math.sin(angle) * r1)}
+            x2={round2(center + Math.cos(angle) * r2)}
+            y2={round2(center + Math.sin(angle) * r2)}
+            stroke={i <= litTicks ? from : "rgb(148 163 184 / 0.25)"}
+            strokeWidth={major ? 2 : 1}
+            strokeLinecap="round"
+          />
+        );
+      }),
+    [ticks, size, center, litTicks, from]
+  );
 
   return (
     <div
@@ -163,25 +188,7 @@ export function NeonRing({
             <stop offset="100%" stopColor={to} />
           </linearGradient>
         </defs>
-        {ticks > 0 &&
-          Array.from({ length: ticks }, (_, i) => {
-            const angle = (i / ticks) * Math.PI * 2;
-            const major = i % 5 === 0;
-            const r1 = size / 2 - 1;
-            const r2 = r1 - (major ? 7 : 4);
-            return (
-              <line
-                key={i}
-                x1={round2(center + Math.cos(angle) * r1)}
-                y1={round2(center + Math.sin(angle) * r1)}
-                x2={round2(center + Math.cos(angle) * r2)}
-                y2={round2(center + Math.sin(angle) * r2)}
-                stroke={i / ticks <= clamped ? from : "rgb(148 163 184 / 0.25)"}
-                strokeWidth={major ? 2 : 1}
-                strokeLinecap="round"
-              />
-            );
-          })}
+        {tickLines}
         <circle cx={center} cy={center} r={radius} fill="none" strokeWidth={stroke} stroke="rgb(148 163 184 / 0.12)" />
         <motion.circle
           cx={center}
@@ -252,7 +259,8 @@ export function SegmentedControl<T extends string>({
 }) {
   const layoutId = useId();
   return (
-    <div role="tablist" aria-label={ariaLabel} className={cn("cyber-scrollbar flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03] p-1", className)}>
+    <div role="tablist" aria-label={ariaLabel} // Wraps onto a second row instead of scrolling sideways on narrow phones.
+      className={cn("flex max-w-full flex-wrap gap-1 rounded-2xl border border-white/10 bg-white/[0.03] p-1", className)}>
       {options.map((option) => {
         const active = option.value === value;
         const Icon = option.icon;
@@ -326,9 +334,9 @@ export function CyberStat({
       {typeof ratio === "number" && (
         <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-white/[0.06]">
           <motion.div
-            className={cn("h-full rounded-full bg-gradient-to-r", toneClass[tone].split(" ").slice(1).join(" "))}
+            className={cn("h-full w-full origin-left rounded-full bg-gradient-to-r", toneClass[tone].split(" ").slice(1).join(" "))}
             initial={false}
-            animate={{ width: `${Math.round(Math.min(1, Math.max(0, ratio)) * 100)}%` }}
+            animate={{ scaleX: Math.min(1, Math.max(0, ratio)) }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>

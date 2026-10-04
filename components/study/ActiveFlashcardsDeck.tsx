@@ -651,7 +651,7 @@ export function ActiveFlashcardsDeck() {
                 <span className="tabular-nums text-slate-300">{ratings[key]}</span>
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-                <div className={`h-full rounded-full bg-gradient-to-r ${bar} transition-[width] duration-500`} style={{ width: `${ratingTotal > 0 ? (ratings[key] / ratingTotal) * 100 : 0}%` }} />
+                <div className={`h-full w-full origin-left rounded-full bg-gradient-to-r ${bar} transition-transform duration-500`} style={{ transform: `scaleX(${ratingTotal > 0 ? ratings[key] / ratingTotal : 0})` }} />
               </div>
             </div>
           ))}

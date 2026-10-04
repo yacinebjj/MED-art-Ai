@@ -122,9 +122,9 @@ export function NoteEditor({ value, onChange, disabled, className }: NoteEditorP
         className={cn(
           // 16px base + generous line-height: notes are re-read for minutes at a time.
           "cyber-scrollbar h-full min-h-[300px] w-full min-w-0 flex-1 overflow-y-auto rounded-2xl border border-white/[0.08] bg-slate-950/40 p-5 text-base leading-[1.8] text-slate-100 outline-none transition-[opacity,border-color,box-shadow] focus:border-cyan-400/40 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)] sm:p-7",
-          "caret-cyan-300 selection:bg-cyan-400/30 selection:text-white",
-          "prose prose-invert max-w-none [&_[style*='rgb(254,_240,_138)']]:text-slate-900 prose-headings:text-white prose-strong:text-white prose-blockquote:border-l-cyan-400 prose-blockquote:text-slate-300 prose-mark:bg-yellow-200",
-          "prose-table:w-full prose-table:border-collapse prose-td:border prose-td:border-white/10 prose-td:p-2 prose-th:border prose-th:border-white/10 prose-th:bg-white/5 prose-th:p-2",
+          "caret-cyan-300 selection:bg-cyan-400/30",
+          "prose max-w-none dark:prose-invert [&_[style*='rgb(254,_240,_138)']]:text-slate-900 prose-headings:text-slate-900 dark:prose-headings:text-white prose-strong:text-slate-900 dark:prose-strong:text-white prose-blockquote:border-l-cyan-500 prose-blockquote:text-slate-600 dark:prose-blockquote:text-slate-300 prose-mark:bg-yellow-200",
+          "prose-table:w-full prose-table:border-collapse prose-td:border prose-td:border-slate-200 dark:prose-td:border-white/10 prose-td:p-2 prose-th:border prose-th:border-slate-200 dark:prose-th:border-white/10 prose-th:bg-slate-100 dark:prose-th:bg-white/5 prose-th:p-2",
           disabled && "cursor-not-allowed opacity-50"
         )}
       />

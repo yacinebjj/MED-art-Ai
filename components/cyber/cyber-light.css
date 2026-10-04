@@ -1,0 +1,270 @@
+/*
+ * GENERATED light-mode layer for the Cyber-Medical pages (see cyber.css).
+ * The pages are authored dark-first; when the student switches to the light
+ * theme (no `.dark` on <html>), these rules re-tint the dark utilities used
+ * inside `.cyber-stage` — text to slate, dark glass to white glass, white
+ * hairlines to slate hairlines. Text sitting on solid/gradient color is left
+ * untouched. Regenerate after adding new dark utilities to those pages.
+ */
+
+:root:not(.dark) .cyber-stage .bg-slate-900 {
+  background-color: rgb(255 255 255);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950 {
+  background-color: rgb(255 255 255);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950\/15 {
+  background-color: rgb(255 255 255 / 0.72);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950\/40 {
+  background-color: rgb(255 255 255 / 0.72);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950\/50 {
+  background-color: rgb(255 255 255 / 0.72);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950\/60 {
+  background-color: rgb(255 255 255 / 0.72);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950\/70 {
+  background-color: rgb(255 255 255 / 0.72);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950\/80 {
+  background-color: rgb(255 255 255 / 0.8);
+}
+
+:root:not(.dark) .cyber-stage .bg-slate-950\/95 {
+  background-color: rgb(255 255 255 / 0.95);
+}
+
+:root:not(.dark) .cyber-stage .bg-white\/10 {
+  background-color: rgb(15 23 42 / 0.08);
+}
+
+:root:not(.dark) .cyber-stage .bg-white\/\[0\.02\] {
+  background-color: rgb(15 23 42 / 0.022);
+}
+
+:root:not(.dark) .cyber-stage .bg-white\/\[0\.03\] {
+  background-color: rgb(15 23 42 / 0.033);
+}
+
+:root:not(.dark) .cyber-stage .bg-white\/\[0\.04\] {
+  background-color: rgb(15 23 42 / 0.044);
+}
+
+:root:not(.dark) .cyber-stage .bg-white\/\[0\.06\] {
+  background-color: rgb(15 23 42 / 0.066);
+}
+
+:root:not(.dark) .cyber-stage .bg-white\/\[0\.07\] {
+  background-color: rgb(15 23 42 / 0.077);
+}
+
+:root:not(.dark) .cyber-stage .bg-white\/\[0\.08\] {
+  background-color: rgb(15 23 42 / 0.08);
+}
+
+:root:not(.dark) .cyber-stage .border-white\/10 {
+  border-color: rgb(15 23 42 / 0.14);
+}
+
+:root:not(.dark) .cyber-stage .border-white\/15 {
+  border-color: rgb(15 23 42 / 0.21);
+}
+
+:root:not(.dark) .cyber-stage .border-white\/20 {
+  border-color: rgb(15 23 42 / 0.22);
+}
+
+:root:not(.dark) .cyber-stage .border-white\/25 {
+  border-color: rgb(15 23 42 / 0.22);
+}
+
+:root:not(.dark) .cyber-stage .border-white\/\[0\.06\] {
+  border-color: rgb(15 23 42 / 0.084);
+}
+
+:root:not(.dark) .cyber-stage .border-white\/\[0\.07\] {
+  border-color: rgb(15 23 42 / 0.098);
+}
+
+:root:not(.dark) .cyber-stage .border-white\/\[0\.08\] {
+  border-color: rgb(15 23 42 / 0.112);
+}
+
+:root:not(.dark) .cyber-stage .hover\:bg-slate-900:hover {
+  background-color: rgb(255 255 255);
+}
+
+:root:not(.dark) .cyber-stage .hover\:bg-white\/10:hover {
+  background-color: rgb(15 23 42 / 0.08);
+}
+
+:root:not(.dark) .cyber-stage .hover\:bg-white\/\[0\.03\]:hover {
+  background-color: rgb(15 23 42 / 0.033);
+}
+
+:root:not(.dark) .cyber-stage .hover\:border-white\/20:hover {
+  border-color: rgb(15 23 42 / 0.22);
+}
+
+:root:not(.dark) .cyber-stage .hover\:border-white\/25:hover {
+  border-color: rgb(15 23 42 / 0.22);
+}
+
+:root:not(.dark) .cyber-stage .hover\:text-cyan-100:hover {
+  color: rgb(14 116 144);
+}
+
+:root:not(.dark) .cyber-stage .hover\:text-cyan-200:hover {
+  color: rgb(14 116 144);
+}
+
+:root:not(.dark) .cyber-stage .hover\:text-rose-300:hover {
+  color: rgb(190 18 60);
+}
+
+:root:not(.dark) .cyber-stage .hover\:text-white:hover:not([class*="bg-gradient"], [class*="bg-primary"], [class*="bg-rose-6"], [class*="bg-emerald-5"], [class*="bg-destructive"], .cyber-keep, .cyber-keep *) {
+  color: rgb(15 23 42);
+}
+
+@media (min-width: 768px) {
+  :root:not(.dark) .cyber-stage .md\:bg-slate-900\/60 {
+    background-color: rgb(255 255 255 / 0.72);
+  }
+}
+
+:root:not(.dark) .cyber-stage .placeholder\:text-slate-500::placeholder {
+  color: rgb(100 116 139);
+}
+
+:root:not(.dark) .cyber-stage .placeholder\:text-slate-600::placeholder {
+  color: rgb(148 163 184);
+}
+
+:root:not(.dark) .cyber-stage .text-amber-100 {
+  color: rgb(180 83 9);
+}
+
+:root:not(.dark) .cyber-stage .text-amber-200 {
+  color: rgb(180 83 9);
+}
+
+:root:not(.dark) .cyber-stage .text-amber-300 {
+  color: rgb(180 83 9);
+}
+
+:root:not(.dark) .cyber-stage .text-cyan-100 {
+  color: rgb(14 116 144);
+}
+
+:root:not(.dark) .cyber-stage .text-cyan-200 {
+  color: rgb(14 116 144);
+}
+
+:root:not(.dark) .cyber-stage .text-cyan-300 {
+  color: rgb(14 116 144);
+}
+
+:root:not(.dark) .cyber-stage .text-cyan-300\/60 {
+  color: rgb(14 116 144 / 0.75);
+}
+
+:root:not(.dark) .cyber-stage .text-cyan-300\/70 {
+  color: rgb(14 116 144 / 0.75);
+}
+
+:root:not(.dark) .cyber-stage .text-emerald-100 {
+  color: rgb(4 120 87);
+}
+
+:root:not(.dark) .cyber-stage .text-emerald-200 {
+  color: rgb(4 120 87);
+}
+
+:root:not(.dark) .cyber-stage .text-emerald-300 {
+  color: rgb(4 120 87);
+}
+
+:root:not(.dark) .cyber-stage .text-fuchsia-100 {
+  color: rgb(162 28 175);
+}
+
+:root:not(.dark) .cyber-stage .text-fuchsia-200 {
+  color: rgb(162 28 175);
+}
+
+:root:not(.dark) .cyber-stage .text-orange-100 {
+  color: rgb(194 65 12);
+}
+
+:root:not(.dark) .cyber-stage .text-orange-200 {
+  color: rgb(194 65 12);
+}
+
+:root:not(.dark) .cyber-stage .text-rose-100 {
+  color: rgb(190 18 60);
+}
+
+:root:not(.dark) .cyber-stage .text-rose-200 {
+  color: rgb(190 18 60);
+}
+
+:root:not(.dark) .cyber-stage .text-rose-300 {
+  color: rgb(190 18 60);
+}
+
+:root:not(.dark) .cyber-stage .text-sky-100 {
+  color: rgb(3 105 161);
+}
+
+:root:not(.dark) .cyber-stage .text-sky-300 {
+  color: rgb(3 105 161);
+}
+
+:root:not(.dark) .cyber-stage .text-slate-100 {
+  color: rgb(30 41 59);
+}
+
+:root:not(.dark) .cyber-stage .text-slate-200 {
+  color: rgb(51 65 85);
+}
+
+:root:not(.dark) .cyber-stage .text-slate-300 {
+  color: rgb(71 85 105);
+}
+
+:root:not(.dark) .cyber-stage .text-slate-400 {
+  color: rgb(100 116 139);
+}
+
+:root:not(.dark) .cyber-stage .text-slate-500 {
+  color: rgb(100 116 139);
+}
+
+:root:not(.dark) .cyber-stage .text-slate-600 {
+  color: rgb(148 163 184);
+}
+
+:root:not(.dark) .cyber-stage .text-violet-100 {
+  color: rgb(109 40 217);
+}
+
+:root:not(.dark) .cyber-stage .text-violet-200 {
+  color: rgb(109 40 217);
+}
+
+:root:not(.dark) .cyber-stage .text-violet-300 {
+  color: rgb(109 40 217);
+}
+
+:root:not(.dark) .cyber-stage .text-white:not([class*="bg-gradient"], [class*="bg-primary"], [class*="bg-rose-6"], [class*="bg-emerald-5"], [class*="bg-destructive"], .cyber-keep, .cyber-keep *) {
+  color: rgb(15 23 42);
+}

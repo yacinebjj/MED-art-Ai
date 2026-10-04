@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Pause, Play, Wind } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,7 @@ const PATTERNS: BreathPattern[] = [
 ];
 
 /** Guided breathing between Pomodoro cycles — an animated orb that expands / contracts with the phases. */
-export function BreathingPanel({ suggested }: { suggested: boolean }) {
+export const BreathingPanel = memo(function BreathingPanel({ suggested }: { suggested: boolean }) {
   const reduceMotion = useReducedMotion();
   const [patternId, setPatternId] = useState(PATTERNS[0].id);
   const [running, setRunning] = useState(false);
@@ -139,4 +139,4 @@ export function BreathingPanel({ suggested }: { suggested: boolean }) {
       </div>
     </div>
   );
-}
+});

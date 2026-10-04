@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, Reorder, useReducedMotion } from "framer-motion";
 import { AlertTriangle, ChevronDown, ClipboardCheck, Coffee, Columns3, GitCommitVertical, LayoutGrid, ListChecks, PartyPopper, RotateCcw } from "lucide-react";
@@ -136,7 +136,8 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
     prevProgressPctRef.current = progressPct;
   }, [progressPct, tasks.length]);
 
-  async function toggleTask(task: StudyPlanTask) {
+  // Stable identity: the memoized task chips of the Timeline / Kanban / Grid views only re-render when their task changes.
+  const toggleTask = useCallback(async (task: StudyPlanTask) => {
     const nextCompleted = !task.isCompleted;
     // Optimistic UI — flips instantly, reverts only if the server write fails.
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, isCompleted: nextCompleted } : t)));
@@ -153,7 +154,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, isCompleted: task.isCompleted } : t)));
       toast({ variant: "error", title: err instanceof Error ? err.message : "La mise à jour a échoué." });
     }
-  }
+  }, [planId, toast]);
 
   async function handleReorder(newOrderIds: number[]) {
     const previousTasks = tasks;
@@ -338,7 +339,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
       ) : (
         <div className="space-y-4">
           {/* HERO — Aujourd'hui, toujours visible en premier */}
-          <div className="relative overflow-hidden rounded-3xl border border-cyan-400/30 bg-[linear-gradient(145deg,rgba(8,47,73,0.45),rgba(2,6,23,0.7))] p-4 shadow-[0_0_50px_-20px_rgba(34,211,238,0.55)] sm:p-6">
+          <div className="relative overflow-hidden rounded-3xl border border-cyan-400/30 cyber-surface-hero p-4 shadow-[0_0_50px_-20px_rgba(34,211,238,0.55)] sm:p-6">
             {todayTotal === 0 ? (
               <div className="flex flex-col items-center gap-2 py-6 text-center">
                 <Coffee className="h-8 w-8 text-primary/70" />
@@ -545,7 +546,7 @@ function useMemoParticles(count: number, spread: number) {
 function StudyOathBanner() {
   const { language } = useLanguage();
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-orange-400/30 bg-[linear-gradient(135deg,rgba(124,45,18,0.25),rgba(2,6,23,0.6))] p-5 text-center shadow-[0_0_40px_-20px_rgba(251,146,60,0.6)]">
+    <div className="relative overflow-hidden rounded-2xl border border-orange-400/30 cyber-surface-warn p-5 text-center shadow-[0_0_40px_-20px_rgba(251,146,60,0.6)]">
       <AlertTriangle className="mx-auto h-6 w-6 text-orange-500" />
       <p className="mx-auto mt-3 max-w-xl text-base font-serif italic leading-relaxed text-orange-100">
         {tTodo("studyOathText", language)}

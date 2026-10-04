@@ -642,7 +642,7 @@ function NotesPageContent() {
 
       {/* True fullscreen — a portal to document.body (PageTransition's transform would otherwise contain `fixed`). */}
       <FullscreenViewerModal open={isFullscreen && !!selectedNote} onClose={() => setIsFullscreen(false)} title={draftTitle || tNotes("titlePlaceholder", language)}>
-        <div className="dark cyber-stage min-h-full rounded-none border-0 p-4 sm:p-6" style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}>
+        <div className="cyber-stage min-h-full rounded-none border-0 p-4 sm:p-6" style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}>
           {editorContent}
         </div>
       </FullscreenViewerModal>

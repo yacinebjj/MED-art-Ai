@@ -210,9 +210,9 @@ function TodoStepper({ currentIndex }: { currentIndex: number }) {
               {i < STEPS.length - 1 && (
                 <div className="mx-2 h-0.5 flex-1 overflow-hidden rounded-full bg-white/[0.08] sm:mx-3">
                   <motion.div
-                    className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"
+                    className="h-full w-full origin-left rounded-full bg-gradient-to-r from-emerald-300 to-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"
                     initial={false}
-                    animate={{ width: isDone ? "100%" : "0%" }}
+                    animate={{ scaleX: isDone ? 1 : 0 }}
                     transition={{ duration: 0.45, ease: "easeOut" }}
                   />
                 </div>

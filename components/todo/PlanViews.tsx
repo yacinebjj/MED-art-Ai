@@ -7,7 +7,7 @@
  * (PATCH isCompleted), so no data flow changes. Code-split from the list view.
  */
 
-import { useMemo, useState, type DragEvent } from "react";
+import { memo, useMemo, useState, type DragEvent } from "react";
 import { motion } from "framer-motion";
 import { CalendarDays, Check, Clock, Flag, Inbox, Sparkles, Sun, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -41,12 +41,19 @@ function groupByDate(tasks: StudyPlanTask[]): [string, StudyPlanTask[]][] {
 }
 
 /** Compact task line with a neon check that fires a micro-burst on completion. */
-function TaskChip({ task, onToggle, draggable, onDragStart }: { task: StudyPlanTask; onToggle: (task: StudyPlanTask) => void; draggable?: boolean; onDragStart?: (e: DragEvent<HTMLDivElement>) => void }) {
+const TaskChip = memo(function TaskChip({ task, onToggle, draggable }: { task: StudyPlanTask; onToggle: (task: StudyPlanTask) => void; draggable?: boolean }) {
   const [burst, fire] = useBurst();
   return (
     <div
       draggable={draggable}
-      onDragStart={onDragStart}
+      onDragStart={
+        draggable
+          ? (e: DragEvent<HTMLDivElement>) => {
+              e.dataTransfer.setData("text/plain", String(task.id));
+              e.dataTransfer.effectAllowed = "move";
+            }
+          : undefined
+      }
       className={cn(
         "group flex items-start gap-2.5 rounded-xl border px-2.5 py-2 transition-colors",
         draggable && "cursor-grab active:cursor-grabbing",
@@ -62,7 +69,7 @@ function TaskChip({ task, onToggle, draggable, onDragStart }: { task: StudyPlanT
         aria-pressed={task.isCompleted}
         aria-label={task.title}
         className={cn(
-          "relative mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all active:scale-90",
+          "relative mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-[transform,border-color,background-color,box-shadow] active:scale-90",
           task.isCompleted ? "border-emerald-300 bg-emerald-400 text-slate-950 shadow-[0_0_12px_rgba(52,211,153,0.6)]" : "border-white/25 hover:border-cyan-300"
         )}
       >
@@ -80,7 +87,7 @@ function TaskChip({ task, onToggle, draggable, onDragStart }: { task: StudyPlanT
       </span>
     </div>
   );
-}
+});
 
 // ── Timeline ────────────────────────────────────────────────────────────
 
@@ -236,15 +243,7 @@ export function KanbanView({ tasks, today, onToggle }: ViewProps) {
                   ) : (
                     columns[id].map((task) => (
                       <motion.div key={task.id} layout transition={{ duration: 0.2 }}>
-                        <TaskChip
-                          task={task}
-                          onToggle={onToggle}
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData("text/plain", String(task.id));
-                            e.dataTransfer.effectAllowed = "move";
-                          }}
-                        />
+                        <TaskChip task={task} onToggle={onToggle} draggable />
                       </motion.div>
                     ))
                   )}
@@ -314,7 +313,7 @@ export function GridView({ tasks, today, onToggle }: ViewProps) {
                   disabled={total === 0}
                   onClick={() => setSelected(date)}
                   className={cn(
-                    "relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-xl border text-xs transition-all disabled:cursor-default",
+                    "relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-xl border text-xs transition-[border-color,box-shadow] disabled:cursor-default",
                     total === 0 ? "border-transparent text-slate-700" : "border-white/[0.08] text-white hover:border-cyan-400/40",
                     isActive && "border-cyan-300/80 shadow-[0_0_18px_-4px_rgba(34,211,238,0.7)]",
                     isToday && !isActive && "border-cyan-400/40"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { CloudRain, Volume2, VolumeX, Waves, Wind, Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +65,7 @@ interface AudioGraph {
  * on the fly) plus a matching tint for the dial. Starts only on an explicit
  * click (autoplay policies) and is fully torn down on unmount.
  */
-export function AmbiencePanel({ ambience, onAmbienceChange }: { ambience: AmbienceId; onAmbienceChange: (id: AmbienceId) => void }) {
+export const AmbiencePanel = memo(function AmbiencePanel({ ambience, onAmbienceChange }: { ambience: AmbienceId; onAmbienceChange: (id: AmbienceId) => void }) {
   const graphRef = useRef<AudioGraph | null>(null);
   const [volume, setVolume] = useState(0.35);
   const [playing, setPlaying] = useState(false);
@@ -180,7 +180,7 @@ export function AmbiencePanel({ ambience, onAmbienceChange }: { ambience: Ambien
               aria-pressed={active}
               title={label}
               className={cn(
-                "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border text-[10px] font-bold transition-all active:scale-95",
+                "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border text-[10px] font-bold transition-[transform,border-color,background-color,color,box-shadow] active:scale-95",
                 active ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-200 shadow-[0_0_18px_rgba(34,211,238,0.25)]" : "border-white/[0.07] bg-white/[0.02] text-slate-400 hover:border-white/20 hover:text-white"
               )}
             >
@@ -205,4 +205,4 @@ export function AmbiencePanel({ ambience, onAmbienceChange }: { ambience: Ambien
       </label>
     </div>
   );
-}
+});

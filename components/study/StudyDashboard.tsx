@@ -9,7 +9,7 @@
  * itself after the last cycle. Durations are a per-device preference.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { BookOpenCheck, Coffee, Flame, Minus, Pause, Play, Plus, RotateCcw, ShieldAlert, Timer, Trophy, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -103,7 +103,7 @@ function DurationStepper({
   onChange: (next: number) => void;
 }) {
   const buttonClass =
-    "flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-400/40 hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100";
+    "flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition-[transform,border-color,color] hover:border-cyan-400/40 hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100";
   return (
     <div className="flex flex-1 flex-col items-center gap-2 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3.5">
       <div className="flex items-center gap-1.5 text-slate-400">
@@ -258,6 +258,9 @@ export function StudyDashboard() {
     globalReset();
   }
 
+  // Stable: the memoized ambience panel must not re-render on every timer tick.
+  const handleAmbienceChange = useCallback((ambience: AmbienceId) => setSettings((prev) => ({ ...prev, ambience })), []);
+
   function patchSettings(patch: Partial<PomodoroSettings>) {
     setSettings((prev) => ({ ...prev, ...patch }));
   }
@@ -350,10 +353,10 @@ export function StudyDashboard() {
                 return (
                   <div key={i} className="flex flex-1 gap-0.5" style={{ flexGrow: settings.study + settings.rest }}>
                     <span className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]" style={{ flexGrow: settings.study }}>
-                      <span className="block h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 transition-[width] duration-1000 ease-linear" style={{ width: `${studyFill * 100}%` }} />
+                      <span className="block h-full w-full origin-left rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 transition-transform duration-1000 ease-linear" style={{ transform: `scaleX(${studyFill})` }} />
                     </span>
                     <span className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]" style={{ flexGrow: settings.rest }}>
-                      <span className="block h-full rounded-full bg-gradient-to-r from-amber-400 to-rose-500 transition-[width] duration-1000 ease-linear" style={{ width: `${breakFill * 100}%` }} />
+                      <span className="block h-full w-full origin-left rounded-full bg-gradient-to-r from-amber-400 to-rose-500 transition-transform duration-1000 ease-linear" style={{ transform: `scaleX(${breakFill})` }} />
                     </span>
                   </div>
                 );
@@ -377,7 +380,7 @@ export function StudyDashboard() {
               <button
                 type="button"
                 onClick={handleReset}
-                className="flex min-h-14 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-6 text-sm font-bold text-slate-300 transition-all hover:border-white/25 hover:text-white active:scale-95"
+                className="flex min-h-14 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-6 text-sm font-bold text-slate-300 transition-[transform,border-color,color] hover:border-white/25 hover:text-white active:scale-95"
               >
                 <RotateCcw className="h-4 w-4" />
                 Réinitialiser
@@ -434,9 +437,9 @@ export function StudyDashboard() {
                 <div key={day.key} className="flex flex-1 flex-col items-center gap-1">
                   <div className="flex h-20 w-full items-end overflow-hidden rounded-md bg-white/[0.04]">
                     <motion.div
-                      className={cn("w-full rounded-md", i === week.length - 1 ? "bg-gradient-to-t from-cyan-500 to-violet-400" : "bg-gradient-to-t from-cyan-500/50 to-sky-400/50")}
+                      className={cn("h-full w-full origin-bottom rounded-md", i === week.length - 1 ? "bg-gradient-to-t from-cyan-500 to-violet-400" : "bg-gradient-to-t from-cyan-500/50 to-sky-400/50")}
                       initial={false}
-                      animate={{ height: `${Math.max(day.seconds > 0 ? 6 : 0, (day.seconds / weekMax) * 100)}%` }}
+                      animate={{ scaleY: Math.max(day.seconds > 0 ? 0.06 : 0, day.seconds / weekMax) }}
                       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
                       title={`${formatHoursMinutes(day.seconds)}`}
                     />
@@ -465,7 +468,7 @@ export function StudyDashboard() {
           </CyberPanel>
 
           <CyberPanel className="p-5">
-            <AmbiencePanel ambience={settings.ambience} onAmbienceChange={(ambience) => patchSettings({ ambience })} />
+            <AmbiencePanel ambience={settings.ambience} onAmbienceChange={handleAmbienceChange} />
           </CyberPanel>
         </div>
       </div>
