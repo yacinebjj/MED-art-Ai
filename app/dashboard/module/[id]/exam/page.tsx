@@ -65,7 +65,6 @@ import { ReferenceExamUploader } from "@/components/course/workspace/exam/Refere
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
-import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 type ResultStatus = "correct" | "incorrect" | "skipped";
@@ -361,7 +360,7 @@ export default function ExamGeneratorPage() {
     setExamState("generating");
     setIsGenerating(true);
     try {
-      const res = await fetchWithHeartbeat("/api/exam/generate", {
+      const res = await fetch("/api/exam/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ moduleId, courseIds, variation, preferences, ...(styleProfile ? { styleProfile } : {}) }),

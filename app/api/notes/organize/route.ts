@@ -1,4 +1,3 @@
-import { withHeartbeat } from "@/lib/heartbeat-route";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -62,7 +61,7 @@ Consignes STRICTES :
 6. Ne renvoie AUCUN texte en dehors du code HTML. Ne mets pas de balise de bloc de code (pas de \`\`\`html au début ou à la fin). Donne juste le HTML directement.
 7. FRAGMENT UNIQUEMENT, JAMAIS UN DOCUMENT COMPLET : ta réponse est insérée TELLE QUELLE à l'intérieur d'une page existante. Ne génère JAMAIS <!DOCTYPE>, <html>, <head>, <title>, <style>, ni <body> — ces balises casseraient la mise en page de l'éditeur. Ne définis AUCUNE règle CSS dans une balise <style> et n'utilise AUCUNE classe CSS (pas de class="...") : la SEULE façon de styliser un élément est l'attribut "style" en ligne directement sur cet élément, exactement comme dans l'exemple de la règle 4. Commence directement par le premier <h2> ou <p> du contenu, sans aucune balise englobante avant.`;
 
-async function handlePost(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -113,6 +112,3 @@ async function handlePost(request: NextRequest) {
     return NextResponse.json({ error: errorMessage(error) }, { status });
   }
 }
-
-// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
-export const POST = withHeartbeat(handlePost);

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fileSha256, lookupFileResult, storeFileResult } from "@/lib/ai-file-cache";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { callOpenRouter, OpenRouterError, CHEAP_VISION_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { EXAM_STYLE_EXTRACTION_SYSTEM_PROMPT, EXAM_STYLE_EXTRACTION_USER_TEXT } from "@/lib/ai/exam-prompts";
@@ -95,21 +94,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // The same annale analysed before (by anyone) is answered from the cache —
-  // no model call and no generation unit spent.
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const fileHash = fileSha256(buffer);
-  const cachedProfile = ExamStyleProfileSchema.safeParse(await lookupFileResult<unknown>("exam-style", fileHash));
-  if (cachedProfile.success) {
-    return NextResponse.json({ success: true, styleProfile: cachedProfile.data, cached: true });
-  }
-
   const quotaGate = await reserveGeneration(user);
   if (!quotaGate.allowed) {
     return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
   }
 
   try {
+    const buffer = Buffer.from(await file.arrayBuffer());
     const base64 = buffer.toString("base64");
     const userMessage = buildAnalysisMessage(base64, file.type, kind, file.name || "reference-exam");
 
@@ -142,7 +133,6 @@ export async function POST(request: NextRequest) {
       throw lastError instanceof Error ? lastError : new Error("Échec de l'analyse du style après 2 tentatives.");
     }
 
-    await storeFileResult("exam-style", fileHash, styleProfile);
     return NextResponse.json({ success: true, styleProfile });
   } catch (error) {
     await refundGeneration(user.id);

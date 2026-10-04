@@ -12,7 +12,6 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 import type { GeneratedPlanDay } from "@/types/study-planner";
-import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 function buildRestDaysOptions(language: Language) {
   return Array.from({ length: 7 }, (_, i) => ({
@@ -80,7 +79,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
       const body = new FormData();
       body.append("file", file);
       const res = await fetch("/api/study-planner/upload", { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "Le téléversement a échoué.");
       setSource({ fileName: data.fileName, fileUrl: data.fileUrl, text: data.text ?? "", imageOnly: Boolean(data.imageOnly) });
       if (data.imageOnly) {
@@ -134,7 +133,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
         .map((t) => t.trim())
         .filter(Boolean);
 
-      const generateRes = await fetchWithHeartbeat("/api/study-planner/generate", {
+      const generateRes = await fetch("/api/study-planner/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

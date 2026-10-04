@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { callOpenRouter, LAB_PRIMARY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, ECONOMY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 import { STUDY_KIT_SYSTEM_PROMPT } from "@/lib/ai/lecture-notes-prompts";
 import type { LectureStudyKit } from "@/types/lecture-study-kit";
@@ -80,8 +80,7 @@ export async function POST(request: NextRequest) {
         { role: "system", content: STUDY_KIT_SYSTEM_PROMPT },
         { role: "user", content: smartNotes.slice(0, MAX_NOTES_CHARS) },
       ],
-      // Same model and JSON mode as the flashcards engine (qwen3-30b-a3b: ~15x cheaper than Gemini Flash, ~150 tok/s, non-reasoning).
-      { model: LAB_PRIMARY_MODEL, maxTokens: 6000, temperature: 0.2, responseFormat: { type: "json_object" }, timeoutMs: 90_000 }
+      { model: ECONOMY_MODEL, maxTokens: 6000, temperature: 0.2, reasoning: { effort: "low" }, timeoutMs: 100_000 }
     );
     const kit = sanitizeKit(parseJsonResponse(raw));
     if (kit.flashcards.length === 0 && kit.highYield.length === 0 && kit.mindmap.branches.length === 0) {

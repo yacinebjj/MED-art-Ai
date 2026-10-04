@@ -44,7 +44,6 @@ import { sanitizeNoteHtml } from "@/lib/notes/sanitize-note-html";
 import { CyberHeader, CyberPanel, CyberStage, SegmentedControl } from "@/components/cyber/primitives";
 import { useStoredPreference } from "@/components/cyber/hooks";
 import type { UserNote } from "@/types/user-notes";
-import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 const SIDEBAR_WIDTH = 320;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -239,7 +238,7 @@ function NotesPageContent() {
 
     setIsOrganizing(true);
     try {
-      const res = await fetchWithHeartbeat("/api/notes/organize", {
+      const res = await fetch("/api/notes/organize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: rawText }),

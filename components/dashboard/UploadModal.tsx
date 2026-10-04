@@ -20,23 +20,7 @@ import { useCyberTilt } from "@/components/cyber/hooks";
 // AND app/api/upload/route.ts. Checked here so an oversized file is rejected
 // instantly, before spending a student's time and mobile data.
 const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo
-/** A whole semester can be dropped at once; files are imported 3 at a time so 60 files never stall the browser nor flood the server. */
-const MAX_BATCH_FILES = 60;
-const BATCH_CONCURRENCY = 3;
-
-/**
- * Only failures of the side-effect-free steps (signing, the Storage upload,
- * a dropped connection) get one silent retry. A slow/failed text extraction
- * is never retried automatically: the server may have created the course
- * already, and a blind retry would duplicate it.
- */
-function isTransientUploadError(err: unknown): boolean {
-  if (err instanceof OcrSuggestedError) return false;
-  if (err instanceof TypeError) return true; // fetch() network failure
-  const message = err instanceof Error ? err.message : "";
-  if (/extraction/i.test(message)) return false;
-  return /préparation de l'envoi|envoi du fichier a pris trop de temps|vérifie ta connexion|failed to fetch|network|réseau/i.test(message);
-}
+const MAX_BATCH_FILES = 10;
 
 type Method = "upload" | "drive" | "text" | "link";
 type QueueStatus = "pending" | "uploading" | "done" | "error";
@@ -134,7 +118,6 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   const [title, setTitle] = useState("");
   const [link, setLink] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [isDriveImporting, setIsDriveImporting] = useState(false);
   // Lifted out of DriveBrowser so the OAuth connection survives switching tabs.
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
@@ -172,13 +155,9 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   function addFiles(list: FileList | null) {
     if (!list || list.length === 0) return;
     setError(null);
-    const all = Array.from(list);
-    const incoming = all.slice(0, allowsBatch ? MAX_BATCH_FILES : 1);
+    const incoming = Array.from(list).slice(0, allowsBatch ? MAX_BATCH_FILES : 1);
     const oversized = incoming.filter((f) => f.size > MAX_UPLOAD_FILE_BYTES);
-    const notices: string[] = [];
-    if (oversized.length > 0) notices.push(`${oversized.map((f) => f.name).join(", ")} : trop volumineux (max 100 Mo).`);
-    if (allowsBatch && all.length > MAX_BATCH_FILES) notices.push(`${all.length - MAX_BATCH_FILES} fichier(s) ignoré(s) : ${MAX_BATCH_FILES} maximum par import — relance l'import pour la suite.`);
-    if (notices.length > 0) setError(notices.join(" "));
+    if (oversized.length > 0) setError(`${oversized.map((f) => f.name).join(", ")} : trop volumineux (max 100 Mo).`);
     const accepted = incoming
       .filter((f) => f.size <= MAX_UPLOAD_FILE_BYTES)
       .map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 7)}`, file, status: "pending" as const }));
@@ -195,9 +174,8 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     const body = new FormData();
     body.append("file", f);
     const res = await fetch("/api/generate-course", { method: "POST", body });
-    // A platform timeout answers with an HTML page, not JSON — never surface a raw parse error.
-    const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; slug?: string };
-    if (!res.ok || !data.success || !data.slug) throw new Error(data.error ?? `Le téléversement a échoué (HTTP ${res.status}).`);
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error ?? "Le téléversement a échoué.");
     return data.slug;
   }
 
@@ -206,8 +184,8 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     body.append("text", t);
     body.append("title", courseTitle);
     const res = await fetch("/api/generate-course", { method: "POST", body });
-    const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; slug?: string };
-    if (!res.ok || !data.success || !data.slug) throw new Error(data.error ?? `L'import a échoué (HTTP ${res.status}).`);
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error ?? "L'import a échoué.");
     return data.slug;
   }
 
@@ -215,59 +193,30 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     setQueue((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
-  /**
-   * Imports the queued files BATCH_CONCURRENCY at a time, each with its own
-   * real status; a transient failure (network, timeout, 5xx) is retried once
-   * automatically before being shown. One file failing never stops the others.
-   */
+  /** Imports the queued files one by one, each with its own real status. */
   async function handleSubmitFiles() {
     const pending = queue.filter((item) => item.status === "pending" || item.status === "error");
     if (pending.length === 0) return;
     setIsSubmitting(true);
     setError(null);
-    setBatchProgress({ done: 0, total: pending.length });
     let succeeded = 0;
-    let finished = 0;
-    const submit = onSubmitFile ?? defaultSubmitFile;
-    const waiting = [...pending];
-
-    async function importOne(item: QueueItem) {
+    for (const item of pending) {
       patchItem(item.id, { status: "uploading", message: undefined, ocr: undefined });
-      for (let attempt = 1; ; attempt++) {
-        try {
-          const result = await submit(item.file);
-          patchItem(item.id, { status: "done" });
-          succeeded++;
-          onUploaded(result);
-          return;
-        } catch (err) {
-          if (attempt < 2 && isTransientUploadError(err)) {
-            patchItem(item.id, { message: "Connexion instable — nouvelle tentative…" });
-            await new Promise((resolve) => setTimeout(resolve, 2500));
-            continue;
-          }
-          patchItem(item.id, {
-            status: "error",
-            message: err instanceof Error ? err.message : "Le téléversement a échoué.",
-            ocr: err instanceof OcrSuggestedError && onRetryWithOcr ? { path: err.path, fileName: err.fileName } : undefined,
-          });
-          return;
-        }
+      try {
+        const result = await (onSubmitFile ?? defaultSubmitFile)(item.file);
+        patchItem(item.id, { status: "done" });
+        succeeded++;
+        onUploaded(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Le téléversement a échoué.";
+        patchItem(item.id, {
+          status: "error",
+          message,
+          ocr: err instanceof OcrSuggestedError && onRetryWithOcr ? { path: err.path, fileName: err.fileName } : undefined,
+        });
       }
     }
-
-    await Promise.all(
-      Array.from({ length: Math.min(BATCH_CONCURRENCY, waiting.length) }, async () => {
-        while (waiting.length > 0) {
-          const item = waiting.shift()!;
-          await importOne(item);
-          finished++;
-          setBatchProgress({ done: finished, total: pending.length });
-        }
-      })
-    );
     setIsSubmitting(false);
-    setBatchProgress(null);
     const failed = pending.length - succeeded;
     if (failed === 0) {
       toast({ variant: "success", title: succeeded > 1 ? `${succeeded} sources importées` : "Source importée" });
@@ -440,22 +389,8 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                 </p>
               </div>
 
-              {batchProgress && batchProgress.total > 1 && (
-                <div className="rounded-2xl border border-cyan-400/30 bg-cyan-500/5 p-3" role="status" aria-live="polite">
-                  <div className="mb-1.5 flex items-center justify-between text-xs font-bold text-foreground">
-                    <span>Import en cours — {BATCH_CONCURRENCY} fichiers à la fois</span>
-                    <span className="tabular-nums">
-                      {batchProgress.done}/{batchProgress.total}
-                    </span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 transition-[width] duration-300" style={{ width: `${Math.round((batchProgress.done / batchProgress.total) * 100)}%` }} />
-                  </div>
-                </div>
-              )}
-
               {queue.length > 0 && (
-                <ul className={cn("space-y-2", queue.length > 5 && "max-h-[22rem] overflow-y-auto pr-1 [scrollbar-width:thin]")}>
+                <ul className="space-y-2">
                   {queue.map((item) => {
                     const visual = fileVisual(item.file.name);
                     const Icon = visual.icon;
@@ -469,7 +404,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                             <p className="truncate text-sm font-bold text-foreground">{item.file.name}</p>
                             <p className="text-[11px] text-muted-foreground">
                               {visual.label} · {formatSize(item.file.size)}
-                              {item.status === "uploading" && ` · ${item.message ?? "Import et extraction…"}`}
+                              {item.status === "uploading" && " · Import et extraction…"}
                               {item.status === "done" && " · Importé"}
                             </p>
                           </div>

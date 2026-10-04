@@ -1,11 +1,10 @@
-import { withHeartbeat } from "@/lib/heartbeat-route";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { runModuleSynthesis, type ModuleSynthesisType } from "@/lib/module-synthesis";
-import { callOpenRouter, STUDIO_FAST_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import { SynthesisOptionsSchema, buildSynthesisTransformPrompt, needsSynthesisTransform, type SynthesisOptions } from "@/lib/synthesis-options";
 
 /**
@@ -22,8 +21,7 @@ async function personalizeSummary(markdown: string, options: SynthesisOptions): 
         { role: "system", content: buildSynthesisTransformPrompt(options) },
         { role: "user", content: markdown },
       ],
-      // Markdown rewrite of an existing summary — Flash-Lite (fast, -60% output price), reasoning minimal.
-      { model: STUDIO_FAST_MODEL, maxTokens: 8000, bypassMock: true, reasoning: { effort: "minimal" }, timeoutMs: 120_000 }
+      { model: ECONOMY_MODEL, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" }, timeoutMs: 120_000 }
     );
     const cleaned = raw.replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
     return cleaned.length > 40 ? { content: cleaned, personalized: true } : { content: markdown, personalized: false };
@@ -118,7 +116,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
  * and surface as an opaque framework crash instead of this app's own
  * `{success:false, error}` JSON shape.
  */
-async function guardedPost(request: NextRequest): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     return await handlePost(request);
   } catch (error) {
@@ -126,6 +124,3 @@ async function guardedPost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
-
-// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
-export const POST = withHeartbeat(guardedPost);

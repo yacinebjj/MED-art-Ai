@@ -22,7 +22,7 @@
 
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, CHEAP_MODEL, STUDIO_FAST_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import {
   buildSummaryChunkPrompt,
   buildKeywordRowPrompt,
@@ -39,7 +39,7 @@ import {
   type CourseWorkspaceGenerationType,
   type KeywordCategories,
 } from "@/lib/course-workspace-cache";
-import { MAX_SOURCE_CHARS, errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export type ModuleSynthesisType = "global_summary" | "keywords_table" | "medical_dictionary";
@@ -83,40 +83,8 @@ export interface EligibleCourseRow {
   raw_text: string;
 }
 
-/** Same definition as studio_courses.content_hash (60k-char prefix) — the fallback used to hash the FULL text, giving long courses two different keys. */
 function resolveContentHash(course: EligibleCourseRow): string {
-  return course.content_hash ?? sha256(normalizeText(course.raw_text.slice(0, MAX_SOURCE_CHARS)));
-}
-
-/**
- * Cross-course synthesis cache (module_cross_synthesis_cache): the synthesis
- * is a pure function of the courses' contents AND titles (the titles appear
- * in the output, so they are part of the key — another student's file names
- * are never shown). It used to be regenerated on every request, even when
- * every per-course chunk was a cache hit.
- */
-function crossSynthesisKey(coursesInOrder: EligibleCourseRow[]): string {
-  const parts = coursesInOrder.map((course) => `${resolveContentHash(course)}|${course.title.trim()}`).sort();
-  return sha256(`cross-v1\n${parts.join("\n")}`);
-}
-
-async function lookupCrossSynthesis(key: string): Promise<string | null> {
-  try {
-    const { data, error } = await getSupabaseAdmin().from("module_cross_synthesis_cache").select("content").eq("cache_key", key).maybeSingle<{ content: string }>();
-    if (error) return null;
-    return data?.content ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function storeCrossSynthesis(key: string, content: string): Promise<void> {
-  try {
-    const { error } = await getSupabaseAdmin().from("module_cross_synthesis_cache").upsert({ cache_key: key, content }, { onConflict: "cache_key", ignoreDuplicates: true });
-    if (error) console.error("[module-synthesis:cross-cache] Échec écriture (non bloquant):", error.message);
-  } catch (error) {
-    console.error("[module-synthesis:cross-cache] Exception écriture (non bloquant):", errorMessage(error));
-  }
+  return course.content_hash ?? sha256(normalizeText(course.raw_text));
 }
 
 function buildCourseInputs(courses: EligibleCourseRow[]): { inputs: ModuleSynthesisCourseInput[]; fallbackTitles: string[] } {
@@ -176,10 +144,6 @@ function stitchSummaryChunks(coursesInOrder: EligibleCourseRow[], chunksByHash: 
 }
 
 async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], chunksByHash: Map<string, unknown>): Promise<string> {
-  const cacheKey = crossSynthesisKey(coursesInOrder);
-  const cached = await lookupCrossSynthesis(cacheKey);
-  if (cached) return cached;
-
   const chunksByCourseTitle = Object.fromEntries(
     coursesInOrder.map((course) => [course.title, chunksByHash.get(resolveContentHash(course)) ?? {}])
   );
@@ -200,7 +164,7 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
     // genuinely additive cross-course synthesis — a knowingly-accepted
     // tradeoff on a small sample, per the product owner's own explicit
     // "runway over accuracy margin" decision.
-    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, responseFormat: { type: "json_object" } }
+    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true }
   );
 
   const parsed = parseJsonResponse(raw);
@@ -208,7 +172,6 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
   if (!content.trim()) {
     throw new Error("La réponse de l'IA ne contient pas de synthèse transversale exploitable.");
   }
-  await storeCrossSynthesis(cacheKey, content);
   return content;
 }
 
@@ -391,10 +354,7 @@ async function generateAndStoreSynthesisChunks(
   // different, comparably rigor-sensitive task — exam QCM generation; never
   // independently re-measured for a term-dictionary task specifically). No
   // `reasoning` option, matching every other CHEAP_MODEL call site.
-  // global_summary / keywords_table: STUDIO_FAST_MODEL (Gemini 3.1 Flash-Lite,
-  // 2026-10-07 cost pass — same JSON family as the previous ECONOMY_MODEL at
-  // -60/-67% price; ECONOMY_MODEL stays its automatic model fallback).
-  const model = type === "medical_dictionary" ? CHEAP_MODEL : STUDIO_FAST_MODEL;
+  const model = type === "medical_dictionary" ? CHEAP_MODEL : ECONOMY_MODEL;
 
   // Scales with THIS BATCH's own course count (bounded by
   // MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL above, never the full
@@ -410,13 +370,13 @@ async function generateAndStoreSynthesisChunks(
       { role: "user", content: userPrompt },
     ],
     type === "medical_dictionary"
-      ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true, responseFormat: { type: "json_object" } }
+      ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true }
       // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
       // lib/ai/studio-prompts.ts's own header comment) + the matching
       // reasoning cap: without it, this model's hidden reasoning tokens can
       // silently consume the completion budget before writing any of the
       // actual JSON, truncating it (see callOpenRouter's own doc comment).
-      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "minimal" }, responseFormat: { type: "json_object" } }
+      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
   );
 
   const parsed = parseJsonResponse(raw);

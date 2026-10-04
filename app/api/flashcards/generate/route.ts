@@ -1,4 +1,3 @@
-import { withHeartbeat } from "@/lib/heartbeat-route";
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
@@ -232,7 +231,7 @@ function parseGeneratedCards(raw: string): FlashcardQA[] {
  * At most one model call per request bounds latency and spend; the deck
  * only asks again once the student is close to the end of a batch.
  */
-async function handlePost(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -421,6 +420,3 @@ async function handlePost(request: NextRequest) {
     remainingUnseen: Math.max(0, poolSize - batch.length),
   });
 }
-
-// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
-export const POST = withHeartbeat(handlePost);

@@ -101,7 +101,6 @@ import { ExplicationGeneratingLabel, type ExplicationProgressView } from "@/comp
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
-import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 /**
  * Each of these 3 is a genuinely heavy render tree (multi-mode tabs,
@@ -872,7 +871,7 @@ export default function ModuleWorkspacePage() {
     fetch(`/api/curriculum/modules/${params.id}`)
       .then(async (res) => {
         if (!res.ok) throw new Error("not found");
-        const body = await res.json().catch(() => ({}));
+        const body = await res.json();
         return body.module as CurriculumModule;
       })
       .then((mod) => {
@@ -1196,10 +1195,10 @@ export default function ModuleWorkspacePage() {
     const uploaded = await uploadDocumentDirect(file, moduleId);
     if (!uploaded.course) throw new Error("La création du cours a échoué.");
 
-    // No per-file toast: UploadModal shows one summary for the whole batch (a 40-file import would otherwise stack 40 toasts).
     applyCreatedCourse(uploaded.course, uploaded.text, uploaded.fileUrl);
+    toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} a été importé et sauvegardé.` });
     return String(uploaded.course.id);
-  }, [moduleId, applyCreatedCourse]);
+  }, [moduleId, applyCreatedCourse, toast, language]);
 
   /** Explicit OCR retry after handleFileSelected throws lib/upload-client.ts's OcrSuggestedError (a scanned PDF with no real text layer) — a real, billed OpenRouter call, only ever triggered by the student's own click on UploadModal's "Essayer l'OCR" action, never automatically. */
   const handleOcrRetry = useCallback(async (path: string, fileName: string): Promise<string> => {
@@ -1548,7 +1547,7 @@ export default function ModuleWorkspacePage() {
 
     const regenerationPromise = (async () => {
       try {
-        const res = await fetchWithHeartbeat("/api/studio/regenerate", {
+        const res = await fetch("/api/studio/regenerate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ courseId, section: id, language: getContentLanguage() }),
@@ -1680,7 +1679,7 @@ export default function ModuleWorkspacePage() {
     courseId: number,
     extra?: Record<string, unknown>
   ): Promise<{ res: Response; data: StudioGenerateResponse }> {
-    const res = await fetchWithHeartbeat("/api/studio/generate", {
+    const res = await fetch("/api/studio/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // studyYear is sent unconditionally (not folded into `extra`) — it
@@ -2073,7 +2072,6 @@ export default function ModuleWorkspacePage() {
         try {
           if (!activeCourseRef.current) {
             await handleFileSelected(file);
-            toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} a été importé et sauvegardé.` });
           } else {
             const uploaded = await uploadDocumentDirect(file, moduleId);
             if (!uploaded.course) throw new Error("La création du cours a échoué.");

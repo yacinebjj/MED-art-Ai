@@ -44,7 +44,6 @@ import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { tStudyTools } from "@/lib/translations/studyTools";
 import type { FlashcardPoolItem } from "@/types/flashcard";
-import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 /** How long the "Bien joué !" / "Pas grave" confirmation stays before the deck advances. */
 const GRADE_FEEDBACK_MS = 550;
@@ -241,7 +240,7 @@ async function fetchLinkedCard(cardId: string, signal: AbortSignal): Promise<Fla
   try {
     const res = await fetch(`/api/flashcards/card?id=${encodeURIComponent(cardId)}`, { signal });
     if (!res.ok) return null;
-    const body: unknown = await res.json().catch(() => ({}));
+    const body: unknown = await res.json();
     const card = body && typeof body === "object" ? (body as { card?: unknown }).card : null;
     return isFlashcardPoolItem(card) ? card : null;
   } catch {
@@ -258,7 +257,7 @@ type BatchResult =
 async function requestBatch(contentLanguage: ContentLanguage, signal: AbortSignal): Promise<BatchResult> {
   let res: Response;
   try {
-    res = await fetchWithHeartbeat("/api/flashcards/generate", {
+    res = await fetch("/api/flashcards/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ language: contentLanguage }),

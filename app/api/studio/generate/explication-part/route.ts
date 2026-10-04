@@ -7,7 +7,6 @@ import { STUDIO_PROMPT_CONFIG } from "@/lib/ai/studio-prompts";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { computeExplicationSlices, generateExplicationPart, splitSliceIntoSubSlices } from "@/lib/studio-explication-delta";
-import { explicationSourceHash, lookupExplicationPart, storeExplicationPart, type PartGeometry } from "@/lib/explication-part-cache";
 
 export const runtime = "nodejs";
 // 280s — comfortably inside this project's REAL enforced ceiling, which an
@@ -157,10 +156,10 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   const { data: courseRow, error: courseRowError } = await supabase
     .from("studio_courses")
-    .select("raw_text, explication_reservation_pending")
+    .select("raw_text")
     .eq("id", courseId)
     .eq("user_id", user.id)
-    .maybeSingle<{ raw_text: string | null; explication_reservation_pending: boolean | null }>();
+    .maybeSingle<{ raw_text: string | null }>();
   if (courseRowError) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${courseRowError.message}` }, { status: 500 });
   }
@@ -169,15 +168,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { success: false, error: "Impossible de retrouver le texte source de ce cours (≥ 50 caractères requis)." },
       { status: 400 }
-    );
-  }
-
-  // Only a run reserved by explication-start may generate parts: this route
-  // spends a paid 100-260 s model call and must never be callable on its own.
-  if (!courseRow?.explication_reservation_pending) {
-    return NextResponse.json(
-      { success: false, error: "Aucune génération en cours pour ce cours — relance l'Explication depuis le Studio." },
-      { status: 409 }
     );
   }
 
@@ -212,21 +202,6 @@ export async function POST(request: NextRequest) {
   const systemPrompt = STUDIO_PROMPT_CONFIG.explication.systemPrompt + languageInstruction + customPromptInstruction;
 
   const encoder = new TextEncoder();
-  const isLastPart = partIndex === totalParts - 1 && subPartIndex === subSlices.length - 1;
-
-  // Cross-student part cache — skipped for a custom prompt (output unique to
-  // that student). A hit answers instantly, with no model call at all.
-  const sourceHash = customPrompt ? null : explicationSourceHash(resolvedSourceText);
-  const geometry: PartGeometry = { partIndex, totalParts, subPartIndex, subPartCount: subSlices.length };
-  if (sourceHash) {
-    const cachedPart = await lookupExplicationPart(sourceHash, language, geometry);
-    if (cachedPart) {
-      return new NextResponse(`${JSON.stringify({ type: "result", success: true, partIndex, totalParts, isLastPart, partMarkdown: cachedPart, cached: true })}\n`, {
-        status: 200,
-        headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache, no-transform" },
-      });
-    }
-  }
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       // See this route's own header comment for why this exists: keeps real
@@ -242,8 +217,8 @@ export async function POST(request: NextRequest) {
       }, 15_000);
 
       generateExplicationPart(slice, systemPrompt, partIndex + 1, totalParts, previousPartTail)
-        .then(async (partMarkdown) => {
-          if (sourceHash) await storeExplicationPart(sourceHash, language, geometry, partMarkdown);
+        .then((partMarkdown) => {
+          const isLastPart = partIndex === totalParts - 1 && subPartIndex === subSlices.length - 1;
           controller.enqueue(
             encoder.encode(`${JSON.stringify({ type: "result", success: true, partIndex, totalParts, isLastPart, partMarkdown })}\n`)
           );

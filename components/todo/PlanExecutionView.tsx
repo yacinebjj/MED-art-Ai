@@ -181,7 +181,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isCompleted: nextCompleted }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "La mise à jour a échoué.");
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, isCompleted: task.isCompleted } : t)));
@@ -240,7 +240,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
       if (undone) return;
       try {
         const res = await fetch(`/api/study-planner/plans/${planId}/tasks/${task.id}`, { method: "DELETE" });
-        const data = await res.json().catch(() => ({}));
+        const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error ?? "failed");
       } catch {
         if (!undone) {
@@ -259,7 +259,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: task.title, moduleId: task.moduleId }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? tTodo("aiSuggestErrorToast", language));
       setSuggestions((prev) => ({ ...prev, [task.id]: data.suggestions }));
     } catch (err) {

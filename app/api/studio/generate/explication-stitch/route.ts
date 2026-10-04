@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, HAIKU_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { buildExplicationSeamStitchPrompt } from "@/lib/prompts/public-course-sections";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -31,10 +31,11 @@ const SEAM_STITCH_TIMEOUT_MS = 45_000;
  * non-2xx/malformed response as "leave this seam unstitched", never as a
  * reason to fail the whole Explication.
  *
- * Uses CHEAP_MODEL (qwen3-235b-a22b-2507 since the 2026-10 cost audit) — a
- * small, precise "does this duplicate/restart, and if so fix only that"
- * judgment on a ~3k-char input. It used HAIKU_MODEL ($1/$5 per M tokens);
- * the strongest Qwen does this structural edit for ~1/12 of the price.
+ * Uses HAIKU_MODEL, not CHEAP_MODEL — this is a small, precise "does this
+ * duplicate/restart, and if so fix only that" structural judgment call on a
+ * tiny input, not the long-form exhaustive writing CHEAP_MODEL (DeepSeek
+ * V3.2) was chosen for elsewhere in this pipeline (see lib/ai/openrouter.ts's
+ * own comment on that choice).
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
         { role: "system", content: buildExplicationSeamStitchPrompt() },
         { role: "user", content: `avant:\n"""\n${tail}\n"""\n\naprès:\n"""\n${head}\n"""\n\nGénère le JSON demandé.` },
       ],
-      { model: CHEAP_MODEL, maxTokens: SEAM_STITCH_MAX_TOKENS, bypassMock: true, timeoutMs: SEAM_STITCH_TIMEOUT_MS, temperature: 0.2 }
+      { model: HAIKU_MODEL, maxTokens: SEAM_STITCH_MAX_TOKENS, bypassMock: true, timeoutMs: SEAM_STITCH_TIMEOUT_MS, temperature: 0.2 }
     );
     const parsed = parseJsonResponse(raw);
     const fixedTail = typeof parsed.tail === "string" && parsed.tail.trim() ? parsed.tail : tail;

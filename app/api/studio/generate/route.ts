@@ -1,7 +1,6 @@
-import { withHeartbeat } from "@/lib/heartbeat-route";
 import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL, STUDIO_FAST_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
 import {
   STUDIO_BYPASS_MOCK,
   STUDIO_PROMPT_CONFIG,
@@ -182,9 +181,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const studyYear = studyYearRaw === 1 || studyYearRaw === 2 ? studyYearRaw : null;
   // A non-default language, a custom prompt (explication only), or a
   // non-default study year on cas_clinique (année 1/2) makes this a
-  // PERSONALIZED request — cached under its own variant key in
-  // studio_content_cache (exact matches only, see cacheVariant below), never
-  // mixed with the default rows, and never
+  // PERSONALIZED request — never served from, nor written to, the
+  // cross-student studio_content_cache (keyed on content_hash alone, no
+  // language/prompt/year dimension — extending it would need a schema
+  // migration this codebase has no confirmed-live tooling for), and never
   // routed through the cross-university Explication chunk-delta pipeline
   // either (that pipeline reuses OTHER students' French, default-prompt
   // chapters — wrong material to reuse for a personalized request). Falls
@@ -195,11 +195,6 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // would silently share one cas_clinique cache entry — showing one of
   // them the wrong shape/content entirely.
   const isPersonalizedVariant = language !== "fr" || (actionType === "cas_clinique" && studyYear !== null);
-  // Shared-cache variant for those requests: language + (cas_clinique only) study year. Same
-  // source + same variant = same output, so it is reused across students like the default.
-  const cacheVariant = isPersonalizedVariant
-    ? [language !== "fr" ? language : null, actionType === "cas_clinique" && studyYear !== null ? `y${studyYear}` : null].filter(Boolean).join("-")
-    : undefined;
   const languageInstruction =
     language === "en"
       ? "\n\nINSTRUCTION DE LANGUE OBLIGATOIRE (remplace toute langue de sortie précédemment implicite) : rédige l'INTÉGRALITÉ de ta réponse — tous les champs textuels du JSON, sans exception — en ANGLAIS, jamais en français, en conservant strictement le même niveau de rigueur médicale, la même structure JSON et le même format exact déjà exigés ci-dessus." + buildLanguageDirective("en")
@@ -246,7 +241,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   let cacheRowId: string | undefined;
   let cacheMode: "exact" | "delta" | "cross-university-delta" | "miss" = "miss";
 
-  const cacheResult: StudioCacheLookupResult = await lookupStudioContentCache(actionType, truncatedContext, false, cacheVariant);
+  const cacheResult: StudioCacheLookupResult = isPersonalizedVariant
+    ? { hit: false }
+    : await lookupStudioContentCache(actionType, truncatedContext);
 
   if (cacheResult.hit && cacheResult.matchType === "exact") {
     finalData = cacheResult.data;
@@ -347,13 +344,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
-      // MODEL POLICY (2026-10-07 cost pass): attempts 1-2 run on
-      // STUDIO_FAST_MODEL (Gemini 3.1 Flash-Lite: -60/-67% price, reasoning
-      // "minimal", far higher throughput); the LAST attempt runs on
-      // ECONOMY_MODEL (Gemini 3.7 Flash), the model every section below was
-      // validated on — so a section the fast model cannot produce valid
-      // still gets the proven one. History of the previous policy:
-      // every Studio section reaching this generic path ran
+      // MODEL POLICY: every Studio section reaching this generic path runs
       // on ECONOMY_MODEL (Gemini 3.7 Flash) — Explication Ultra-Détaillée
       // (CHEAP_MODEL/DeepSeek V3.2) never reaches here anymore, see the
       // actionType === "explication" guard near the top of this handler.
@@ -362,6 +353,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       // exact prompt+schema on a real course — Hémolyse — with a full
       // structural re-validation and a manual medical-accuracy read finding
       // no errors). There is no Sonnet fallback anywhere in this route.
+      const generationModel = ECONOMY_MODEL;
 
       // reasoning: { effort: "low" } — confirmed production root cause of
       // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
@@ -374,13 +366,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       // the ceiling is set. `streamOpenRouter` (the chat path) already caps
       // this for the exact same model — every ECONOMY_MODEL Studio call
       // gets the identical cap.
-      // Flash-Lite thinks very little at "minimal"; ECONOMY_MODEL keeps its
-      // proven "low" cap on the final attempt.
-      const reasoningFor = (model: string) => (model === STUDIO_FAST_MODEL ? ({ effort: "minimal" } as const) : ({ effort: "low" } as const));
-      // Every attempt shares one envelope under maxDuration (300 s), so a slow
-      // first attempt can never push the last one past the platform wall.
-      const generationStartedAt = Date.now();
-      const GENERATION_BUDGET_MS = 270_000;
+      const reasoningOption = { effort: "low" } as const;
 
       // RAISED 2 -> 3 after a real, reported production symptom: an
       // occasional "ne respecte pas le schéma attendu" failure on Résumé
@@ -410,35 +396,16 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // Architecture voulue par le client : le texte intégral du cours est
         // injecté DANS le system prompt (pas dans un message user séparé) —
         // voir buildStudioSystemMessage. Le message user reste minimal.
-        const isLastAttempt = attempt === MAX_GENERIC_ATTEMPTS;
-        const generationModel = isLastAttempt ? ECONOMY_MODEL : STUDIO_FAST_MODEL;
-        const remainingMs = GENERATION_BUDGET_MS - (Date.now() - generationStartedAt);
         let attemptRaw: string;
         try {
-          if (remainingMs < 20_000) throw new OpenRouterError("La génération a pris trop de temps. Réessaie : le résultat sera plus rapide.", 504);
           attemptRaw = await callOpenRouter(
             [
               { role: "system", content: systemContent },
               { role: "user", content: userPrompt },
             ],
-            {
-              model: generationModel,
-              maxTokens: effectiveMaxTokens,
-              bypassMock: STUDIO_BYPASS_MOCK,
-              reasoning: reasoningFor(generationModel),
-              responseFormat: { type: "json_object" },
-              timeoutMs: isLastAttempt ? remainingMs - 5_000 : Math.min(120_000, remainingMs - 5_000),
-            }
+            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: reasoningOption }
           );
         } catch (error) {
-          // A transient failure (timeout, rate limit, provider 5xx) moves on
-          // to the next attempt — whose model differs — instead of failing
-          // the student's request outright.
-          const transient = error instanceof OpenRouterError && (error.status === 429 || error.status >= 500);
-          if (transient && !isLastAttempt && GENERATION_BUDGET_MS - (Date.now() - generationStartedAt) > 30_000) {
-            console.warn(`[studio/generate:${actionType}] Tentative ${attempt} (${generationModel}) en échec transitoire, tentative suivante:`, (error as OpenRouterError).message);
-            continue;
-          }
           await refundGeneration(user.id);
           if (error instanceof OpenRouterError) {
             return NextResponse.json({ success: false, error: error.message }, { status: error.status });
@@ -472,10 +439,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // errors and never throws, so a caching hiccup can't block this
     // student's own successful generation. No separate "record usage" call
     // here anymore — reserveGeneration() above already incremented
-    // atomically, before this call even ran. A personalized request is
-    // stored under its own variant key (language/year), never mixed with the
-    // default rows.
-    await storeStudioContentCache(actionType, truncatedContext, finalData, cacheVariant);
+    // atomically, before this call even ran. Skipped for a personalized
+    // (non-default language / custom prompt) request — see
+    // isPersonalizedVariant's own comment above for why this must never
+    // enter the shared cross-student cache.
+    if (!isPersonalizedVariant) {
+      await storeStudioContentCache(actionType, truncatedContext, finalData);
+    }
   }
 
   // Persist BEFORE returning success — see this route's header comment.
@@ -545,7 +515,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
  * Never masks a real, already-handled error response — only ever catches
  * what the handler itself did not.
  */
-async function guardedPost(request: NextRequest): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     return await handlePost(request);
   } catch (error) {
@@ -553,6 +523,3 @@ async function guardedPost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
-
-// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
-export const POST = withHeartbeat(guardedPost);

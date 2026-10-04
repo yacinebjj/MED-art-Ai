@@ -1,6 +1,5 @@
 "use client";
 
-import { SectionErrorBoundary } from "@/components/ui/SectionErrorBoundary";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -914,7 +913,7 @@ export function StudioPanel({
               // fixes a sub-pixel blur on text selection under this panel's
               // own Framer Motion (motion.*) ancestors' transform.
               <div ref={containerRef} data-selectable className="text-select-stable p-2 md:p-4">
-                <SectionErrorBoundary label="cette section" resetKey={openedSection}>{children}</SectionErrorBoundary>
+                {children}
               </div>
             )
           ) : openedLab ? (
@@ -928,7 +927,7 @@ export function StudioPanel({
                 data-selectable
                 className="text-select-stable p-2 md:p-4"
               >
-                <SectionErrorBoundary label="cet outil du Lab" resetKey={openedLab.id}>{labContent}</SectionErrorBoundary>
+                {labContent}
               </motion.div>
             )
           ) : (
@@ -1480,7 +1479,7 @@ export function StudioPanel({
             </div>
             {/* text-select-stable — see its own comment in app/globals.css. */}
             <div ref={containerRef} data-selectable className="text-select-stable flex-1 overflow-y-auto p-6">
-              <SectionErrorBoundary label="ce contenu" resetKey={openedSection ?? openedLab?.id}>{detailContent}</SectionErrorBoundary>
+              {detailContent}
             </div>
           </div>,
           document.body

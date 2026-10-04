@@ -1,4 +1,3 @@
-import { withHeartbeat } from "@/lib/heartbeat-route";
 import { z } from "zod";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
@@ -287,8 +286,6 @@ async function generateExamBatch(
           // affects a fraction of the exam.
           model: CHEAP_MODEL,
           maxTokens: EXAM_BATCH_MAX_TOKENS,
-          // Strict JSON mode: the batch is a {"questions": [...]} object — no prose preamble to pay for or repair.
-          responseFormat: { type: "json_object" },
           bypassMock: true,
           ...(isVariation ? { temperature: VARIATION_TEMPERATURE } : {}),
         }
@@ -945,8 +942,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const selectedCourses = eligibleCourses.map((course) => ({ id: course.id, title: course.title }));
 
   if (!cachedContent && !isVariation && !isPersonalizedExam) {
-    // Awaited: a fire-and-forget write can be frozen with the function once the response is sent.
-    await storeExamCache(contentHash, content, selectedCourses);
+    void storeExamCache(contentHash, content, selectedCourses);
   }
   // Personalized exams never enter the shared variation pool either.
   if (isVariation && !servedFromVariationPool && !isPersonalizedExam) {
@@ -1005,7 +1001,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
  * masks a real, already-handled error response — only ever catches what
  * handlePost itself did not.
  */
-async function guardedPost(request: NextRequest): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     return await handlePost(request);
   } catch (error) {
@@ -1013,6 +1009,3 @@ async function guardedPost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
-
-// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
-export const POST = withHeartbeat(guardedPost);

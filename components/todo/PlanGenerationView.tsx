@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/Button";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tTodo } from "@/lib/translations/todo";
 import type { GeneratedPlanDay, StudyPlanChatMessage } from "@/types/study-planner";
-import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 interface PlanGenerationViewProps {
   planId: number;
@@ -52,12 +51,12 @@ export function PlanGenerationView({ planId, initialCoachMessage, initialDays, o
     setError(null);
 
     try {
-      const res = await fetchWithHeartbeat("/api/study-planner/generate", {
+      const res = await fetch("/api/study-planner/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId, message }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "L'affinement a échoué.");
 
       setDays(data.days);
@@ -78,7 +77,7 @@ export function PlanGenerationView({ planId, initialCoachMessage, initialDays, o
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ generatedPlan: days, refinementChat: chatMessages, status }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "La sauvegarde a échoué.");
 
       toast({ variant: "success", title: status === "active" ? tTodo("toastPlanLaunched", language) : tTodo("toastPlanSaved", language) });

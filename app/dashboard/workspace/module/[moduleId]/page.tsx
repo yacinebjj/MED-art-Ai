@@ -25,7 +25,6 @@ import { NeonRing, SegmentedControl } from "@/components/cyber/primitives";
 import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
 import { useStoredPreference } from "@/components/cyber/hooks";
 import { SUMMARY_DEPTHS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type SummaryDepth, type SynthesisOptions } from "@/lib/synthesis-options";
-import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 /**
  * PHASE 2 — real generation calls wired to
@@ -322,7 +321,7 @@ export default function ModuleWorkspacePage() {
     setFallbackNotice(null);
     setDictionaryFailedNotice(null);
     try {
-      const res = await fetchWithHeartbeat("/api/workspace/module-synthesis", {
+      const res = await fetch("/api/workspace/module-synthesis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ moduleId, courseIds: Array.from(selectedIds), type, ...(type === "global_summary" ? { options: summaryOptions } : {}) }),

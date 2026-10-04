@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findStoredVariantUrl } from "@/lib/storage-variant-lookup";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -335,15 +334,6 @@ export async function POST(request: NextRequest) {
       // it, and the reload path now reads audio_url directly.
       await persistAudioUrl(supabase, courseId, user.id, cachedUrl);
       return NextResponse.json({ success: true, audioUrl: cachedUrl, cached: true });
-    }
-  }
-
-  // Non-default dialects are stored at a deterministic path — reuse it if anyone generated it already.
-  if (!isDefaultVariant) {
-    const variantUrl = await findStoredVariantUrl(PODCAST_BUCKET, `${contentHash}-${dialect}`);
-    if (variantUrl) {
-      await persistAudioUrl(supabase, courseId, user.id, variantUrl);
-      return NextResponse.json({ success: true, audioUrl: variantUrl, cached: true });
     }
   }
 

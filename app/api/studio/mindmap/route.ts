@@ -1,4 +1,3 @@
-import { withHeartbeat } from "@/lib/heartbeat-route";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
@@ -214,7 +213,7 @@ function pickSourceText(course: StudioCourseRow): string {
  * and refunds it on any failure after that point. Nothing is persisted
  * server-side; the client caches the map per student/course.
  */
-async function handlePost(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -336,6 +335,3 @@ async function handlePost(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });
   }
 }
-
-// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
-export const POST = withHeartbeat(handlePost);

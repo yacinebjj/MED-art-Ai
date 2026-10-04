@@ -84,8 +84,6 @@ export async function callOpenRouterChain<T>(messages: Parameters<typeof callOpe
     try {
       const raw = await callOpenRouterResilient(messages, {
         ...base,
-        // This chain already walks its own model list — no extra OpenRouter-level fallback per attempt.
-        fallbackModels: [],
         model: attempt.model,
         maxTokens: attempt.maxTokens ?? maxTokens,
         timeoutMs,
