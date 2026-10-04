@@ -52,7 +52,11 @@ const PODCAST_BUCKET = "studio-podcasts";
 // only live confirmation this recalibration leans on) — watch production
 // logs for "flux terminé sans résultat" after this ships, the same signal
 // that caught the original incident.
-const AUDIO_MAX_TOKENS = 15_000;
+// RAISED 15,000 -> 16,000 for the 10-12 min, calm-pace, 6-chapter script
+// (1400-1600 words): ~720 s of playback ≈ 14,400 audio tokens at the
+// calibrated ~20 tokens/s, i.e. ≈195 s of narration generation at ~3.7x real
+// time — still inside the 225 s narration timeout and the 300 s route budget.
+const AUDIO_MAX_TOKENS = 16_000;
 
 // Folded into studio_podcast_cache's content_hash below — content_hash is a
 // PLAIN hash of the source text alone, with no dimension for "which script
@@ -64,7 +68,7 @@ const AUDIO_MAX_TOKENS = 15_000;
 // whenever a future prompt/length change should invalidate every existing
 // cached episode — cheap and migration-free (no schema change: it just makes
 // old rows permanently unreachable by a fresh hash, not deleted).
-const PODCAST_PROMPT_VERSION = "v3-longer-fallback";
+const PODCAST_PROMPT_VERSION = "v4-pure-language-6-chapters-calm";
 
 interface CourseRow {
   id: number;
@@ -274,7 +278,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "'courseId' est requis." }, { status: 400 });
   }
   const dialect = resolvePodcastDialect(dialectRaw);
-  // Only the ORIGINAL default (fr-darija) is cross-student cached —
+  // Only the default variant (pure French, DEFAULT_PODCAST_DIALECT) is cross-student cached —
   // studio_podcast_cache is keyed on content_hash alone, with no
   // language/dialect dimension. Extending that key would need a schema
   // migration this codebase has no confirmed-live tooling for (see this

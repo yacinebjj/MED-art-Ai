@@ -4,6 +4,32 @@ import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { runModuleSynthesis, type ModuleSynthesisType } from "@/lib/module-synthesis";
+import { callOpenRouter, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { SynthesisOptionsSchema, buildSynthesisTransformPrompt, needsSynthesisTransform, type SynthesisOptions } from "@/lib/synthesis-options";
+
+/**
+ * Personalizes a finished "Résumé Global" (format / focus / mnemonics) in ONE
+ * extra pass over the stitched summary — the per-course chunks themselves
+ * stay shared in the cross-student cache. Never fails the request: on any
+ * error the full summary is returned and the client is told the
+ * personalization was skipped.
+ */
+async function personalizeSummary(markdown: string, options: SynthesisOptions): Promise<{ content: string; personalized: boolean }> {
+  try {
+    const raw = await callOpenRouter(
+      [
+        { role: "system", content: buildSynthesisTransformPrompt(options) },
+        { role: "user", content: markdown },
+      ],
+      { model: ECONOMY_MODEL, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" }, timeoutMs: 120_000 }
+    );
+    const cleaned = raw.replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    return cleaned.length > 40 ? { content: cleaned, personalized: true } : { content: markdown, personalized: false };
+  } catch (error) {
+    console.warn("[workspace/module-synthesis] Personnalisation ignorée:", error instanceof Error ? error.message : error);
+    return { content: markdown, personalized: false };
+  }
+}
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -43,7 +69,17 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { moduleId, courseIds, type } = (body ?? {}) as { moduleId?: unknown; courseIds?: unknown; type?: unknown };
+  const { moduleId, courseIds, type, options: rawOptions } = (body ?? {}) as { moduleId?: unknown; courseIds?: unknown; type?: unknown; options?: unknown };
+
+  // Résumé Global customization (format / focus / mnemonics) — optional.
+  let options: SynthesisOptions | undefined;
+  if (rawOptions !== undefined) {
+    const parsed = SynthesisOptionsSchema.safeParse(rawOptions);
+    if (!parsed.success) {
+      return NextResponse.json({ success: false, error: "'options' est invalide." }, { status: 400 });
+    }
+    options = parsed.data;
+  }
 
   if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) {
     return NextResponse.json({ success: false, error: "'moduleId' est requis et doit être un nombre." }, { status: 400 });
@@ -62,6 +98,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const outcome = await runModuleSynthesis(user, moduleId, courseIds, type);
   if (!outcome.ok) {
     return NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status });
+  }
+
+  if (type === "global_summary" && options && needsSynthesisTransform(options)) {
+    const { content, personalized } = await personalizeSummary(outcome.result.content, options);
+    return NextResponse.json({ success: true, ...outcome.result, content, personalized, personalizationSkipped: !personalized });
   }
 
   return NextResponse.json({ success: true, ...outcome.result });

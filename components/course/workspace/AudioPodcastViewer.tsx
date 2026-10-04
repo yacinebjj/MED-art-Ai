@@ -38,6 +38,10 @@ type Speed = (typeof SPEED_OPTIONS)[number];
 
 const SPEED_STORAGE_KEY = "medart:podcast-speed";
 const BOOKMARKS_STORAGE_PREFIX = "medart:podcast-bookmarks:";
+/** Last listening position per episode, so a 10+ min episode resumes where the student stopped. */
+const RESUME_STORAGE_PREFIX = "medart:podcast-resume:";
+/** Positions this close to the start or the end are not worth resuming. */
+const RESUME_EDGE_SECONDS = 15;
 
 /** Fixed per page load: a stable cache-busting query for the second playback attempt. */
 const CACHE_BUST_TOKEN = Date.now().toString(36);
@@ -603,6 +607,25 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
   // same course, so two accounts on one browser must not see each other's bookmarks.
   const { user } = useAuth();
   const bookmarksKey = `${BOOKMARKS_STORAGE_PREFIX}${user?.id ?? "anonymous"}:${hashString(audioUrl)}`;
+  const resumeKey = `${RESUME_STORAGE_PREFIX}${user?.id ?? "anonymous"}:${hashString(audioUrl)}`;
+
+  function readResumePosition(): number {
+    try {
+      const value = Number(window.localStorage.getItem(resumeKey));
+      return Number.isFinite(value) && value > RESUME_EDGE_SECONDS ? value : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function saveResumePosition(time: number, duration: number): void {
+    try {
+      if (time <= RESUME_EDGE_SECONDS || (Number.isFinite(duration) && duration > 0 && time >= duration - RESUME_EDGE_SECONDS)) window.localStorage.removeItem(resumeKey);
+      else window.localStorage.setItem(resumeKey, String(Math.floor(time)));
+    } catch {
+      // Best-effort convenience.
+    }
+  }
   const [bookmarks, setBookmarks] = useState<PodcastBookmark[]>([]);
   const [hydratedBookmarksKey, setHydratedBookmarksKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
@@ -1071,12 +1094,16 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
           setIsPlaying(false);
           setIsBuffering(false);
           const audio = audioRef.current;
-          if (audio) setCurrentTime(audio.currentTime);
+          if (audio) {
+            setCurrentTime(audio.currentTime);
+            saveResumePosition(audio.currentTime, audio.duration);
+          }
           updatePositionState();
         }}
         onEnded={() => {
           setIsPlaying(false);
           setIsBuffering(false);
+          saveResumePosition(0, 0);
         }}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
@@ -1085,6 +1112,12 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
           audio.playbackRate = speedRef.current;
           if (Number.isFinite(audio.duration) && audio.duration > 0) setMediaDuration(audio.duration);
           setPlaybackError(false);
+          // Resume a long episode where the student stopped last time.
+          const resumeAt = readResumePosition();
+          if (resumeAt > 0 && Number.isFinite(audio.duration) && resumeAt < audio.duration - RESUME_EDGE_SECONDS && audio.currentTime < 1) {
+            audio.currentTime = resumeAt;
+            setCurrentTime(resumeAt);
+          }
           updatePositionState();
         }}
         onDurationChange={(event) => {

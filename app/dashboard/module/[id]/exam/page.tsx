@@ -56,6 +56,11 @@ import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
+import { ExamConfigurator } from "@/components/course/workspace/exam/ExamConfigurator";
+import { type ExamTimerMode } from "@/components/course/workspace/exam/ExamTimer";
+import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
+import { useStoredPreference } from "@/components/cyber/hooks";
+import { DEFAULT_EXAM_PREFERENCES, EXAM_DIFFICULTIES, EXAM_EXPLANATION_DEPTHS, EXAM_QUESTION_FOCUS, type ExamPreferences } from "@/lib/exam-preferences";
 import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
@@ -143,6 +148,17 @@ export default function ExamGeneratorPage() {
   // beyond this component's own state — a page refresh simply forgets it,
   // same as every other in-progress selection on this page.
   const [styleProfile, setStyleProfile] = useState<ExamStyleProfile | null>(null);
+  // Exam customization — remembered on this device.
+  const [difficulty, setDifficulty] = useStoredPreference("medart:exam-difficulty", DEFAULT_EXAM_PREFERENCES.difficulty, EXAM_DIFFICULTIES);
+  const [questionFocus, setQuestionFocus] = useStoredPreference("medart:exam-focus", DEFAULT_EXAM_PREFERENCES.questionFocus, EXAM_QUESTION_FOCUS);
+  const [explanationDepth, setExplanationDepth] = useStoredPreference("medart:exam-explanations", DEFAULT_EXAM_PREFERENCES.explanationDepth, EXAM_EXPLANATION_DEPTHS);
+  const [timerMode, setTimerMode] = useStoredPreference<ExamTimerMode>("medart:exam-timer", "chrono", ["chrono", "countdown"] as const);
+  const preferences: ExamPreferences = { difficulty, questionFocus, explanationDepth };
+  function handlePreferencesChange(next: ExamPreferences) {
+    setDifficulty(next.difficulty);
+    setQuestionFocus(next.questionFocus);
+    setExplanationDepth(next.explanationDepth);
+  }
 
   const [savedExams, setSavedExams] = useState<SavedExam[]>([]);
   const [activeExamId, setActiveExamId] = useState<string | null>(null);
@@ -347,7 +363,7 @@ export default function ExamGeneratorPage() {
       const res = await fetch("/api/exam/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleId, courseIds, variation, ...(styleProfile ? { styleProfile } : {}) }),
+        body: JSON.stringify({ moduleId, courseIds, variation, preferences, ...(styleProfile ? { styleProfile } : {}) }),
       });
       const body = await res.json().catch(() => null);
       // Server truth for the "Régénérer" quota, synced whenever the API
@@ -632,24 +648,46 @@ export default function ExamGeneratorPage() {
   // Compact course-list + button combo used ONLY by the mobile "Sources"
   // tab — desktop keeps its own bigger, decorative idleContent card below
   // instead (unchanged), since desktop already has the room to spare.
+  const examConfigurator = (
+    <ExamConfigurator
+      preferences={preferences}
+      onPreferencesChange={handlePreferencesChange}
+      timerMode={timerMode}
+      onTimerModeChange={setTimerMode}
+      selectedCount={selectedCourseIds.size}
+      totalCourses={courses?.length ?? 0}
+      hasStyleProfile={Boolean(styleProfile)}
+      disabled={isGenerating}
+    />
+  );
+
+  // Mobile "Sources" tab: configuration + a floating action bar, always reachable.
   const generateButtonBlock = (
-    <div className="shrink-0 border-t border-border p-4">
+    <div className="sticky bottom-0 shrink-0 border-t border-white/[0.08] bg-slate-950/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:bg-transparent">
+      <details className="group mb-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] [&_summary::-webkit-details-marker]:hidden">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3.5 text-sm font-bold text-foreground">
+          <span className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-cyan-400" />
+            Personnaliser l&apos;examen
+          </span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
+        </summary>
+        <div className="max-h-[45vh] overflow-y-auto px-3.5 pb-3.5">{examConfigurator}</div>
+      </details>
       <Button
         size="lg"
         disabled={selectedCourseIds.size === 0 || isGenerating}
         onClick={handleGenerate}
-        className="min-h-12 w-full whitespace-normal text-center leading-snug shadow-glow"
+        className="min-h-12 w-full whitespace-normal bg-gradient-to-r from-cyan-400 to-sky-500 text-center font-black leading-snug text-slate-950 shadow-[0_0_28px_rgba(34,211,238,0.4)] hover:opacity-95"
       >
         {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Générer l&apos;examen
       </Button>
-      <p className="mt-2 text-center text-xs text-muted-foreground">40 à 60 QCM générés par l&apos;IA</p>
-      {selectedCourseIds.size === 0 && (
-        <p className="mt-1 text-center text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>
-      )}
+      {selectedCourseIds.size === 0 && <p className="mt-2 text-center text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
     </div>
   );
 
+  // Desktop idle state: hero + configuration + telemetry + launch.
   const idleContent = (
     <motion.div
       key="idle"
@@ -657,31 +695,37 @@ export default function ExamGeneratorPage() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto p-6 text-center sm:p-8"
+      className="flex h-full flex-col overflow-y-auto overflow-x-hidden p-5 sm:p-8"
     >
-      <div className="relative flex h-20 w-20 shrink-0 animate-float items-center justify-center rounded-3xl bg-primary-50 shadow-glow dark:bg-primary-950/40">
-        <span aria-hidden className="absolute inset-0 rounded-3xl bg-primary-400/20 blur-xl" />
-        <FileQuestion className="relative h-9 w-9 text-primary-600 dark:text-primary-400" />
+      <div className="flex flex-col items-center gap-3 text-center">
+        <div className="relative flex h-20 w-20 shrink-0 items-center justify-center">
+          <span aria-hidden className="cyber-breathe absolute inset-0 rounded-3xl bg-cyan-400/20 blur-xl" />
+          <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300 via-sky-500 to-violet-600 text-white shadow-[0_0_36px_rgba(34,211,238,0.45)]">
+            <FileQuestion className="h-8 w-8" />
+          </span>
+        </div>
+        <div>
+          <p className="cyber-kicker">Atelier d&apos;examen</p>
+          <h3 className="cyber-title mt-1 text-2xl font-black">Prêt à te tester ?</h3>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">Choisis tes cours à gauche, règle ton examen ici, puis lance une épreuve clinique complète, corrigée et expliquée.</p>
+        </div>
       </div>
-      <div>
-        <h3 className="text-xl font-bold text-foreground">Prêt à te tester ?</h3>
-        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          Sélectionne les cours à couvrir dans le panneau de gauche, puis génère un examen clinique complet.
-        </p>
-      </div>
-      <div className="flex flex-col items-center gap-1.5">
+
+      <div className="mx-auto mt-6 w-full max-w-xl rounded-3xl border border-white/[0.08] bg-white/[0.02] p-5">{examConfigurator}</div>
+
+      <div className="mx-auto mt-5 flex w-full max-w-xl flex-col items-center gap-2">
         <Button
           size="lg"
           disabled={selectedCourseIds.size === 0 || isGenerating}
           onClick={handleGenerate}
-          className="min-h-12 max-w-full whitespace-normal text-center leading-snug shadow-glow"
+          className="group relative min-h-12 w-full overflow-hidden bg-gradient-to-r from-cyan-400 via-sky-500 to-violet-500 font-black text-slate-950 shadow-[0_0_34px_rgba(34,211,238,0.45)] hover:opacity-95 sm:w-auto sm:px-10"
         >
+          <span aria-hidden className="cyber-sheen" />
           <Sparkles className="h-4 w-4" />
           Générer l&apos;examen
         </Button>
-        <p className="text-xs text-muted-foreground">40 à 60 QCM générés par l&apos;IA</p>
+        {selectedCourseIds.size === 0 && <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
       </div>
-      {selectedCourseIds.size === 0 && <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
     </motion.div>
   );
 
@@ -696,49 +740,24 @@ export default function ExamGeneratorPage() {
   );
 
   const generatingContent = (
-    <motion.div
-      key="generating"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto p-6 sm:p-8"
-    >
-      <div className="relative flex h-20 w-20 items-center justify-center">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-30" />
-        <span aria-hidden className="absolute inset-0 rounded-full bg-primary-400/20 blur-xl" />
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-          className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-50 shadow-glow dark:bg-primary-950/40"
-        >
-          <Sparkles className="h-7 w-7 text-primary-600 dark:text-primary-400" />
-        </motion.div>
-      </div>
-      <p className="max-w-sm text-center text-sm font-semibold text-foreground">
-        Création d&apos;un examen clinique type Faculté de Médecine Saad Dahlab (Blida)...
-      </p>
-      {/* Purely ambient — a fixed row of skeleton cards revealing on a
-          staggered delay, NOT tied to any real per-question progress signal
-          (the backend returns the whole exam in one response; sometimes
-          instantly from cache). Never claims a specific question count or
-          step is "done now" — that would be fabricated given caching/pooling
-          upstream (see app/api/exam/generate/route.ts). */}
-      <div className="w-full max-w-md space-y-3">
-        {[0, 1, 2].map((i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: i * 0.5, repeat: Infinity, repeatType: "reverse", repeatDelay: 1 }}
-            className="space-y-2 rounded-xl border border-border bg-accent/40 p-4"
-          >
-            <div className="h-3 w-3/4 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-full animate-pulse rounded bg-muted" />
-            <div className="h-3 w-5/6 animate-pulse rounded bg-muted" />
-          </motion.div>
-        ))}
-      </div>
+    <motion.div key="generating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
+      <GenerationAura
+        title="Création de ton épreuve clinique…"
+        steps={[
+          "Lecture de tes cours sélectionnés",
+          "Sélection des notions à haut rendement",
+          "Rédaction des vignettes et des propositions",
+          "Construction des distracteurs plausibles",
+          "Rédaction de la correction détaillée",
+        ]}
+        chips={
+          <>
+            <TelemetryChip icon={ListChecks}>{selectedCourseIds.size || activeExam?.selectedCourses.length || 0} cours</TelemetryChip>
+            <TelemetryChip icon={FileQuestion}>40 à 60 QCM</TelemetryChip>
+            <TelemetryChip icon={Sparkles}>{(() => { const d = preferences.difficulty; return d === "debutant" ? "Débutant" : d === "examen_blanc" ? "Examen blanc" : "Intermédiaire"; })()}</TelemetryChip>
+          </>
+        }
+      />
     </motion.div>
   );
 
@@ -767,7 +786,7 @@ export default function ExamGeneratorPage() {
           <h2 className="cyber-title text-xl font-black">Épreuve Clinique</h2>
         </div>
         <div className="flex items-center gap-2">
-          <ExamTimer key={activeExamId} />
+          <ExamTimer key={activeExamId} mode={timerMode} questionCount={questions.length} />
           <NeonRing
             value={questions.length > 0 ? answeredCount / questions.length : 0}
             size={52}

@@ -8,6 +8,7 @@ import { ExamGenerationSchema, ExamQuestionSchema, ExamStyleProfileSchema, type 
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { ExamPreferencesSchema, buildExamPreferenceDirective, isDefaultExamPreferences, type ExamPreferences } from "@/lib/exam-preferences";
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
@@ -545,11 +546,12 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { moduleId, courseIds, variation, styleProfile: rawStyleProfile } = (body ?? {}) as {
+  const { moduleId, courseIds, variation, styleProfile: rawStyleProfile, preferences: rawPreferences } = (body ?? {}) as {
     moduleId?: unknown;
     courseIds?: unknown;
     variation?: unknown;
     styleProfile?: unknown;
+    preferences?: unknown;
   };
 
   if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) {
@@ -573,6 +575,20 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     }
     styleProfile = styleParse.data;
   }
+
+  // Student customization (difficulty, question focus, explanation depth).
+  // Defaults = the canonical exam (cache + pooling unchanged); anything else
+  // is generated fresh with an extra directive, exactly like a style-guided
+  // exam — never served from or written to the cross-student caches.
+  let customPreferences: ExamPreferences | undefined;
+  if (rawPreferences !== undefined) {
+    const preferencesParse = ExamPreferencesSchema.safeParse(rawPreferences);
+    if (!preferencesParse.success) {
+      return NextResponse.json({ success: false, error: "'preferences' est invalide." }, { status: 400 });
+    }
+    if (!isDefaultExamPreferences(preferencesParse.data)) customPreferences = preferencesParse.data;
+  }
+  const isPersonalizedExam = Boolean(styleProfile || customPreferences);
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -677,7 +693,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // reference exam) — never served from, or written to, the cross-student
   // cache that assumes any two students selecting the same course set want
   // the identical canonical exam.
-  if (!isVariation && !styleProfile) {
+  if (!isVariation && !isPersonalizedExam) {
     cachedContent = await lookupExamCache(contentHash);
     if (cachedContent) void recordExamCacheHit(contentHash);
   }
@@ -687,7 +703,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // below at $0, shared across every student who regenerates this same set.
   let variationContent: unknown | null = null;
   let existingVariations: { id: string; content: unknown; variation_index: number }[] = [];
-  if (isVariation && !styleProfile) {
+  if (isVariation && !isPersonalizedExam) {
     const { existing } = await lookupExamVariations(contentHash);
     existingVariations = existing;
     if (existing.length >= MAX_EXAM_VARIATIONS) {
@@ -714,7 +730,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     reservedGeneration = true;
 
     try {
-      if (styleProfile) {
+      if (isPersonalizedExam) {
         // STYLE-MIMICRY BRANCH (Examen Guidé par le Style Prof): pooling and
         // harvesting are bypassed entirely — reusing an already-generated
         // Studio QCM would silently dilute the "clone chirurgical" the
@@ -728,7 +744,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // one — accepted per product direction (v1 has no separate quota for
         // this, it's gated by the same reserveGeneration check above).
         const courseInputs = buildCourseInputs(eligibleCourses, eligibleCourses.length);
-        const styleSystemPrompt = buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile);
+        const baseSystemPrompt = styleProfile ? buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile) : buildExamStaticSystemPrompt(courseInputs);
+        const preferenceDirective = customPreferences ? buildExamPreferenceDirective(customPreferences) : "";
+        const styleSystemPrompt = preferenceDirective ? `${baseSystemPrompt}\n\n${preferenceDirective}` : baseSystemPrompt;
         const generatedQuestions = await generateShortfallQuestions(courseInputs, EXAM_TARGET_TOTAL, isVariation, [], styleSystemPrompt);
         const allQuestions = generatedQuestions.slice(0, 60);
 
@@ -923,10 +941,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         });
   const selectedCourses = eligibleCourses.map((course) => ({ id: course.id, title: course.title }));
 
-  if (!cachedContent && !isVariation && !styleProfile) {
+  if (!cachedContent && !isVariation && !isPersonalizedExam) {
     void storeExamCache(contentHash, content, selectedCourses);
   }
-  if (isVariation && !servedFromVariationPool) {
+  // Personalized exams never enter the shared variation pool either.
+  if (isVariation && !servedFromVariationPool && !isPersonalizedExam) {
     const variationInsert = await insertExamVariation(contentHash, existingVariations.length + 1, content);
     if (variationInsert.conflict) {
       console.warn("[exam/generate] Conflit d'insertion de variation (course concurrent) — contenu propre servi quand même.");

@@ -111,6 +111,10 @@
   background-color: rgb(15 23 42 / 0.033);
 }
 
+:root:not(.dark) .cyber-stage .hover\:border-white\/15:hover {
+  border-color: rgb(15 23 42 / 0.21);
+}
+
 :root:not(.dark) .cyber-stage .hover\:border-white\/20:hover {
   border-color: rgb(15 23 42 / 0.22);
 }

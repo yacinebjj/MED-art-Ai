@@ -4,14 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, BookOpenText, Check, Copy, Download, FileSpreadsheet, History, Layers, Library, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, BookOpenText, Brain, Check, ChevronRight, Copy, Download, FileSpreadsheet, History, Layers, Library, ListChecks, Loader2, Search, Sparkles, Target, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
-import { PROSE_CLASSES, DARK_PROSE_CLASSES } from "@/lib/markdown";
 import { ModuleSynthesisView } from "@/components/dashboard/ModuleSynthesisView";
 import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
 import { createClient } from "@/lib/supabase/client";
@@ -22,6 +21,10 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
+import { NeonRing, SegmentedControl } from "@/components/cyber/primitives";
+import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
+import { useStoredPreference } from "@/components/cyber/hooks";
+import { SUMMARY_DEPTHS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type SummaryDepth, type SynthesisOptions } from "@/lib/synthesis-options";
 
 /**
  * PHASE 2 — real generation calls wired to
@@ -91,6 +94,8 @@ function persistEntryNow(userId: string, moduleId: number, entry: HistoryEntry):
 }
 
 interface HistoryEntry {
+  /** Personalized summary format ("Synthèse rapide"…), when not the full sheet. */
+  variantLabel?: string;
   id: string;
   type: WorkspaceGenerationType;
   /** 1-indexed count among entries of the SAME type this session — what "Résumé 1"/"Tableau 2" actually numbers. */
@@ -132,6 +137,11 @@ export default function ModuleWorkspacePage() {
   const [dictionaryFailedNotice, setDictionaryFailedNotice] = useState<string[] | null>(null);
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  // Résumé Global customization (remembered on this device; focus is per session).
+  const [summaryDepth, setSummaryDepth] = useStoredPreference<SummaryDepth>("medart:synthesis-depth", "fiche_complete", SUMMARY_DEPTHS);
+  const [mnemonicsPref, setMnemonicsPref] = useStoredPreference<"on" | "off">("medart:synthesis-mnemonics", "off", ["on", "off"] as const);
+  const [summaryFocus, setSummaryFocus] = useState("");
+  const [courseQuery, setCourseQuery] = useState("");
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
 
   // Mobile-first UX rework — below `md`, the aside (sources) and main
@@ -292,6 +302,8 @@ export default function ModuleWorkspacePage() {
 
   /** Mirrors lib/module-synthesis.ts's own MIN_COURSES_REQUIRED — duplicated as a plain constant rather than imported, since that module pulls in server-only dependencies (getSupabaseAdmin, OpenRouter calls) that have no place in a "use client" bundle. Enforced again server-side in that same route (never trust a client-only gate). */
   const MIN_COURSES_REQUIRED = 5;
+  const summaryOptions: SynthesisOptions = { depth: summaryDepth, focus: summaryFocus.trim(), mnemonics: mnemonicsPref === "on" };
+  const summaryPersonalized = needsSynthesisTransform(summaryOptions);
   const hasSelection = selectedIds.size >= MIN_COURSES_REQUIRED;
   const isGenerating = isGeneratingSummary || isGeneratingKeywords || isGeneratingDictionary;
 
@@ -312,7 +324,7 @@ export default function ModuleWorkspacePage() {
       const res = await fetch("/api/workspace/module-synthesis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleId, courseIds: Array.from(selectedIds), type }),
+        body: JSON.stringify({ moduleId, courseIds: Array.from(selectedIds), type, ...(type === "global_summary" ? { options: summaryOptions } : {}) }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.success) {
@@ -332,7 +344,11 @@ export default function ModuleWorkspacePage() {
         ordinal: history.filter((h) => h.type === type).length + 1,
         timestamp: Date.now(),
         content,
+        ...(type === "global_summary" && body.personalized ? { variantLabel: SUMMARY_DEPTH_LABELS[summaryOptions.depth].label } : {}),
       };
+      if (type === "global_summary" && body.personalizationSkipped) {
+        toast({ variant: "info", title: "Personnalisation indisponible pour l'instant", description: "Voici la fiche complète ; relance pour obtenir le format choisi." });
+      }
       if (userId) persistEntryNow(userId, moduleId, entry);
       setHistory((prev) => [entry, ...prev]);
       setActiveHistoryId(entry.id);
@@ -389,12 +405,32 @@ export default function ModuleWorkspacePage() {
     setMobileTab("results");
   }
 
+  const selectionRatio = Math.min(1, selectedIds.size / MIN_COURSES_REQUIRED);
   const sourcesHeader = (
-    <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-600 shadow-glow dark:bg-teal-950/40 dark:text-teal-400">
-        <Layers className="h-4 w-4" />
-      </span>
-      <h2 className="text-sm font-bold text-foreground">{tWorkspaceSynthesis("sourcesHeading", language)}</h2>
+    <div className="space-y-3 border-b border-white/[0.07] px-4 py-4">
+      <div className="flex items-center gap-3">
+        <NeonRing value={selectionRatio} size={46} stroke={4} from={hasSelection ? "#34d399" : "#22d3ee"} to="#8b5cf6" aria-label={`${selectedIds.size} cours sélectionnés sur ${MIN_COURSES_REQUIRED} minimum`}>
+          <Layers className="h-4 w-4 text-cyan-400" />
+        </NeonRing>
+        <div className="min-w-0">
+          <h2 className="text-sm font-black text-foreground">{tWorkspaceSynthesis("sourcesHeading", language)}</h2>
+          <p className="text-xs text-muted-foreground">
+            {hasSelection ? `${selectedIds.size} cours prêts` : `${selectedIds.size} / ${MIN_COURSES_REQUIRED} minimum`} · {courses?.length ?? 0} disponibles
+          </p>
+        </div>
+      </div>
+      {courses && courses.length > 6 && (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            value={courseQuery}
+            onChange={(e) => setCourseQuery(e.target.value)}
+            placeholder="Filtrer les cours…"
+            className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-cyan-400/50"
+          />
+        </div>
+      )}
     </div>
   );
 
@@ -433,7 +469,9 @@ export default function ModuleWorkspacePage() {
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {courses.map((course) => {
+          {courses
+            .filter((course) => !courseQuery.trim() || course.title.toLowerCase().includes(courseQuery.trim().toLowerCase()))
+            .map((course) => {
             const isSelected = selectedIds.has(course.id);
             return (
               <li key={course.id}>
@@ -444,14 +482,14 @@ export default function ModuleWorkspacePage() {
                     checkbox row with no real affordance beyond its tint. */}
                 <label
                   className={cn(
-                    "flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 transition-all duration-300",
+                    "flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 transition-[border-color,background-color,box-shadow,transform] duration-200",
                     isSelected
-                      ? "border-teal-300 bg-teal-50 shadow-glow dark:border-teal-800 dark:bg-teal-950/30"
-                      : "border-transparent hover:-translate-y-0.5 hover:border-border hover:bg-accent hover:shadow-soft"
+                      ? "border-cyan-400/50 bg-cyan-400/10 shadow-[0_0_20px_-8px_rgba(34,211,238,0.7)]"
+                      : "border-transparent hover:-translate-y-0.5 hover:border-white/15 hover:bg-white/[0.03]"
                   )}
                 >
                   <Checkbox checked={isSelected} onCheckedChange={() => toggleOne(course.id)} className="mt-0.5" />
-                  <span className={cn("min-w-0 flex-1 truncate text-sm font-medium", isSelected ? "text-teal-900 dark:text-teal-200" : "text-foreground")}>
+                  <span className={cn("min-w-0 flex-1 break-words text-sm font-medium [overflow-wrap:anywhere]", isSelected ? "text-cyan-700 dark:text-cyan-100" : "text-foreground")}>
                     {course.title}
                   </span>
                 </label>
@@ -463,43 +501,83 @@ export default function ModuleWorkspacePage() {
     </div>
   );
 
-  const generateButtonsRow = (
-    <div className="flex flex-col gap-2 border-b border-border px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:px-6">
-      <Button
-        onClick={handleGenerateGlobalSummary}
-        disabled={!hasSelection || isGenerating}
-        size="lg"
-        className="min-h-12 w-full bg-teal-600 shadow-glow hover:bg-teal-500 sm:w-auto dark:bg-teal-500 dark:hover:bg-teal-400"
-      >
-        {isGeneratingSummary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-        Générer un Résumé Global
-      </Button>
-      <Button
-        onClick={handleGenerateKeywordTable}
-        disabled={!hasSelection || isGenerating}
-        variant="secondary"
-        size="lg"
-        className="min-h-12 w-full border border-blue-300/60 bg-blue-50 text-blue-700 shadow-soft hover:bg-blue-100 sm:w-auto dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
-      >
-        {isGeneratingKeywords ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-        Générer Tableau des Mots-Clés
-      </Button>
-      <Button
-        onClick={handleGenerateMedicalDictionary}
-        disabled={!hasSelection || isGenerating}
-        variant="secondary"
-        size="lg"
-        className="min-h-12 w-full border border-amber-300/60 bg-amber-50 text-amber-700 shadow-soft hover:bg-amber-100 sm:w-auto dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-950/50"
-      >
-        {isGeneratingDictionary ? <Loader2 className="h-4 w-4 animate-spin" /> : <Library className="h-4 w-4" />}
-        Générer Dictionnaire Médical
-      </Button>
-      {!hasSelection && (
-        <span className="text-xs text-muted-foreground">
-          {tWorkspaceSynthesis("minSelectionHint", language).replace("{n}", String(MIN_COURSES_REQUIRED))} (
-          {selectedIds.size}/{MIN_COURSES_REQUIRED}).
+  const GENERATION_TILES = [
+    { type: "global_summary" as const, icon: Sparkles, title: "Résumé Global", short: "Résumé", hint: summaryPersonalized ? SUMMARY_DEPTH_LABELS[summaryDepth].label : "Fiche complète par cours", tone: "from-cyan-300 to-sky-500", loading: isGeneratingSummary, onClick: handleGenerateGlobalSummary },
+    { type: "keywords_table" as const, icon: FileSpreadsheet, title: "Tableau des Mots-Clés", short: "Mots-clés", hint: "Notions classées par catégorie", tone: "from-violet-400 to-fuchsia-500", loading: isGeneratingKeywords, onClick: handleGenerateKeywordTable },
+    { type: "medical_dictionary" as const, icon: Library, title: "Dictionnaire Médical", short: "Dictionnaire", hint: "Termes expliqués FR / عربي", tone: "from-amber-300 to-orange-500", loading: isGeneratingDictionary, onClick: handleGenerateMedicalDictionary },
+  ];
+
+  // Desktop: open until a first result exists. Phones: collapsed (it would squeeze the course list).
+  const renderSummaryOptions = (openByDefault: boolean) => (
+    <details open={openByDefault} className="group rounded-2xl border border-white/[0.08] bg-white/[0.02] [&_summary::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3.5 text-sm font-bold text-foreground">
+        <span className="flex items-center gap-2">
+          <Wand2 className="h-4 w-4 text-cyan-400" />
+          Personnaliser le Résumé Global
+          {summaryPersonalized && <span className="rounded-full bg-cyan-400/15 px-2 py-0.5 text-[10px] font-black text-cyan-600 dark:text-cyan-200">Actif</span>}
         </span>
-      )}
+        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
+      </summary>
+      <div className="space-y-3 px-3.5 pb-3.5">
+        <SegmentedControl<SummaryDepth>
+          size="sm"
+          ariaLabel="Format du résumé"
+          value={summaryDepth}
+          onChange={setSummaryDepth}
+          options={SUMMARY_DEPTHS.map((value) => ({ value, label: SUMMARY_DEPTH_LABELS[value].label }))}
+        />
+        <p className="text-[11px] text-muted-foreground">{SUMMARY_DEPTH_LABELS[summaryDepth].hint}</p>
+        <div className="relative">
+          <Target className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={summaryFocus}
+            onChange={(e) => setSummaryFocus(e.target.value.slice(0, 160))}
+            placeholder="Cibler (optionnel) : ex. traitement, sémiologie, examens…"
+            className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-cyan-400/50"
+          />
+        </div>
+        <label className="flex min-h-10 cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/[0.08] px-3">
+          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Brain className="h-4 w-4 text-violet-400" />
+            Ajouter des moyens mnémotechniques
+          </span>
+          <input type="checkbox" checked={mnemonicsPref === "on"} onChange={(e) => setMnemonicsPref(e.target.checked ? "on" : "off")} className="h-4 w-4 accent-cyan-500" />
+        </label>
+      </div>
+    </details>
+  );
+
+  const generateButtonsRow = (
+    <div className="space-y-3 border-b border-white/[0.07] px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-6 md:bg-transparent md:pb-4">
+      {isDesktopOrTablet && renderSummaryOptions(!output)}
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        {GENERATION_TILES.map(({ type, icon: Icon, title, short, hint, tone, loading, onClick }) => (
+          <button
+            key={type}
+            type="button"
+            onClick={onClick}
+            disabled={!hasSelection || isGenerating}
+            className="group relative flex min-h-[4.5rem] flex-col items-center justify-center gap-1 overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] p-2 text-center transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-cyan-400/40 hover:shadow-[0_0_26px_-10px_rgba(34,211,238,0.8)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 sm:min-h-[5.5rem] sm:flex-row sm:justify-start sm:gap-3 sm:p-3.5 sm:text-left"
+          >
+            <span aria-hidden className="cyber-sheen" />
+            <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-slate-950 sm:h-11 sm:w-11", tone)}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4 sm:h-5 sm:w-5" />}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs font-black text-foreground sm:hidden">{short}</span>
+              <span className="hidden text-sm font-black text-foreground sm:block">{title}</span>
+              <span className="hidden truncate text-[11px] text-muted-foreground sm:block">{hint}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="hidden flex-wrap gap-2 sm:flex">
+        <TelemetryChip icon={ListChecks}>
+          {selectedIds.size} cours sélectionnés{!hasSelection ? ` · min. ${MIN_COURSES_REQUIRED}` : ""}
+        </TelemetryChip>
+        {hasSelection && <TelemetryChip icon={BookOpenText}>{selectedIds.size} chapitres à générer</TelemetryChip>}
+        <TelemetryChip icon={Sparkles}>Chapitres déjà générés : servis instantanément</TelemetryChip>
+      </div>
     </div>
   );
 
@@ -536,6 +614,7 @@ export default function ModuleWorkspacePage() {
                   ? tWorkspaceSynthesis("entryTypeTable", language)
                   : tWorkspaceSynthesis("entryTypeDictionary", language)}{" "}
               {entry.ordinal}
+              {entry.variantLabel && <span className="ml-1 truncate text-[11px] font-semibold opacity-70">· {entry.variantLabel}</span>}
             </button>
           </li>
         ))}
@@ -578,48 +657,24 @@ export default function ModuleWorkspacePage() {
 
       <AnimatePresence mode="wait">
         {isGenerating ? (
-          <motion.div
-            key="generating"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center gap-4 py-16 text-center sm:py-24"
-          >
-            <div
-              className={cn(
-                "relative flex h-20 w-20 items-center justify-center rounded-full shadow-glow",
+          <motion.div key="generating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <GenerationAura
+              accent={isGeneratingSummary ? "cyan" : isGeneratingKeywords ? "violet" : "amber"}
+              title={isGeneratingSummary ? "Synthèse de tes cours en cours…" : isGeneratingKeywords ? "Extraction des mots-clés…" : "Construction du dictionnaire médical…"}
+              steps={
                 isGeneratingSummary
-                  ? "bg-teal-100 dark:bg-teal-950/40"
+                  ? ["Lecture des cours sélectionnés", "Réutilisation des chapitres déjà générés", "Rédaction des chapitres manquants", summaryPersonalized ? "Mise au format choisi" : "Assemblage de la fiche complète"]
                   : isGeneratingKeywords
-                    ? "bg-blue-100 dark:bg-blue-950/40"
-                    : "bg-amber-100 dark:bg-amber-950/40"
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute inset-0 animate-ping rounded-full",
-                  isGeneratingSummary ? "bg-teal-400/30" : isGeneratingKeywords ? "bg-blue-400/30" : "bg-amber-400/30"
-                )}
-              />
-              <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: "linear" }}>
-                <Sparkles
-                  className={cn(
-                    "relative h-9 w-9",
-                    isGeneratingSummary ? "text-teal-600 dark:text-teal-400" : isGeneratingKeywords ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"
-                  )}
-                />
-              </motion.div>
-            </div>
-            <p className="text-sm font-semibold text-foreground">
-              {isGeneratingSummary
-                ? "Synthèse des cours en cours..."
-                : isGeneratingKeywords
-                  ? "Extraction des mots-clés en cours..."
-                  : "Construction du dictionnaire médical en cours..."}
-            </p>
-            <p className="max-w-xs text-xs text-muted-foreground/70">
-              Un instant — l'IA analyse tes sources sélectionnées pour produire une révision de qualité.
-            </p>
+                    ? ["Lecture des cours sélectionnés", "Repérage des notions clés", "Classement par catégorie", "Assemblage du tableau"]
+                    : ["Lecture des cours sélectionnés", "Sélection des termes techniques", "Rédaction des explications FR / عربي", "Assemblage du dictionnaire"]
+              }
+              chips={
+                <>
+                  <TelemetryChip icon={ListChecks}>{selectedIds.size} cours</TelemetryChip>
+                  {isGeneratingSummary && <TelemetryChip icon={Wand2}>{SUMMARY_DEPTH_LABELS[summaryDepth].label}</TelemetryChip>}
+                </>
+              }
+            />
           </motion.div>
         ) : output ? (
           // ModuleSynthesisView splits stitchSummaryChunks' per-course "## "
@@ -633,19 +688,30 @@ export default function ModuleWorkspacePage() {
             <ModuleSynthesisView markdown={output} isDark={isDark} />
           </motion.div>
         ) : (
-          <motion.div
-            key="empty"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "flex flex-col items-center gap-3 py-16 text-center opacity-60 sm:py-24")}
-          >
-            <span className="flex h-14 w-14 animate-float items-center justify-center rounded-2xl bg-teal-50 not-prose dark:bg-teal-500/10">
-              <Sparkles className="h-7 w-7 text-teal-500" />
+          <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-6 py-12 text-center sm:py-16">
+            <span className="relative flex h-16 w-16 items-center justify-center">
+              <span aria-hidden className="cyber-breathe absolute inset-0 rounded-3xl bg-cyan-400/20 blur-xl" />
+              <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300 via-sky-500 to-violet-600 text-white shadow-[0_0_30px_rgba(34,211,238,0.45)]">
+                <Sparkles className="h-7 w-7" />
+              </span>
             </span>
-            <p className="!my-0 text-base font-medium not-prose text-muted-foreground">
-              Choisis tes sources puis lance une génération pour voir le résultat ici.
-            </p>
+            <div>
+              <p className="cyber-kicker">Atelier de synthèse</p>
+              <p className="mt-1 text-lg font-black text-foreground">Transforme tes cours en fiches de révision</p>
+            </div>
+            <ol className="grid w-full max-w-2xl gap-3 text-left sm:grid-cols-3">
+              {[
+                { icon: ListChecks, title: "1. Sélectionne", text: `Au moins ${MIN_COURSES_REQUIRED} cours du module.` },
+                { icon: Wand2, title: "2. Personnalise", text: "Format, ciblage, moyens mnémotechniques." },
+                { icon: Sparkles, title: "3. Génère", text: "Résumé, mots-clés ou dictionnaire." },
+              ].map(({ icon: Icon, title, text }) => (
+                <li key={title} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+                  <Icon className="h-5 w-5 text-cyan-400" />
+                  <p className="mt-2 text-sm font-black text-foreground">{title}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{text}</p>
+                </li>
+              ))}
+            </ol>
           </motion.div>
         )}
       </AnimatePresence>
@@ -706,7 +772,7 @@ export default function ModuleWorkspacePage() {
               onClick={handleCopyOutput}
               aria-label={tWorkspaceSynthesis("copyOutputAriaLabel", language)}
               title={tWorkspaceSynthesis("copyOutputAriaLabel", language)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-soft backdrop-blur transition-all duration-200 hover:bg-accent hover:text-foreground active:scale-95"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-muted-foreground shadow-soft backdrop-blur transition-all duration-200 hover:bg-accent hover:text-foreground active:scale-95"
             >
               {justCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
             </button>
@@ -715,7 +781,7 @@ export default function ModuleWorkspacePage() {
               onClick={handleDownloadOutput}
               aria-label={tWorkspaceSynthesis("downloadOutputAriaLabel", language)}
               title={tWorkspaceSynthesis("downloadOutputAriaLabel", language)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-soft backdrop-blur transition-all duration-200 hover:bg-accent hover:text-foreground active:scale-95"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-muted-foreground shadow-soft backdrop-blur transition-all duration-200 hover:bg-accent hover:text-foreground active:scale-95"
             >
               <Download className="h-4 w-4" />
             </button>
@@ -749,8 +815,7 @@ export default function ModuleWorkspacePage() {
     // actually needs it (see the résumé view's own overflow-x-auto table
     // wrappers). Matches app/dashboard/module/[id]/exam/page.tsx's own
     // identical root treatment.
-    <div className="aurora-canvas-bg relative flex h-dvh w-full max-w-full flex-col overflow-hidden">
-      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+    <div className="cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
       <WorkspaceTopbar title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)} />
 
       <PomodoroStudyBanner />
@@ -779,7 +844,7 @@ export default function ModuleWorkspacePage() {
         {isDesktopOrTablet ? (
           <>
             {/* ── Sources sidebar (desktop) ───────────────────────────── */}
-            <aside className="glass-card flex max-h-[40vh] w-full shrink-0 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark md:h-auto md:max-h-none md:w-80">
+            <aside className="cyber-glass flex max-h-[40vh] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-3xl md:h-auto md:max-h-none md:w-80">
               {sourcesHeader}
               {selectAllRow}
               {courseListPanel}
@@ -787,23 +852,24 @@ export default function ModuleWorkspacePage() {
             </aside>
 
             {/* ── Results / generation main area (desktop) ────────────── */}
-            <main className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
+            <main className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
               {generateButtonsRow}
               {outputPanel}
             </main>
           </>
         ) : mobileTab === "sources" ? (
-          <div className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
+          <div className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
             {sourcesHeader}
+            <div className="shrink-0 px-3 pt-3">{renderSummaryOptions(false)}</div>
             {selectAllRow}
             {courseListPanel}
             {generateButtonsRow}
           </div>
         ) : (
-          <div className="glass-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl shadow-glass dark:shadow-glass-dark">
+          <div className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
             {history.length > 0 ? (
               historySection
-            ) : (
+            ) : isGenerating ? null : (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">{tWorkspaceSynthesis("noResultsYetHint", language)}</p>
             )}
             {outputPanel}

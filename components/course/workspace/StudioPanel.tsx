@@ -352,8 +352,6 @@ const LANGUAGE_OPTIONS = [
 const PODCAST_DIALECT_OPTIONS = [
   { value: "fr", label: "🇫🇷 Français" },
   { value: "en", label: "🇬🇧 English" },
-  { value: "fr-darija", label: "🇫🇷🇩🇿 Français-Arabe (Darija Algérienne)" },
-  { value: "en-darija", label: "🇬🇧🇩🇿 English-Arabic (Darija Algérienne)" },
 ];
 
 /**
@@ -387,7 +385,7 @@ export function TileOptionsMenu({
   const [draftModel, setDraftModel] = useState<InfographicModelKey>("nano-banana-2");
   // Podcast keeps its own dialect list; it starts on the global language
   // (plain English, not the mixed Darija variant) when English is selected.
-  const [draftDialect, setDraftDialect] = useState<PodcastDialect>(() => (contentLanguage === "en" ? "en" : "fr-darija"));
+  const [draftDialect, setDraftDialect] = useState<PodcastDialect>(() => (contentLanguage === "en" ? "en" : "fr"));
 
   // Rendered in a portal with fixed positioning, anchored to the tile: as a
   // plain `absolute` child it lived inside the Studio's scrolling grid

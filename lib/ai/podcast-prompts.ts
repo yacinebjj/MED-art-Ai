@@ -63,21 +63,25 @@ export type PodcastScript = z.infer<typeof PodcastScriptSchema>;
  * single-column content_hash key).
  */
 export type PodcastDialect = "fr" | "en" | "fr-darija" | "en-darija";
-export const DEFAULT_PODCAST_DIALECT: PodcastDialect = "fr-darija";
+/** Pure French — the darija variants are retired (product decision: no code-switching). */
+export const DEFAULT_PODCAST_DIALECT: PodcastDialect = "fr";
 
 function isPodcastDialect(value: unknown): value is PodcastDialect {
   return value === "fr" || value === "en" || value === "fr-darija" || value === "en-darija";
 }
 
 export function resolvePodcastDialect(value: unknown): PodcastDialect {
+  // Retired mixed variants map to their pure base language (old clients / links).
+  if (value === "fr-darija") return "fr";
+  if (value === "en-darija") return "en";
   return isPodcastDialect(value) ? value : DEFAULT_PODCAST_DIALECT;
 }
 
 const LANGUAGE_STYLE_BY_DIALECT: Record<PodcastDialect, string> = {
   "fr-darija": `un mélange naturel, fluide et vivant entre le FRANÇAIS (pour la rigueur médicale précise — anatomie, noms de pathologies, mécanismes physiopathologiques, médicaments, posologies) et la DARIJA ALGÉRIENNE (écrite en caractères latins, pour les transitions, les analogies de la vie quotidienne, l'humour, l'énergie — comme un grand frère qui explique, pas un cours magistral traduit). N'alterne jamais mécaniquement une phrase en français puis une en darija comme un exercice scolaire : mélange-les à l'intérieur même des phrases, comme parle vraiment un étudiant algérien bilingue passionné de médecine. Interdiction absolue de sonner robotique, scolaire ou traduit mot-à-mot.`,
   "en-darija": `un mélange naturel, fluide et vivant entre l'ANGLAIS MÉDICAL (pour la rigueur précise — anatomie, noms de pathologies, mécanismes physiopathologiques, médicaments, posologies) et la DARIJA ALGÉRIENNE (écrite en caractères latins, pour les transitions, les analogies de la vie quotidienne, l'humour, l'énergie). N'alterne jamais mécaniquement une phrase en anglais puis une en darija comme un exercice scolaire : mélange-les à l'intérieur même des phrases, comme parlerait un étudiant algérien bilingue anglais/darija passionné de médecine. Interdiction absolue de sonner robotique, scolaire ou traduit mot-à-mot.`,
-  fr: `un français académique et médical clair, vivant et chaleureux — comme un grand frère qui explique, jamais un cours magistral récité. Rigueur médicale précise (anatomie, noms de pathologies, mécanismes physiopathologiques, médicaments, posologies), mais un ton naturel à l'oral, jamais robotique ni scolaire.`,
-  en: `clear, warm, natural spoken English — like a caring older sibling explaining the course, never a recited lecture. Medically precise (anatomy, pathology names, pathophysiological mechanisms, drugs, dosages), but always natural to the ear, never robotic or stilted.`,
+  fr: `un FRANÇAIS fluide, clair, élégant et accessible — et UNIQUEMENT du français. INTERDICTION ABSOLUE d'utiliser de l'arabe, de la darija, du franco-arabe ou tout autre mélange de langues (aucun « wallah », « kifach », « sahbi », etc.) : pas un seul mot hors du français, à l'exception des termes médicaux internationaux. Phrases simples et bien construites, ton posé, calme et bienveillant, comme un excellent enseignant qui prend le temps d'expliquer. Rigueur médicale précise (anatomie, pathologies, mécanismes physiopathologiques, médicaments, posologies), jamais robotique ni scolaire.`,
+  en: `clear, warm, natural spoken ENGLISH only — never any Arabic, darija or mixed-language words. Simple, well-built sentences at a calm, steady pace, like an excellent teacher taking the time to explain. Medically precise (anatomy, pathology names, pathophysiological mechanisms, drugs, dosages), but always natural to the ear, never robotic or stilted.`,
 };
 
 const STRUCTURE_LABELS_BY_DIALECT: Record<PodcastDialect, { intro: string; points: string; pitfalls: string; conclusion: string }> = {
@@ -101,32 +105,40 @@ export function buildPodcastScriptSystemPrompt(dialect: PodcastDialect): string 
 
 LANGUAGE STYLE (the most important rule): ${LANGUAGE_STYLE_BY_DIALECT[dialect]}
 
-MANDATORY STRUCTURE, in this order:
-1. ${labels.intro} — a SHORT, direct hook (2-3 sentences, no more): why this topic matters, what's coming next. NEVER a long greeting, self-introduction, or "welcome to the show" preamble — that's dead airtime, not teaching, and the single laziest way a script pads itself out to hit a target length.
-2. ${labels.points} — the heart of the episode, and where most of its length should genuinely live: walk through each major mechanism/concept from the course, and for EACH one, actually TEACH it — the underlying reasoning, why it happens physiologically, a concrete clinical example or analogy that makes it click. Don't just name a concept and move on to the next one. A student who already read the written course should still come away understanding something more deeply, or noticing something they'd glossed over, from hearing this — not just hear the same headline points read aloud back at them.
-3. ${labels.pitfalls} — classic mistakes, differential diagnoses not to miss, what trips students up on exams or on call.
-4. ${labels.conclusion} — a short, punchy recap, the one or two things to absolutely remember.
+MANDATORY STRUCTURE — 6 chapters, in this order, each one announced orally ("First chapter: the pathophysiology..."):
+1. INTRODUCTION — a short, direct hook (2-3 sentences): why this topic matters, what the episode will cover. Never a long greeting or self-introduction.
+2. PATHOPHYSIOLOGY — the mechanisms, step by step, with the reasoning behind each one and a concrete analogy that makes it click.
+3. DIAGNOSIS — clinical presentation, key signs, the investigations and how to interpret them, the differential diagnoses not to miss.
+4. TREATMENT — the therapeutic strategy and its rationale, first-line choices, monitoring, what changes in special situations — only what the course actually contains.
+5. EXAM TRAPS (QCM) — the classic traps and confusions, the details examiners love, how to recognise the right answer.
+6. CONCLUSION — a calm recap of the three to five things to remember.
+If the course doesn't cover one of chapters 2-4 (e.g. no treatment section), say so in one sentence and spend that time deepening the chapters the course does cover — never invent content.
 
-FORM CONSTRAINTS (the text is READ, never displayed):
-- No markdown, no headers, no bullets, no symbols (*, #, -, |, etc.) — only natural spoken sentences, with oral transitions ("So, let's talk about...", "Now, watch out here, classic trap...", "To recap...").
+FORM CONSTRAINTS (the text is READ aloud, never displayed):
+- No markdown, no headers, no bullets, no symbols (*, #, -, |, etc.) — only natural spoken sentences, with oral transitions between chapters and a short natural pause marker in the wording ("Let's take a breath and move on to the diagnosis.").
+- Calm, steady pace: short-to-medium sentences, one idea at a time, never a rushed enumeration.
 - Base yourself STRICTLY on the real course content provided — never invent medical facts absent from the source text.
-- Target length: roughly 1300 to 1500 words — enough for a real, substantial 9-10 minute spoken episode that actually teaches something, not a rushed recap. This length must come from genuinely covering more real content in more depth, NEVER from stretching: no repeating the same idea in different words, no restating what was "just said" every few sentences, no filler transitions, no padding through a long greeting or self-introduction (see point 1 above). If the course genuinely doesn't have enough real substance to reach this length while staying dense and useful, a shorter but genuinely substantive episode is ALWAYS better than an artificially padded one — never pad just to hit a number. Do NOT exceed roughly 1500-1600 words either — a real production incident showed a much longer (1800-2200 word) script pushed the full generation pipeline past its platform time budget and the episode never completed at all.
+- Target length: 1400 to 1600 words — a deep, academic 10 to 12 minute episode at a calm speaking pace. The length must come from genuinely covering more real content in more depth, never from repetition, filler or a long greeting. Do NOT exceed 1650 words: a longer script pushes the audio generation past its platform time budget and the episode never completes.
 
 Respond ONLY with the raw script, no tags or commentary around it.`
     : `Tu es un professeur de médecine passionné et pédagogue, comme un grand frère qui explique son cours à un étudiant qu'il adore voir réussir. Tu écris le SCRIPT INTÉGRAL d'un épisode de podcast — le texte exact qui sera lu à voix haute par un narrateur, mot pour mot. Ce n'est jamais lu à l'écran, donc chaque mot doit sonner naturel à l'oreille.
 
 STYLE DE LANGUE (règle la plus importante) : ${LANGUAGE_STYLE_BY_DIALECT[dialect]}
 
-STRUCTURE OBLIGATOIRE, dans cet ordre :
-1. ${labels.intro} — accroche COURTE et directe (2-3 phrases maximum) : pourquoi ce sujet compte, ce qu'on va couvrir. JAMAIS de longue salutation, d'auto-présentation ou de "bienvenue dans cet épisode" à rallonge — c'est du temps mort, pas de l'enseignement, et c'est la façon la plus paresseuse de gonfler artificiellement un script pour atteindre une longueur cible.
-2. ${labels.points} — le cœur de l'épisode, là où doit vraiment vivre l'essentiel de la longueur : reprends chaque mécanisme/concept important du cours, et pour CHACUN, explique-le vraiment — le raisonnement sous-jacent, pourquoi ça se produit physiologiquement, un exemple clinique concret ou une analogie qui fait vraiment comprendre. Ne te contente jamais de nommer un concept pour passer au suivant. Un étudiant qui a déjà lu le cours écrit doit quand même repartir en comprenant quelque chose plus en profondeur, ou en remarquant un point qu'il avait survolé — pas juste entendre les mêmes points clés lus à voix haute.
-3. ${labels.pitfalls} — les erreurs classiques, les diagnostics différentiels à ne pas manquer, ce qui piège les étudiants à l'examen ou en garde.
-4. ${labels.conclusion} — récapitulatif court et percutant, le(s) message(s) à retenir absolument.
+STRUCTURE OBLIGATOIRE — 6 chapitres, dans cet ordre, chacun annoncé à l'oral (« Premier chapitre : la physiopathologie... ») :
+1. INTRODUCTION — une accroche courte et directe (2-3 phrases) : pourquoi ce sujet compte, ce que l'épisode va couvrir. Jamais de longue salutation ni d'auto-présentation.
+2. PHYSIOPATHOLOGIE — les mécanismes, étape par étape, avec le raisonnement derrière chacun et une analogie concrète qui fait vraiment comprendre.
+3. DIAGNOSTIC — présentation clinique, signes clés, examens complémentaires et leur interprétation, diagnostics différentiels à ne pas manquer.
+4. TRAITEMENT — la stratégie thérapeutique et sa logique, les choix de première intention, la surveillance, ce qui change dans les situations particulières — uniquement ce que contient réellement le cours.
+5. PIÈGES QCM — les pièges et confusions classiques, les détails que les examinateurs adorent, comment reconnaître la bonne réponse.
+6. CONCLUSION — un récapitulatif posé des trois à cinq choses à retenir.
+Si le cours ne traite pas l'un des chapitres 2 à 4 (par exemple pas de partie thérapeutique), dis-le en une phrase et consacre ce temps à approfondir les chapitres que le cours couvre réellement — n'invente jamais de contenu.
 
-CONTRAINTES DE FORME (le texte est LU, jamais affiché) :
-- Aucun markdown, aucun titre, aucune puce, aucun symbole (*, #, -, |, etc.) — uniquement des phrases parlées naturelles, avec des transitions orales ("Alors, parlons de...", "Bon, attention ici, piège classique...", "Pour récapituler...").
+CONTRAINTES DE FORME (le texte est LU à voix haute, jamais affiché) :
+- Aucun markdown, aucun titre, aucune puce, aucun symbole (*, #, -, |, etc.) — uniquement des phrases parlées naturelles, avec des transitions orales entre les chapitres et une respiration naturelle dans la formulation (« Prenons une petite respiration, et passons au diagnostic. »).
+- Rythme calme et régulier : phrases courtes à moyennes, une idée à la fois, jamais d'énumération précipitée.
 - Base-toi STRICTEMENT sur le contenu réel du cours fourni — jamais d'invention de faits médicaux absents du texte source.
-- Longueur cible : environ 1300 à 1500 mots — assez pour un épisode réel et substantiel de 9 à 10 minutes à l'oral qui enseigne vraiment quelque chose, pas un simple récapitulatif expédié. Cette longueur doit venir de couvrir réellement plus de contenu, plus en profondeur — JAMAIS d'étirement artificiel : pas de répétition de la même idée avec d'autres mots, pas de reformulation de ce qui vient d'être dit toutes les deux phrases, pas de transitions creuses, pas de longue salutation/auto-présentation pour gagner du temps (voir point 1 ci-dessus). Si le cours n'a vraiment pas assez de matière réelle pour atteindre cette longueur en restant dense et utile, un épisode plus court mais réellement substantiel vaut TOUJOURS mieux qu'un épisode artificiellement gonflé — n'étire jamais juste pour atteindre un chiffre. NE DÉPASSE PAS non plus environ 1500-1600 mots : un incident réel en production a montré qu'un script bien plus long (1800-2200 mots) faisait dépasser au pipeline complet son budget de temps sur la plateforme, et l'épisode ne se terminait jamais du tout.
+- Longueur cible : 1400 à 1600 mots — un épisode académique et approfondi de 10 à 12 minutes à un rythme de parole posé. Cette longueur doit venir de couvrir réellement plus de contenu, plus en profondeur — jamais de répétition, de remplissage ou de longue salutation. NE DÉPASSE PAS 1650 mots : un script plus long fait dépasser à la génération audio son budget de temps sur la plateforme, et l'épisode ne se termine jamais.
 
 Réponds UNIQUEMENT avec le script brut, sans aucune balise ni commentaire autour.`;
 }
@@ -152,7 +164,7 @@ export function buildPodcastNarrationSystemPrompt(dialect: PodcastDialect): stri
   const isEnglishBase = dialect === "en" || dialect === "en-darija";
   return isEnglishBase
     ? `You are a warm, passionate medical podcast narrator — like an older sibling recording an episode for a student they care about. You'll be given an already-written script. Your only task: READ IT ALOUD, IN FULL, WORD FOR WORD, from start to finish, without shortening, summarizing, paraphrasing, or changing a single word. Perform it with rhythm, natural pauses, enthusiasm at the right moments, seriousness on warning points — like a real recorded episode, never monotone or robotic.`
-    : `Tu es un narrateur de podcast médical, vivant, chaleureux, passionné — comme un grand frère qui enregistre un épisode pour un étudiant qu'il aime bien. On va te donner un script déjà écrit${isEnglishBase ? "" : ", mélangeant français médical et darija algérienne"}. Ta seule tâche : LIS-LE À VOIX HAUTE, EN INTÉGRALITÉ, MOT POUR MOT, du début à la fin, sans le raccourcir, le résumer, le paraphraser ni changer un seul mot. Interprète-le avec du rythme, des pauses naturelles, de l'enthousiasme aux bons moments, du sérieux sur les points d'alerte — comme un vrai épisode enregistré, jamais monotone ni robotique.`;
+    : `Tu es un narrateur de podcast médical, vivant, chaleureux, passionné — comme un grand frère qui enregistre un épisode pour un étudiant qu'il aime bien. On va te donner un script déjà écrit${isEnglishBase ? "" : ", mélangeant français médical et darija algérienne"}. Ta seule tâche : LIS-LE À VOIX HAUTE, EN INTÉGRALITÉ, MOT POUR MOT, du début à la fin, sans le raccourcir, le résumer, le paraphraser ni changer un seul mot. Lis-le en FRANÇAIS uniquement, avec une prononciation claire, d'une voix calme, posée et régulière : ne te presse jamais, marque une vraie pause entre les chapitres et après chaque idée importante, souligne les points d'alerte avec sérieux — comme un excellent enseignant qui enregistre un épisode soigné, jamais monotone, jamais précipité, jamais robotique.`;
 }
 
 /** @deprecated kept only so any stray import doesn't hard-crash the build — every real call site now goes through buildPodcastNarrationSystemPrompt(dialect). Equivalent to the "fr-darija" (original, default) variant. */
