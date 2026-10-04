@@ -1177,7 +1177,9 @@ export async function transcribeAudioViaOpenRouter(
   // own hardening comment). A higher temperature only adds decoding
   // randomness, which is never wanted for a transcription meant to be
   // word-for-word faithful.
-  options?: { language?: string; timeoutMs?: number; temperature?: number }
+  // prompt: Whisper's optional context/vocabulary hint (spelling of domain terms,
+  // expected languages) — guides decoding without forcing a language.
+  options?: { language?: string; timeoutMs?: number; temperature?: number; prompt?: string }
 ): Promise<TranscriptionResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -1206,6 +1208,7 @@ export async function transcribeAudioViaOpenRouter(
       // BlobPart's stricter ArrayBuffer type.
       form.append("file", new Blob([Uint8Array.from(buffer)], { type: TRANSCRIPTION_FORMAT_MIME[format] }), `audio.${format}`);
       if (options?.language) form.append("language", options.language);
+      if (options?.prompt) form.append("prompt", options.prompt);
       form.append("temperature", String(options?.temperature ?? 0));
 
       res = await fetchOpenRouterWithRetry(OPENROUTER_TRANSCRIPTION_URL, {
@@ -1225,6 +1228,7 @@ export async function transcribeAudioViaOpenRouter(
           input_audio: { data: buffer.toString("base64"), format },
           temperature: options?.temperature ?? 0,
           ...(options?.language ? { language: options.language } : {}),
+          ...(options?.prompt ? { prompt: options.prompt } : {}),
         }),
         signal: timeoutController.signal,
       });

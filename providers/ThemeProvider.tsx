@@ -1,5 +1,8 @@
 "use client";
 
+// App-wide: real colors for theme-token opacity classes (bg-popover/95, border-border/60…) — see the file header.
+import "@/components/ui/token-alpha.css";
+
 import { useEffect, type ComponentProps } from "react";
 import { ThemeProvider as NextThemesProvider, useTheme } from "next-themes";
 

@@ -19,7 +19,8 @@ export const DropdownMenuContent = forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[10rem] overflow-hidden rounded-2xl border border-border/60 bg-popover/95 p-1.5 text-popover-foreground shadow-glass backdrop-blur-xl dark:shadow-glass-dark",
+        // Fully opaque (never see-through over the page) and above every app layer.
+        "z-[9999] min-w-[10rem] overflow-hidden rounded-2xl p-1.5 border border-black/10 bg-popover text-popover-foreground shadow-[0_20px_25px_-5px_rgba(0,0,0,0.35),0_8px_10px_-6px_rgba(0,0,0,0.35)] dark:border-white/[0.12] dark:shadow-[0_20px_25px_-5px_rgba(0,0,0,0.7),0_8px_10px_-6px_rgba(0,0,0,0.7)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2",
         className
       )}
@@ -73,7 +74,8 @@ export const DropdownMenuSubContent = forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[10rem] overflow-hidden rounded-2xl border border-border/60 bg-popover/95 p-1.5 text-popover-foreground shadow-glass backdrop-blur-xl dark:shadow-glass-dark",
+        // Fully opaque (never see-through over the page) and above every app layer.
+        "z-[9999] min-w-[10rem] overflow-hidden rounded-2xl p-1.5 border border-black/10 bg-popover text-popover-foreground shadow-[0_20px_25px_-5px_rgba(0,0,0,0.35),0_8px_10px_-6px_rgba(0,0,0,0.35)] dark:border-white/[0.12] dark:shadow-[0_20px_25px_-5px_rgba(0,0,0,0.7),0_8px_10px_-6px_rgba(0,0,0,0.7)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className
       )}

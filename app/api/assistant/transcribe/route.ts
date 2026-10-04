@@ -53,6 +53,14 @@ function resolveFormat(mimeType: string): TranscriptionFormat {
   return MIME_TO_FORMAT[normalized] ?? "webm";
 }
 
+/**
+ * Context hint for Whisper (not an instruction it "follows", a vocabulary /
+ * style prior): an Algerian medical student who may speak French, Arabic or
+ * Darja and mix them, with correctly spelled French medical terms.
+ */
+const DICTATION_PROMPT =
+  "Question d'un étudiant en médecine algérien, en français, en arabe ou en darija algérienne, parfois mélangés. Vocabulaire médical : insuffisance cardiaque, hypertension artérielle, physiopathologie, sémiologie, électrocardiogramme, glomérulonéphrite, pneumopathie, antibiothérapie, QCM, cas clinique. واش هي الأعراض تاع المرض ؟";
+
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
@@ -94,7 +102,11 @@ export async function POST(request: NextRequest) {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   try {
-    const { text } = await transcribeAudioViaOpenRouter(buffer, format, { language: "fr" });
+    // No forced language: Whisper auto-detects French, Arabic or Algerian
+    // Darja (forcing "fr" bent Darja/Arabic speech into wrong French). The
+    // prompt only biases spelling towards medical vocabulary and the
+    // student's real languages, it never translates.
+    const { text } = await transcribeAudioViaOpenRouter(buffer, format, { prompt: DICTATION_PROMPT });
     return NextResponse.json({ success: true, text });
   } catch (error) {
     const message = error instanceof OpenRouterError ? error.message : errorMessage(error);

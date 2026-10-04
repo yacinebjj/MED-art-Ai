@@ -281,7 +281,7 @@ export async function POST(request: NextRequest) {
       const stream = await streamOpenRouter(messages, { model: HAIKU_MODEL, maxTokens: 2048 });
       return new NextResponse(stream, {
         status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Model-Used": HAIKU_MODEL },
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
       });
     } catch (error) {
       if (error instanceof OpenRouterError) {
@@ -313,7 +313,7 @@ export async function POST(request: NextRequest) {
       const stream = await streamOpenRouter(messages, { model, maxTokens: 2048 });
       return new NextResponse(stream, {
         status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Model-Used": model },
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
       });
     } catch (error) {
       lastError = error;

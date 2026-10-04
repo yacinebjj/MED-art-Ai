@@ -19,6 +19,7 @@ import {
   ImageIcon,
   ListChecks,
   Mic,
+  AudioLines,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -30,6 +31,12 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import dynamic from "next/dynamic";
+import { resizeImageToDataUrl } from "@/lib/assistant/image-resize";
+import { playChime } from "@/lib/voice/chime";
+
+// The voice studio is its own chunk — only downloaded when voice mode opens.
+const VoiceModeOverlay = dynamic(() => import("@/components/assistant/VoiceModeOverlay").then((m) => m.VoiceModeOverlay), { ssr: false });
 import { cn } from "@/lib/utils";
 import { generateId } from "@/lib/generate-id";
 import { uploadDocumentDirect } from "@/lib/upload-client";
@@ -335,10 +342,10 @@ interface DocumentAttachmentEnvelope {
 
 type AttachmentEnvelope = ImageAttachmentEnvelope | DocumentAttachmentEnvelope;
 
-// encodeImageMessage removed — nothing sends a NEW image message anymore
-// (handleImageFileChosen refuses up front). decodeAttachmentEnvelope below
-// still recognizes IMAGE_ENVELOPE_KIND so an OLD image message already
-// sitting in a student's saved history still renders correctly.
+/** An image message: the (downsized) picture + the student's caption, rendered as a bubble with the photo. */
+function encodeImageMessage(payload: Omit<ImageAttachmentEnvelope, "kind">): string {
+  return JSON.stringify({ kind: IMAGE_ENVELOPE_KIND, ...payload });
+}
 
 function encodeDocumentMessage(payload: Omit<DocumentAttachmentEnvelope, "kind">): string {
   return JSON.stringify({ kind: DOCUMENT_ENVELOPE_KIND, ...payload });
@@ -450,6 +457,10 @@ export default function AssistantPage() {
   const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
+  // Image picked but not sent yet — previewed above the composer, sent with the caption.
+  const [pendingImage, setPendingImage] = useState<{ dataUrl: string; fileName: string } | null>(null);
+  const [isPreparingImage, setIsPreparingImage] = useState(false);
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
   const { toast } = useToast();
   // Covers the async window between picking a file and the resulting message
@@ -831,6 +842,15 @@ export default function AssistantPage() {
 
   async function sendMessage(rawText: string) {
     const text = rawText.trim();
+    if (pendingImage && !isTyping && !isAttachmentBusy) {
+      const image = pendingImage;
+      setPendingImage(null);
+      haptic(10);
+      await sendAttachmentMessage(encodeImageMessage({ dataUrl: image.dataUrl, fileName: image.fileName, caption: text }), text || DEFAULT_IMAGE_PROMPT, {
+        image: { dataUrl: image.dataUrl, fileName: image.fileName },
+      });
+      return;
+    }
     if (!text || isTyping || isAttachmentBusy) return;
 
     haptic(10);
@@ -889,14 +909,18 @@ export default function AssistantPage() {
       pushSystemErrorMessage("Ce fichier n'est pas une image valide.");
       return;
     }
-    // Dashboard Assistant now runs exclusively on OpenRouter's ":free"
-    // model chain (see app/api/dashboard-assistant/route.ts), verified
-    // text-only — that route would reject this with a 400 anyway, but
-    // failing fast here skips a pointless resize + network round trip and
-    // gives the student the explanation immediately.
-    pushSystemErrorMessage(
-      "L'analyse d'image n'est pas disponible sur l'assistant gratuit (modèles texte uniquement). Essaie sans image, ou utilise le chat d'un cours pour ce type de contenu."
-    );
+    // Downsized client-side (~1568 px JPEG), then staged as a thumbnail above
+    // the composer: the student adds a question and sends both together.
+    setIsPreparingImage(true);
+    try {
+      const dataUrl = await resizeImageToDataUrl(file);
+      setPendingImage({ dataUrl, fileName: file.name || "image.jpg" });
+      textareaRef.current?.focus();
+    } catch (error) {
+      pushSystemErrorMessage(error instanceof Error ? error.message : "Cette image n'a pas pu être lue.");
+    } finally {
+      setIsPreparingImage(false);
+    }
   }
 
   /** "Importer un PDF" — direct-to-storage upload (lib/upload-client.ts), same officeparser-backed extraction pipeline as the rest of the app (see lib/document-extraction.ts) under the hood, just never routed through this Next.js server's own request body — that's what lets a large PDF attachment actually upload instead of hitting Vercel's ~4.5 MB request-body ceiling. */
@@ -1027,6 +1051,7 @@ export default function AssistantPage() {
       };
 
       recorder.start();
+      playChime("start");
       setIsListening(true);
     } catch (error) {
       setIsListening(false);
@@ -1040,6 +1065,7 @@ export default function AssistantPage() {
 
   function stopDictation() {
     mediaRecorderRef.current?.stop();
+    playChime("stop");
     setIsListening(false);
   }
 
@@ -1051,7 +1077,31 @@ export default function AssistantPage() {
     void startDictation();
   }
 
-  const canSend = input.trim().length > 0 && !isTyping && !isAttachmentBusy;
+  // Desktop shortcut: Ctrl+M / Cmd+M starts dictation, the same keys stop and transcribe.
+  const toggleListeningRef = useRef(toggleListening);
+  toggleListeningRef.current = toggleListening;
+  useEffect(() => {
+    function handleShortcut(e: globalThis.KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        if (!voiceModeOpen) toggleListeningRef.current();
+      }
+    }
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [voiceModeOpen]);
+
+  /** Voice mode: one spoken turn → same conversation as the chat; resolves with the assistant's reply text. */
+  async function askFromVoice(text: string): Promise<string> {
+    await sendMessage(text);
+    // Let the last streamed chunk commit before reading the thread.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const thread = messagesRef.current;
+    const last = thread[thread.length - 1];
+    return last && last.role === "assistant" ? last.content.replace(/^⚠️\s*/, "") : "";
+  }
+
+  const canSend = (input.trim().length > 0 || pendingImage !== null) && !isTyping && !isAttachmentBusy;
   const activeAction = mode ? QUICK_ACTIONS.find((action) => action.mode === mode) : undefined;
   const composerPlaceholder = activeAction ? tAssistant(activeAction.placeholder, language) : tAssistant("composerPlaceholder", language);
   // On a phone the primary button morphs (mic while there's nothing to send,
@@ -1251,6 +1301,34 @@ export default function AssistantPage() {
                   )}
                 </AnimatePresence>
 
+                {(pendingImage || isPreparingImage) && (
+                  <div className="flex items-center gap-3 px-3 pt-3">
+                    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-border bg-muted">
+                      {pendingImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- local data: URL preview
+                        <img src={pendingImage.dataUrl} alt={pendingImage.fileName} className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center">
+                          <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                        </span>
+                      )}
+                      {pendingImage && (
+                        <button
+                          type="button"
+                          onClick={() => setPendingImage(null)}
+                          aria-label="Retirer l'image"
+                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white transition-colors hover:bg-black"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <p className="min-w-0 text-xs text-muted-foreground">
+                      {isPreparingImage ? "Préparation de l'image…" : "Image prête : ajoute ta question (ou envoie directement) pour une analyse médicale détaillée."}
+                    </p>
+                  </div>
+                )}
+
                 <div className="flex w-full items-end gap-1 p-1.5">
                   <div className="relative shrink-0">
                     <button
@@ -1340,6 +1418,24 @@ export default function AssistantPage() {
                     type="button"
                     onClick={() => {
                       haptic();
+                      setVoiceModeOpen(true);
+                    }}
+                    disabled={!micSupported || isListening || isTyping}
+                    aria-label="Mode vocal"
+                    title="Mode vocal (conversation à la voix)"
+                    className={cn(
+                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-[transform,background-color,color] duration-150 hover:bg-accent hover:text-foreground active:scale-90 disabled:cursor-not-allowed disabled:opacity-40",
+                      hasPrimaryAction && "max-sm:hidden"
+                    )}
+                  >
+                    <AudioLines className="h-5 w-5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    title={micSupported ? "Dicter (Ctrl+M)" : undefined}
+                    onClick={() => {
+                      haptic();
                       toggleListening();
                     }}
                     disabled={!micSupported || isTranscribing}
@@ -1390,6 +1486,7 @@ export default function AssistantPage() {
           </div>
         </div>
       </div>
+      <VoiceModeOverlay open={voiceModeOpen} onClose={() => setVoiceModeOpen(false)} onAsk={askFromVoice} />
     </div>
   );
 

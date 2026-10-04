@@ -2750,7 +2750,8 @@ export default function ModuleWorkspacePage() {
           className="flex min-h-0 flex-1 flex-col overflow-hidden transition-[padding-bottom] duration-200 ease-out"
           style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
         >
-          <div className={cn(panelShellClasses, "m-2 min-h-0 flex-1")}>
+          {/* Edge-to-edge on phones: the whole width goes to Sources / Chat / Studio. */}
+          <div className={cn(panelShellClasses, "min-h-0 flex-1 rounded-none border-x-0 shadow-none")}>
             {mobileTab === "sources" && !isZen && <ModuleSourcesPanel variant="mobile" {...sourcesPanelProps} />}
             {(mobileTab === "chat" || isZen) && mobileChatPanel}
             {mobileTab === "studio" &&

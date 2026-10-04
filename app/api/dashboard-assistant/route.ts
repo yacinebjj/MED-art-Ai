@@ -1,6 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+
+// ── Vision (images in the assistant) ────────────────────────────────────
+// Images go to ECONOMY_MODEL (multimodal) — the free text chain can't see
+// them. The client downsizes to ~1568 px JPEG first; this cap keeps the whole
+// JSON body under the platform's ~4.5 MB request ceiling.
+const MAX_IMAGE_BASE64_CHARS = 3_000_000;
+const DATA_URL_IMAGE_PATTERN = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/]+=*$/i;
+const VISION_SYSTEM_ADDENDUM = `L'étudiant joint une IMAGE médicale (schéma, coupe histologique, ECG, radiographie, photo clinique, capture de QCM…). Analyse-la avec méthode :
+1. Identifie ce que montre l'image (type d'examen / de document, structures ou éléments visibles).
+2. Décris les éléments clés observés, précisément et sans extrapoler au-delà de ce qui est visible.
+3. Donne l'interprétation la plus probable, puis les diagnostics différentiels pertinents et ce qui permettrait de trancher.
+4. S'il s'agit d'un QCM, résous-le en justifiant chaque proposition.
+5. Termine par les points à retenir pour l'examen.
+Si l'image est illisible ou insuffisante, dis-le clairement plutôt que d'inventer. Rappelle, quand c'est une situation clinique réelle, que cela ne remplace pas l'avis d'un médecin.`;
+
+type VisionPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
 import { reserveChatMessageDaily } from "@/lib/subscription";
@@ -109,7 +125,7 @@ export async function POST(request: NextRequest) {
     mode?: unknown;
     style?: unknown;
     stepByStep?: unknown;
-    /** Rejected below — the free-tier model chain is verified text-only (no vision). Sent by the shared assistant UI (app/dashboard/(shell)/assistant/page.tsx), which also targets the paid, vision-capable route — must be refused explicitly here, not silently ignored, so a student who attaches an image gets an honest message instead of a reply that quietly never looked at it. */
+    /** Inline image ({ dataUrl }) — analysed by the multimodal model (see the vision branch below). */
     image?: unknown;
     /** Text-only, so this DOES work here — folded into the prompt like app/api/assistant/route.ts's own document support. */
     document?: unknown;
@@ -124,11 +140,16 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  let imageDataUrl: string | null = null;
   if (image !== undefined) {
-    return NextResponse.json(
-      { error: "L'analyse d'image n'est pas disponible sur l'assistant gratuit (modèles texte uniquement). Essaie sans image, ou utilise le chat d'un cours pour ce type de contenu." },
-      { status: 400 }
-    );
+    const candidate = image as { dataUrl?: unknown };
+    if (!candidate || typeof candidate.dataUrl !== "string" || !DATA_URL_IMAGE_PATTERN.test(candidate.dataUrl)) {
+      return NextResponse.json({ error: "Format d'image non supporté (PNG, JPEG, WEBP ou GIF attendu)." }, { status: 400 });
+    }
+    if (candidate.dataUrl.length > MAX_IMAGE_BASE64_CHARS) {
+      return NextResponse.json({ error: "Image trop lourde. Réessaie avec une photo plus petite." }, { status: 413 });
+    }
+    imageDataUrl = candidate.dataUrl;
   }
 
   let documentAttachment: { fileName: string; text: string } | null = null;
@@ -169,6 +190,36 @@ export async function POST(request: NextRequest) {
     { role: "user", content: message },
   ];
 
+  // Vision: multimodal model only (the text chain would silently ignore the
+  // image). Draws on the same daily allowance as the advanced text model.
+  if (imageDataUrl) {
+    if (!dailyGate.allowed) {
+      return NextResponse.json(
+        { error: "Tu as utilisé toutes tes analyses avancées du jour (images comprises). Elles se rechargent demain — tu peux continuer en texte d'ici là." },
+        { status: 429 }
+      );
+    }
+    const visionMessages: ChatMessageInput[] = [
+      messages[0],
+      { role: "system", content: VISION_SYSTEM_ADDENDUM },
+      ...messages.slice(1, -1),
+      {
+        role: "user",
+        content: [
+          { type: "text", text: message },
+          { type: "image_url", image_url: { url: imageDataUrl } },
+        ] as VisionPart[],
+      } as unknown as ChatMessageInput,
+    ];
+    try {
+      const stream = await streamOpenRouter(visionMessages, { model: ECONOMY_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.3 });
+      return new NextResponse(stream, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+    } catch (error) {
+      console.error("[dashboard-assistant] Analyse d'image échouée:", error instanceof Error ? error.message : error);
+      return NextResponse.json({ error: "L'analyse de l'image n'a pas pu aboutir. Réessaie dans un instant." }, { status: 502 });
+    }
+  }
+
   // Try each candidate model in order — the first one that succeeds wins. A
   // model erroring (momentary saturation, a provider hiccup, a rate-limit
   // blip) is the EXPECTED, routine case here, not an exceptional one — this
@@ -181,7 +232,7 @@ export async function POST(request: NextRequest) {
       const stream = await streamOpenRouter(messages, { model: CHEAP_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5 });
       return new NextResponse(stream, {
         status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Model-Used": CHEAP_MODEL },
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
       });
     } catch (error) {
       lastError = error;
@@ -203,7 +254,7 @@ export async function POST(request: NextRequest) {
       const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5 });
       return new NextResponse(stream, {
         status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Model-Used": model },
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
       });
     } catch (error) {
       lastError = error;

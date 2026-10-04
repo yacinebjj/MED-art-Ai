@@ -41,7 +41,9 @@ export function CyberStage({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("cyber-stage rounded-[1.75rem] text-foreground", className)} style={{ ...accentVars(accent), ...style }}>
+    // Phones/small tablets: edge-to-edge (cancels the shell's side gutter, no rounded frame) —
+    // the whole screen width goes to the content. Framed card from md: up.
+    <div className={cn("cyber-stage text-foreground max-sm:-mx-2 sm:max-md:-mx-4 max-md:rounded-none max-md:border-x-0 md:rounded-[1.75rem]", className)} style={{ ...accentVars(accent), ...style }}>
       {children}
     </div>
   );

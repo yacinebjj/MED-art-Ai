@@ -1,14 +1,11 @@
 "use client";
 
-import { DragEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Cloud, FileText, FileUp, Loader2, Upload, UploadCloud } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/Dialog";
+import "@/components/cyber/cyber.css";
+
+import { DragEvent, KeyboardEvent, useEffect, useRef, useState, type ComponentType } from "react";
+import { motion } from "framer-motion";
+import { AlertTriangle, CheckCircle2, Cloud, File, FileImage, FileSpreadsheet, FileText, FileType2, Globe, Link2, Loader2, Presentation, Sparkles, Trash2, Upload, UploadCloud, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
@@ -17,32 +14,42 @@ import { preloadGoogleDriveScripts, type DriveListItem } from "@/lib/google-driv
 import { DriveBrowser } from "@/components/dashboard/DriveBrowser";
 import { useToast } from "@/components/ui/Toast";
 import { OcrSuggestedError } from "@/lib/upload-client";
+import { useCyberTilt } from "@/components/cyber/hooks";
 
 // Must match the server-side MAX_FILE_BYTES in app/api/generate-course/route.ts
-// AND app/api/upload/route.ts (whichever ends up handling this file — see
-// onSubmitFile's own doc comment above for why the two differ by caller).
-// Checked here purely so an oversized file is rejected INSTANTLY, before
-// spending a student's time (and mobile data) uploading e.g. 150 Mo of
-// radiology scans over a slow connection just to get turned away by the
-// server at the very end.
+// AND app/api/upload/route.ts. Checked here so an oversized file is rejected
+// instantly, before spending a student's time and mobile data.
 const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo
+const MAX_BATCH_FILES = 10;
 
-function formatOversizedFileError(file: File): string {
-  return `Fichier trop volumineux (${(file.size / (1024 * 1024)).toFixed(1)} Mo, max ${MAX_UPLOAD_FILE_BYTES / (1024 * 1024)} Mo).`;
+type Method = "upload" | "drive" | "text" | "link";
+type QueueStatus = "pending" | "uploading" | "done" | "error";
+
+interface QueueItem {
+  id: string;
+  file: File;
+  status: QueueStatus;
+  message?: string;
+  ocr?: { path: string; fileName: string };
 }
 
-// Horizontal pill-nav row (NotebookLM-style "Upload files / Drive / Texte
-// direct" bar below the central dropzone) — see this file's own header
-// comment on why this deliberately only covers this app's 3 REAL import
-// methods, not NotebookLM's full set (web search, "Websites", Play Books
-// have no backend here — shipping them would be a dead button, the exact
-// bug class already found and fixed elsewhere in this app).
-const NAV_PILL_BASE =
-  "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60";
-const NAV_PILL_ACTIVE = "border-primary/60 bg-primary/10 text-primary shadow-glow";
-const NAV_PILL_INACTIVE = "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground";
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
 
-/** Enter/Space activates a non-<button> clickable zone, matching native button semantics. */
+/** Icon + tint per document family. */
+function fileVisual(name: string): { icon: ComponentType<{ className?: string }>; tint: string; label: string } {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return { icon: FileType2, tint: "from-rose-400 to-red-600", label: "PDF" };
+  if (ext === "doc" || ext === "docx") return { icon: FileText, tint: "from-sky-400 to-blue-600", label: "Word" };
+  if (ext === "ppt" || ext === "pptx") return { icon: Presentation, tint: "from-amber-300 to-orange-600", label: "PowerPoint" };
+  if (ext === "xls" || ext === "xlsx" || ext === "csv") return { icon: FileSpreadsheet, tint: "from-emerald-400 to-green-600", label: "Tableur" };
+  if (["png", "jpg", "jpeg", "webp", "gif", "heic"].includes(ext)) return { icon: FileImage, tint: "from-violet-400 to-fuchsia-600", label: "Image" };
+  if (ext === "txt" || ext === "md") return { icon: FileText, tint: "from-slate-400 to-slate-600", label: "Texte" };
+  return { icon: File, tint: "from-slate-400 to-slate-600", label: ext.toUpperCase() || "Fichier" };
+}
+
 function handleZoneKeyDown(e: KeyboardEvent<HTMLDivElement>, action: () => void) {
   if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
@@ -50,93 +57,117 @@ function handleZoneKeyDown(e: KeyboardEvent<HTMLDivElement>, action: () => void)
   }
 }
 
+const METHODS: { id: Method; label: string; hint: string; icon: ComponentType<{ className?: string }>; tint: string }[] = [
+  { id: "upload", label: "Fichiers", hint: "PDF, DOCX, PPTX, TXT…", icon: UploadCloud, tint: "from-cyan-300 to-sky-500" },
+  { id: "drive", label: "Google Drive", hint: "Parcourir tes dossiers", icon: Cloud, tint: "from-emerald-300 to-teal-500" },
+  { id: "text", label: "Texte direct", hint: "Notes, polycopié collé", icon: FileText, tint: "from-violet-400 to-fuchsia-500" },
+  { id: "link", label: "Lien web", hint: "Page de cours en ligne", icon: Globe, tint: "from-amber-300 to-orange-500" },
+];
+
+function MethodCard({ method, active, disabled, onSelect }: { method: (typeof METHODS)[number]; active: boolean; disabled: boolean; onSelect: () => void }) {
+  const ref = useCyberTilt<HTMLButtonElement>(6);
+  const Icon = method.icon;
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      aria-pressed={active}
+      className={cn(
+        "cyber-tilt group relative flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 overflow-hidden rounded-2xl border p-2.5 text-center transition-[border-color,box-shadow] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[5.5rem] sm:flex-row sm:justify-start sm:gap-3 sm:p-3.5 sm:text-left",
+        active ? "border-cyan-400/60 bg-cyan-400/10 shadow-[0_0_26px_-8px_rgba(34,211,238,0.7)]" : "border-border hover:border-cyan-400/40"
+      )}
+    >
+      <span aria-hidden className="cyber-reflect" />
+      <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg sm:h-11 sm:w-11", method.tint)}>
+        <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-xs font-black text-foreground sm:text-sm">{method.label}</span>
+        <span className="hidden truncate text-[11px] text-muted-foreground sm:block">{method.hint}</span>
+      </span>
+    </button>
+  );
+}
+
 export interface UploadModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called with whatever identifier the submit handler resolved with (a course slug for the default dashboard flow; a studio_courses id for a caller overriding onSubmitFile/onSubmitText) once the upload succeeds. */
+  /** Called with whatever identifier the submit handler resolved with (a course slug for the default dashboard flow; a studio_courses id for a caller overriding onSubmitFile/onSubmitText) once an import succeeds. */
   onUploaded: (result: string) => void;
-  /** Overrides the default POST /api/generate-course (public `courses` table) flow — e.g. the module workspace instead creates a studio_courses row scoped to one curriculum module. Must resolve with an identifier string, or throw an Error with a user-facing message. */
+  /** Overrides the default POST /api/generate-course flow — e.g. the module workspace creates a studio_courses row scoped to one module. Must resolve with an identifier string, or throw an Error with a user-facing message. Enables multi-file batches. */
   onSubmitFile?: (file: File) => Promise<string>;
-  /** Same override, for the "Texte direct" card. */
+  /** Same override, for "Texte direct", Drive and "Lien web" (all become text). */
   onSubmitText?: (text: string, title: string) => Promise<string>;
-  /**
-   * Only meaningful when onSubmitFile throws lib/upload-client.ts's
-   * OcrSuggestedError (a PDF with no real text layer — a scanned/rasterized
-   * document — for which a real OCR fallback exists). Callers that support
-   * it wire this to lib/upload-client.ts's retryUploadWithOcr (closing over
-   * their own moduleId, exactly like onSubmitFile does); callers that don't
-   * pass it simply never see the "Essayer l'OCR" action rendered.
-   */
+  /** Only meaningful when onSubmitFile throws lib/upload-client.ts's OcrSuggestedError (a scanned PDF). */
   onRetryWithOcr?: (path: string, fileName: string) => Promise<string>;
   title?: string;
   description?: string;
 }
 
+/**
+ * Source import studio: files (batch, per-file status), Google Drive, direct
+ * text and web link — the four real import paths this app supports.
+ */
 export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSubmitText, onRetryWithOcr, title: modalTitle, description }: UploadModalProps) {
-  const [activeMethod, setActiveMethod] = useState<"upload" | "text" | "drive">("upload");
+  const [method, setMethod] = useState<Method>("upload");
   const [isDragging, setIsDragging] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
+  const [link, setLink] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDriveImporting, setIsDriveImporting] = useState(false);
-  // Lifted out of DriveBrowser so the OAuth connection survives switching to
-  // another pill and back — DriveBrowser itself unmounts/remounts with the
-  // active tab, same as the upload dropzone/paste-text form either side of
-  // it, but re-running Google's OAuth popup on every tab switch would be a
-  // real, avoidable annoyance the other two tabs don't have.
+  // Lifted out of DriveBrowser so the OAuth connection survives switching tabs.
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ocrSuggestion, setOcrSuggestion] = useState<{ path: string; fileName: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  // Batches only where the caller handles each file itself (module workspace) —
+  // the default dashboard flow navigates to the one course it just created.
+  const allowsBatch = Boolean(onSubmitFile);
+  const busy = isSubmitting || isDriveImporting;
 
-  // Fires the moment this modal opens, well before any click — see
-  // preloadGoogleDriveScripts' own doc comment: by the time the student
-  // actually taps "Importer depuis Drive", the Google scripts this needs are
-  // already loaded, so the click handler's own await on them resolves near-
-  // instantly instead of introducing a real async gap between the tap and
-  // Google's own popup call (the gap several mobile browsers treat as
-  // "gesture no longer trusted", silently blocking the popup).
+  // Preload Google's scripts as soon as the modal opens (popup must follow the tap synchronously on mobile).
   useEffect(() => {
     if (open) preloadGoogleDriveScripts();
   }, [open]);
 
   function reset() {
-    setActiveMethod("upload");
+    setMethod("upload");
     setIsDragging(false);
-    setFile(null);
+    setQueue([]);
     setText("");
     setTitle("");
+    setLink("");
     setError(null);
-    setOcrSuggestion(null);
     setDriveAccessToken(null);
   }
 
   function handleOpenChange(next: boolean) {
-    // Radix routes the built-in X button, Escape, AND an overlay click all
-    // through this same callback — blocking it here while a submission is
-    // in flight covers all three at once. Without this, closing mid-upload
-    // (no request is ever aborted) let the student reopen and resubmit
-    // immediately, firing two concurrent course-creation requests from one
-    // upload. Found during a security/UX audit.
-    if (!next && (isSubmitting || isDriveImporting)) return;
+    // Never close mid-import (no request is aborted; a reopen could submit twice).
+    if (!next && busy) return;
     if (!next) reset();
     onOpenChange(next);
+  }
+
+  function addFiles(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    setError(null);
+    const incoming = Array.from(list).slice(0, allowsBatch ? MAX_BATCH_FILES : 1);
+    const oversized = incoming.filter((f) => f.size > MAX_UPLOAD_FILE_BYTES);
+    if (oversized.length > 0) setError(`${oversized.map((f) => f.name).join(", ")} : trop volumineux (max 100 Mo).`);
+    const accepted = incoming
+      .filter((f) => f.size <= MAX_UPLOAD_FILE_BYTES)
+      .map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 7)}`, file, status: "pending" as const }));
+    setQueue((prev) => (allowsBatch ? [...prev.filter((q) => q.status !== "done"), ...accepted].slice(0, MAX_BATCH_FILES) : accepted.slice(0, 1)));
   }
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragging(false);
-    const dropped = e.dataTransfer.files?.[0];
-    if (!dropped) return;
-    if (dropped.size > MAX_UPLOAD_FILE_BYTES) {
-      setFile(null);
-      setError(formatOversizedFileError(dropped));
-      return;
-    }
-    setError(null);
-    setFile(dropped);
+    addFiles(e.dataTransfer.files);
   }
 
   async function defaultSubmitFile(f: File): Promise<string> {
@@ -158,48 +189,74 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     return data.slug;
   }
 
-  async function handleSubmitFile() {
-    if (!file) return;
+  function patchItem(id: string, patch: Partial<QueueItem>) {
+    setQueue((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  /** Imports the queued files one by one, each with its own real status. */
+  async function handleSubmitFiles() {
+    const pending = queue.filter((item) => item.status === "pending" || item.status === "error");
+    if (pending.length === 0) return;
     setIsSubmitting(true);
     setError(null);
-    setOcrSuggestion(null);
-
-    try {
-      const result = await (onSubmitFile ?? defaultSubmitFile)(file);
-      onUploaded(result);
-      handleOpenChange(false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Le téléversement a échoué.";
-      setError(message);
-      // Only offer the OCR retry action if THIS caller actually wired
-      // onRetryWithOcr — a caller that didn't (e.g. one with no course/
-      // moduleId concept to attach the result to) just sees the plain error,
-      // same as any other extraction failure.
-      if (err instanceof OcrSuggestedError && onRetryWithOcr) {
-        setOcrSuggestion({ path: err.path, fileName: err.fileName });
+    let succeeded = 0;
+    for (const item of pending) {
+      patchItem(item.id, { status: "uploading", message: undefined, ocr: undefined });
+      try {
+        const result = await (onSubmitFile ?? defaultSubmitFile)(item.file);
+        patchItem(item.id, { status: "done" });
+        succeeded++;
+        onUploaded(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Le téléversement a échoué.";
+        patchItem(item.id, {
+          status: "error",
+          message,
+          ocr: err instanceof OcrSuggestedError && onRetryWithOcr ? { path: err.path, fileName: err.fileName } : undefined,
+        });
       }
-      toast({ variant: "error", title: "Le téléversement a échoué", description: message });
+    }
+    setIsSubmitting(false);
+    const failed = pending.length - succeeded;
+    if (failed === 0) {
+      toast({ variant: "success", title: succeeded > 1 ? `${succeeded} sources importées` : "Source importée" });
+      handleOpenChange(false);
+    } else if (succeeded > 0) {
+      toast({ variant: "info", title: `${succeeded} importée(s), ${failed} en échec`, description: "Les fichiers en échec restent dans la liste." });
+    } else {
+      toast({ variant: "error", title: "Le téléversement a échoué", description: "Vérifie les fichiers en rouge." });
+    }
+  }
+
+  /** Student-initiated OCR retry for one scanned PDF (a real, billed call — never automatic). */
+  async function handleOcrRetry(item: QueueItem) {
+    if (!item.ocr || !onRetryWithOcr) return;
+    setIsSubmitting(true);
+    patchItem(item.id, { status: "uploading", message: "Extraction OCR en cours (1-2 min)…" });
+    try {
+      const result = await onRetryWithOcr(item.ocr.path, item.ocr.fileName);
+      patchItem(item.id, { status: "done", message: undefined, ocr: undefined });
+      onUploaded(result);
+      if (queue.every((q) => q.id === item.id || q.status === "done")) handleOpenChange(false);
+    } catch (err) {
+      patchItem(item.id, { status: "error", message: err instanceof Error ? err.message : "L'extraction OCR a échoué.", ocr: undefined });
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  /** Explicit, student-initiated OCR retry after handleSubmitFile surfaced an OcrSuggestedError — never triggered automatically (see onRetryWithOcr's own doc comment: a real, billed OpenRouter call). */
-  async function handleOcrRetry() {
-    if (!ocrSuggestion || !onRetryWithOcr) return;
+  async function submitText(content: string, courseTitle: string, failureTitle: string) {
     setIsSubmitting(true);
     setError(null);
-
     try {
-      const result = await onRetryWithOcr(ocrSuggestion.path, ocrSuggestion.fileName);
-      setOcrSuggestion(null);
+      const result = await (onSubmitText ?? defaultSubmitText)(content, courseTitle);
       onUploaded(result);
+      toast({ variant: "success", title: "Source importée" });
       handleOpenChange(false);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "L'extraction OCR a échoué.";
+      const message = err instanceof Error ? err.message : "L'import a échoué.";
       setError(message);
-      setOcrSuggestion(null);
-      toast({ variant: "error", title: "L'extraction OCR a échoué", description: message });
+      toast({ variant: "error", title: failureTitle, description: message });
     } finally {
       setIsSubmitting(false);
     }
@@ -210,36 +267,36 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
       setError("Le texte est trop court (50 caractères minimum).");
       return;
     }
+    await submitText(text, title, "L'import a échoué");
+  }
+
+  async function handleImportLink() {
+    const url = link.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      setError("Colle un lien complet qui commence par http:// ou https://");
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
-
     try {
-      const result = await (onSubmitText ?? defaultSubmitText)(text, title);
-      onUploaded(result);
-      handleOpenChange(false);
+      const res = await fetch("/api/import/url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(typeof data?.error === "string" ? data.error : "Impossible de récupérer cette page.");
+      setIsSubmitting(false);
+      await submitText(String(data.text), title.trim() || String(data.title ?? ""), "L'import du lien a échoué");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "L'import a échoué.";
+      const message = err instanceof Error ? err.message : "Impossible de récupérer cette page.";
       setError(message);
-      toast({ variant: "error", title: "L'import a échoué", description: message });
-    } finally {
+      toast({ variant: "error", title: "L'import du lien a échoué", description: message });
       setIsSubmitting(false);
     }
   }
 
-  /**
-   * Called by DriveBrowser once the student taps a real file (not a
-   * folder). Downloads + extracts it server-side (app/api/drive/import)
-   * using the access token DriveBrowser already obtained, then feeds the
-   * result through the exact same onSubmitText path as "Texte direct" —
-   * from this point on, a Drive import is indistinguishable from pasted
-   * text to whatever caller customized onSubmitText (or the default
-   * /api/generate-course flow).
-   */
+  /** A Drive file is downloaded + extracted server-side, then goes through the same text path. */
   async function handleDriveFileSelected(picked: DriveListItem, accessToken: string) {
     if (isDriveImporting) return;
     setError(null);
     setIsDriveImporting(true);
-
     try {
       const res = await fetch("/api/drive/import", {
         method: "POST",
@@ -248,22 +305,15 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        // Distinguish an expired/revoked Drive session from any other import
-        // failure — without this, the student saw the exact same opaque
-        // toast either way and had no hint that closing/reopening the modal
-        // (the only way to clear the stale token today) would actually fix
-        // it. Clearing driveAccessToken here means switching back to the
-        // Drive tab now shows the "Se connecter" screen directly, no modal
-        // reopen needed.
         if (data.authExpired) {
           setDriveAccessToken(null);
           throw new Error(data.error ?? "Ta session Google Drive a expiré. Reconnecte-toi pour réessayer.");
         }
         throw new Error(data.error ?? "L'import depuis Google Drive a échoué.");
       }
-
       const result = await (onSubmitText ?? defaultSubmitText)(data.text, picked.name);
       onUploaded(result);
+      toast({ variant: "success", title: "Source importée depuis Drive" });
       handleOpenChange(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "L'import depuis Google Drive a échoué.";
@@ -274,23 +324,33 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     }
   }
 
+  const pendingCount = queue.filter((q) => q.status === "pending" || q.status === "error").length;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{modalTitle ?? "Ajouter un cours"}</DialogTitle>
-          <DialogDescription>
-            {description ?? "Importe un document, connecte Google Drive, ou colle du texte pour créer un nouvel espace de travail."}
-          </DialogDescription>
+      <DialogContent className="max-w-3xl overflow-hidden">
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(ellipse_at_top,rgba(34,211,238,0.18),transparent_70%)]" />
+        <DialogHeader className="relative">
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300 via-sky-500 to-violet-600 text-white shadow-[0_0_28px_rgba(34,211,238,0.45)]">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 text-left">
+              <DialogTitle>{modalTitle ?? "Ajouter un cours"}</DialogTitle>
+              <DialogDescription>{description ?? "Importe un document, connecte Google Drive, colle du texte ou un lien pour créer un espace de travail."}</DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="flex flex-col gap-5">
-          {/* Central content zone — dropzone, paste-text form, or the Drive
-              browser, whichever method is active. This is the visually
-              dominant element, per the request's own "central dropzone"
-              spec. */}
-          {activeMethod === "upload" ? (
-            <div className="flex flex-col items-center gap-4">
+        <div className="relative mt-2 grid grid-cols-4 gap-2 sm:gap-3">
+          {METHODS.map((m) => (
+            <MethodCard key={m.id} method={m} active={method === m.id} disabled={busy} onSelect={() => setMethod(m.id)} />
+          ))}
+        </div>
+
+        <motion.div key={method} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="relative mt-4 flex max-h-[55vh] flex-col gap-4 overflow-y-auto overflow-x-hidden pr-0.5">
+          {method === "upload" && (
+            <>
               <div
                 role="button"
                 tabIndex={0}
@@ -302,117 +362,163 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                 }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleDrop}
-                aria-label="Glisser-déposer un fichier, ou appuyer pour parcourir"
+                aria-label="Glisser-déposer des fichiers, ou appuyer pour parcourir"
                 className={cn(
-                  "flex min-h-[13rem] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-all duration-300",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                  isDragging
-                    ? "scale-[1.01] border-primary bg-gradient-to-br from-primary/10 via-primary/5 to-transparent shadow-glow"
-                    : "border-border bg-gradient-to-br from-muted/50 via-muted/30 to-transparent hover:border-primary/40 hover:from-primary/5 hover:via-muted/40"
+                  "relative flex min-h-[11rem] w-full cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-[border-color,background-color,transform]",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isDragging ? "scale-[1.01] border-cyan-400 bg-cyan-400/10" : "border-border hover:border-cyan-400/50"
                 )}
               >
                 <input
                   ref={inputRef}
                   type="file"
+                  multiple={allowsBatch}
                   accept={ACCEPTED_FILE_TYPES.join(",")}
                   className="hidden"
                   onChange={(e) => {
-                    const chosen = e.target.files?.[0] ?? null;
-                    if (chosen && chosen.size > MAX_UPLOAD_FILE_BYTES) {
-                      setFile(null);
-                      setError(formatOversizedFileError(chosen));
-                      return;
-                    }
-                    setError(null);
-                    setFile(chosen);
+                    addFiles(e.target.files);
+                    e.target.value = "";
                   }}
                 />
-                <UploadCloud className={cn("h-10 w-10 transition-transform duration-300", isDragging ? "scale-110 text-primary" : "text-muted-foreground")} />
-                <p className="text-base font-semibold text-foreground">{file ? file.name : "Glisse-dépose ton fichier ici"}</p>
-                <p className="text-xs text-muted-foreground">PDF, DOCX, PPTX, TXT — max 100 Mo</p>
+                <motion.span animate={isDragging ? { y: -4, scale: 1.08 } : { y: 0, scale: 1 }} className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300 to-sky-500 text-white shadow-[0_0_30px_rgba(34,211,238,0.45)]">
+                  <UploadCloud className="h-7 w-7" />
+                </motion.span>
+                <p className="text-base font-bold text-foreground">{isDragging ? "Dépose ici" : allowsBatch ? "Glisse-dépose tes fichiers ici" : "Glisse-dépose ton fichier ici"}</p>
+                <p className="text-xs text-muted-foreground">
+                  PDF, DOCX, PPTX, TXT — 100 Mo max{allowsBatch ? ` par fichier · jusqu'à ${MAX_BATCH_FILES} à la fois` : ""}
+                </p>
               </div>
 
-              <Button className="w-full max-w-xs" disabled={!file || isSubmitting} isLoading={isSubmitting} onClick={handleSubmitFile}>
+              {queue.length > 0 && (
+                <ul className="space-y-2">
+                  {queue.map((item) => {
+                    const visual = fileVisual(item.file.name);
+                    const Icon = visual.icon;
+                    return (
+                      <li key={item.id} className={cn("rounded-2xl border p-3", item.status === "error" ? "border-rose-400/40 bg-rose-500/5" : item.status === "done" ? "border-emerald-400/40 bg-emerald-500/5" : "border-border")}>
+                        <div className="flex items-center gap-3">
+                          <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white", visual.tint)}>
+                            <Icon className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-bold text-foreground">{item.file.name}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {visual.label} · {formatSize(item.file.size)}
+                              {item.status === "uploading" && " · Import et extraction…"}
+                              {item.status === "done" && " · Importé"}
+                            </p>
+                          </div>
+                          {item.status === "uploading" ? (
+                            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cyan-500" />
+                          ) : item.status === "done" ? (
+                            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setQueue((prev) => prev.filter((q) => q.id !== item.id))}
+                              disabled={isSubmitting}
+                              aria-label={`Retirer ${item.file.name}`}
+                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-500 disabled:opacity-40"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                        {item.status === "uploading" && (
+                          <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted" aria-hidden>
+                            <motion.div className="h-full w-1/3 rounded-full bg-gradient-to-r from-cyan-400 to-violet-500" animate={{ x: ["-100%", "300%"] }} transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }} />
+                          </div>
+                        )}
+                        {item.status === "error" && item.message && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <p className="flex min-w-0 items-start gap-1.5 text-xs text-rose-600 dark:text-rose-300">
+                              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                              <span className="break-words">{item.message}</span>
+                            </p>
+                            {item.ocr && (
+                              <Button type="button" size="sm" variant="outline" disabled={isSubmitting} onClick={() => void handleOcrRetry(item)}>
+                                Essayer l&apos;OCR (1-2 min)
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <Button className="w-full sm:w-auto sm:self-center sm:px-10" disabled={pendingCount === 0 || isSubmitting} isLoading={isSubmitting} onClick={() => void handleSubmitFiles()}>
                 {!isSubmitting && <Upload className="h-4 w-4" />}
-                Ajouter le cours
+                {pendingCount > 1 ? `Importer ${pendingCount} fichiers` : "Importer"}
               </Button>
-            </div>
-          ) : activeMethod === "text" ? (
-            <div className="flex flex-col gap-3">
-              <Input
-                label="Titre (optionnel)"
-                placeholder="Ex : Physiologie rénale"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                rows={6}
-                placeholder="Colle ici le texte de ton cours…"
-                aria-label="Contenu du cours"
-                className="w-full resize-none rounded-xl border border-input bg-card px-3.5 py-2.5 text-base text-foreground shadow-soft transition-all duration-300 focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring sm:text-sm"
-              />
-              <Button className="w-full max-w-xs self-center" disabled={isSubmitting} isLoading={isSubmitting} onClick={handleSubmitText}>
-                {!isSubmitting && <FileText className="h-4 w-4" />}
-                Ajouter le cours
-              </Button>
-            </div>
-          ) : (
-            <DriveBrowser
-              accessToken={driveAccessToken}
-              onAccessTokenChange={setDriveAccessToken}
-              onFileSelected={handleDriveFileSelected}
-              disabled={isDriveImporting}
-            />
+            </>
           )}
 
-          {/* Horizontal pill nav — the 3 REAL import methods this app
-              supports. */}
-          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-border pt-4">
-            <button
-              type="button"
-              onClick={() => setActiveMethod("upload")}
-              disabled={isDriveImporting}
-              className={cn(NAV_PILL_BASE, activeMethod === "upload" ? NAV_PILL_ACTIVE : NAV_PILL_INACTIVE)}
-              aria-pressed={activeMethod === "upload"}
-            >
-              <FileUp className="h-4 w-4" />
-              Upload files
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveMethod("drive")}
-              disabled={isDriveImporting}
-              className={cn(NAV_PILL_BASE, activeMethod === "drive" ? NAV_PILL_ACTIVE : NAV_PILL_INACTIVE)}
-              aria-pressed={activeMethod === "drive"}
-              aria-label="Importer un document depuis Google Drive"
-            >
-              {isDriveImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
-              Drive
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveMethod("text")}
-              disabled={isDriveImporting}
-              className={cn(NAV_PILL_BASE, activeMethod === "text" ? NAV_PILL_ACTIVE : NAV_PILL_INACTIVE)}
-              aria-pressed={activeMethod === "text"}
-            >
-              <FileText className="h-4 w-4" />
-              Texte direct
-            </button>
-          </div>
-        </div>
+          {method === "drive" && (
+            <DriveBrowser accessToken={driveAccessToken} onAccessTokenChange={setDriveAccessToken} onFileSelected={handleDriveFileSelected} disabled={isDriveImporting} />
+          )}
+
+          {method === "text" && (
+            <>
+              <Input label="Titre (optionnel)" placeholder="Ex : Physiologie rénale" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <div>
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  rows={8}
+                  placeholder="Colle ici le texte de ton cours, tes notes cliniques ou un extrait de polycopié…"
+                  aria-label="Contenu du cours"
+                  className="w-full resize-y rounded-xl border border-input bg-card px-3.5 py-2.5 text-base leading-relaxed text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="mt-1 text-right text-[11px] text-muted-foreground">{text.trim().length.toLocaleString("fr-FR")} caractères · 50 minimum</p>
+              </div>
+              <Button className="w-full sm:w-auto sm:self-center sm:px-10" disabled={isSubmitting} isLoading={isSubmitting} onClick={() => void handleSubmitText()}>
+                {!isSubmitting && <FileText className="h-4 w-4" />}
+                Importer le texte
+              </Button>
+            </>
+          )}
+
+          {method === "link" && (
+            <>
+              <div className="rounded-2xl border border-border p-4">
+                <label className="text-sm font-bold text-foreground" htmlFor="import-link">
+                  Lien de la page
+                </label>
+                <div className="relative mt-2">
+                  <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    id="import-link"
+                    type="url"
+                    inputMode="url"
+                    value={link}
+                    onChange={(e) => setLink(e.target.value)}
+                    placeholder="https://…"
+                    className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-10 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring"
+                  />
+                  {link && (
+                    <button type="button" onClick={() => setLink("")} aria-label="Effacer" className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent">
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground">Le texte lisible de la page est extrait puis importé comme une source. Pour un PDF en ligne, télécharge-le et utilise l&apos;onglet Fichiers.</p>
+              </div>
+              <Input label="Titre (optionnel)" placeholder="Par défaut : le titre de la page" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <Button className="w-full sm:w-auto sm:self-center sm:px-10" disabled={isSubmitting || !link.trim()} isLoading={isSubmitting} onClick={() => void handleImportLink()}>
+                {!isSubmitting && <Globe className="h-4 w-4" />}
+                Importer la page
+              </Button>
+            </>
+          )}
+        </motion.div>
 
         {error && (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <p className="text-sm text-destructive">{error}</p>
-            {ocrSuggestion && (
-              <Button type="button" variant="outline" isLoading={isSubmitting} disabled={isSubmitting} onClick={handleOcrRetry}>
-                Essayer l&apos;OCR (1-2 min)
-              </Button>
-            )}
-          </div>
+          <p role="alert" className="mt-3 flex items-start gap-1.5 text-sm text-destructive">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="break-words">{error}</span>
+          </p>
         )}
       </DialogContent>
     </Dialog>
