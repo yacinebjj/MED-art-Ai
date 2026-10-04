@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Check, ClipboardCheck, ListChecks, ListTodo, Loader2, Sparkles, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tTodo } from "@/lib/translations/todo";
 import { CyberHeader, CyberPanel, CyberStage } from "@/components/cyber/primitives";
+import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
 import type { GeneratedPlanDay, StudyPlan, StudyPlanTask } from "@/types/study-planner";
 
 // Each wizard step is its own chunk — only the one on screen is downloaded.
@@ -110,6 +111,36 @@ export default function TodoPage() {
 
   const currentIndex = step.name === "loading" ? -1 : STEPS.findIndex((s) => s.key === step.name);
 
+  // Warm every step's chunk once the page is idle, so "Recommencer" (or any
+  // step change) renders instantly instead of waiting on a network fetch.
+  useEffect(() => {
+    const warm = () => {
+      void import("@/components/todo/ModuleChipSelector");
+      void import("@/components/todo/PlanConfigForm");
+      void import("@/components/todo/PlanGenerationView");
+      void import("@/components/todo/PlanExecutionView");
+    };
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(warm, { timeout: 3000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(warm, 1500);
+    return () => clearTimeout(id);
+  }, []);
+
+  // A step change (e.g. "Recommencer" at the bottom of a long plan) brings the
+  // new step into view — otherwise the short step sits above the viewport and
+  // the student only sees an empty area.
+  useEffect(() => {
+    if (step.name === "loading") return;
+    document.getElementById("main-content")?.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step.name]);
+
+  function handleReset() {
+    setStep({ name: "modules" });
+  }
+
   return (
     <CyberStage accent="emerald" className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
       <CyberHeader
@@ -124,12 +155,12 @@ export default function TodoPage() {
       </div>
 
       <CyberPanel className="mt-4 overflow-hidden p-4 sm:mt-5 sm:p-6 lg:p-8">
-        <AnimatePresence mode="wait">
+        {/* No exit-then-enter wait: the next step replaces the current one immediately. */}
+        <LocalErrorBoundary resetKey={step.name} onReset={handleReset} title="Ce planning n'a pas pu s'afficher." description="Tes tâches sont intactes. Réessaie : le planificateur repart de l'étape des modules.">
           <motion.div
             key={step.name}
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -16 }}
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
           >
             {step.name === "loading" && (
@@ -157,13 +188,13 @@ export default function TodoPage() {
                 initialCoachMessage={step.coachMessage}
                 initialDays={step.days}
                 onSaved={(status) => handlePlanSaved(step.planId, status)}
-                onReset={() => setStep({ name: "modules" })}
+                onReset={handleReset}
               />
             )}
 
-            {step.name === "execute" && <PlanExecutionView planId={step.planId} initialTasks={step.tasks} onReset={() => setStep({ name: "modules" })} />}
+            {step.name === "execute" && <PlanExecutionView planId={step.planId} initialTasks={step.tasks} onReset={handleReset} />}
           </motion.div>
-        </AnimatePresence>
+        </LocalErrorBoundary>
       </CyberPanel>
     </CyberStage>
   );

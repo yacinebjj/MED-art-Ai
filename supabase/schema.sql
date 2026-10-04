@@ -2056,8 +2056,8 @@ as $$
   where id = p_user_id;
 $$;
 
-revoke execute on function reserve_module_exam_regenerate(uuid, integer) from anon, authenticated;
-revoke execute on function refund_module_exam_regenerate(uuid) from anon, authenticated;
+revoke execute on function reserve_module_exam_regenerate(uuid, integer) from public, anon, authenticated;
+revoke execute on function refund_module_exam_regenerate(uuid) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Seed — Médecine 2ème et 3ème année, exactement comme spécifié. Chaque

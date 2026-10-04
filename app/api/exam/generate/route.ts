@@ -8,6 +8,48 @@ import { ExamGenerationSchema, ExamQuestionSchema, ExamStyleProfileSchema, type 
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+
+type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
+
+/** PostgREST "function not found" (RPC not deployed on this database yet). */
+function isMissingRpcError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "PGRST202" || error.code === "42883" || /could not find the function/i.test(error.message ?? "");
+}
+
+/**
+ * Fallback for a database where reserve_module_exam_regenerate isn't deployed
+ * (see supabase/migrations/20261004_module_exam_regenerations.sql): the same
+ * reservation as a compare-and-set on the same column, so the cap still
+ * holds under concurrent clicks. Returns the post-increment count, null when
+ * capped, or "unavailable" when even the column is missing.
+ */
+async function reserveRegenerationFallback(supabase: SupabaseAdmin, userId: string, cap: number): Promise<number | null | "unavailable"> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await supabase.from("profiles").select("module_exam_regenerations_used").eq("id", userId).maybeSingle();
+    if (error || !data) return "unavailable";
+    const used = Number((data as { module_exam_regenerations_used?: number | null }).module_exam_regenerations_used ?? 0);
+    if (used >= cap) return null;
+    const { data: updated, error: updateError } = await supabase
+      .from("profiles")
+      .update({ module_exam_regenerations_used: used + 1 })
+      .eq("id", userId)
+      .eq("module_exam_regenerations_used", used)
+      .select("module_exam_regenerations_used")
+      .maybeSingle();
+    if (updateError) return "unavailable";
+    if (updated) return used + 1;
+    // Lost a race with another click: re-read and try again.
+  }
+  return "unavailable";
+}
+
+async function refundRegenerationFallback(supabase: SupabaseAdmin, userId: string): Promise<void> {
+  const { data } = await supabase.from("profiles").select("module_exam_regenerations_used").eq("id", userId).maybeSingle();
+  const used = Number((data as { module_exam_regenerations_used?: number | null } | null)?.module_exam_regenerations_used ?? 0);
+  if (used <= 0) return;
+  await supabase.from("profiles").update({ module_exam_regenerations_used: used - 1 }).eq("id", userId).eq("module_exam_regenerations_used", used);
+}
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
 import { lookupExamVariations, insertExamVariation, recordExamVariationHit } from "@/lib/exam-content-variations";
 import { poolExamQuestions, convertExamQuestionToHarvestableQcm, type ExamQuestion } from "@/lib/exam-pooling";
@@ -549,13 +591,27 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // instead of the frontend having to guess or re-derive it separately.
   let regenerationsRemaining: number | undefined;
   if (isVariation) {
-    const { data: regenCount, error: regenCapError } = await supabase.rpc("reserve_module_exam_regenerate", {
+    const rpcResult = await supabase.rpc("reserve_module_exam_regenerate", {
       p_user_id: user.id,
       p_cap: MODULE_EXAM_REGENERATE_CAP,
     });
+    let regenCount: number | null = rpcResult.data as number | null;
+    let regenCapError = rpcResult.error;
+    if (isMissingRpcError(regenCapError)) {
+      console.warn("[exam/generate] reserve_module_exam_regenerate absent — repli sur la réservation directe (migration 20261004 à exécuter).");
+      const fallback = await reserveRegenerationFallback(supabase, user.id, MODULE_EXAM_REGENERATE_CAP);
+      if (fallback === "unavailable") {
+        return NextResponse.json(
+          { success: false, error: "La régénération est momentanément indisponible (mise à jour du serveur en cours). Ton examen actuel est conservé : réessaie dans quelques minutes." },
+          { status: 503 }
+        );
+      }
+      regenCount = fallback;
+      regenCapError = null;
+    }
     if (regenCapError) {
       console.error("[exam/generate] Échec réservation du plafond de régénération:", regenCapError.message);
-      return NextResponse.json({ success: false, error: `Vérification du plafond échouée : ${regenCapError.message}` }, { status: 500 });
+      return NextResponse.json({ success: false, error: "Impossible de vérifier ton quota de régénérations pour le moment. Réessaie dans quelques minutes." }, { status: 500 });
     }
     if (regenCount === null) {
       return NextResponse.json(
@@ -581,7 +637,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   async function refundModuleExamRegenerateIfNeeded() {
     if (!isVariation) return;
     const { error } = await supabase.rpc("refund_module_exam_regenerate", { p_user_id: userId });
-    if (error) console.warn("[exam/generate] Échec refund_module_exam_regenerate:", error.message);
+    if (isMissingRpcError(error)) await refundRegenerationFallback(supabase, userId);
+    else if (error) console.warn("[exam/generate] Échec refund_module_exam_regenerate:", error.message);
   }
 
   // Scoped to THIS user AND THIS module — a courseId the student doesn't

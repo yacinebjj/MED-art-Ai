@@ -55,6 +55,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
+import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
 import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
@@ -97,6 +98,29 @@ interface ExamAttempt {
 
 const MAX_ATTEMPTS = 5;
 
+/** Keeps only well-formed questions — a malformed saved exam must never crash the testing view. */
+function sanitizeQuestions(raw: unknown): ExamQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (q): q is ExamQuestion =>
+      !!q &&
+      typeof q === "object" &&
+      typeof (q as ExamQuestion).id === "string" &&
+      typeof (q as ExamQuestion).vignette === "string" &&
+      Array.isArray((q as ExamQuestion).options) &&
+      (q as ExamQuestion).options.length > 0
+  );
+}
+
+/** Student-facing wording for generation failures (never a raw database message). */
+function friendlyGenerationError(raw: unknown, fallback: string): string {
+  if (typeof raw !== "string" || !raw.trim()) return fallback;
+  if (/reserve_module_exam_regenerate|schema cache|could not find the function/i.test(raw)) {
+    return "La régénération est momentanément indisponible (mise à jour du serveur en cours). Ton examen actuel est conservé : réessaie dans quelques minutes.";
+  }
+  return raw;
+}
+
 const panelShellClasses = "cyber-glass flex min-w-0 max-w-full flex-col overflow-hidden rounded-3xl";
 
 const RESULTS_STAGGER_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
@@ -135,6 +159,8 @@ export default function ExamGeneratorPage() {
   const [attempts, setAttempts] = useState(MAX_ATTEMPTS);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSavingAttempt, setIsSavingAttempt] = useState(false);
+  // Last generation failure, shown inline (a toast alone can sit under the fullscreen view).
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   // Latest saved attempt per examId — see app/api/exam/attempts/route.ts.
   // Keyed by examId (not a plain array) so handleViewExam/the auto-resume
@@ -143,7 +169,7 @@ export default function ExamGeneratorPage() {
   const [attemptsByExamId, setAttemptsByExamId] = useState<Record<string, ExamAttempt>>({});
 
   const activeExam = useMemo(() => savedExams.find((e) => e.id === activeExamId) ?? null, [savedExams, activeExamId]);
-  const questions = useMemo(() => activeExam?.content.questions ?? [], [activeExam]);
+  const questions = useMemo(() => sanitizeQuestions(activeExam?.content?.questions), [activeExam]);
 
   // "Un-contre-un" testing cockpit — one question in focus at a time
   // (instead of one giant scroll), with a jump-to-any-question navigator.
@@ -310,6 +336,10 @@ export default function ExamGeneratorPage() {
   }
 
   async function generateExam(courseIds: number[], variation: boolean) {
+    // Snapshot: a failed (re)generation restores exactly what was on screen.
+    const previousAnswers = answers;
+    const previousState: ExamState = variation ? "results" : "idle";
+    setGenerationError(null);
     setAnswers({});
     setExamState("generating");
     setIsGenerating(true);
@@ -332,15 +362,21 @@ export default function ExamGeneratorPage() {
         setAttempts(body.regenerationsRemaining);
       }
       if (!res.ok || !body?.success) {
-        toast({
-          variant: "error",
-          title: tExam("generationFailedTitle", language),
-          description: body?.error ?? tExam("generationFailedFallbackDescription", language),
-        });
-        setExamState(variation ? "results" : "idle");
+        const message = friendlyGenerationError(body?.error, tExam("generationFailedFallbackDescription", language));
+        toast({ variant: "error", title: tExam("generationFailedTitle", language), description: message });
+        setGenerationError(message);
+        setAnswers(previousAnswers);
+        setExamState(previousState);
         return;
       }
       const exam = body.exam as SavedExam;
+      if (!exam || sanitizeQuestions(exam.content?.questions).length === 0) {
+        const message = "L'examen reçu est incomplet. Réessaie la génération.";
+        setGenerationError(message);
+        setAnswers(previousAnswers);
+        setExamState(previousState);
+        return;
+      }
       setSavedExams((prev) => [...prev, exam]);
       setActiveExamId(exam.id);
       setExamState("testing");
@@ -355,7 +391,9 @@ export default function ExamGeneratorPage() {
         title: tExam("generationFailedTitle", language),
         description: tExam("generationFailedNetworkDescription", language),
       });
-      setExamState(variation ? "results" : "idle");
+      setGenerationError(tExam("generationFailedNetworkDescription", language));
+      setAnswers(previousAnswers);
+      setExamState(previousState);
     } finally {
       setIsGenerating(false);
     }
@@ -647,6 +685,16 @@ export default function ExamGeneratorPage() {
     </motion.div>
   );
 
+  const generationErrorBanner = generationError && (
+    <div role="alert" className="mb-4 flex items-start gap-3 rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
+      <p className="min-w-0 flex-1 break-words text-foreground">{generationError}</p>
+      <button type="button" onClick={() => setGenerationError(null)} aria-label="Fermer" className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-accent">
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
   const generatingContent = (
     <motion.div
       key="generating"
@@ -700,7 +748,18 @@ export default function ExamGeneratorPage() {
   // — the modal provides its own single scroll region instead).
   const currentQuestion = questions[currentQuestionIndex] as ExamQuestion | undefined;
 
-  const testingInnerContent = (
+  const testingInnerContent =
+    questions.length === 0 ? (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <AlertTriangle className="h-7 w-7 text-amber-500" />
+        <p className="text-sm font-bold text-foreground">Cet examen ne contient aucune question exploitable.</p>
+        <p className="max-w-xs text-xs text-muted-foreground">Génère un nouvel examen ou choisis-en un autre dans « Mes Examens ».</p>
+        <Button variant="secondary" onClick={handleStartOver}>
+          <FilePlus2 className="h-4 w-4" />
+          {tExam("generateNewExam", language)}
+        </Button>
+      </div>
+    ) : (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -820,7 +879,7 @@ export default function ExamGeneratorPage() {
         </Button>
       </div>
     </>
-  );
+    );
 
   const testingContent = (
     <motion.div
@@ -966,6 +1025,7 @@ export default function ExamGeneratorPage() {
 
   const resultsInnerContent = (
     <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+      {generationErrorBanner && <div className="xl:col-span-2">{generationErrorBanner}</div>}
       {/* Stats first on phones/tablets (no scrolling past 40+ questions to see the score); right column on xl. */}
       <div className="xl:order-2">{statsPanel}</div>
       <div className="min-w-0 xl:order-1">
@@ -1215,12 +1275,15 @@ export default function ExamGeneratorPage() {
             {/* Panneau Droit — Exam Arena (desktop) */}
             <main className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
               {(examState === "testing" || examState === "results") && fullscreenToggleRow}
-              <AnimatePresence mode="wait">
-                {examState === "idle" && idleContent}
-                {examState === "generating" && generatingContent}
-                {examState === "testing" && testingContent}
-                {examState === "results" && resultsContent}
-              </AnimatePresence>
+              {examState === "idle" && generationErrorBanner && <div className="px-4 pt-4">{generationErrorBanner}</div>}
+              <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
+                <AnimatePresence mode="wait">
+                  {examState === "idle" && idleContent}
+                  {examState === "generating" && generatingContent}
+                  {examState === "testing" && testingContent}
+                  {examState === "results" && resultsContent}
+                </AnimatePresence>
+              </LocalErrorBoundary>
             </main>
           </>
         ) : mobileTab === "sources" ? (
@@ -1229,6 +1292,7 @@ export default function ExamGeneratorPage() {
               <AnimatePresence mode="wait">{generatingContent}</AnimatePresence>
             ) : (
               <>
+                {generationErrorBanner && <div className="px-3 pt-3">{generationErrorBanner}</div>}
                 {courseHeaderBlock}
                 <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={setStyleProfile} disabled={isGenerating} />
                 <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">{courseListContent}</div>
@@ -1241,13 +1305,17 @@ export default function ExamGeneratorPage() {
             {savedExams.length > 0 && (
               <div className="max-h-40 shrink-0 overflow-y-auto border-b border-border p-2">{savedExamsContent}</div>
             )}
-            {examState === "testing" || examState === "results" ? (
+            {examState === "generating" ? (
+              generatingContent
+            ) : examState === "testing" || examState === "results" ? (
               <>
                 {fullscreenToggleRow}
-                <AnimatePresence mode="wait">
-                  {examState === "testing" && testingContent}
-                  {examState === "results" && resultsContent}
-                </AnimatePresence>
+                <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
+                  <AnimatePresence mode="wait">
+                    {examState === "testing" && testingContent}
+                    {examState === "results" && resultsContent}
+                  </AnimatePresence>
+                </LocalErrorBoundary>
               </>
             ) : (
               <p className="flex-1 px-4 py-10 text-center text-xs text-muted-foreground">
@@ -1307,10 +1375,12 @@ export default function ExamGeneratorPage() {
       <FullscreenViewerModal
         open={isExamFullscreen}
         onClose={() => setIsExamFullscreen(false)}
-        title={examState === "results" ? "Résultats de l'examen" : "Épreuve Clinique"}
+        title={examState === "results" ? "Résultats de l'examen" : examState === "generating" ? "Génération de l'examen…" : "Épreuve Clinique"}
       >
         <div className="cyber-stage min-h-full max-w-full overflow-x-hidden rounded-none border-0 p-4 text-foreground sm:p-6">
-          {examState === "testing" ? testingInnerContent : examState === "results" ? resultsInnerContent : null}
+          <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
+            {examState === "testing" ? testingInnerContent : examState === "results" ? resultsInnerContent : generatingContent}
+          </LocalErrorBoundary>
         </div>
       </FullscreenViewerModal>
     </div>
