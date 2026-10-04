@@ -1323,6 +1323,8 @@ export async function streamOpenRouter(
     timeoutMs?: number;
     temperature?: number;
     reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean };
+    /** OpenRouter provider routing — "latency" favours the fastest first token for a chat reply. */
+    providerSort?: "throughput" | "latency" | "price";
   }
 ): Promise<ReadableStream<Uint8Array>> {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -1354,6 +1356,7 @@ export async function streamOpenRouter(
         max_tokens: options?.maxTokens ?? 4096,
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
+        ...(options?.providerSort ? { provider: { sort: options.providerSort } } : {}),
         stream: true,
         // Without this, a streamed OpenAI-compatible completion never
         // includes a usage frame at all — the final SSE chunk (empty

@@ -205,7 +205,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // /api/studio/generate's MODEL POLICY and reasoningOption comments
         // (Gemini Flash always reasons; `effort: "low"` keeps that thinking
         // from eating the JSON's token budget).
-        { model: ECONOMY_MODEL, maxTokens: STUDIO_PROMPT_CONFIG.qcm.maxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: { effort: "low" } }
+        { model: ECONOMY_MODEL, maxTokens: STUDIO_PROMPT_CONFIG.qcm.maxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: { effort: "low" }, providerSort: "throughput" }
       );
     } catch (error) {
       await refundAll();

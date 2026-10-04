@@ -18,7 +18,6 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { CHUNK_SECONDS } from "@/lib/audio/browser-chunking";
-import { AudioFormatError, streamLectureChunks } from "@/lib/audio/streaming-decode";
 import { buildTimestampedTranscript } from "@/lib/lecture-transcript";
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
 
@@ -167,6 +166,8 @@ export async function transcribeLecture(
 ): Promise<{ transcript: string; audioUrls: string[]; durationSec: number }> {
   const { onProgress, onPeaks, signal } = options;
   onProgress({ stage: "decoding", ratio: 0.02, label: "Décodage progressif de l'audio…" });
+  // Loaded on demand: the demuxer (mp4box) stays out of the page's first load.
+  const { AudioFormatError, streamLectureChunks } = await import("@/lib/audio/streaming-decode");
 
   // Same file (fingerprint) = same deterministic chunk grid: a checkpoint is
   // reused as-is, so a relaunch skips every chunk already transcribed.

@@ -40,3 +40,23 @@ export function verifySynthesisRunToken(token: unknown, userId: string, moduleId
   const given = Buffer.from(signature);
   return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
+
+/**
+ * Seals an intermediate payload (e.g. a batch of exam questions) to one run
+ * token, so an assemble step can trust what the client hands back: anything
+ * not produced by this server for this run fails verification.
+ */
+export function sealRunPayload(runToken: string, payload: string): string | null {
+  const k = key();
+  if (!k) return null;
+  return sign(`payload.${runToken}.${payload}`, k);
+}
+
+export function verifyRunPayload(runToken: string, payload: string, seal: unknown): boolean {
+  if (typeof seal !== "string") return false;
+  const expected = sealRunPayload(runToken, payload);
+  if (!expected) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(seal);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}

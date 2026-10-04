@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
         { role: "system", content: STUDY_KIT_SYSTEM_PROMPT },
         { role: "user", content: smartNotes.slice(0, MAX_NOTES_CHARS) },
       ],
-      { model: ECONOMY_MODEL, maxTokens: 6000, temperature: 0.2, reasoning: { effort: "low" }, timeoutMs: 100_000 }
+      { model: ECONOMY_MODEL, maxTokens: 6000, temperature: 0.2, reasoning: { effort: "low" }, timeoutMs: 100_000, providerSort: "throughput" }
     );
     const kit = sanitizeKit(parseJsonResponse(raw));
     if (kit.flashcards.length === 0 && kit.highYield.length === 0 && kit.mindmap.branches.length === 0) {

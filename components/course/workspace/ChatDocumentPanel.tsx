@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AnimatePresence, motion } from "framer-motion";
@@ -63,6 +63,17 @@ import {
 import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
 import { ChatRichMarkdown } from "@/components/course/workspace/ChatRichMarkdown";
 import type { ChatMessage } from "@/lib/types";
+
+/** Memoized plain-markdown bubble: past messages are not re-parsed on every streamed chunk of the latest one. */
+const PlainChatMarkdown = memo(function PlainChatMarkdown({ content, dark }: { content: string; dark: boolean }) {
+  return (
+    <article className={cn(dark ? DARK_CHAT_PROSE_CLASSES : CHAT_PROSE_CLASSES, "max-w-none")}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={dark ? DARK_CHAT_MARKDOWN_COMPONENTS : CHAT_MARKDOWN_COMPONENTS}>
+        {normalizeCallouts(content || "…")}
+      </ReactMarkdown>
+    </article>
+  );
+});
 
 export interface ChatDocumentPanelHandle {
   focusInput: () => void;
@@ -569,11 +580,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                   isStreaming={isStreaming}
                 />
               ) : (
-                <article className={cn(dark ? DARK_CHAT_PROSE_CLASSES : CHAT_PROSE_CLASSES, "max-w-none")}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={dark ? DARK_CHAT_MARKDOWN_COMPONENTS : CHAT_MARKDOWN_COMPONENTS}>
-                    {normalizeCallouts(cleanContent || "…")}
-                  </ReactMarkdown>
-                </article>
+                <PlainChatMarkdown content={cleanContent} dark={dark} />
               )}
               {showToolbar && !isStreaming && (
                 <div className="flex items-center gap-0.5 transition-opacity duration-200 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:focus-within:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100">

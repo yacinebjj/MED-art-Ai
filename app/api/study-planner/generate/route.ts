@@ -266,7 +266,7 @@ export async function POST(request: NextRequest) {
           // NOT independently tested (only the initial-generation call
           // below was) — same prompt family and schema shape, applied here
           // for consistency, under the same knowingly-accepted tradeoff.
-          { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true }
+          { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true, providerSort: "throughput" }
         );
       }, StudyPlanRefinementSchema);
 
@@ -293,7 +293,7 @@ export async function POST(request: NextRequest) {
                 { role: "system", content: prompt },
                 { role: "user", content: "Génère le planning de révision demandé pour cette période." },
               ],
-              { model: CHEAP_MODEL, maxTokens: computeGenerationMaxTokens(windowDays), bypassMock: true, timeoutMs: Math.min(200_000, remaining - 5_000) }
+              { model: CHEAP_MODEL, maxTokens: computeGenerationMaxTokens(windowDays), bypassMock: true, timeoutMs: Math.min(200_000, remaining - 5_000), providerSort: "throughput" }
             );
           }, StudyPlanGenerationSchema);
         } catch (error) {
@@ -327,7 +327,7 @@ export async function POST(request: NextRequest) {
         // coverage, clean schema — a knowingly-accepted tradeoff on a small
         // sample, per the product owner's own explicit "runway over
         // accuracy margin" decision.
-        { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true }
+        { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true, providerSort: "throughput" }
       );
     }, StudyPlanGenerationSchema);
 

@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
   // traffic (text-only) on the free tier below.
   if (imageAttachment) {
     try {
-      const stream = await streamOpenRouter(messages, { model: HAIKU_MODEL, maxTokens: 2048 });
+      const stream = await streamOpenRouter(messages, { model: HAIKU_MODEL, maxTokens: 2048, providerSort: "latency" });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
@@ -310,7 +310,7 @@ export async function POST(request: NextRequest) {
   let lastError: unknown = null;
   for (const model of FREE_MODEL_CHAIN) {
     try {
-      const stream = await streamOpenRouter(messages, { model, maxTokens: 2048 });
+      const stream = await streamOpenRouter(messages, { model, maxTokens: 2048, providerSort: "latency" });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },

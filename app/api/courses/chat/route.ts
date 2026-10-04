@@ -625,6 +625,7 @@ export async function POST(request: NextRequest) {
         temperature: 0.3,
         maxTokens: maxTokensForThisTurn,
         reasoning: { effort: "low" },
+        providerSort: "latency",
       });
     } catch (error) {
       lastError = error;
@@ -661,6 +662,7 @@ export async function POST(request: NextRequest) {
           temperature: 0.3,
           maxTokens: maxTokensForThisTurn,
           reasoning: { effort: "low" },
+          providerSort: "latency",
         });
         break;
       } catch (error) {

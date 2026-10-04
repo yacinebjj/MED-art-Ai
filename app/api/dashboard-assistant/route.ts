@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
       } as unknown as ChatMessageInput,
     ];
     try {
-      const stream = await streamOpenRouter(visionMessages, { model: ECONOMY_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.3 });
+      const stream = await streamOpenRouter(visionMessages, { model: ECONOMY_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.3, providerSort: "latency" });
       return new NextResponse(stream, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     } catch (error) {
       console.error("[dashboard-assistant] Analyse d'image échouée:", error instanceof Error ? error.message : error);
@@ -229,7 +229,7 @@ export async function POST(request: NextRequest) {
 
   if (dailyGate.allowed) {
     try {
-      const stream = await streamOpenRouter(messages, { model: CHEAP_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5 });
+      const stream = await streamOpenRouter(messages, { model: CHEAP_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5, providerSort: "latency" });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
@@ -251,7 +251,7 @@ export async function POST(request: NextRequest) {
 
   for (const model of FREE_MODEL_CHAIN) {
     try {
-      const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5 });
+      const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5, providerSort: "latency" });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },

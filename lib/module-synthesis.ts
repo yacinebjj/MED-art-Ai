@@ -178,7 +178,7 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
     // genuinely additive cross-course synthesis — a knowingly-accepted
     // tradeoff on a small sample, per the product owner's own explicit
     // "runway over accuracy margin" decision.
-    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, timeoutMs: 110_000 }
+    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, timeoutMs: 110_000, providerSort: "throughput" }
   );
 
   const parsed = parseJsonResponse(raw);
@@ -384,13 +384,13 @@ async function generateAndStoreSynthesisChunks(
       { role: "user", content: userPrompt },
     ],
     type === "medical_dictionary"
-      ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true }
+      ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true, providerSort: "throughput" as const }
       // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
       // lib/ai/studio-prompts.ts's own header comment) + the matching
       // reasoning cap: without it, this model's hidden reasoning tokens can
       // silently consume the completion budget before writing any of the
       // actual JSON, truncating it (see callOpenRouter's own doc comment).
-      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
+      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" as const }, providerSort: "throughput" as const }
   );
 
   const parsed = parseJsonResponse(raw);

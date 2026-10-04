@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
       // accurate reorganization — a knowingly-accepted tradeoff on a small
       // sample, per the product owner's own explicit "runway over accuracy
       // margin" decision.
-      { maxTokens: computeOrganizeMaxTokens(content.length), model: CHEAP_MODEL }
+      { maxTokens: computeOrganizeMaxTokens(content.length), model: CHEAP_MODEL, providerSort: "throughput" }
     );
 
     const organizedContent = raw.replace(/^```html\s*/i, "").replace(/```\s*$/i, "");

@@ -64,10 +64,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
-import { CourseStatsModal } from "@/components/dashboard/CourseStatsModal";
-import { UploadModal } from "@/components/dashboard/UploadModal";
 import { WorkspaceCommandBar, type WorkspaceSyncState } from "@/components/course/workspace/os/WorkspaceCommandBar";
-import { CommandPalette, type CommandItem } from "@/components/course/workspace/os/CommandPalette";
+import type { CommandItem } from "@/components/course/workspace/os/CommandPalette";
 import { ResizeHandle } from "@/components/course/workspace/os/ResizeHandle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { ChatDocumentPanel, CHAT_MODE_OPTIONS, type ChatDocumentPanelHandle } from "@/components/course/workspace/ChatDocumentPanel";
@@ -85,7 +83,6 @@ import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { OcrSuggestedError } from "@/lib/upload-client";
 import type { CurriculumYearData } from "@/types/academic";
 import { QCM_REGENERATE_CAP, StudioPanel, type SectionStatus, type TileGenerationOptions } from "@/components/course/workspace/StudioPanel";
-import { FileViewerModal } from "@/components/course/workspace/FileViewerModal";
 import { StudioTileSkeleton } from "@/components/course/workspace/StudioTileSkeleton";
 import { MobileWorkspaceTabBar, type MobileWorkspaceTab } from "@/components/course/workspace/MobileWorkspaceTabBar";
 import { MobileStudioCards } from "@/components/course/workspace/MobileStudioCards";
@@ -113,6 +110,16 @@ import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-cours
  * `ssr: false` is safe here — this whole page is already client-rendered
  * (useParams + client-only state), so there's no SSR output to lose.
  */
+/**
+ * Dialogs that are closed on arrival (stats, upload, command palette, file
+ * viewer with react-pdf/pdfjs): code-split out of the course page's initial
+ * bundle, fetched after first paint instead of blocking it.
+ */
+const CourseStatsModal = dynamic(() => import("@/components/dashboard/CourseStatsModal").then((m) => m.CourseStatsModal), { ssr: false });
+const UploadModal = dynamic(() => import("@/components/dashboard/UploadModal").then((m) => m.UploadModal), { ssr: false });
+const CommandPalette = dynamic(() => import("@/components/course/workspace/os/CommandPalette").then((m) => m.CommandPalette), { ssr: false });
+const FileViewerModal = dynamic(() => import("@/components/course/workspace/FileViewerModal").then((m) => m.FileViewerModal), { ssr: false });
+
 const GastriteResumeStudio = dynamic(
   () => import("@/components/course/workspace/GastriteResumeStudio").then((m) => m.GastriteResumeStudio),
   { ssr: false }
@@ -2854,13 +2861,15 @@ export default function ModuleWorkspacePage() {
 
       <CommandPalette open={isPaletteOpen} onOpenChange={setIsPaletteOpen} items={paletteItems} groupOrder={PALETTE_GROUPS} />
 
-      <FileViewerModal
-        open={fileViewerCourse !== null}
-        onOpenChange={(open) => !open && setFileViewerCourse(null)}
-        title={fileViewerCourse?.title ?? ""}
-        fileUrl={fileViewerCourse?.sourceFileUrl ?? null}
-        rawText={fileViewerCourse?.rawText ?? ""}
-      />
+      {fileViewerCourse !== null && (
+        <FileViewerModal
+          open
+          onOpenChange={(open) => !open && setFileViewerCourse(null)}
+          title={fileViewerCourse.title}
+          fileUrl={fileViewerCourse.sourceFileUrl ?? null}
+          rawText={fileViewerCourse.rawText ?? ""}
+        />
+      )}
     </div>
   );
 }

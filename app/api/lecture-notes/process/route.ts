@@ -135,7 +135,7 @@ async function runExtraction(supabase: Supabase, userId: string, jobId: number, 
       ],
       // Low temperature: factual fidelity over fluency. Reasoning capped low so
       // hidden thinking never eats the visible notes' budget.
-      { model: ECONOMY_MODEL, maxTokens: 12_000, temperature: 0.15, reasoning: { effort: "low" }, timeoutMs: 240_000, bypassMock: true }
+      { model: ECONOMY_MODEL, maxTokens: 12_000, temperature: 0.15, reasoning: { effort: "low" }, timeoutMs: 240_000, bypassMock: true, providerSort: "throughput" }
     );
     if (!smartNotes.trim()) throw new Error("L'IA a renvoyé des notes vides.");
 

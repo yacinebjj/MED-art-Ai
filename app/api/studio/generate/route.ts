@@ -403,7 +403,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
               { role: "system", content: systemContent },
               { role: "user", content: userPrompt },
             ],
-            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: reasoningOption }
+            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: reasoningOption, providerSort: "throughput" }
           );
         } catch (error) {
           await refundGeneration(user.id);

@@ -166,18 +166,34 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullText = "";
+      // At most ONE state update per animation frame: a fast stream delivers
+      // dozens of chunks per frame, and each update re-renders the whole
+      // course workspace — the text still appears as fast as the eye sees it.
+      let frame: number | null = null;
+      const flush = () => {
+        frame = null;
+        if (!isMountedRef.current) return;
+        const text = fullText;
+        setChatMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m)));
+      };
+      let typingCleared = false;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         fullText += decoder.decode(value, { stream: true });
         if (!isMountedRef.current) continue; // keep draining the stream, just stop touching state
-        setChatMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: fullText } : m)));
+        if (frame === null) frame = requestAnimationFrame(flush);
         // The growing bubble itself is the "in progress" signal from here on —
         // clear the separate "MedArt écrit…" indicator the moment real text
         // starts arriving, so the two don't show redundantly at once.
-        setIsTyping(false);
+        if (!typingCleared) {
+          typingCleared = true;
+          setIsTyping(false);
+        }
       }
+      if (frame !== null) cancelAnimationFrame(frame);
+      flush();
 
       if (!isMountedRef.current) return;
 

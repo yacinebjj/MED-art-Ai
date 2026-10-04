@@ -65,6 +65,7 @@ import { ReferenceExamUploader } from "@/components/course/workspace/exam/Refere
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
+import { runExamGeneration, type ExamRunProgress } from "@/lib/exam-run-client";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 type ResultStatus = "correct" | "incorrect" | "skipped";
@@ -174,6 +175,7 @@ export default function ExamGeneratorPage() {
   // handleRegenerate and generateExam.
   const [attempts, setAttempts] = useState(MAX_ATTEMPTS);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<ExamRunProgress | null>(null);
   const [isSavingAttempt, setIsSavingAttempt] = useState(false);
   // Last generation failure, shown inline (a toast alone can sit under the fullscreen view).
   const [generationError, setGenerationError] = useState<string | null>(null);
@@ -360,12 +362,11 @@ export default function ExamGeneratorPage() {
     setExamState("generating");
     setIsGenerating(true);
     try {
-      const res = await fetch("/api/exam/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleId, courseIds, variation, preferences, ...(styleProfile ? { styleProfile } : {}) }),
-      });
-      const body = await res.json().catch(() => null);
+      // Plan → parallel micro-batches → assemble (lib/exam-run-client.ts):
+      // no single request has to outlive Vercel's limit, whatever the
+      // number of selected courses.
+      setGenerationProgress(null);
+      const { ok, body } = await runExamGeneration({ moduleId, courseIds, variation, preferences, styleProfile }, setGenerationProgress);
       // Server truth for the "Régénérer" quota, synced whenever the API
       // includes it — on the SUCCESS path (a fresh regeneration was just
       // reserved) and on the 403 cap-reached error path alike (see
@@ -377,7 +378,7 @@ export default function ExamGeneratorPage() {
       if (typeof body?.regenerationsRemaining === "number") {
         setAttempts(body.regenerationsRemaining);
       }
-      if (!res.ok || !body?.success) {
+      if (!ok || !body?.success) {
         const message = friendlyGenerationError(body?.error, tExam("generationFailedFallbackDescription", language));
         toast({ variant: "error", title: tExam("generationFailedTitle", language), description: message });
         setGenerationError(message);
@@ -412,6 +413,7 @@ export default function ExamGeneratorPage() {
       setExamState(previousState);
     } finally {
       setIsGenerating(false);
+      setGenerationProgress(null);
     }
   }
 
@@ -742,7 +744,13 @@ export default function ExamGeneratorPage() {
   const generatingContent = (
     <motion.div key="generating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
       <GenerationAura
-        title="Création de ton épreuve clinique…"
+        title={
+          generationProgress?.phase === "questions" && generationProgress.total > 0
+            ? `Rédaction des QCM ${generationProgress.done}/${generationProgress.total}…`
+            : generationProgress?.phase === "assemble"
+              ? "Assemblage de ton épreuve…"
+              : "Création de ton épreuve clinique…"
+        }
         steps={[
           "Lecture de tes cours sélectionnés",
           "Sélection des notions à haut rendement",
