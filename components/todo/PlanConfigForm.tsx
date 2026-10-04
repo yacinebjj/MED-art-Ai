@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 import type { GeneratedPlanDay } from "@/types/study-planner";
+import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 function buildRestDaysOptions(language: Language) {
   return Array.from({ length: 7 }, (_, i) => ({
@@ -133,7 +134,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
         .map((t) => t.trim())
         .filter(Boolean);
 
-      const generateRes = await fetch("/api/study-planner/generate", {
+      const generateRes = await fetchWithHeartbeat("/api/study-planner/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

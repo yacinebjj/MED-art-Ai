@@ -1,3 +1,4 @@
+import { withHeartbeat } from "@/lib/heartbeat-route";
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -797,7 +798,7 @@ async function handleDiagnose(user: { id: string }, body: z.infer<typeof Diagnos
   }
 }
 
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return jsonError("Tu dois être connecté(e).", 401);
@@ -820,3 +821,6 @@ export async function POST(request: NextRequest) {
   if (body.action === "exam") return handleExam(user, body);
   return handleDiagnose(user, body);
 }
+
+// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
+export const POST = withHeartbeat(handlePost);

@@ -44,6 +44,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
+import { SectionErrorBoundary } from "@/components/ui/SectionErrorBoundary";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import { MedicalMarkdown } from "@/components/reader/MedicalMarkdown";
 import { LectureQuizPanel } from "@/components/dashboard/LectureQuizPanel";
@@ -811,7 +812,7 @@ function AudioWorkspaceContent() {
           <div className="p-3 sm:p-6 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
             <AnimatePresence mode="wait">
               <motion.div key={tab + (hasNotes ? "-ready" : "")} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
-                {renderTab()}
+                <SectionErrorBoundary label="cet onglet" resetKey={tab}>{renderTab()}</SectionErrorBoundary>
               </motion.div>
             </AnimatePresence>
           </div>

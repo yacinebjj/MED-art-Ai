@@ -9,8 +9,9 @@
  * see lib/ai/openrouter.ts).
  *
  * Phase 2 (extraction, ONE call over the full transcript): runs on
- * ECONOMY_MODEL (1M-token context) — a 2-hour lecture is ~30-40k tokens of
- * French, which no longer fits the 32k context of the current CHEAP_MODEL.
+ * STUDIO_FAST_MODEL (Gemini 3.1 Flash-Lite, 1M-token context, ECONOMY_MODEL
+ * as automatic fallback) — a 2-hour lecture is ~30-40k tokens of French,
+ * kept in a single call so no detail is cut at a chunk border.
  * Fidelity rules come first: nothing that was not said, every number/dose
  * kept verbatim, Darija translated literally or omitted, never embellished.
  */

@@ -326,6 +326,48 @@ export const FLASHCARD_MODEL = "qwen/qwen3-30b-a3b-instruct-2507";
 export const LAB_PRIMARY_MODEL = FLASHCARD_MODEL;
 export const LAB_FALLBACK_MODEL = "qwen/qwen3-235b-a22b-2507";
 
+// FAST STRUCTURED-GENERATION MODEL, 2026-10-07 — Studio sections (résumé,
+// cas clinique, QCM, exemples), QCM regeneration, module synthesis and the
+// audio Smart Notes, all previously on ECONOMY_MODEL (gemini-3.7-flash).
+// Prices confirmed live (GET /api/v1/models/<id>/endpoints, 2026-10-07):
+//   gemini-3.7-flash        $0.75/M in, $3.75/M out, always reasons (~20% of
+//                           max_tokens of hidden, billed output at effort "low")
+//   gemini-3.1-flash-lite   $0.25/M in, $1.50/M out, cached input $0.025/M,
+//                           1M context, 65k max output, Google-served only
+// → -67% input, -60% output, and with reasoning at "minimal" the hidden
+// thinking budget (up to ~4k billed tokens per Studio call) mostly
+// disappears. Flash-Lite is Google's highest-throughput tier, same JSON
+// family as ECONOMY_MODEL — the property this pipeline relies on (strict JSON
+// with escaped long medical text). Quality backstop: callers keep
+// ECONOMY_MODEL as the automatic model fallback (MODEL_FALLBACKS below) and
+// as the model of their LAST validation retry, so a section Flash-Lite
+// cannot produce correctly still gets the proven model. Not re-benchmarked
+// with live calls in this change: scripts/bench-models.mjs compares them on
+// real course text.
+export const STUDIO_FAST_MODEL = "google/gemini-3.1-flash-lite";
+
+/**
+ * Automatic MODEL-level fallback, sent as OpenRouter's native `models`
+ * array: when the primary answers 429/5xx, is down, or rejects the request
+ * (context length…), OpenRouter retries the next model inside the SAME
+ * request — the student never sees the failure. (Provider-level fallback
+ * within one model is already OpenRouter's default.) Fallbacks stay inside a
+ * family that accepts the same parameters (reasoning / JSON mode), so a
+ * fallback never fails on a parameter its primary accepted.
+ */
+const MODEL_FALLBACKS: Record<string, string[]> = {
+  [STUDIO_FAST_MODEL]: [ECONOMY_MODEL],
+  [ECONOMY_MODEL]: [STUDIO_FAST_MODEL],
+  [CHEAP_MODEL]: [FLASHCARD_MODEL],
+  [FLASHCARD_MODEL]: [CHEAP_MODEL],
+  [CHEAP_VISION_MODEL]: [ECONOMY_MODEL],
+};
+
+function modelRouting(model: string, fallbackModels: string[] | undefined): { model: string; models?: string[] } {
+  const fallbacks = (fallbackModels ?? MODEL_FALLBACKS[model] ?? []).filter((m) => m !== model);
+  return fallbacks.length > 0 ? { model, models: [model, ...fallbacks] } : { model };
+}
+
 /**
  * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
  * decoding to the schema (structured outputs); `json_object` only guarantees
@@ -704,6 +746,8 @@ export async function callOpenRouter(
      * token. Used by time-critical calls (Lab, podcast script).
      */
     providerSort?: "throughput" | "latency" | "price";
+    /** Model-level fallbacks (OpenRouter `models`). Omitted = MODEL_FALLBACKS default; [] = none. */
+    fallbackModels?: string[];
   }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
@@ -771,7 +815,7 @@ export async function callOpenRouter(
         "X-Title": "Med Art AI",
       },
       body: JSON.stringify({
-        model: options?.model ?? MODEL,
+        ...modelRouting(options?.model ?? MODEL, options?.fallbackModels),
         messages,
         max_tokens: options?.maxTokens ?? 8192,
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
@@ -1328,6 +1372,8 @@ export async function streamOpenRouter(
     timeoutMs?: number;
     temperature?: number;
     reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean };
+    /** Model-level fallbacks (OpenRouter `models`). Omitted = MODEL_FALLBACKS default; [] = none. */
+    fallbackModels?: string[];
   }
 ): Promise<ReadableStream<Uint8Array>> {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -1354,7 +1400,7 @@ export async function streamOpenRouter(
         "X-Title": "Med Art AI",
       },
       body: JSON.stringify({
-        model: options?.model ?? MODEL,
+        ...modelRouting(options?.model ?? MODEL, options?.fallbackModels),
         messages,
         max_tokens: options?.maxTokens ?? 4096,
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),

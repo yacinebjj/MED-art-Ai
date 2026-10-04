@@ -101,6 +101,7 @@ import { ExplicationGeneratingLabel, type ExplicationProgressView } from "@/comp
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
+import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 /**
  * Each of these 3 is a genuinely heavy render tree (multi-mode tabs,
@@ -1547,7 +1548,7 @@ export default function ModuleWorkspacePage() {
 
     const regenerationPromise = (async () => {
       try {
-        const res = await fetch("/api/studio/regenerate", {
+        const res = await fetchWithHeartbeat("/api/studio/regenerate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ courseId, section: id, language: getContentLanguage() }),
@@ -1679,7 +1680,7 @@ export default function ModuleWorkspacePage() {
     courseId: number,
     extra?: Record<string, unknown>
   ): Promise<{ res: Response; data: StudioGenerateResponse }> {
-    const res = await fetch("/api/studio/generate", {
+    const res = await fetchWithHeartbeat("/api/studio/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // studyYear is sent unconditionally (not folded into `extra`) — it

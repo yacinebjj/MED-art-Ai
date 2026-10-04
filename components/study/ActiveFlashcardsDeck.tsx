@@ -44,6 +44,7 @@ import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { tStudyTools } from "@/lib/translations/studyTools";
 import type { FlashcardPoolItem } from "@/types/flashcard";
+import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 
 /** How long the "Bien joué !" / "Pas grave" confirmation stays before the deck advances. */
 const GRADE_FEEDBACK_MS = 550;
@@ -257,7 +258,7 @@ type BatchResult =
 async function requestBatch(contentLanguage: ContentLanguage, signal: AbortSignal): Promise<BatchResult> {
   let res: Response;
   try {
-    res = await fetch("/api/flashcards/generate", {
+    res = await fetchWithHeartbeat("/api/flashcards/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ language: contentLanguage }),

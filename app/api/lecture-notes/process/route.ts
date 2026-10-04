@@ -4,7 +4,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { callOpenRouter, ECONOMY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, STUDIO_FAST_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { LECTURE_NOTES_SYSTEM_PROMPT, MAX_TRANSCRIPT_CHARS_FOR_EXTRACTION, buildLectureNotesUserMessage } from "@/lib/ai/lecture-notes-prompts";
 import { stripTimestamps } from "@/lib/lecture-transcript";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
@@ -133,9 +133,12 @@ async function runExtraction(supabase: Supabase, userId: string, jobId: number, 
         { role: "system", content: LECTURE_NOTES_SYSTEM_PROMPT },
         { role: "user", content: buildLectureNotesUserMessage(spoken) },
       ],
-      // Low temperature: factual fidelity over fluency. Reasoning capped low so
-      // hidden thinking never eats the visible notes' budget.
-      { model: ECONOMY_MODEL, maxTokens: 12_000, temperature: 0.15, reasoning: { effort: "low" }, timeoutMs: 240_000, bypassMock: true }
+      // Gemini 3.1 Flash-Lite: 1M-token context (a full 2-hour transcript in
+      // ONE call — no chunking, so no detail is lost at a chunk border), $0.25/M
+      // input vs $0.75/M (input is the bulk here: 40-170k tokens per lecture),
+      // high throughput. ECONOMY_MODEL is its automatic model fallback. Low
+      // temperature for fidelity; reasoning minimal so no hidden billed tokens.
+      { model: STUDIO_FAST_MODEL, maxTokens: 12_000, temperature: 0.15, reasoning: { effort: "minimal" }, timeoutMs: 240_000, bypassMock: true }
     );
     if (!smartNotes.trim()) throw new Error("L'IA a renvoyé des notes vides.");
 

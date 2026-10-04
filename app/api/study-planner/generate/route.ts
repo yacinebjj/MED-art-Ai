@@ -1,3 +1,4 @@
+import { withHeartbeat } from "@/lib/heartbeat-route";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -85,7 +86,7 @@ function scopeDaysToModules<T extends { items: { moduleId: number | null }[] }>(
   }));
 }
 
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -196,7 +197,7 @@ export async function POST(request: NextRequest) {
           // NOT independently tested (only the initial-generation call
           // below was) — same prompt family and schema shape, applied here
           // for consistency, under the same knowingly-accepted tradeoff.
-          { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true }
+          { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true, responseFormat: { type: "json_object" } }
         );
       }, StudyPlanRefinementSchema);
 
@@ -223,7 +224,7 @@ export async function POST(request: NextRequest) {
         // coverage, clean schema — a knowingly-accepted tradeoff on a small
         // sample, per the product owner's own explicit "runway over
         // accuracy margin" decision.
-        { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true }
+        { model: CHEAP_MODEL, maxTokens: generationMaxTokens, bypassMock: true, responseFormat: { type: "json_object" } }
       );
     }, StudyPlanGenerationSchema);
 
@@ -354,3 +355,6 @@ function recoverPartialPlan<T>(
   }
   return retried.data as T;
 }
+
+// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
+export const POST = withHeartbeat(handlePost);

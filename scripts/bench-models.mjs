@@ -19,7 +19,8 @@ if (!sourcePath || !apiKey) {
   console.error("Usage: OPENROUTER_API_KEY=... node scripts/bench-models.mjs cours.txt [model ...]");
   process.exit(1);
 }
-const models = modelArgs.length > 0 ? modelArgs : ["qwen/qwen-2.5-72b-instruct", "qwen/qwen3-235b-a22b-2507"];
+// Defaults: every before/after pair of the 2026-10 cost passes (Studio: 3.7 Flash → 3.1 Flash-Lite; CHEAP: qwen-2.5-72b → qwen3-235b).
+const models = modelArgs.length > 0 ? modelArgs : ["google/gemini-3.7-flash", "google/gemini-3.1-flash-lite", "qwen/qwen-2.5-72b-instruct", "qwen/qwen3-235b-a22b-2507"];
 const source = readFileSync(sourcePath, "utf8").slice(0, 40_000);
 
 const TASKS = {

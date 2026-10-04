@@ -1,6 +1,7 @@
+import { withHeartbeat } from "@/lib/heartbeat-route";
 import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, ECONOMY_MODEL, STUDIO_FAST_MODEL } from "@/lib/ai/openrouter";
 import {
   STUDIO_BYPASS_MOCK,
   STUDIO_PROMPT_CONFIG,
@@ -346,7 +347,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
       const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
-      // MODEL POLICY: every Studio section reaching this generic path runs
+      // MODEL POLICY (2026-10-07 cost pass): attempts 1-2 run on
+      // STUDIO_FAST_MODEL (Gemini 3.1 Flash-Lite: -60/-67% price, reasoning
+      // "minimal", far higher throughput); the LAST attempt runs on
+      // ECONOMY_MODEL (Gemini 3.7 Flash), the model every section below was
+      // validated on — so a section the fast model cannot produce valid
+      // still gets the proven one. History of the previous policy:
+      // every Studio section reaching this generic path ran
       // on ECONOMY_MODEL (Gemini 3.7 Flash) — Explication Ultra-Détaillée
       // (CHEAP_MODEL/DeepSeek V3.2) never reaches here anymore, see the
       // actionType === "explication" guard near the top of this handler.
@@ -355,7 +362,6 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       // exact prompt+schema on a real course — Hémolyse — with a full
       // structural re-validation and a manual medical-accuracy read finding
       // no errors). There is no Sonnet fallback anywhere in this route.
-      const generationModel = ECONOMY_MODEL;
 
       // reasoning: { effort: "low" } — confirmed production root cause of
       // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
@@ -368,7 +374,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       // the ceiling is set. `streamOpenRouter` (the chat path) already caps
       // this for the exact same model — every ECONOMY_MODEL Studio call
       // gets the identical cap.
-      const reasoningOption = { effort: "low" } as const;
+      // Flash-Lite thinks very little at "minimal"; ECONOMY_MODEL keeps its
+      // proven "low" cap on the final attempt.
+      const reasoningFor = (model: string) => (model === STUDIO_FAST_MODEL ? ({ effort: "minimal" } as const) : ({ effort: "low" } as const));
+      // Every attempt shares one envelope under maxDuration (300 s), so a slow
+      // first attempt can never push the last one past the platform wall.
+      const generationStartedAt = Date.now();
+      const GENERATION_BUDGET_MS = 270_000;
 
       // RAISED 2 -> 3 after a real, reported production symptom: an
       // occasional "ne respecte pas le schéma attendu" failure on Résumé
@@ -398,16 +410,35 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // Architecture voulue par le client : le texte intégral du cours est
         // injecté DANS le system prompt (pas dans un message user séparé) —
         // voir buildStudioSystemMessage. Le message user reste minimal.
+        const isLastAttempt = attempt === MAX_GENERIC_ATTEMPTS;
+        const generationModel = isLastAttempt ? ECONOMY_MODEL : STUDIO_FAST_MODEL;
+        const remainingMs = GENERATION_BUDGET_MS - (Date.now() - generationStartedAt);
         let attemptRaw: string;
         try {
+          if (remainingMs < 20_000) throw new OpenRouterError("La génération a pris trop de temps. Réessaie : le résultat sera plus rapide.", 504);
           attemptRaw = await callOpenRouter(
             [
               { role: "system", content: systemContent },
               { role: "user", content: userPrompt },
             ],
-            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: reasoningOption }
+            {
+              model: generationModel,
+              maxTokens: effectiveMaxTokens,
+              bypassMock: STUDIO_BYPASS_MOCK,
+              reasoning: reasoningFor(generationModel),
+              responseFormat: { type: "json_object" },
+              timeoutMs: isLastAttempt ? remainingMs - 5_000 : Math.min(120_000, remainingMs - 5_000),
+            }
           );
         } catch (error) {
+          // A transient failure (timeout, rate limit, provider 5xx) moves on
+          // to the next attempt — whose model differs — instead of failing
+          // the student's request outright.
+          const transient = error instanceof OpenRouterError && (error.status === 429 || error.status >= 500);
+          if (transient && !isLastAttempt && GENERATION_BUDGET_MS - (Date.now() - generationStartedAt) > 30_000) {
+            console.warn(`[studio/generate:${actionType}] Tentative ${attempt} (${generationModel}) en échec transitoire, tentative suivante:`, (error as OpenRouterError).message);
+            continue;
+          }
           await refundGeneration(user.id);
           if (error instanceof OpenRouterError) {
             return NextResponse.json({ success: false, error: error.message }, { status: error.status });
@@ -514,7 +545,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
  * Never masks a real, already-handled error response — only ever catches
  * what the handler itself did not.
  */
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function guardedPost(request: NextRequest): Promise<NextResponse> {
   try {
     return await handlePost(request);
   } catch (error) {
@@ -522,3 +553,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
+
+// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
+export const POST = withHeartbeat(guardedPost);

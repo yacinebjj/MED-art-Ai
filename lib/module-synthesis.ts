@@ -22,7 +22,7 @@
 
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, CHEAP_MODEL, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL, STUDIO_FAST_MODEL } from "@/lib/ai/openrouter";
 import {
   buildSummaryChunkPrompt,
   buildKeywordRowPrompt,
@@ -200,7 +200,7 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
     // genuinely additive cross-course synthesis — a knowingly-accepted
     // tradeoff on a small sample, per the product owner's own explicit
     // "runway over accuracy margin" decision.
-    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true }
+    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, responseFormat: { type: "json_object" } }
   );
 
   const parsed = parseJsonResponse(raw);
@@ -391,7 +391,10 @@ async function generateAndStoreSynthesisChunks(
   // different, comparably rigor-sensitive task — exam QCM generation; never
   // independently re-measured for a term-dictionary task specifically). No
   // `reasoning` option, matching every other CHEAP_MODEL call site.
-  const model = type === "medical_dictionary" ? CHEAP_MODEL : ECONOMY_MODEL;
+  // global_summary / keywords_table: STUDIO_FAST_MODEL (Gemini 3.1 Flash-Lite,
+  // 2026-10-07 cost pass — same JSON family as the previous ECONOMY_MODEL at
+  // -60/-67% price; ECONOMY_MODEL stays its automatic model fallback).
+  const model = type === "medical_dictionary" ? CHEAP_MODEL : STUDIO_FAST_MODEL;
 
   // Scales with THIS BATCH's own course count (bounded by
   // MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL above, never the full
@@ -407,13 +410,13 @@ async function generateAndStoreSynthesisChunks(
       { role: "user", content: userPrompt },
     ],
     type === "medical_dictionary"
-      ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true }
+      ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true, responseFormat: { type: "json_object" } }
       // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
       // lib/ai/studio-prompts.ts's own header comment) + the matching
       // reasoning cap: without it, this model's hidden reasoning tokens can
       // silently consume the completion budget before writing any of the
       // actual JSON, truncating it (see callOpenRouter's own doc comment).
-      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" } }
+      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "minimal" }, responseFormat: { type: "json_object" } }
   );
 
   const parsed = parseJsonResponse(raw);

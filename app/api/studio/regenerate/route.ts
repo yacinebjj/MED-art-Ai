@@ -1,6 +1,7 @@
+import { withHeartbeat } from "@/lib/heartbeat-route";
 import { buildLanguageDirective, parseContentLanguage } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, ECONOMY_MODEL, STUDIO_FAST_MODEL } from "@/lib/ai/openrouter";
 import { STUDIO_BYPASS_MOCK, STUDIO_PROMPT_CONFIG, STUDIO_SECTION_KEYS, buildStudioSystemMessage } from "@/lib/ai/studio-prompts";
 import { parseAndValidateStudioSection } from "@/lib/ai/studio-section-validation";
 import { errorMessage, MAX_SOURCE_CHARS } from "@/lib/course-generation-shared";
@@ -201,13 +202,20 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
           { role: "system", content: systemContent },
           { role: "user", content: userPrompt },
         ],
-        // Same model + reasoning cap as the first QCM generation — see
-        // /api/studio/generate's MODEL POLICY and reasoningOption comments
-        // (Gemini Flash always reasons; `effort: "low"` keeps that thinking
-        // from eating the JSON's token budget).
-        { model: ECONOMY_MODEL, maxTokens: STUDIO_PROMPT_CONFIG.qcm.maxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: { effort: "low" } }
+        // Same policy as /api/studio/generate's MODEL POLICY: fast model
+        // first (reasoning "minimal"), proven ECONOMY_MODEL (reasoning "low",
+        // so thinking never eats the JSON's budget) on the last attempt.
+        // 3 × 85 s stays under maxDuration (300 s).
+        attempt < MAX_ATTEMPTS
+          ? { model: STUDIO_FAST_MODEL, maxTokens: STUDIO_PROMPT_CONFIG.qcm.maxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: { effort: "minimal" }, responseFormat: { type: "json_object" }, timeoutMs: 85_000 }
+          : { model: ECONOMY_MODEL, maxTokens: STUDIO_PROMPT_CONFIG.qcm.maxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: { effort: "low" }, responseFormat: { type: "json_object" }, timeoutMs: 85_000 }
       );
     } catch (error) {
+      // Transient failure (timeout, 429, 5xx): the next attempt — on another model — gets a chance first.
+      if (attempt < MAX_ATTEMPTS && error instanceof OpenRouterError && (error.status === 429 || error.status >= 500)) {
+        console.warn(`[studio/regenerate:qcm] Échec transitoire (tentative ${attempt}), tentative suivante:`, error.message);
+        continue;
+      }
       await refundAll();
       if (error instanceof OpenRouterError) {
         return NextResponse.json({ success: false, error: error.message }, { status: error.status });
@@ -266,7 +274,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 // other section. Set to false to refuse even that.
 const REGENERATION_ENABLED = true as boolean;
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function guardedPost(request: NextRequest): Promise<NextResponse> {
   if (!REGENERATION_ENABLED) {
     return NextResponse.json(
       { success: false, error: "La régénération est désactivée : le contenu déjà généré est conservé et partagé." },
@@ -280,3 +288,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
+
+// Long-running: answers as a heartbeat NDJSON stream when the client asks for it (lib/heartbeat-route.ts).
+export const POST = withHeartbeat(guardedPost);

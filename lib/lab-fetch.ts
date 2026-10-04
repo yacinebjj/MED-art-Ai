@@ -1,3 +1,4 @@
+import { fetchWithHeartbeat } from "@/lib/heartbeat-client";
 /**
  * fetch() for the MedArt Lab tools (mind map, matrix, virtual patient), with
  * ONE automatic second chance for the failures a student should never see:
@@ -34,7 +35,7 @@ function waitForOnline(maxMs: number): Promise<void> {
 export async function labFetch(input: string, init: RequestInit): Promise<Response> {
   const startedAt = Date.now();
   try {
-    const res = await fetch(input, init);
+    const res = await fetchWithHeartbeat(input, init);
     const fastTransient = (res.status === 502 || res.status === 503) && Date.now() - startedAt < FAST_FAILURE_MS;
     if (!fastTransient) return res;
   } catch (error) {
@@ -42,5 +43,5 @@ export async function labFetch(input: string, init: RequestInit): Promise<Respon
     await waitForOnline(OFFLINE_WAIT_MS);
   }
   await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-  return fetch(input, init);
+  return fetchWithHeartbeat(input, init);
 }
