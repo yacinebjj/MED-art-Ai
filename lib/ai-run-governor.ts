@@ -21,7 +21,7 @@
  */
 
 export type UpstreamFailureKind = "overload" | "server" | "network";
-export type GovernorStopReason = "deadline" | "overload";
+export type GovernorStopReason = "deadline" | "overload" | "stalled";
 
 export interface GovernorOptions {
   /** Total wall-clock budget for the whole run. */
@@ -32,6 +32,13 @@ export interface GovernorOptions {
   breakerThreshold: number;
   /** An attempt is not started with less than this much budget left. */
   minAttemptWindowMs: number;
+  /**
+   * Optional progress watchdog: stop only when NO request has succeeded for
+   * this long. Lets a slow-but-advancing run go to completion (the deadline
+   * then acts as an absolute backstop only) while still ending a genuinely
+   * stuck one.
+   */
+  stallMs?: number;
 }
 
 const OVERLOAD_BASE_PAUSE_MS = 12_000;
@@ -47,6 +54,7 @@ export class AiRunGovernor {
   private consecutiveFailures = 0;
   private overloadStreak = 0;
   private stopReason: GovernorStopReason | null = null;
+  private lastProgressAt = Date.now();
 
   constructor(options: GovernorOptions) {
     this.options = options;
@@ -64,6 +72,7 @@ export class AiRunGovernor {
   /** Why the run must stop, or null while it may continue. */
   get stopped(): GovernorStopReason | null {
     if (!this.stopReason && this.remainingMs() < this.options.minAttemptWindowMs) this.stopReason = "deadline";
+    if (!this.stopReason && this.options.stallMs && Date.now() - this.lastProgressAt > this.options.stallMs) this.stopReason = "stalled";
     return this.stopReason;
   }
 
@@ -98,6 +107,7 @@ export class AiRunGovernor {
   }
 
   reportSuccess(): void {
+    this.lastProgressAt = Date.now();
     this.consecutiveFailures = 0;
     this.overloadStreak = 0;
     if (this.limit < this.options.maxConcurrency) this.limit++;

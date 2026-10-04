@@ -70,6 +70,77 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * WINDOWED GENERATION (2026-10-04). Real failure: a plan is one AI call that
+ * must write EVERY day at once — at ~40 tok/s (CHEAP_MODEL) anything beyond
+ * ~10 days needs more than the 240 s call timeout, then the retry is killed
+ * by Vercel at 300 s ("MedArt Neural Engine met trop de temps à répondre").
+ * Long periods are now split into WINDOW_DAYS-day windows generated IN
+ * PARALLEL with the same prompt and model: courses are dealt across the
+ * windows in order, and the final window is a global revision of every
+ * course before the exam. Each call stays small (~70-120 s); the whole run
+ * shares one deadline under maxDuration; a failed window no longer fails the
+ * whole plan (its days stay empty, the rest is delivered).
+ */
+const WINDOW_DAYS = 7;
+const WINDOWED_ABOVE_DAYS = 10;
+const WINDOW_CONCURRENCY = 8;
+const PLAN_DEADLINE_MS = 255_000;
+
+interface PlanWindow {
+  start: string;
+  endExclusive: string;
+  courses: StudyPlanCourseInput[];
+  index: number;
+  count: number;
+}
+
+function planWindows(today: string, examDate: string, courses: StudyPlanCourseInput[]): PlanWindow[] {
+  const totalDays = countDaysExclusive(today, examDate);
+  const count = Math.max(1, Math.ceil(totalDays / WINDOW_DAYS));
+  const windows: PlanWindow[] = [];
+  for (let i = 0; i < count; i++) {
+    const start = addDaysIso(today, i * WINDOW_DAYS);
+    const endExclusive = i === count - 1 ? examDate : addDaysIso(today, (i + 1) * WINDOW_DAYS);
+    windows.push({ start, endExclusive, courses: [], index: i, count });
+  }
+  // Learning windows get the courses dealt in order (cycling when there are
+  // more windows than courses); the last window revises everything.
+  const learning = count > 1 ? windows.slice(0, -1) : windows;
+  if (count > 1) windows[count - 1].courses = [...courses];
+  courses.forEach((course, i) => learning[i % learning.length].courses.push(course));
+  for (const w of learning) if (w.courses.length === 0) w.courses = [courses[w.index % courses.length]];
+  return windows;
+}
+
+function windowDirective(w: PlanWindow, realExamDate: string): string {
+  const last = w.index === w.count - 1;
+  return `\n\nCONTEXTE DE FENÊTRE (prioritaire sur toute indication contraire ci-dessus) : ce planning est la PÉRIODE ${w.index + 1}/${w.count} d'un programme de révision plus long ; l'examen réel a lieu le ${realExamDate}. Ne planifie QUE les dates de cette période et ${
+    last ? "fais-en une phase de RÉVISION GÉNÉRALE et de consolidation de tous les cours listés, en priorisant les notions à fort rendement avant l'examen." : "concentre-toi sur l'étude des cours listés ci-dessus, en avançant régulièrement."
+  }`;
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await fn(items[i]);
+      }
+    })
+  );
+  return results;
+}
+
 /** POST body — { planId, manualCourseTitles?, programText? } for a first generation, or { planId, message } to refine an existing one. */
 /**
  * Strict module scoping: the model occasionally attaches an item to a module
@@ -205,6 +276,40 @@ export async function POST(request: NextRequest) {
         days: scopeDaysToModules(result.days, planRow.module_ids),
         refinementChat: [...history, { role: "assistant" as const, content: result.assistantReply }],
       });
+    }
+
+    if (totalDayCount > WINDOWED_ABOVE_DAYS) {
+      const deadline = Date.now() + PLAN_DEADLINE_MS;
+      const windows = planWindows(config.today, config.examDate, courses);
+      const outcomes = await mapLimit(windows, WINDOW_CONCURRENCY, async (w) => {
+        const windowDays = countDaysExclusive(w.start, w.endExclusive);
+        try {
+          return await generateWithRetry(() => {
+            const remaining = deadline - Date.now();
+            if (remaining < 25_000) throw new OpenRouterError("Temps de génération épuisé pour cette période.", 504);
+            const prompt = buildStudyPlanGenerationPrompt({ ...config, courses: w.courses, today: w.start, examDate: w.endExclusive }) + windowDirective(w, config.examDate);
+            return callOpenRouter(
+              [
+                { role: "system", content: prompt },
+                { role: "user", content: "Génère le planning de révision demandé pour cette période." },
+              ],
+              { model: CHEAP_MODEL, maxTokens: computeGenerationMaxTokens(windowDays), bypassMock: true, timeoutMs: Math.min(200_000, remaining - 5_000) }
+            );
+          }, StudyPlanGenerationSchema);
+        } catch (error) {
+          console.warn(`[study-planner/generate] Période ${w.index + 1}/${w.count} (${w.start} → ${w.endExclusive}) en échec:`, errorMessage(error));
+          return null;
+        }
+      });
+      const succeeded = outcomes.filter((o): o is NonNullable<typeof o> => o !== null);
+      if (succeeded.length === 0) throw new Error("La génération du planning a échoué. Réessaie dans un instant.");
+      const days = succeeded.flatMap((o) => o.days).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      const missingWindows = outcomes.length - succeeded.length;
+      const coachMessage =
+        missingWindows > 0
+          ? `${succeeded[0].coachMessage}\n\n(${missingWindows} période(s) n'ont pas pu être planifiées cette fois : relance la génération pour les compléter.)`
+          : succeeded[0].coachMessage;
+      return NextResponse.json({ success: true, coachMessage, days: scopeDaysToModules(days, planRow.module_ids) });
     }
 
     const result = await generateWithRetry(() => {

@@ -153,3 +153,9 @@ export function computePeaks(buffer: AudioBuffer, bars = 480): number[] {
   }
   return max > 0 ? peaks.map((p) => p / max) : peaks;
 }
+
+/** Normalises then encodes a run of 16 kHz mono samples as a WAV chunk (shared with lib/audio/streaming-decode.ts). */
+export function encodeNormalizedWav(samples: Float32Array): Blob {
+  normalize(samples);
+  return encodeMonoWav(samples, TARGET_SAMPLE_RATE);
+}

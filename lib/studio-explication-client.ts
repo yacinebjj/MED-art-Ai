@@ -104,6 +104,12 @@ export interface ExplicationGenerationProgress {
   isRecovering: boolean;
   /** "generating" while parts are being produced, "stitching" during the post-pass that repairs seams between independently-generated parts. */
   phase: "generating" | "stitching";
+  /**
+   * The Explication as far as it can already be read: every completed part
+   * from the start up to the first part still missing, joined in order. Lets
+   * the UI show the lesson while the rest is generating instead of a spinner.
+   */
+  previewMarkdown?: string;
 }
 
 const MAX_PART_ATTEMPTS = 3;
@@ -206,10 +212,10 @@ const MAX_CONCURRENT_REQUESTS = 8;
  * parts kept hitting an already-saturated provider in parallel. The
  * endpoints and models are unchanged; the governor only decides when and
  * whether the next request is sent:
- *  - RUN_BUDGET_MS (12 min: 3 waves of parts for a 20+ part polycopié): hard
- *    ceiling for the whole generation. No attempt starts
- *    with less than MIN_ATTEMPT_WINDOW_MS left, and each request's own
- *    timeout is clamped to the budget that remains.
+ *  - PROGRESS WATCHDOG (STALL_MS): a run is stopped only when NO part has
+ *    completed for STALL_MS — a slow but advancing generation always goes to
+ *    the end (a fixed 12-min budget used to cut such runs at "3/4 parties").
+ *    RUN_BUDGET_MS is only an absolute backstop.
  *  - adaptive concurrency: a 429/503 halves the requests in flight and pauses
  *    new ones (Retry-After honoured); each success adds a slot back.
  *  - circuit breaker: BREAKER_THRESHOLD consecutive upstream failures stop
@@ -217,11 +223,14 @@ const MAX_CONCURRENT_REQUESTS = 8;
  * Every finished part stays checkpointed, so stopping early never loses
  * work: the next run only generates what is missing.
  */
-const RUN_BUDGET_MS = 12 * 60_000;
+const RUN_BUDGET_MS = 45 * 60_000;
+/** No part completed for this long = genuinely stuck (one part legitimately takes up to ~4 min, retries included). */
+const STALL_MS = 9 * 60_000;
 const MIN_ATTEMPT_WINDOW_MS = 45_000;
-const BREAKER_THRESHOLD = 3;
-/** Total requests one part may spend across retries and subdivision, whatever the budget left. */
-const MAX_REQUESTS_PER_PART = 8;
+/** Patient, silent recovery: overload pauses grow 12 s → 60 s, so ~8 episodes ≈ 6 min of upstream saturation before giving up. */
+const BREAKER_THRESHOLD = 8;
+/** Total requests one part may spend across retries and subdivision. */
+const MAX_REQUESTS_PER_PART = 12;
 
 /** Student-facing failure text: what happened, what is already saved, and what to do — never a raw transport trace. */
 function stopMessage(reason: GovernorStopReason | "failed", completed: number, total: number, detail?: string): string {
@@ -230,6 +239,7 @@ function stopMessage(reason: GovernorStopReason | "failed", completed: number, t
       ? ` ${completed}/${total} partie${completed > 1 ? "s sont" : " est"} déjà prête${completed > 1 ? "s" : ""} et sauvegardée${completed > 1 ? "s" : ""} : relance la génération, seules les parties manquantes seront produites.`
       : " Rien n'a été perdu : relance la génération dans quelques minutes.";
   if (reason === "overload") return `MedArt Neural Engine est saturé en ce moment (forte demande).${saved}`;
+  if (reason === "stalled") return `MedArt Neural Engine ne répond plus depuis plusieurs minutes, j'ai mis la génération en pause.${saved}`;
   if (reason === "deadline") return `La génération prend plus de temps que prévu, je l'ai arrêtée pour ne pas te faire attendre.${saved}`;
   return `Une partie du cours n'a pas pu être générée${detail ? ` (${detail})` : ""}.${saved}`;
 }
@@ -665,7 +675,18 @@ async function runGenerationInParts(
       maxConcurrency: MAX_CONCURRENT_REQUESTS,
       breakerThreshold: BREAKER_THRESHOLD,
       minAttemptWindowMs: MIN_ATTEMPT_WINDOW_MS,
+      stallMs: STALL_MS,
     });
+
+    /** Completed parts from the start up to the first missing one, in order. */
+    const readablePrefix = () => {
+      const out: string[] = [];
+      for (const part of parts) {
+        if (part === null) break;
+        out.push(part);
+      }
+      return out.join("\n\n");
+    };
 
     const emitProgress = () => {
       onProgress?.({
@@ -674,6 +695,7 @@ async function runGenerationInParts(
         inFlightParts: activeStatusByPart.size,
         isRecovering: governor.isThrottled || [...activeStatusByPart.values()].some((s) => s.isRecovering),
         phase: "generating",
+        previewMarkdown: readablePrefix() || undefined,
       });
     };
 

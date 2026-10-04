@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
 import { SynthesisExplorer } from "@/components/dashboard/synthesis/SynthesisExplorer";
+import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
 import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
 import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -93,6 +94,20 @@ function persistEntryNow(userId: string, moduleId: number, entry: HistoryEntry):
   }
 }
 
+/** JSON body of /api/workspace/module-synthesis (direct call or batched-run assemble step). */
+interface SynthesisResponseBody {
+  success?: boolean;
+  error?: string;
+  content?: string;
+  personalized?: boolean;
+  personalizationSkipped?: boolean;
+  fullyCached?: boolean;
+  coursesFromCache?: number;
+  coursesGenerated?: number;
+  coursesUsingRawTextFallback?: unknown;
+  coursesFailedToGenerate?: unknown;
+}
+
 interface HistoryEntry {
   /** Personalized summary format ("Synthèse rapide"…), when not the full sheet. */
   variantLabel?: string;
@@ -126,6 +141,8 @@ export default function ModuleWorkspacePage() {
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
   const [isGeneratingDictionary, setIsGeneratingDictionary] = useState(false);
+  /** Live progress of a large (micro-batched) synthesis run: courses processed / to process, then assembly. */
+  const [synthesisProgress, setSynthesisProgress] = useState<{ done: number; total: number; phase: "courses" | "assemble" } | null>(null);
   const [output, setOutput] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string[] | null>(null);
   // medical_dictionary ONLY — course titles whose sub-batch failed even after
@@ -302,10 +319,100 @@ export default function ModuleWorkspacePage() {
 
   /** Mirrors lib/module-synthesis.ts's own MIN_COURSES_REQUIRED — duplicated as a plain constant rather than imported, since that module pulls in server-only dependencies (getSupabaseAdmin, OpenRouter calls) that have no place in a "use client" bundle. Enforced again server-side in that same route (never trust a client-only gate). */
   const MIN_COURSES_REQUIRED = 5;
+  /** Above this, a synthesis runs as plan → micro-batches → assemble (see runBatchedSynthesis). */
+  const DIRECT_SYNTHESIS_MAX_COURSES = 6;
   const summaryOptions: SynthesisOptions = { depth: summaryDepth, focus: summaryFocus.trim(), mnemonics: mnemonicsPref === "on" };
   const summaryPersonalized = needsSynthesisTransform(summaryOptions);
   const hasSelection = selectedIds.size >= MIN_COURSES_REQUIRED;
   const isGenerating = isGeneratingSummary || isGeneratingKeywords || isGeneratingDictionary;
+
+  /**
+   * LARGE SELECTIONS (more than DIRECT_SYNTHESIS_MAX_COURSES): a single
+   * request generating 10-50 courses outlives Vercel's 300 s limit. Instead:
+   *  1. /plan — lists the courses not yet cached, reserves ONE unit, returns a run token;
+   *  2. /batch — micro-batches of 3-4 courses, several in parallel under the
+   *     adaptive run governor (429 → fewer in flight + pause, silent retry);
+   *     every finished batch is cached server-side, progress shown live;
+   *  3. assemble — the normal route with the run token: stitching + cross-course
+   *     synthesis only, a few seconds.
+   * Returns the parsed assemble response body (same shape as the direct call).
+   */
+  async function runBatchedSynthesis(type: WorkspaceGenerationType, courseIds: number[]): Promise<{ ok: boolean; body: SynthesisResponseBody }> {
+    const planRes = await fetch("/api/workspace/module-synthesis/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moduleId, courseIds, type }),
+    });
+    const plan = (await planRes.json().catch(() => ({}))) as { success?: boolean; error?: string; missingCourseIds?: number[]; runToken?: string | null };
+    if (!planRes.ok || !plan.success) return { ok: false, body: plan };
+
+    const missing = plan.missingCourseIds ?? [];
+    const batchSize = type === "medical_dictionary" ? 3 : 4;
+    const batches: number[][] = [];
+    for (let i = 0; i < missing.length; i += batchSize) batches.push(missing.slice(i, i + batchSize));
+
+    let done = 0;
+    setSynthesisProgress({ done: 0, total: missing.length, phase: "courses" });
+    const governor = new AiRunGovernor({
+      deadlineMs: 40 * 60_000,
+      stallMs: 8 * 60_000,
+      maxConcurrency: type === "medical_dictionary" ? 6 : 4,
+      breakerThreshold: 6,
+      minAttemptWindowMs: 20_000,
+    });
+    const queue = [...batches];
+    async function worker() {
+      while (queue.length > 0) {
+        const batch = queue.shift()!;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          if (!(await governor.acquire())) return;
+          let status = 0;
+          let retryAfter: number | null = null;
+          try {
+            const res = await fetch("/api/workspace/module-synthesis/batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ moduleId, courseIds: batch, type, runToken: plan.runToken }),
+            });
+            status = res.status;
+            retryAfter = Number(res.headers.get("Retry-After")) || null;
+            const data = (await res.json().catch(() => ({}))) as { success?: boolean };
+            if (res.ok && data.success) {
+              governor.reportSuccess();
+              break;
+            }
+          } catch {
+            status = 0;
+          } finally {
+            governor.release();
+          }
+          const upstream = classifyUpstreamStatus(status);
+          if (upstream) governor.reportUpstreamFailure(upstream, retryAfter);
+          if (status === 403 || status === 400) break; // expired token / invalid: retrying cannot help
+          if (upstream !== "overload") await new Promise((r) => setTimeout(r, 2500 * attempt));
+        }
+        // Counted whether it succeeded or not: assembly reports any course still missing.
+        done += batch.length;
+        setSynthesisProgress({ done: Math.min(done, missing.length), total: missing.length, phase: "courses" });
+      }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(6, batches.length)) }, worker));
+
+    setSynthesisProgress({ done: missing.length, total: missing.length, phase: "assemble" });
+    const res = await fetch("/api/workspace/module-synthesis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        moduleId,
+        courseIds,
+        type,
+        ...(plan.runToken ? { runToken: plan.runToken } : {}),
+        ...(type === "global_summary" ? { options: summaryOptions } : {}),
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as SynthesisResponseBody;
+    return { ok: res.ok && body.success === true, body };
+  }
 
   async function generate(type: WorkspaceGenerationType) {
     if (selectedIds.size < MIN_COURSES_REQUIRED) {
@@ -321,13 +428,20 @@ export default function ModuleWorkspacePage() {
     setFallbackNotice(null);
     setDictionaryFailedNotice(null);
     try {
-      const res = await fetch("/api/workspace/module-synthesis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleId, courseIds: Array.from(selectedIds), type, ...(type === "global_summary" ? { options: summaryOptions } : {}) }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body?.success) {
+      let ok: boolean;
+      let body: SynthesisResponseBody;
+      if (selectedIds.size > DIRECT_SYNTHESIS_MAX_COURSES) {
+        ({ ok, body } = await runBatchedSynthesis(type, Array.from(selectedIds)));
+      } else {
+        const res = await fetch("/api/workspace/module-synthesis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ moduleId, courseIds: Array.from(selectedIds), type, ...(type === "global_summary" ? { options: summaryOptions } : {}) }),
+        });
+        body = (await res.json().catch(() => ({}))) as SynthesisResponseBody;
+        ok = res.ok && Boolean(body.success);
+      }
+      if (!ok) {
         toast({
           variant: "error",
           title: tWorkspaceSynthesis("generationFailedTitle", language),
@@ -390,6 +504,7 @@ export default function ModuleWorkspacePage() {
       });
     } finally {
       setLoading(false);
+      setSynthesisProgress(null);
     }
   }
 
@@ -660,7 +775,19 @@ export default function ModuleWorkspacePage() {
           <motion.div key="generating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <GenerationAura
               accent={isGeneratingSummary ? "cyan" : isGeneratingKeywords ? "violet" : "amber"}
-              title={isGeneratingSummary ? "Synthèse de tes cours en cours…" : isGeneratingKeywords ? "Extraction des mots-clés…" : "Construction du dictionnaire médical…"}
+              title={
+                synthesisProgress?.phase === "courses" && synthesisProgress.total > 0
+                  ? `Traitement des cours ${synthesisProgress.done}/${synthesisProgress.total}…`
+                  : synthesisProgress?.phase === "assemble"
+                    ? isGeneratingDictionary
+                      ? "Assemblage du dictionnaire…"
+                      : "Assemblage et synthèse transversale…"
+                    : isGeneratingSummary
+                      ? "Synthèse de tes cours en cours…"
+                      : isGeneratingKeywords
+                        ? "Extraction des mots-clés…"
+                        : "Construction du dictionnaire médical…"
+              }
               steps={
                 isGeneratingSummary
                   ? ["Lecture des cours sélectionnés", "Réutilisation des chapitres déjà générés", "Rédaction des chapitres manquants", summaryPersonalized ? "Mise au format choisi" : "Assemblage de la fiche complète"]

@@ -3,8 +3,9 @@
  * to 2 hours and more, built so that no single request ever has to last
  * long, and nothing is lost when one fails:
  *
- *   decode once (16 kHz) ─▶ for each 4-min chunk, 3 in parallel:
- *        encode WAV ─▶ signed URL ─▶ PUT straight to Supabase Storage
+ *   STREAMING decode (lib/audio/streaming-decode.ts — never the whole file in
+ *   memory) ─▶ each 4-min chunk as soon as it is decoded, 3 in parallel:
+ *        signed URL ─▶ PUT straight to Supabase Storage
  *        ─▶ transcribe (server downloads it; tiny JSON request)
  *   ─▶ POST /process → { jobId } (background job) ─▶ poll /status
  *
@@ -16,7 +17,8 @@
  */
 
 import { createClient } from "@/lib/supabase/client";
-import { CHUNK_SECONDS, computePeaks, encodeLectureChunk, prepareLectureAudio, type PreparedLectureAudio } from "@/lib/audio/browser-chunking";
+import { CHUNK_SECONDS } from "@/lib/audio/browser-chunking";
+import { AudioFormatError, streamLectureChunks } from "@/lib/audio/streaming-decode";
 import { buildTimestampedTranscript } from "@/lib/lecture-transcript";
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
 
@@ -136,8 +138,7 @@ function isRetryable(error: unknown): boolean {
   return true; // network errors, timeouts, storage hiccups
 }
 
-async function uploadAndTranscribe(prepared: PreparedLectureAudio, uploadId: string, index: number, signal: AbortSignal): Promise<ChunkResult> {
-  const blob = await encodeLectureChunk(prepared, index);
+async function uploadAndTranscribe(blob: Blob, uploadId: string, index: number, signal: AbortSignal): Promise<ChunkResult> {
   const signed = await postJson<{ bucket: string; path: string; token: string }>("/api/lecture-notes/upload-url", { uploadId, chunkIndex: index }, signal);
 
   const supabase = createClient();
@@ -165,27 +166,24 @@ export async function transcribeLecture(
   options: { onProgress: (p: PipelineProgress) => void; onPeaks?: (peaks: number[], durationSec: number) => void; signal: AbortSignal }
 ): Promise<{ transcript: string; audioUrls: string[]; durationSec: number }> {
   const { onProgress, onPeaks, signal } = options;
-  onProgress({ stage: "decoding", ratio: 0.02, label: "Décodage et compression de l'audio…" });
+  onProgress({ stage: "decoding", ratio: 0.02, label: "Décodage progressif de l'audio…" });
 
-  const prepared = await prepareLectureAudio(file);
-  onPeaks?.(computePeaks(prepared.buffer), prepared.durationSec);
-  const total = prepared.chunkCount;
-
-  const existing = readCheckpoint(file);
-  const checkpoint: Checkpoint =
-    existing && existing.total === total ? existing : { uploadId: crypto.randomUUID(), total, results: {}, savedAt: Date.now() };
-
-  const pending = Array.from({ length: total }, (_, i) => i).filter((i) => !checkpoint.results[String(i)]);
-  let done = total - pending.length;
-  const report = () =>
+  // Same file (fingerprint) = same deterministic chunk grid: a checkpoint is
+  // reused as-is, so a relaunch skips every chunk already transcribed.
+  const checkpoint: Checkpoint = readCheckpoint(file) ?? { uploadId: crypto.randomUUID(), total: 0, results: {}, savedAt: Date.now() };
+  let estimatedTotal = Math.max(checkpoint.total, 1);
+  let produced = 0;
+  let done = Object.keys(checkpoint.results).length;
+  const report = () => {
+    const total = Math.max(estimatedTotal, produced, done, 1);
     onProgress({
       stage: "transcribing",
-      ratio: 0.06 + 0.86 * (done / total),
+      ratio: 0.04 + 0.88 * Math.min(1, done / total),
       label: `Transcription Whisper — segment ${Math.min(done + 1, total)}/${total} (${Math.round((done / total) * 100)}%)`,
       chunksDone: done,
       chunksTotal: total,
     });
-  report();
+  };
 
   // Run governor (lib/ai-run-governor.ts): global budget, adaptive
   // concurrency on 429/503, and a circuit breaker so a saturated or down
@@ -196,45 +194,81 @@ export async function transcribeLecture(
     maxConcurrency: CONCURRENCY,
     breakerThreshold: TRANSCRIPTION_BREAKER_THRESHOLD,
     minAttemptWindowMs: 30_000,
+    stallMs: 8 * 60_000,
   });
   const outcome: { failure: unknown } = { failure: null };
-  async function worker() {
-    while (pending.length > 0 && !outcome.failure) {
-      const index = pending.shift()!;
-      for (let attempt = 1; ; attempt++) {
-        if (signal.aborted) throw new DOMException("Annulé", "AbortError");
-        if (!(await governor.acquire())) {
-          outcome.failure = new Error(
-            governor.stopped === "overload"
-              ? "Le service de transcription est saturé en ce moment."
-              : "La transcription prend plus de temps que prévu, je l'ai mise en pause."
-          );
+
+  async function processChunk(index: number, blob: Blob): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      if (signal.aborted) throw new DOMException("Annulé", "AbortError");
+      if (!(await governor.acquire())) {
+        outcome.failure = new Error(
+          governor.stopped === "overload" ? "Le service de transcription est saturé en ce moment." : "La transcription prend plus de temps que prévu, je l'ai mise en pause."
+        );
+        return;
+      }
+      try {
+        checkpoint.results[String(index)] = await uploadAndTranscribe(blob, checkpoint.uploadId, index, signal);
+        governor.reportSuccess();
+        writeCheckpoint(file, checkpoint);
+        done++;
+        report();
+        return;
+      } catch (error) {
+        const upstream = error instanceof HttpError ? classifyUpstreamStatus(error.status) : error instanceof DOMException ? null : "network";
+        if (upstream) governor.reportUpstreamFailure(upstream, error instanceof HttpError && error.retryAfterMs ? error.retryAfterMs / 1000 : null);
+        if (attempt >= MAX_ATTEMPTS || !isRetryable(error)) {
+          outcome.failure = error;
           return;
         }
-        try {
-          checkpoint.results[String(index)] = await uploadAndTranscribe(prepared, checkpoint.uploadId, index, signal);
-          governor.reportSuccess();
-          writeCheckpoint(file, checkpoint);
-          done++;
-          report();
-          break;
-        } catch (error) {
-          const upstream = error instanceof HttpError ? classifyUpstreamStatus(error.status) : error instanceof DOMException ? null : "network";
-          if (upstream) governor.reportUpstreamFailure(upstream, error instanceof HttpError && error.retryAfterMs ? error.retryAfterMs / 1000 : null);
-          if (attempt >= MAX_ATTEMPTS || !isRetryable(error)) {
-            outcome.failure = error;
-            return;
-          }
-          // Overload pauses are applied by the governor on the next acquire().
-          if (upstream !== "overload") await sleep(Math.min(1500 * 2 ** (attempt - 1), 30_000), signal);
-        } finally {
-          governor.release();
-        }
+        // Overload pauses are applied by the governor on the next acquire().
+        if (upstream !== "overload") await sleep(Math.min(1500 * 2 ** (attempt - 1), 30_000), signal);
+      } finally {
+        governor.release();
       }
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(1, pending.length)) }, worker));
+  // Decode → upload pipelining: chunks are transcribed while later ones are
+  // still decoding; at most CONCURRENCY uploads in flight, and the decoder
+  // itself waits (back-pressure) when chunks are produced faster than sent.
+  const inFlight = new Set<Promise<void>>();
+  let summary = { durationSec: 0, peaks: [] as number[] };
+  try {
+    const stream = streamLectureChunks(file, {
+      signal,
+      onEstimate: (count) => {
+        estimatedTotal = Math.max(count, produced);
+        report();
+      },
+    });
+    for (;;) {
+      const step = await stream.next();
+      if (step.done) {
+        summary = step.value;
+        break;
+      }
+      const chunk = step.value;
+      produced = Math.max(produced, chunk.index + 1);
+      if (outcome.failure) break;
+      if (checkpoint.results[String(chunk.index)]) continue; // already transcribed in an earlier run
+      while (inFlight.size >= CONCURRENCY) await Promise.race(inFlight);
+      const task: Promise<void> = processChunk(chunk.index, chunk.blob).finally(() => inFlight.delete(task));
+      inFlight.add(task);
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    outcome.failure =
+      error instanceof AudioFormatError
+        ? error
+        : new Error("Ce fichier audio n'a pas pu être décodé. Vérifie qu'il s'agit bien d'un enregistrement (M4A, MP3, WAV, OGG, WEBM).");
+  }
+  await Promise.all(inFlight);
+
+  const total = produced;
+  checkpoint.total = total;
+  if (total > 0) writeCheckpoint(file, checkpoint);
+  if (summary.durationSec > 0) onPeaks?.(summary.peaks, summary.durationSec);
 
   const failure = outcome.failure;
   if (failure) {
@@ -242,16 +276,17 @@ export async function transcribeLecture(
     const message = failure instanceof Error ? failure.message : "Erreur inconnue.";
     const saved = Object.keys(checkpoint.results).length;
     throw new LecturePipelineError(
-      saved > 0 ? `${message} — ${saved}/${total} segments sont sauvegardés : relance pour reprendre là où ça s'est arrêté.` : message,
+      saved > 0 ? `${message} — ${saved} segment(s) sauvegardé(s) : relance pour reprendre là où ça s'est arrêté.` : message,
       saved > 0
     );
   }
 
   const ordered = Array.from({ length: total }, (_, i) => checkpoint.results[String(i)]);
+  if (ordered.some((r) => !r)) throw new LecturePipelineError("Certains segments manquent — relance pour les compléter.", true);
   return {
     transcript: buildTimestampedTranscript(ordered.map((r, i) => ({ startSec: i * CHUNK_SECONDS, text: r.text }))),
     audioUrls: ordered.map((r) => r.audioUrl),
-    durationSec: prepared.durationSec,
+    durationSec: summary.durationSec || total * CHUNK_SECONDS,
   };
 }
 

@@ -143,9 +143,23 @@ function stitchSummaryChunks(coursesInOrder: EligibleCourseRow[], chunksByHash: 
     .join("\n\n---\n\n");
 }
 
+/**
+ * Total characters of course material the cross-course call may receive.
+ * Its model (CHEAP_MODEL) has a 32,768-token window shared with the output:
+ * with 50 courses the full per-course chunks (pretty-printed) reached
+ * ~40-80k tokens and the call failed with a context error. Each course now
+ * gets an equal share of this budget (compact JSON, truncated per course).
+ */
+const CROSS_COURSE_INPUT_CHARS = 45_000;
+
 async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], chunksByHash: Map<string, unknown>): Promise<string> {
+  const perCourse = Math.max(350, Math.floor(CROSS_COURSE_INPUT_CHARS / Math.max(1, coursesInOrder.length)));
   const chunksByCourseTitle = Object.fromEntries(
-    coursesInOrder.map((course) => [course.title, chunksByHash.get(resolveContentHash(course)) ?? {}])
+    coursesInOrder.map((course) => {
+      const chunk = chunksByHash.get(resolveContentHash(course)) ?? {};
+      const text = typeof chunk === "string" ? chunk : JSON.stringify(chunk);
+      return [course.title, text.length > perCourse ? `${text.slice(0, perCourse)}…` : text];
+    })
   );
   const prompt = buildCrossCourseSynthesisPrompt(chunksByCourseTitle);
 
@@ -164,7 +178,7 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
     // genuinely additive cross-course synthesis — a knowingly-accepted
     // tradeoff on a small sample, per the product owner's own explicit
     // "runway over accuracy margin" decision.
-    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true }
+    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, timeoutMs: 110_000 }
   );
 
   const parsed = parseJsonResponse(raw);
@@ -402,6 +416,82 @@ async function generateAndStoreSynthesisChunks(
   await storeCourseWorkspaceChunks(newChunks, cacheType);
 }
 
+type CoursesOutcome = { ok: true; courses: EligibleCourseRow[] } | { ok: false; status: number; error: string };
+
+/** The caller's own courses of this module among `courseIds` (ownership enforced), ordered by id. */
+async function loadEligibleCourses(userId: string, moduleId: number, courseIds: number[]): Promise<CoursesOutcome> {
+  const { data, error } = await getSupabaseAdmin()
+    .from("studio_courses")
+    .select("id, title, content_hash, explication, raw_text")
+    .eq("user_id", userId)
+    .eq("curriculum_module_id", moduleId)
+    .in("id", courseIds)
+    .order("id", { ascending: true });
+  if (error) {
+    console.error("[module-synthesis] Échec lecture Supabase:", error);
+    return { ok: false, status: 500, error: `Lecture échouée : ${error.message}` };
+  }
+  return { ok: true, courses: (data ?? []) as EligibleCourseRow[] };
+}
+
+/**
+ * CLIENT-DRIVEN RUN, step 1 (10-50 courses). Lists the selected courses not
+ * yet in the per-course cache and reserves ONE generation unit when work is
+ * needed. The client then generates the missing courses in micro-batches
+ * (prepareModuleSynthesisBatch, one short request each — never one
+ * multi-minute request that Vercel kills at 300 s) and finally assembles
+ * with runModuleSynthesis(..., { prereserved: true }).
+ */
+export async function planModuleSynthesis(
+  user: User,
+  moduleId: number,
+  courseIds: number[],
+  type: ModuleSynthesisType
+): Promise<{ ok: true; missingCourseIds: number[]; total: number; reserved: boolean } | { ok: false; status: number; error: string }> {
+  const loaded = await loadEligibleCourses(user.id, moduleId, courseIds);
+  if (!loaded.ok) return loaded;
+  if (loaded.courses.length < MIN_COURSES_REQUIRED) {
+    return { ok: false, status: 400, error: `Sélectionne au moins ${MIN_COURSES_REQUIRED} cours possédés dans ce module pour générer cette synthèse (${loaded.courses.length} trouvé(s)).` };
+  }
+  const cached = await lookupCourseWorkspaceChunks(loaded.courses.map(resolveContentHash), CACHE_GENERATION_TYPE[type]);
+  const missingCourseIds = loaded.courses.filter((c) => !cached.has(resolveContentHash(c))).map((c) => c.id);
+  const needsWork = missingCourseIds.length > 0 || (type !== "medical_dictionary" && loaded.courses.length > 1);
+  if (needsWork) {
+    const quotaGate = await reserveGeneration(user);
+    if (!quotaGate.allowed) return { ok: false, status: 403, error: quotaGate.reason ?? "Quota atteint." };
+  }
+  return { ok: true, missingCourseIds, total: loaded.courses.length, reserved: needsWork };
+}
+
+/**
+ * CLIENT-DRIVEN RUN, step 2: generates and caches the chunks of a few
+ * courses (3-4) in ONE call with a bounded timeout. Idempotent: courses
+ * already cached are skipped, so a retried batch never pays twice. Never
+ * reserves quota (the plan step did) — the route only accepts it with the
+ * run token returned by that plan step.
+ */
+export async function prepareModuleSynthesisBatch(
+  user: User,
+  moduleId: number,
+  courseIds: number[],
+  type: ModuleSynthesisType
+): Promise<{ ok: true; generated: number; fromCache: number } | { ok: false; status: number; error: string }> {
+  const loaded = await loadEligibleCourses(user.id, moduleId, courseIds);
+  if (!loaded.ok) return loaded;
+  const cacheType = CACHE_GENERATION_TYPE[type];
+  const cached = await lookupCourseWorkspaceChunks(loaded.courses.map(resolveContentHash), cacheType);
+  const missing = loaded.courses.filter((c) => !cached.has(resolveContentHash(c)));
+  if (missing.length === 0) return { ok: true, generated: 0, fromCache: loaded.courses.length };
+  try {
+    const { inputs } = buildCourseInputs(missing);
+    await generateAndStoreSynthesisChunks(type, cacheType, inputs, cached);
+    return { ok: true, generated: missing.length, fromCache: loaded.courses.length - missing.length };
+  } catch (error) {
+    const status = error instanceof OpenRouterError ? error.status : 502;
+    return { ok: false, status, error: error instanceof Error ? error.message : "Échec du lot." };
+  }
+}
+
 /**
  * Runs the full pipeline for one (user, module, courseIds, type) request.
  * Scoped to THIS user AND THIS module — a courseId the caller doesn't own,
@@ -413,8 +503,16 @@ export async function runModuleSynthesis(
   user: User,
   moduleId: number,
   courseIds: number[],
-  type: ModuleSynthesisType
+  type: ModuleSynthesisType,
+  /**
+   * prereserved: final ASSEMBLE step of a client-driven run (see
+   * planModuleSynthesis) — quota was reserved by the plan step, and courses
+   * still missing after the micro-batches are reported as failed instead of
+   * being regenerated here in one long call.
+   */
+  runOptions: { prereserved?: boolean } = {}
 ): Promise<ModuleSynthesisOutcome> {
+  const prereserved = runOptions.prereserved === true;
   if (courseIds.length < MIN_COURSES_REQUIRED) {
     return {
       ok: false,
@@ -423,23 +521,10 @@ export async function runModuleSynthesis(
     };
   }
 
-  const supabase = getSupabaseAdmin();
   const cacheType = CACHE_GENERATION_TYPE[type];
-
-  const { data: courses, error: coursesError } = await supabase
-    .from("studio_courses")
-    .select("id, title, content_hash, explication, raw_text")
-    .eq("user_id", user.id)
-    .eq("curriculum_module_id", moduleId)
-    .in("id", courseIds)
-    .order("id", { ascending: true });
-
-  if (coursesError) {
-    console.error("[module-synthesis] Échec lecture Supabase:", coursesError);
-    return { ok: false, status: 500, error: `Lecture échouée : ${coursesError.message}` };
-  }
-
-  const eligibleCourses = (courses ?? []) as EligibleCourseRow[];
+  const loaded = await loadEligibleCourses(user.id, moduleId, courseIds);
+  if (!loaded.ok) return loaded;
+  const eligibleCourses = loaded.courses;
   if (eligibleCourses.length < MIN_COURSES_REQUIRED) {
     return {
       ok: false,
@@ -469,7 +554,7 @@ export async function runModuleSynthesis(
   // own comment).
   let dictionaryFailedCourses: string[] = [];
 
-  const needsReservation = missingCourses.length > 0 || needsCrossCourseSynthesis;
+  const needsReservation = !prereserved && (missingCourses.length > 0 || needsCrossCourseSynthesis);
 
   if (needsReservation) {
     const quotaGate = await reserveGeneration(user);
@@ -479,7 +564,11 @@ export async function runModuleSynthesis(
   }
 
   try {
-    if (missingCourses.length > 0) {
+    if (prereserved && missingCourses.length > 0) {
+      // Assemble step of a client-driven run: these courses' micro-batches
+      // failed; report them instead of regenerating them in one long call.
+      dictionaryFailedCourses = missingCourses.map((c) => c.title);
+    } else if (missingCourses.length > 0) {
       const { inputs, fallbackTitles: missingFallbacks } = buildCourseInputs(missingCourses);
       fallbackTitles = missingFallbacks;
 
@@ -547,7 +636,7 @@ export async function runModuleSynthesis(
       crossCourseSection = await buildCrossCourseSynthesis(eligibleCourses, cachedByHash);
     }
   } catch (error) {
-    if (needsReservation) await refundGeneration(user.id);
+    if (needsReservation || prereserved) await refundGeneration(user.id);
     if (error instanceof OpenRouterError) {
       return { ok: false, status: error.status, error: error.message };
     }
@@ -585,7 +674,7 @@ export async function runModuleSynthesis(
         // Actual successes, not merely attempted — subtracts any
         // medical_dictionary sub-batch that failed (dictionaryFailedCourses
         // is always [] for every other type, so this is a no-op there).
-        coursesGenerated: missingCourses.length - dictionaryFailedCourses.length,
+        coursesGenerated: Math.max(0, missingCourses.length - dictionaryFailedCourses.length),
         coursesFromCache: eligibleCourses.length - missingCourses.length,
         coursesUsingRawTextFallback: fallbackTitles,
         coursesFailedToGenerate: dictionaryFailedCourses,

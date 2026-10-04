@@ -904,7 +904,13 @@ const EXPLICATION_PART_MAX_TOKENS = 12_000;
  * enough margin — lower it further (and/or shrink CHUNKED_SLICE_CHARS
  * again) rather than raising it back toward the wall.
  */
-const EXPLICATION_PART_TIMEOUT_MS = 180_000;
+// 2026-10-04: 180 s -> 230 s. With 12,000 max tokens at ~70 tok/s a full
+// part needs ~171 s — 180 s left almost no slack, so slower provider moments
+// timed out, forcing subdivision (the cascade behind "La génération prend
+// plus de temps que prévu"). 230 s keeps ~50 s under the 280 s route wall for
+// the DB read, parsing and response write; the call is also routed to the
+// fastest DeepSeek provider (providerSort "throughput" below).
+const EXPLICATION_PART_TIMEOUT_MS = 230_000;
 
 /**
  * Deterministic slice plan for a course's full source text — same slicing
@@ -1157,6 +1163,10 @@ export async function generateExplicationPart(
       // and causing the 180s part timeouts.
       reasoning: { enabled: false },
       timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
+      // Fastest-decoding provider of the 13 serving deepseek-v3.2: a part's
+      // wall-clock is bounded by decode speed (up to 12,000 tokens), so this
+      // is what directly shortens every part and avoids timeouts.
+      providerSort: "throughput",
     }
   );
 

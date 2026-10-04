@@ -46,6 +46,10 @@ export interface ExplicationProgressView {
   inFlightParts: number;
   isRecovering: boolean;
   phase: "generating" | "stitching";
+  /** Readable prefix of the Explication (completed parts in order) — shown while the rest generates. */
+  previewMarkdown?: string;
+  /** Course this progress belongs to, so a preview never shows on another course. */
+  courseId?: number;
 }
 
 export function ExplicationGeneratingLabel({ className, progress }: { className?: string; progress?: ExplicationProgressView | null }) {
