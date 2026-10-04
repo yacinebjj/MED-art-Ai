@@ -235,7 +235,23 @@ export const MID_TIER_MODEL = "openai/gpt-5-mini";
 //   analogous to ECONOMY_MODEL's hidden-reasoning-tokens bug ever surfaces
 //   for this model, re-read this file's own `reasoning` option doc comment
 //   below before assuming the same fix transfers as-is.
-export const CHEAP_MODEL = "qwen/qwen-2.5-72b-instruct";
+//
+// 2026-10-06 — COST AUDIT: qwen-2.5-72b-instruct → qwen3-235b-a22b-2507.
+// Prices confirmed live (GET https://openrouter.ai/api/v1/models, 2026-10-06):
+//   qwen-2.5-72b-instruct    $0.360/M in, $0.400/M out, 32,768 ctx, 16,384 max out
+//   qwen3-235b-a22b-2507     $0.087/M in, $0.350/M out, 262,144 ctx, cached input $0.0175/M
+// i.e. ~4x cheaper input (~20x on a cached prompt prefix), ~12% cheaper
+// output, 8x the context (the 32k ceiling caused real overflows: module
+// dictionary, exam batches, 2-hour lecture transcripts), and the strongest
+// Qwen generation instead of the 2024 one — already this app's
+// LAB_FALLBACK_MODEL, so it runs on medical JSON here today. Same family
+// ("Qwen only"), non-reasoning Instruct variant (no hidden tokens), and its
+// supported parameters are a strict superset of the previous model's, so no
+// call site's request shape changes. Throughput is in the same ~40 tok/s
+// class as before. Not re-benchmarked with live calls in this change (no
+// test budget authorized): scripts/bench-models.mjs runs the comparison on
+// real course text with your own key. Rollback = this one line.
+export const CHEAP_MODEL = "qwen/qwen3-235b-a22b-2507";
 
 // EXPLICATION-ONLY MODEL, 2026-09-30 — carved out of CHEAP_MODEL specifically
 // for lib/studio-explication-delta.ts, after the 2026-09-30 CHEAP_MODEL

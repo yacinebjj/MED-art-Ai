@@ -79,7 +79,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
       const body = new FormData();
       body.append("file", file);
       const res = await fetch("/api/study-planner/upload", { method: "POST", body });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "Le téléversement a échoué.");
       setSource({ fileName: data.fileName, fileUrl: data.fileUrl, text: data.text ?? "", imageOnly: Boolean(data.imageOnly) });
       if (data.imageOnly) {

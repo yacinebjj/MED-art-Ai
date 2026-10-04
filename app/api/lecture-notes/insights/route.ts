@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, LAB_PRIMARY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
         { role: "system", content: INSIGHTS_SYSTEM_PROMPT },
         { role: "user", content: smartNotes.slice(0, 12_000) },
       ],
-      { model: CHEAP_MODEL, maxTokens: 1500, timeoutMs: 75_000 }
+      { model: LAB_PRIMARY_MODEL, maxTokens: 1500, responseFormat: { type: "json_object" }, timeoutMs: 75_000 }
     );
 
     const parsed = parseJsonResponse(raw) as { keywords?: unknown; quiz?: unknown };

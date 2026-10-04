@@ -181,10 +181,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const studyYear = studyYearRaw === 1 || studyYearRaw === 2 ? studyYearRaw : null;
   // A non-default language, a custom prompt (explication only), or a
   // non-default study year on cas_clinique (année 1/2) makes this a
-  // PERSONALIZED request — never served from, nor written to, the
-  // cross-student studio_content_cache (keyed on content_hash alone, no
-  // language/prompt/year dimension — extending it would need a schema
-  // migration this codebase has no confirmed-live tooling for), and never
+  // PERSONALIZED request — cached under its own variant key in
+  // studio_content_cache (exact matches only, see cacheVariant below), never
+  // mixed with the default rows, and never
   // routed through the cross-university Explication chunk-delta pipeline
   // either (that pipeline reuses OTHER students' French, default-prompt
   // chapters — wrong material to reuse for a personalized request). Falls
@@ -195,6 +194,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // would silently share one cas_clinique cache entry — showing one of
   // them the wrong shape/content entirely.
   const isPersonalizedVariant = language !== "fr" || (actionType === "cas_clinique" && studyYear !== null);
+  // Shared-cache variant for those requests: language + (cas_clinique only) study year. Same
+  // source + same variant = same output, so it is reused across students like the default.
+  const cacheVariant = isPersonalizedVariant
+    ? [language !== "fr" ? language : null, actionType === "cas_clinique" && studyYear !== null ? `y${studyYear}` : null].filter(Boolean).join("-")
+    : undefined;
   const languageInstruction =
     language === "en"
       ? "\n\nINSTRUCTION DE LANGUE OBLIGATOIRE (remplace toute langue de sortie précédemment implicite) : rédige l'INTÉGRALITÉ de ta réponse — tous les champs textuels du JSON, sans exception — en ANGLAIS, jamais en français, en conservant strictement le même niveau de rigueur médicale, la même structure JSON et le même format exact déjà exigés ci-dessus." + buildLanguageDirective("en")
@@ -241,9 +245,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   let cacheRowId: string | undefined;
   let cacheMode: "exact" | "delta" | "cross-university-delta" | "miss" = "miss";
 
-  const cacheResult: StudioCacheLookupResult = isPersonalizedVariant
-    ? { hit: false }
-    : await lookupStudioContentCache(actionType, truncatedContext);
+  const cacheResult: StudioCacheLookupResult = await lookupStudioContentCache(actionType, truncatedContext, false, cacheVariant);
 
   if (cacheResult.hit && cacheResult.matchType === "exact") {
     finalData = cacheResult.data;
@@ -439,13 +441,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // errors and never throws, so a caching hiccup can't block this
     // student's own successful generation. No separate "record usage" call
     // here anymore — reserveGeneration() above already incremented
-    // atomically, before this call even ran. Skipped for a personalized
-    // (non-default language / custom prompt) request — see
-    // isPersonalizedVariant's own comment above for why this must never
-    // enter the shared cross-student cache.
-    if (!isPersonalizedVariant) {
-      await storeStudioContentCache(actionType, truncatedContext, finalData);
-    }
+    // atomically, before this call even ran. A personalized request is
+    // stored under its own variant key (language/year), never mixed with the
+    // default rows.
+    await storeStudioContentCache(actionType, truncatedContext, finalData, cacheVariant);
   }
 
   // Persist BEFORE returning success — see this route's header comment.

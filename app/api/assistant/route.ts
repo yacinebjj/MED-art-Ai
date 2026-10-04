@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { HAIKU_MODEL, FREE_MODEL_CHAIN, OpenRouterError, streamOpenRouter, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { ECONOMY_MODEL, FREE_MODEL_CHAIN, OpenRouterError, streamOpenRouter, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
@@ -271,14 +271,16 @@ export async function POST(request: NextRequest) {
     buildUserMessage(message, imageAttachment),
   ];
 
-  // Image attachments go straight to HAIKU_MODEL (paid) — Anthropic's own
-  // confirmed vision support, not FREE_MODEL_CHAIN's unverified "multimodal"
-  // catalog claim (see that constant's own comment for why). Images are a
+  // Image attachments go to ECONOMY_MODEL (Gemini Flash, native vision —
+  // the model the Dashboard assistant already uses for images) instead of
+  // HAIKU_MODEL: $0.75/$3.75 vs $1/$5 per M tokens, reasoning capped low.
+  // Not FREE_MODEL_CHAIN, whose "multimodal" catalog claim is unverified
+  // (see that constant's own comment for why). Images are a
   // minority of Assistant messages, so this still leaves the bulk of real
   // traffic (text-only) on the free tier below.
   if (imageAttachment) {
     try {
-      const stream = await streamOpenRouter(messages, { model: HAIKU_MODEL, maxTokens: 2048 });
+      const stream = await streamOpenRouter(messages, { model: ECONOMY_MODEL, maxTokens: 2048, reasoning: { effort: "low" } });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },

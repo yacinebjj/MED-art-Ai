@@ -46,7 +46,7 @@ export function PendingRequestsPanel({ groupId, onCountChange }: PendingRequests
         headers: accept ? { "Content-Type": "application/json" } : undefined,
         body: accept ? JSON.stringify({ status: "accepted" }) : undefined,
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "Une erreur est survenue.");
 
       setMembers((prev) => {

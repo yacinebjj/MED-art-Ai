@@ -39,7 +39,7 @@ import {
   type CourseWorkspaceGenerationType,
   type KeywordCategories,
 } from "@/lib/course-workspace-cache";
-import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { MAX_SOURCE_CHARS, errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 
 export type ModuleSynthesisType = "global_summary" | "keywords_table" | "medical_dictionary";
@@ -83,8 +83,40 @@ export interface EligibleCourseRow {
   raw_text: string;
 }
 
+/** Same definition as studio_courses.content_hash (60k-char prefix) — the fallback used to hash the FULL text, giving long courses two different keys. */
 function resolveContentHash(course: EligibleCourseRow): string {
-  return course.content_hash ?? sha256(normalizeText(course.raw_text));
+  return course.content_hash ?? sha256(normalizeText(course.raw_text.slice(0, MAX_SOURCE_CHARS)));
+}
+
+/**
+ * Cross-course synthesis cache (module_cross_synthesis_cache): the synthesis
+ * is a pure function of the courses' contents AND titles (the titles appear
+ * in the output, so they are part of the key — another student's file names
+ * are never shown). It used to be regenerated on every request, even when
+ * every per-course chunk was a cache hit.
+ */
+function crossSynthesisKey(coursesInOrder: EligibleCourseRow[]): string {
+  const parts = coursesInOrder.map((course) => `${resolveContentHash(course)}|${course.title.trim()}`).sort();
+  return sha256(`cross-v1\n${parts.join("\n")}`);
+}
+
+async function lookupCrossSynthesis(key: string): Promise<string | null> {
+  try {
+    const { data, error } = await getSupabaseAdmin().from("module_cross_synthesis_cache").select("content").eq("cache_key", key).maybeSingle<{ content: string }>();
+    if (error) return null;
+    return data?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function storeCrossSynthesis(key: string, content: string): Promise<void> {
+  try {
+    const { error } = await getSupabaseAdmin().from("module_cross_synthesis_cache").upsert({ cache_key: key, content }, { onConflict: "cache_key", ignoreDuplicates: true });
+    if (error) console.error("[module-synthesis:cross-cache] Échec écriture (non bloquant):", error.message);
+  } catch (error) {
+    console.error("[module-synthesis:cross-cache] Exception écriture (non bloquant):", errorMessage(error));
+  }
 }
 
 function buildCourseInputs(courses: EligibleCourseRow[]): { inputs: ModuleSynthesisCourseInput[]; fallbackTitles: string[] } {
@@ -144,6 +176,10 @@ function stitchSummaryChunks(coursesInOrder: EligibleCourseRow[], chunksByHash: 
 }
 
 async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], chunksByHash: Map<string, unknown>): Promise<string> {
+  const cacheKey = crossSynthesisKey(coursesInOrder);
+  const cached = await lookupCrossSynthesis(cacheKey);
+  if (cached) return cached;
+
   const chunksByCourseTitle = Object.fromEntries(
     coursesInOrder.map((course) => [course.title, chunksByHash.get(resolveContentHash(course)) ?? {}])
   );
@@ -172,6 +208,7 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
   if (!content.trim()) {
     throw new Error("La réponse de l'IA ne contient pas de synthèse transversale exploitable.");
   }
+  await storeCrossSynthesis(cacheKey, content);
   return content;
 }
 

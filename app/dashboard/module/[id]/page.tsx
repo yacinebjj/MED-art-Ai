@@ -871,7 +871,7 @@ export default function ModuleWorkspacePage() {
     fetch(`/api/curriculum/modules/${params.id}`)
       .then(async (res) => {
         if (!res.ok) throw new Error("not found");
-        const body = await res.json();
+        const body = await res.json().catch(() => ({}));
         return body.module as CurriculumModule;
       })
       .then((mod) => {
@@ -1195,10 +1195,10 @@ export default function ModuleWorkspacePage() {
     const uploaded = await uploadDocumentDirect(file, moduleId);
     if (!uploaded.course) throw new Error("La création du cours a échoué.");
 
+    // No per-file toast: UploadModal shows one summary for the whole batch (a 40-file import would otherwise stack 40 toasts).
     applyCreatedCourse(uploaded.course, uploaded.text, uploaded.fileUrl);
-    toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} a été importé et sauvegardé.` });
     return String(uploaded.course.id);
-  }, [moduleId, applyCreatedCourse, toast, language]);
+  }, [moduleId, applyCreatedCourse]);
 
   /** Explicit OCR retry after handleFileSelected throws lib/upload-client.ts's OcrSuggestedError (a scanned PDF with no real text layer) — a real, billed OpenRouter call, only ever triggered by the student's own click on UploadModal's "Essayer l'OCR" action, never automatically. */
   const handleOcrRetry = useCallback(async (path: string, fileName: string): Promise<string> => {
@@ -2072,6 +2072,7 @@ export default function ModuleWorkspacePage() {
         try {
           if (!activeCourseRef.current) {
             await handleFileSelected(file);
+            toast({ variant: "success", title: tModulePage("toastSourceAdded", language), description: `${file.name} a été importé et sauvegardé.` });
           } else {
             const uploaded = await uploadDocumentDirect(file, moduleId);
             if (!uploaded.course) throw new Error("La création du cours a échoué.");

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, HAIKU_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, LAB_PRIMARY_MODEL } from "@/lib/ai/openrouter";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveHighlightMessage, refundHighlightMessage } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
@@ -101,9 +101,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const raw = await callOpenRouter(
       [{ role: "system", content: buildPrompt(title.trim()) }],
-      // HAIKU_MODEL — small, fast, cheap: a 2-4 item suggestion list for one
+      // LAB_PRIMARY_MODEL (qwen3-30b-a3b, ~$0.05/$0.19 per M, ~150 tok/s) — was
+      // HAIKU_MODEL ($1/$5): ~20x the price for a 2-4 item suggestion list for one
       // task title doesn't need a heavier tier.
-      { model: HAIKU_MODEL, maxTokens: 500, bypassMock: true, timeoutMs: 60_000 }
+      { model: LAB_PRIMARY_MODEL, maxTokens: 500, bypassMock: true, timeoutMs: 60_000 }
     );
 
     const parsed = parseJsonResponse(raw);

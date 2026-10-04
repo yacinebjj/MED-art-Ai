@@ -942,7 +942,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const selectedCourses = eligibleCourses.map((course) => ({ id: course.id, title: course.title }));
 
   if (!cachedContent && !isVariation && !isPersonalizedExam) {
-    void storeExamCache(contentHash, content, selectedCourses);
+    // Awaited: a fire-and-forget write can be frozen with the function once the response is sent.
+    await storeExamCache(contentHash, content, selectedCourses);
   }
   // Personalized exams never enter the shared variation pool either.
   if (isVariation && !servedFromVariationPool && !isPersonalizedExam) {

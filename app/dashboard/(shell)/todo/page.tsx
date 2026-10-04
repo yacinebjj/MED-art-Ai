@@ -53,7 +53,7 @@ export default function TodoPage() {
     async function bootstrap() {
       try {
         const res = await fetch("/api/study-planner/plans");
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok || !data.success) {
           setStep({ name: "modules" });
@@ -104,7 +104,7 @@ export default function TodoPage() {
   async function handlePlanSaved(planId: number, status: "draft" | "active") {
     if (status !== "active") return;
     const res = await fetch(`/api/study-planner/plans/${planId}`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (res.ok && data.success) {
       setStep({ name: "execute", planId, tasks: data.tasks ?? [] });
     }

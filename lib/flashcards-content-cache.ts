@@ -79,7 +79,7 @@ export async function lookupFlashcardsCacheBatch(contentHashes: string[]): Promi
   }
 }
 
-/** Stores a freshly-generated definitive set for future cross-student reuse. Fail-open: a write failure is logged, never thrown — the student's own generation already succeeded and must not be blocked by a caching side-effect failing. */
+/** Stores a freshly-generated definitive set for future cross-student reuse. First writer wins (ignoreDuplicates): a concurrent generation or an already-extended set is never overwritten — cards someone already paid for are never wiped. Fail-open: a write failure is logged, never thrown. */
 export async function storeFlashcardsCache(contentHash: string, cards: FlashcardQA[]): Promise<void> {
   if (!isSupabaseConfigured()) return;
 
@@ -87,7 +87,7 @@ export async function storeFlashcardsCache(contentHash: string, cards: Flashcard
     const supabase = getSupabaseAdmin();
     const { error } = await supabase
       .from("flashcards_content_cache")
-      .upsert({ content_hash: contentHash, cards_data: cards }, { onConflict: "content_hash" });
+      .upsert({ content_hash: contentHash, cards_data: cards }, { onConflict: "content_hash", ignoreDuplicates: true });
 
     if (error) {
       console.error("[flashcards-content-cache:store] Échec écriture (fail-open — la génération reste utilisable):", error.message);
@@ -113,14 +113,18 @@ export async function recordFlashcardsCacheHit(contentHash: string): Promise<voi
  * Appends freshly generated EXTENSION cards to a course's cached set (the
  * "infinite" study flow — see app/api/flashcards/generate/route.ts), so the
  * next student who exhausts the same course gets them for free instead of
- * paying for another generation. Read-modify-write; two simultaneous
- * extensions of the same course can at worst both append (duplicates are
- * filtered by question on read). Fail-open like storeFlashcardsCache.
+ * paying for another generation. Atomic through the append_flashcards_cache
+ * RPC (`cards_data || new` in one statement — the old read-modify-write lost
+ * one of two concurrent extensions, i.e. cards already paid for). Falls back
+ * to read-modify-write until that migration is applied. Fail-open.
  */
 export async function appendFlashcardsCache(contentHash: string, newCards: FlashcardQA[]): Promise<void> {
   if (!isSupabaseConfigured() || newCards.length === 0) return;
   try {
     const supabase = getSupabaseAdmin();
+    const { error: rpcError } = await supabase.rpc("append_flashcards_cache", { p_content_hash: contentHash, p_cards: newCards });
+    if (!rpcError) return;
+    console.warn("[flashcards-content-cache:append] RPC indisponible, repli lecture-écriture:", rpcError.message);
     const { data, error } = await supabase
       .from("flashcards_content_cache")
       .select("cards_data")

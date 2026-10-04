@@ -188,7 +188,7 @@ function BillingPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Impossible de créer le paiement.");
       window.location.href = data.checkoutUrl;
     } catch (err) {

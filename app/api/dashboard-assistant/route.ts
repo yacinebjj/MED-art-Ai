@@ -212,7 +212,8 @@ export async function POST(request: NextRequest) {
       } as unknown as ChatMessageInput,
     ];
     try {
-      const stream = await streamOpenRouter(visionMessages, { model: ECONOMY_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.3 });
+      // Reasoning capped: Gemini Flash always thinks, and uncapped thinking both bills hidden tokens and truncates answers.
+      const stream = await streamOpenRouter(visionMessages, { model: ECONOMY_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.3, reasoning: { effort: "low" } });
       return new NextResponse(stream, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     } catch (error) {
       console.error("[dashboard-assistant] Analyse d'image échouée:", error instanceof Error ? error.message : error);

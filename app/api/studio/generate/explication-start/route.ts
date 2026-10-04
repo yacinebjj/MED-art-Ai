@@ -151,7 +151,9 @@ export async function POST(request: NextRequest) {
 
   const language: "fr" | "en" = languageRaw === "en" ? "en" : "fr";
   const customPrompt = typeof customPromptRaw === "string" ? customPromptRaw.trim().slice(0, 2000) : "";
-  const isPersonalizedVariant = language !== "fr" || customPrompt.length > 0;
+  // A custom prompt is unique to this student; English is a shared variant of the cache.
+  const isPersonalizedVariant = customPrompt.length > 0;
+  const cacheVariant = language !== "fr" ? language : undefined;
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -185,7 +187,7 @@ export async function POST(request: NextRequest) {
   // and this route's whole point is to be as fast as possible.
   const cacheResult: StudioCacheLookupResult = isPersonalizedVariant
     ? { hit: false }
-    : await lookupStudioContentCache("explication", truncatedContext, true);
+    : await lookupStudioContentCache("explication", truncatedContext, true, cacheVariant);
 
   if (cacheResult.hit && cacheResult.matchType === "exact") {
     const markdown = cacheResult.data as string;

@@ -766,7 +766,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "L'envoi a échoué.");
 
       const confirmed: LocalChatMessage = { ...data.message, status: "sent" };
@@ -839,7 +839,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ optionId }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "Le vote a échoué.");
       setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions ?? {} } : m)));
     } catch (err) {
@@ -934,7 +934,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emoji }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "La réaction a échoué.");
       setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions: data.reactions ?? {} } : m)));
     } catch (err) {
@@ -955,7 +955,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageId }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "L'épinglage a échoué.");
     } catch (err) {
       setPinnedMessageId(previous);
@@ -969,7 +969,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
       const body = new FormData();
       body.append("file", file);
       const res = await fetch(`/api/groups/${groupId}/media`, { method: "POST", body });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "L'envoi a échoué.");
       setMessages((prev) => (prev.some((m) => m.id === data.message.id) ? prev : [...prev, { ...data.message, status: "sent" }]));
     } catch (err) {

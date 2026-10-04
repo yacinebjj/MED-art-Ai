@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fileSha256, lookupFileResult, storeFileResult } from "@/lib/ai-file-cache";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
@@ -80,10 +81,26 @@ export async function POST(request: NextRequest) {
   const { data: publicUrlData } = supabase.storage.from(SOURCE_FILES_BUCKET).getPublicUrl(path);
   const fileUrl = publicUrlData.publicUrl;
 
+  // Same scanned PDF already OCR'd for anyone? Reuse it: OCR is billed per
+  // page, and a whole promotion often uploads the identical polycopié.
+  let fileHash: string | null = null;
+  try {
+    const { data: blob } = await supabase.storage.from(SOURCE_FILES_BUCKET).download(path);
+    if (blob) fileHash = fileSha256(Buffer.from(await blob.arrayBuffer()));
+  } catch (error) {
+    console.error("[upload/finalize-ocr] Empreinte du fichier impossible (OCR réel utilisé):", errorMessage(error));
+  }
+  const cachedText = fileHash ? await lookupFileResult<string>("ocr", fileHash) : null;
+
   let text: string;
   try {
-    const result = await extractPdfTextViaOcr(fileUrl, fileName);
-    text = sanitizeForPostgres(result.text);
+    if (cachedText) {
+      text = cachedText;
+    } else {
+      const result = await extractPdfTextViaOcr(fileUrl, fileName);
+      text = sanitizeForPostgres(result.text);
+      if (fileHash && text.length >= 50) await storeFileResult("ocr", fileHash, text);
+    }
   } catch (error) {
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });

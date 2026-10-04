@@ -1140,12 +1140,18 @@ export async function generateExplicationPart(
       ? `\n\n---\nCe cours source est traité en ${totalParts} parties consécutives (contrainte technique de plateforme, invisible pour l'étudiant qui verra un seul document continu). Tu rédiges ICI la PARTIE ${partNumber}/${totalParts} — les extraits numérotés ci-dessous couvrent UNIQUEMENT cette partie, dans l'ordre du cours. Continue directement le contenu, structuré en chapitres Markdown ("## Titre du chapitre") comme d'habitude. N'écris NI introduction générale du cours NI conclusion récapitulative dans cette partie — seulement le corps des chapitres qu'elle couvre ; les autres parties seront concaténées à la suite.\n\nRepère de longueur pour cette partie : environ ${lengthBudget.target} mots, plafond absolu ${lengthBudget.ceiling} mots. Le document final sera long parce qu'il y a ${totalParts} parties, pas parce que chaque partie est illimitée.${continuityInstruction}`
       : `\n\n---\nRepère de longueur pour ce cours : environ ${lengthBudget.target} mots, plafond absolu ${lengthBudget.ceiling} mots.`;
 
+  // The system message is the STATIC prompt only (identical for every part of
+  // every course), and the per-part instruction leads the user message: the
+  // provider can then serve the ~4k-token system prefix from its prompt cache
+  // (qwen3-235b-a22b-2507: $0.0175/M cached vs $0.087/M) instead of
+  // re-billing it in full on every part — it used to come AFTER a per-part
+  // preamble, which made every prefix unique.
   const raw = await callOpenRouter(
     [
-      { role: "system", content: partInstruction + "\n\n---\n\n" + explicationSystemPrompt },
+      { role: "system", content: explicationSystemPrompt },
       {
         role: "user",
-        content: `Voici le contenu source${totalParts > 1 ? ` (partie ${partNumber}/${totalParts})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
+        content: `${partInstruction.replace(/^\n+---\n/, "").trim()}\n\n---\n\nVoici le contenu source${totalParts > 1 ? ` (partie ${partNumber}/${totalParts})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
       },
     ],
     {

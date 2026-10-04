@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Supabase CLI local cache
 supabase/.temp/
+
+# scripts/bench-models.mjs output
+bench-output/

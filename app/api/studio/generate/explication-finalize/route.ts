@@ -4,6 +4,8 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage, MAX_SOURCE_CHARS } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { storeStudioContentCache } from "@/lib/studio-content-cache";
+import { documentMatchesGeneratedParts, explicationSourceHash } from "@/lib/explication-part-cache";
+import { computeExplicationSlices } from "@/lib/studio-explication-delta";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { persistExplicationChapters } from "@/lib/studio-explication-delta";
 import { dispatchStudioGenerationPush } from "@/lib/push/dispatch";
@@ -63,7 +65,9 @@ export async function POST(request: NextRequest) {
 
   const language: "fr" | "en" = languageRaw === "en" ? "en" : "fr";
   const customPrompt = typeof customPromptRaw === "string" ? customPromptRaw.trim().slice(0, 2000) : "";
-  const isPersonalizedVariant = language !== "fr" || customPrompt.length > 0;
+  // A custom prompt makes the output unique to this student; a language alone is a shareable variant.
+  const isPersonalizedVariant = customPrompt.length > 0;
+  const cacheVariant = language !== "fr" ? language : undefined;
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -72,10 +76,10 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   const { data: courseRow, error: courseRowError } = await supabase
     .from("studio_courses")
-    .select("raw_text, title, curriculum_module_id")
+    .select("raw_text, title, curriculum_module_id, explication_reservation_pending")
     .eq("id", courseId)
     .eq("user_id", user.id)
-    .maybeSingle<{ raw_text: string | null; title: string | null; curriculum_module_id: number | null }>();
+    .maybeSingle<{ raw_text: string | null; title: string | null; curriculum_module_id: number | null; explication_reservation_pending: boolean | null }>();
   if (courseRowError) {
     return NextResponse.json({ success: false, error: `Lecture échouée : ${courseRowError.message}` }, { status: 500 });
   }
@@ -112,8 +116,19 @@ export async function POST(request: NextRequest) {
 
   await persistExplicationChapters(courseId, explicationMarkdown);
 
-  if (!isPersonalizedVariant) {
-    await storeStudioContentCache("explication", truncatedContext, explicationMarkdown);
+  // Shared cross-student cache: only for a run this server reserved, and only
+  // when the submitted document provably comes from parts THIS server
+  // generated for this exact source (lib/explication-part-cache.ts). The
+  // parts are posted by the browser, so without this check anyone could
+  // write arbitrary text into every other student's Explication.
+  if (!isPersonalizedVariant && courseRow.explication_reservation_pending) {
+    const rawText = courseRow.raw_text ?? "";
+    const verified = await documentMatchesGeneratedParts(explicationSourceHash(rawText), language, computeExplicationSlices(rawText).length, explicationMarkdown);
+    if (verified) {
+      await storeStudioContentCache("explication", truncatedContext, explicationMarkdown, cacheVariant);
+    } else {
+      console.warn(`[explication-finalize] Document non vérifié contre les parties générées — non partagé (cours ${courseId}).`);
+    }
   }
 
   if (courseRow.title && courseRow.curriculum_module_id) {

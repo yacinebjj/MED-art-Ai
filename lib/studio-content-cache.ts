@@ -57,6 +57,17 @@ interface StudioCacheRow {
   minhash_signature: number[];
 }
 
+/**
+ * Row key for a section + optional variant. The default (French, default
+ * year) keeps the bare section name, so every existing row stays valid; a
+ * variant ("en", "y1", "en-y2"…) is stored as "section@variant" — English
+ * and year-specific generations are now shared across students too instead
+ * of being regenerated (and paid) for every single one of them.
+ */
+function sectionKeyFor(section: JsonSectionId, variant?: string): string {
+  return variant ? `${section}@${variant}` : section;
+}
+
 export interface StudioCacheLookupResult {
   hit: boolean;
   data?: unknown;
@@ -86,7 +97,8 @@ export interface StudioCacheLookupResult {
 export async function lookupStudioContentCache(
   section: JsonSectionId,
   rawText: string,
-  exactOnly = false
+  exactOnly = false,
+  variant?: string
 ): Promise<StudioCacheLookupResult> {
   if (!isSupabaseConfigured()) return { hit: false };
   const supabase = getSupabaseAdmin();
@@ -96,7 +108,7 @@ export async function lookupStudioContentCache(
   const { data: exactRow, error: exactError } = await supabase
     .from("studio_content_cache")
     .select("id, data")
-    .eq("section", section)
+    .eq("section", sectionKeyFor(section, variant))
     .eq("content_hash", hash)
     .maybeSingle();
 
@@ -107,7 +119,8 @@ export async function lookupStudioContentCache(
   if (exactRow) {
     return { hit: true, data: exactRow.data, matchType: "exact", similarity: 1, cacheRowId: exactRow.id };
   }
-  if (exactOnly) return { hit: false };
+  // Variants are exact-only: the fuzzy tier feeds a delta-adaptation prompt written for the default variant.
+  if (exactOnly || variant) return { hit: false };
 
   // Fuzzy tier: pull cached signatures for this section and compare
   // in-process — keeps the similarity math in one place
@@ -156,7 +169,7 @@ export async function lookupStudioContentCache(
  * own generation already succeeded and must not be blocked by a caching
  * side-effect failing.
  */
-export async function storeStudioContentCache(section: JsonSectionId, rawText: string, data: unknown): Promise<void> {
+export async function storeStudioContentCache(section: JsonSectionId, rawText: string, data: unknown, variant?: string): Promise<void> {
   if (!isSupabaseConfigured()) return;
   const supabase = getSupabaseAdmin();
   const normalized = normalizeText(rawText);
@@ -165,7 +178,7 @@ export async function storeStudioContentCache(section: JsonSectionId, rawText: s
 
   const { error } = await supabase.from("studio_content_cache").upsert(
     {
-      section,
+      section: sectionKeyFor(section, variant),
       content_hash: hash,
       minhash_signature: signature,
       normalized_length: normalized.length,

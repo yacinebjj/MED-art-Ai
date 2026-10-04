@@ -240,7 +240,7 @@ async function fetchLinkedCard(cardId: string, signal: AbortSignal): Promise<Fla
   try {
     const res = await fetch(`/api/flashcards/card?id=${encodeURIComponent(cardId)}`, { signal });
     if (!res.ok) return null;
-    const body: unknown = await res.json();
+    const body: unknown = await res.json().catch(() => ({}));
     const card = body && typeof body === "object" ? (body as { card?: unknown }).card : null;
     return isFlashcardPoolItem(card) ? card : null;
   } catch {

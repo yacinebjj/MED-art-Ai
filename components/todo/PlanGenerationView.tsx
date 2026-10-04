@@ -56,7 +56,7 @@ export function PlanGenerationView({ planId, initialCoachMessage, initialDays, o
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId, message }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "L'affinement a échoué.");
 
       setDays(data.days);
@@ -77,7 +77,7 @@ export function PlanGenerationView({ planId, initialCoachMessage, initialDays, o
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ generatedPlan: days, refinementChat: chatMessages, status }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error ?? "La sauvegarde a échoué.");
 
       toast({ variant: "success", title: status === "active" ? tTodo("toastPlanLaunched", language) : tTodo("toastPlanSaved", language) });

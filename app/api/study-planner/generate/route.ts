@@ -189,7 +189,8 @@ export async function POST(request: NextRequest) {
         return callOpenRouter(
           [
             { role: "system", content: prompt },
-            { role: "user", content: message.trim() },
+            // The new request is already the last entry of `history` inside the prompt — not re-sent a second time.
+            { role: "user", content: "Applique ma dernière demande (dernier message de l'historique ci-dessus)." },
           ],
           // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
           // NOT independently tested (only the initial-generation call

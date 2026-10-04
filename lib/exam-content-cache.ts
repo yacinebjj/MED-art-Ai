@@ -17,20 +17,19 @@ interface ExamCourseForHash {
 }
 
 /**
- * Sorted by course id (defensively — callers already order by id, but the
- * hash must never depend on request/array order) and joined with an
- * unambiguous separator, so this is stable across students who select the
- * exact same set of courses regardless of the order they clicked them in.
- * Uses each course's full explication/raw_text (not the per-call
- * MAX_PER_COURSE_CHARS-capped slice fed to the model) so this hash never
- * shifts if that cap is retuned later.
+ * CONTENT-only key: each course contributes the sha256 of its normalized
+ * explication/raw_text, sorted, so the hash is identical for every student
+ * who selects the same set of courses — whatever their own upload ids and
+ * click order. (It used to include `course.id`, a per-student upload id:
+ * two students with the same course never shared an exam.) Uses each
+ * course's full text (not the MAX_PER_COURSE_CHARS-capped slice fed to the
+ * model) so the hash never shifts if that cap is retuned.
  */
 export function computeExamContentHash(courses: ExamCourseForHash[]): string {
-  const normalized = [...courses]
-    .sort((a, b) => a.id - b.id)
-    .map((course) => `${course.id}::${normalizeText(course.explication ?? course.raw_text)}`)
-    .join("\n---\n");
-  return createHash("sha256").update(normalized, "utf8").digest("hex");
+  const perCourse = courses
+    .map((course) => createHash("sha256").update(normalizeText(course.explication ?? course.raw_text), "utf8").digest("hex"))
+    .sort();
+  return createHash("sha256").update(`exam-v2\n${perCourse.join("\n")}`, "utf8").digest("hex");
 }
 
 /** Checked before generating (skipped entirely for variation:true requests — see the route). Returns `null` on any Supabase error or misconfiguration — a lookup failure must never block generation, only skip the optimization. */

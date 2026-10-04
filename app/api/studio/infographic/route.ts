@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { findStoredVariantUrl } from "@/lib/storage-variant-lookup";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -167,6 +168,14 @@ export async function POST(request: NextRequest) {
   const contentHash = sha256(normalizeText(sourceText));
 
   try {
+    // Non-default variants are stored at a deterministic path — reuse it if anyone generated it already.
+    if (!isDefaultVariant) {
+      const variantUrl = await findStoredVariantUrl(INFOGRAPHIC_BUCKET, `${contentHash}-${language}-${modelKey}`);
+      if (variantUrl) {
+        await persistInfographicUrl(supabase, courseId, user.id, variantUrl);
+        return NextResponse.json({ success: true, imageUrl: variantUrl, cached: true });
+      }
+    }
     if (isDefaultVariant) {
       const cachedUrl = await lookupStudioInfographicCache(contentHash);
       if (cachedUrl) {
