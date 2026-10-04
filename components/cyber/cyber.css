@@ -1,0 +1,304 @@
+/*
+ * Cyber-Medical design kit — shared by the revision pages (Flashcards,
+ * Pomodoro, Notes, To-Do planner) and the QCM exam workspace.
+ *
+ * Everything is scoped under `.cyber-stage` (a `.dark` subtree, see
+ * CyberStage.tsx) or opt-in utility classes, so the dashboard home and the
+ * shell chrome are never affected.
+ *
+ * Performance budget:
+ *  - every ambient layer is a static gradient (no blur filter, no animation);
+ *  - backdrop-filter only from md: up (and app/globals.css already strips it
+ *    on touch devices);
+ *  - the only infinite animations are compositor-only transforms (laser
+ *    sweep, dial scanner), turned off on phones and under reduced motion.
+ */
+
+@keyframes cyber-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes cyber-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes cyber-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.95;
+  }
+}
+
+@keyframes cyber-burst {
+  from {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.2);
+    opacity: 0;
+  }
+}
+
+@keyframes cyber-ripple {
+  from {
+    transform: translate(-50%, -50%) scale(0.4);
+    opacity: 0.7;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes cyber-sheen {
+  from {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(220%) skewX(-18deg);
+  }
+}
+
+/* ── Stage: the abyssal dark canvas each page lives on ───────────────── */
+.cyber-stage {
+  position: relative;
+  isolation: isolate;
+  color: rgb(226 232 240);
+  background-color: #020617;
+  background-image:
+    radial-gradient(ellipse 60% 45% at 0% 0%, var(--cyber-glow-a, rgb(34 211 238 / 0.16)) 0%, transparent 70%),
+    radial-gradient(ellipse 55% 45% at 100% 0%, var(--cyber-glow-b, rgb(139 92 246 / 0.16)) 0%, transparent 70%),
+    radial-gradient(ellipse 70% 50% at 50% 110%, rgb(14 165 233 / 0.1) 0%, transparent 70%);
+  border: 1px solid rgb(148 163 184 / 0.1);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.04),
+    0 30px 80px -40px rgb(2 6 23 / 0.9);
+}
+
+.cyber-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(148 163 184 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(148 163 184 / 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 10%, transparent 75%);
+  mask-image: radial-gradient(ellipse at 50% 0%, #000 10%, transparent 75%);
+}
+
+/* ── Glass surfaces ──────────────────────────────────────────────────── */
+.cyber-glass {
+  position: relative;
+  background-color: rgb(2 6 23 / 0.82);
+  border: 1px solid rgb(148 163 184 / 0.12);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 24px 60px -36px rgb(34 211 238 / 0.35);
+}
+
+@media (min-width: 768px) {
+  .cyber-glass {
+    background-color: rgb(15 23 42 / 0.55);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    backdrop-filter: blur(18px) saturate(140%);
+  }
+}
+
+.cyber-glass-hover {
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.25s ease;
+}
+
+.cyber-glass-hover:hover {
+  border-color: rgb(34 211 238 / 0.35);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 0 0 1px rgb(34 211 238 / 0.08),
+    0 18px 50px -24px rgb(34 211 238 / 0.45);
+}
+
+/* ── Laser border: a conic gradient clipped to a 1px ring ────────────── */
+.cyber-laser {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  /* Shorthand first: `mask` resets mask-composite. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.cyber-laser::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 260%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--cyber-laser-a, rgb(34 211 238 / 0.95)) 40deg,
+    transparent 100deg,
+    transparent 180deg,
+    var(--cyber-laser-b, rgb(139 92 246 / 0.9)) 220deg,
+    transparent 280deg
+  );
+}
+
+@media (min-width: 768px) and (prefers-reduced-motion: no-preference) {
+  .cyber-laser[data-spin="true"]::before {
+    animation: cyber-spin 6s linear infinite;
+  }
+}
+
+/* ── Desktop 3D micro-tilt (driven by CSS vars from useCyberTilt) ────── */
+.cyber-tilt {
+  transform: perspective(1100px) rotateX(var(--cyber-rx, 0deg)) rotateY(var(--cyber-ry, 0deg));
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cyber-tilt[data-tilting="true"] {
+  transition: transform 0.08s linear;
+}
+
+/* Interactive light reflection that follows the cursor. */
+.cyber-reflect {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--cyber-reflect, 0);
+  background: radial-gradient(420px circle at var(--cyber-mx, 50%) var(--cyber-my, 50%), rgb(34 211 238 / 0.12), transparent 60%);
+  transition: opacity 0.3s ease;
+}
+
+/* Magnetic buttons drift towards the cursor. */
+.cyber-magnetic {
+  transform: translate3d(var(--cyber-tx, 0px), var(--cyber-ty, 0px), 0);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── Typography ──────────────────────────────────────────────────────── */
+.cyber-title {
+  background-image: linear-gradient(100deg, #fff 0%, #cffafe 45%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.cyber-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgb(103 232 249 / 0.85);
+}
+
+/* ── Micro-particles / ripples ───────────────────────────────────────── */
+.cyber-particle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: var(--cyber-particle, rgb(34 211 238));
+  box-shadow: 0 0 10px var(--cyber-particle, rgb(34 211 238));
+  animation: cyber-burst 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.cyber-ripple {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60px;
+  height: 60px;
+  border-radius: 9999px;
+  pointer-events: none;
+  border: 2px solid var(--cyber-particle, rgb(34 211 238));
+  animation: cyber-ripple 0.6s ease-out forwards;
+}
+
+.cyber-sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.cyber-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.18), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+}
+
+.group:hover .cyber-sheen::after {
+  animation: cyber-sheen 0.9s ease-out;
+}
+
+.cyber-breathe {
+  animation: cyber-breathe 4s ease-in-out infinite;
+}
+
+.cyber-rotate {
+  animation: cyber-rotate 18s linear infinite;
+}
+
+.cyber-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(34 211 238 / 0.25) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cyber-particle,
+  .cyber-ripple,
+  .cyber-breathe,
+  .cyber-rotate,
+  .group:hover .cyber-sheen::after {
+    animation: none !important;
+    opacity: 0;
+  }
+
+  .cyber-breathe,
+  .cyber-rotate {
+    opacity: 1;
+  }
+}
+
+/* Phones: keep every infinite loop off. */
+@media (max-width: 767px) {
+  .cyber-rotate {
+    animation: none;
+  }
+}

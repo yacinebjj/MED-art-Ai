@@ -1,40 +1,30 @@
 "use client";
 
 /**
- * NotebookLM-style flashcard surface — a real CSS 3D flip (perspective +
- * rotateY + backface-visibility), not a show/hide toggle, plus the full set
- * of session controls (see-answer button, prev/next navigation, correct/
- * incorrect scoring). Self-contained: ActiveFlashcardsDeck only supplies data
- * and handlers, every interaction lives here.
- *
- * Theme-aware by construction, not by special-casing dark mode: both faces
- * use `bg-card text-card-foreground border border-border` — the same
- * semantic tokens every other surface in this app (Card, Dialog, etc.) uses,
- * which already resolve to the right light/dark values via next-themes. The
- * back face adds a `border-primary` accent instead of a separate tinted
- * background, so light and dark mode never need distinct color branches here.
+ * Flashcard surface — a real CSS 3D flip (perspective + rotateY +
+ * backface-visibility) inside a desktop-only 3D micro-tilt, with magnetic
+ * Difficile / Moyen / Facile rating buttons (keys 1 / 2 / 3), Space to flip,
+ * and Tinder/Anki-style touch swipes (right = Moyen, left = Difficile).
+ * Self-contained: ActiveFlashcardsDeck only supplies data and handlers.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
-import { Check, ChevronLeft, ChevronRight, Eye, RotateCcw, Sparkles, X } from "lucide-react";
-import { Button } from "@/components/ui/Button";
-import { Progress } from "@/components/ui/Progress";
+import { motion } from "framer-motion";
+import { Brain, ChevronLeft, ChevronRight, Eye, Flame, Gauge, RotateCcw, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/providers/LanguageProvider";
+import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { tStudyTools } from "@/lib/translations/studyTools";
+import { ParticleBurst } from "@/components/cyber/primitives";
+import { useBurst, useCyberTilt, useMagnetic } from "@/components/cyber/hooks";
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
-/** A just-graded card shows a brief, warm confirmation before the deck
- * advances — never a bare "Incorrect" stamp, which reads as a scolding. */
+/** A just-graded card shows a brief, warm confirmation before the deck advances. */
 export type GradeFeedback = "correct" | "incorrect" | null;
 
-/**
- * Touch swipe tuning (Tinder/Anki-style) — mirrors the swipe-to-change-slide
- * pattern in components/visual-studio/SlideDeckCanvas.tsx: a dead zone
- * decides horizontal-drag vs vertical-scroll once, then the drag either
- * springs back to neutral or flings the card fully off-screen.
- */
+/** Self-assessed recall quality. "hard" counts as "à revoir", "medium"/"easy" as recalled. */
+export type FlashcardRating = "hard" | "medium" | "easy";
+
 const SWIPE_TRIGGER_THRESHOLD_PX = 96;
 const SWIPE_AXIS_LOCK_PX = 8;
 const SWIPE_EXIT_DISTANCE_PX = 420;
@@ -42,8 +32,70 @@ const SWIPE_MAX_ROTATION_DEG = 14;
 const SWIPE_EXIT_DURATION_MS = 260;
 const SWIPE_SNAP_BACK_DURATION_MS = 240;
 
+const RATING_COPY: Record<Language, Record<FlashcardRating, { label: string; hint: string }>> = {
+  fr: {
+    hard: { label: "Difficile", hint: "À revoir" },
+    medium: { label: "Moyen", hint: "Retrouvé avec effort" },
+    easy: { label: "Facile", hint: "Acquis" },
+  },
+  en: {
+    hard: { label: "Hard", hint: "Review again" },
+    medium: { label: "Good", hint: "Recalled with effort" },
+    easy: { label: "Easy", hint: "Mastered" },
+  },
+};
+
+const RATING_STYLE: Record<FlashcardRating, { icon: typeof Flame; className: string; glow: string; key: string }> = {
+  hard: {
+    icon: Flame,
+    key: "1",
+    glow: "rgb(251 113 133)",
+    className: "border-rose-400/40 bg-rose-500/10 text-rose-100 hover:border-rose-300/70 hover:bg-rose-500/20 hover:shadow-[0_0_26px_rgba(244,63,94,0.4)]",
+  },
+  medium: {
+    icon: Gauge,
+    key: "2",
+    glow: "rgb(251 191 36)",
+    className: "border-amber-400/40 bg-amber-500/10 text-amber-100 hover:border-amber-300/70 hover:bg-amber-500/20 hover:shadow-[0_0_26px_rgba(245,158,11,0.4)]",
+  },
+  easy: {
+    icon: Zap,
+    key: "3",
+    glow: "rgb(52 211 153)",
+    className: "border-emerald-400/40 bg-emerald-500/10 text-emerald-100 hover:border-emerald-300/70 hover:bg-emerald-500/20 hover:shadow-[0_0_26px_rgba(16,185,129,0.4)]",
+  },
+};
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function RatingButton({ rating, language, disabled, onRate }: { rating: FlashcardRating; language: Language; disabled: boolean; onRate: (rating: FlashcardRating) => void }) {
+  const ref = useMagnetic<HTMLButtonElement>(0.18);
+  const style = RATING_STYLE[rating];
+  const copy = RATING_COPY[language][rating];
+  const Icon = style.icon;
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={() => onRate(rating)}
+      disabled={disabled}
+      className={cn(
+        "cyber-magnetic group relative flex min-h-[3.75rem] flex-col items-center justify-center gap-0.5 overflow-hidden rounded-2xl border px-2 transition-[background-color,border-color,box-shadow] duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-40",
+        style.className
+      )}
+    >
+      <span aria-hidden className="cyber-sheen" />
+      <span className="flex items-center gap-1.5 text-sm font-black">
+        <Icon className="h-4 w-4" />
+        {copy.label}
+      </span>
+      <span className="text-[10px] font-semibold opacity-70">
+        {copy.hint} <kbd className="ml-1 hidden rounded border border-current/30 px-1 font-mono sm:inline">{style.key}</kbd>
+      </span>
+    </button>
+  );
 }
 
 interface FlipFlashcardProps {
@@ -56,10 +108,8 @@ interface FlipFlashcardProps {
   onNext: () => void;
   canGoPrev: boolean;
   score: { correct: number; incorrect: number };
-  onGrade: (isCorrect: boolean) => void;
-  /** Set by the parent for a short window right after grading — freezes
-   * navigation and shows the reassuring overlay below instead of an
-   * instant, jarring jump to the next card. */
+  onGrade: (isCorrect: boolean, rating: FlashcardRating) => void;
+  /** Set by the parent right after grading — freezes navigation and shows the overlay. */
   feedback: GradeFeedback;
 }
 
@@ -67,29 +117,28 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
   const { language } = useLanguage();
   const isLocked = feedback !== null;
   const remaining = total - index - 1;
+  const tiltRef = useCyberTilt<HTMLDivElement>(5);
+  const [burstNonce, fireBurst] = useBurst();
+  const [lastRating, setLastRating] = useState<FlashcardRating>("medium");
 
-  // Touch swipe (Tinder/Anki-style): dragging the card horizontally grades
-  // it without reaching for the buttons below — right = "Correct", left =
-  // "À revoir". Runs entirely alongside those buttons (see the JSX below):
-  // neither method disables the other, both funnel into the same onGrade,
-  // so the parent's post-grade lock (`feedback`/`isLocked` above) applies
-  // identically no matter which one the student used.
+  // Touch swipe: right = "Moyen" (recalled), left = "Difficile". Funnels into the same rate() as the buttons.
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  // Undecided until the gesture clears SWIPE_AXIS_LOCK_PX, then pinned to
-  // whichever axis moved further. A "y" lock defers entirely to native
-  // vertical scroll (no state updates at all), so a student scrolling the
-  // page with a finger that happens to land on the card never drags it.
+  // Undecided until the gesture clears SWIPE_AXIS_LOCK_PX; a "y" lock defers to native scroll.
   const axisRef = useRef<"x" | "y" | null>(null);
-  // Set the instant a real horizontal drag begins; read by the flip
-  // button's onClick so a swipe that springs back without reaching the
-  // grade threshold never ALSO flips the card out from under the student.
+  // A drag that just ended must never ALSO flip the card via the trailing click.
   const draggedRef = useRef(false);
-  const prefersReducedMotion =
-    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const rotation = prefersReducedMotion ? 0 : clamp(dragX / 10, -SWIPE_MAX_ROTATION_DEG, SWIPE_MAX_ROTATION_DEG);
+
+  function rate(rating: FlashcardRating) {
+    if (isLocked) return;
+    setLastRating(rating);
+    fireBurst();
+    onGrade(rating !== "hard", rating);
+  }
 
   function handleTouchStart(e: ReactTouchEvent<HTMLDivElement>) {
     if (isLocked || e.touches.length !== 1) return;
@@ -115,7 +164,7 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
       }
     }
 
-    if (axisRef.current !== "x") return; // vertical gesture — left to native scroll, untouched
+    if (axisRef.current !== "x") return;
     setDragX(dx);
   }
 
@@ -132,23 +181,19 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
     }
 
     if (Math.abs(finalDragX) >= SWIPE_TRIGGER_THRESHOLD_PX) {
-      const isCorrect = finalDragX > 0;
+      const recalled = finalDragX > 0;
       if (prefersReducedMotion) {
-        // No flung-card motion for this student — the existing post-grade
-        // overlay below is confirmation enough.
         setDragX(0);
       } else {
         setIsExiting(true);
-        setDragX(isCorrect ? SWIPE_EXIT_DISTANCE_PX : -SWIPE_EXIT_DISTANCE_PX);
+        setDragX(recalled ? SWIPE_EXIT_DISTANCE_PX : -SWIPE_EXIT_DISTANCE_PX);
       }
-      onGrade(isCorrect);
+      rate(recalled ? "medium" : "hard");
     } else {
-      setDragX(0); // below threshold — spring back to neutral
+      setDragX(0);
     }
   }
 
-  // A cancelled gesture (e.g. an incoming call) is not a deliberate
-  // release — reset without grading rather than reusing handleTouchEnd.
   function handleTouchCancel() {
     touchStartRef.current = null;
     axisRef.current = null;
@@ -156,56 +201,58 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
     setDragX(0);
   }
 
-  // Spacebar flips the current card — guarded so it never hijacks Space
-  // while the student happens to have a text field focused elsewhere on the
-  // page (this view has none, but the guard costs nothing and is the
-  // correct default for a global keydown listener). Also suppressed during
-  // the post-grade feedback beat, same as every other control below.
+  // Space flips, 1 / 2 / 3 rate — never while typing in a field, never during the feedback beat.
+  const rateRef = useRef(rate);
+  rateRef.current = rate;
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.code !== "Space" || isLocked) return;
+      if (isLocked || e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
-      e.preventDefault();
-      onFlip();
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        onFlip();
+      } else if (e.key === "1") rateRef.current("hard");
+      else if (e.key === "2") rateRef.current("medium");
+      else if (e.key === "3") rateRef.current("easy");
+      else if (e.key === "ArrowRight") onNext();
+      else if (e.key === "ArrowLeft" && canGoPrev) onPrev();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onFlip, isLocked]);
+  }, [onFlip, onNext, onPrev, canGoPrev, isLocked]);
+
+  const progressPct = ((index + 1) / Math.max(total, 1)) * 100;
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
           <span>
-            {tStudyTools("cardCounterLabel", language)} {index + 1} / {total}
-            <span className="mx-1.5 text-muted-foreground/40">·</span>
+            {tStudyTools("cardCounterLabel", language)} <b className="text-white">{index + 1}</b> / {total}
+            <span className="mx-1.5 text-slate-600">·</span>
             {remaining > 0
-              ? (remaining > 1
-                  ? tStudyTools("cardsRemainingPlural", language)
-                  : tStudyTools("cardsRemainingSingular", language)
-                ).replace("{n}", String(remaining))
+              ? (remaining > 1 ? tStudyTools("cardsRemainingPlural", language) : tStudyTools("cardsRemainingSingular", language)).replace("{n}", String(remaining))
               : tStudyTools("lastCard", language)}
           </span>
-          <span className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-              <Check className="h-3.5 w-3.5" />
-              {score.correct}
-            </span>
-            <span className="flex items-center gap-1 text-rose-600 dark:text-rose-400">
-              <X className="h-3.5 w-3.5" />
-              {score.incorrect}
-            </span>
+          <span className="flex items-center gap-3 tabular-nums">
+            <span className="text-emerald-300">✓ {score.correct}</span>
+            <span className="text-rose-300">↺ {score.incorrect}</span>
           </span>
         </div>
-        <Progress value={((index + 1) / Math.max(total, 1)) * 100} className="h-1.5" />
+        <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+          <motion.div
+            className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-sky-400 to-violet-500 shadow-[0_0_12px_rgba(34,211,238,0.6)]"
+            initial={false}
+            animate={{ width: `${progressPct}%` }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          />
+        </div>
       </div>
 
-      <div className="relative rounded-2xl">
-        {/* Swipeable layer — carries the drag/exit transform in isolation so
-            the feedback overlay below (a sibling, not a child) stays put on
-            screen even once this has been flung off to one side. */}
+      <div className="relative">
+        {/* Swipe layer — carries the drag/exit transform in isolation from the overlay. */}
         <div
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
@@ -222,63 +269,63 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
                 }
               : undefined
           }
-          className="rounded-2xl transition-transform duration-300 ease-out [perspective:1200px] [touch-action:pan-y] hover:-translate-y-0.5"
+          className="[touch-action:pan-y]"
         >
-          <button
-            type="button"
-            onClick={() => {
-              // A drag that just ended (whether it sprang back or crossed
-              // the grade threshold) must never ALSO flip the card via a
-              // trailing synthetic click.
-              if (draggedRef.current) {
-                draggedRef.current = false;
-                return;
-              }
-              onFlip();
-            }}
-            disabled={isLocked}
-            aria-label={flipped ? tStudyTools("ariaReturnToQuestion", language) : tStudyTools("ariaSeeAnswer", language)}
-            className={cn(
-              "grid min-h-[260px] w-full cursor-pointer rounded-2xl text-left [transform-style:preserve-3d] transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-default",
-              flipped && "[transform:rotateY(180deg)]"
-            )}
-          >
-            {/* Front — Question */}
-            <div className="glass-card [grid-area:1/1] flex flex-col items-center justify-center gap-3 rounded-2xl p-6 text-center text-card-foreground shadow-glass dark:shadow-glass-dark [backface-visibility:hidden]">
-              <span className="text-[10px] font-black uppercase tracking-wide text-muted-foreground">{tStudyTools("questionLabel", language)}</span>
-              <p className="text-base font-semibold leading-relaxed">{item.question}</p>
-              <span className="mt-2 text-[10px] text-muted-foreground/70">{tStudyTools("frontHint", language)}</span>
-            </div>
-
-            {/* Back — Answer */}
-            <div className="glass-card [grid-area:1/1] flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-primary/60 p-6 text-center text-card-foreground shadow-glass dark:shadow-glass-dark [backface-visibility:hidden] [transform:rotateY(180deg)]">
-              <span className="text-[10px] font-black uppercase tracking-wide text-primary-700 dark:text-primary-300">{tStudyTools("answerLabel", language)}</span>
-              <p className="text-base font-medium leading-relaxed">{item.answer}</p>
-              <span className="mt-2 text-[10px] text-muted-foreground/70">{tStudyTools("backHint", language)}</span>
-            </div>
-          </button>
-        </div>
-
-        {/* Warm, brief confirmation after grading — never a bare red
-            "wrong" stamp. Sits on its own non-transformed layer, a sibling
-            of the swipeable card above rather than a child of it, so it
-            stays centered on screen even when a swipe just sent the card
-            flying off to one side. Never blocks input (pointer-events-none)
-            since the controls below are already disabled for the same
-            window. */}
-        {feedback && (
-          <div
-            className={cn(
-              "pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl transition-opacity duration-200",
-              feedback === "correct" ? "bg-emerald-500/10" : "bg-rose-500/10"
-            )}
-          >
-            <div
+          {/* Desktop 3D micro-tilt layer (CSS vars, no re-render). */}
+          <div ref={tiltRef} className="cyber-tilt relative rounded-[1.75rem] [perspective:1400px]">
+            <button
+              type="button"
+              onClick={() => {
+                if (draggedRef.current) {
+                  draggedRef.current = false;
+                  return;
+                }
+                onFlip();
+              }}
+              disabled={isLocked}
+              aria-label={flipped ? tStudyTools("ariaReturnToQuestion", language) : tStudyTools("ariaSeeAnswer", language)}
               className={cn(
-                "flex animate-in items-center gap-2 rounded-full px-4 py-2 text-sm font-bold text-white shadow-lg zoom-in-95 fade-in duration-200",
-                feedback === "correct" ? "bg-emerald-500" : "bg-rose-500"
+                "grid min-h-[300px] w-full cursor-pointer rounded-[1.75rem] text-left [transform-style:preserve-3d] transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 disabled:cursor-default sm:min-h-[340px]",
+                flipped && "[transform:rotateY(180deg)]"
               )}
             >
+              {/* Front — Question */}
+              <div className="relative flex flex-col items-center justify-center gap-4 overflow-hidden rounded-[1.75rem] border border-cyan-400/25 bg-[linear-gradient(145deg,rgba(15,23,42,0.96),rgba(8,47,73,0.85))] p-7 text-center shadow-[0_30px_80px_-30px_rgba(34,211,238,0.45)] [backface-visibility:hidden] [grid-area:1/1]">
+                <span aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(34,211,238,0.18),transparent_60%)]" />
+                <span aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.06)_1px,transparent_1px)] bg-[size:28px_28px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
+                <span className="relative flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">
+                  <Brain className="h-3 w-3" />
+                  {tStudyTools("questionLabel", language)}
+                </span>
+                <p className="relative text-lg font-bold leading-relaxed text-white sm:text-xl">{item.question}</p>
+                <span className="relative mt-1 text-[11px] text-slate-400">{tStudyTools("frontHint", language)}</span>
+              </div>
+
+              {/* Back — Answer */}
+              <div className="relative flex flex-col items-center justify-center gap-4 overflow-hidden rounded-[1.75rem] border border-violet-400/35 bg-[linear-gradient(145deg,rgba(15,23,42,0.96),rgba(46,16,101,0.85))] p-7 text-center shadow-[0_30px_80px_-30px_rgba(139,92,246,0.5)] [backface-visibility:hidden] [grid-area:1/1] [transform:rotateY(180deg)]">
+                <span aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(139,92,246,0.22),transparent_60%)]" />
+                <span className="relative flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-violet-200">
+                  <Sparkles className="h-3 w-3" />
+                  {tStudyTools("answerLabel", language)}
+                </span>
+                <p className="relative text-base font-medium leading-relaxed text-slate-100 sm:text-lg">{item.answer}</p>
+                <span className="relative mt-1 text-[11px] text-slate-400">{tStudyTools("backHint", language)}</span>
+              </div>
+            </button>
+            <span aria-hidden className="cyber-reflect" />
+          </div>
+        </div>
+
+        {/* Post-grade confirmation, on its own non-transformed layer. */}
+        {feedback && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div
+              className={cn(
+                "relative flex animate-in items-center gap-2 rounded-full px-5 py-2.5 text-sm font-black text-slate-950 shadow-lg zoom-in-95 fade-in duration-200",
+                feedback === "correct" ? "bg-emerald-300 shadow-[0_0_30px_rgba(52,211,153,0.6)]" : "bg-rose-300 shadow-[0_0_30px_rgba(251,113,133,0.6)]"
+              )}
+            >
+              <ParticleBurst nonce={burstNonce} color={RATING_STYLE[lastRating].glow} count={12} spread={70} />
               {feedback === "correct" ? <Sparkles className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
               {feedback === "correct" ? tStudyTools("feedbackCorrect", language) : tStudyTools("feedbackIncorrect", language)}
             </div>
@@ -286,57 +333,41 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
         )}
       </div>
 
-      <div className="flex justify-center">
-        <Button type="button" variant="secondary" size="sm" onClick={onFlip} disabled={isLocked}>
-          {flipped ? (
-            <>
-              <RotateCcw className="h-3.5 w-3.5" />
-              {tStudyTools("buttonSeeQuestion", language)}
-            </>
-          ) : (
-            <>
-              <Eye className="h-3.5 w-3.5" />
-              {tStudyTools("ariaSeeAnswer", language)}
-            </>
-          )}
-        </Button>
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          aria-label={tStudyTools("ariaPrevCard", language)}
+          onClick={onPrev}
+          disabled={!canGoPrev || isLocked}
+          className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition-colors hover:border-white/25 hover:text-white disabled:opacity-30"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onFlip}
+          disabled={isLocked}
+          className="flex min-h-11 items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 text-sm font-bold text-cyan-100 transition-colors hover:bg-cyan-400/20 disabled:opacity-40"
+        >
+          {flipped ? <RotateCcw className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          {flipped ? tStudyTools("buttonSeeQuestion", language) : tStudyTools("ariaSeeAnswer", language)}
+          <kbd className="ml-1 hidden rounded border border-cyan-300/30 px-1.5 font-mono text-[10px] sm:inline">Espace</kbd>
+        </button>
+        <button
+          type="button"
+          aria-label={tStudyTools("ariaNextCard", language)}
+          onClick={onNext}
+          disabled={isLocked}
+          className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition-colors hover:border-white/25 hover:text-white disabled:opacity-30"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <Button type="button" variant="ghost" size="icon" aria-label={tStudyTools("ariaPrevCard", language)} onClick={onPrev} disabled={!canGoPrev || isLocked}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-
-          <Button type="button" variant="ghost" size="icon" aria-label={tStudyTools("ariaNextCard", language)} onClick={onNext} disabled={isLocked}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onGrade(false)}
-            disabled={isLocked}
-            className="h-11 bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/40 dark:text-rose-300"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            {tStudyTools("reviewAgain", language)}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onGrade(true)}
-            disabled={isLocked}
-            className="h-11 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300"
-          >
-            <Check className="h-3.5 w-3.5" />
-            {tStudyTools("correctLabel", language)}
-          </Button>
-        </div>
+      <div className="grid grid-cols-3 gap-2.5">
+        {(["hard", "medium", "easy"] as const).map((rating) => (
+          <RatingButton key={rating} rating={rating} language={language} disabled={isLocked} onRate={rate} />
+        ))}
       </div>
     </div>
   );

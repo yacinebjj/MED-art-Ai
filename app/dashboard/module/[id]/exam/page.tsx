@@ -17,12 +17,15 @@
  * scroll on desktop.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
+  BarChart3,
   CheckCircle2,
+  CircleDashed,
+  Crosshair,
   ChevronLeft,
   ChevronRight,
   FilePlus2,
@@ -30,8 +33,11 @@ import {
   ListChecks,
   Loader2,
   RotateCcw,
+  Search,
   Sparkles,
+  Target,
   Trophy,
+  X,
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -39,7 +45,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { ErrorState } from "@/components/ui/ErrorState";
-import { ProgressRing } from "@/components/ui/ProgressRing";
+import { CyberPanel, CyberStat, NeonRing, ParticleBurst, SegmentedControl } from "@/components/cyber/primitives";
 import { useToast } from "@/components/ui/Toast";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -55,6 +61,8 @@ import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQu
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
+type ResultStatus = "correct" | "incorrect" | "skipped";
+type ResultFilter = "all" | ResultStatus;
 
 interface ExamOption {
   label: string;
@@ -89,8 +97,7 @@ interface ExamAttempt {
 
 const MAX_ATTEMPTS = 5;
 
-const panelShellClasses =
-  "glass-card flex flex-col overflow-hidden rounded-3xl shadow-glass transition-all duration-300 dark:shadow-glass-dark";
+const panelShellClasses = "cyber-glass flex flex-col overflow-hidden rounded-3xl transition-all duration-300";
 
 const RESULTS_STAGGER_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
 const RESULT_CARD_VARIANTS = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
@@ -147,6 +154,20 @@ export default function ExamGeneratorPage() {
   // which question is shown.
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [slideDirection, setSlideDirection] = useState(1);
+  // Purely visual: re-keys the micro-particle burst on the option just picked.
+  const [answerBurst, setAnswerBurst] = useState<{ questionId: string; label: string; nonce: number }>({ questionId: "", label: "", nonce: 0 });
+  // Instant filters — courses (sources) and the correction view.
+  const [courseQuery, setCourseQuery] = useState("");
+  const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
+  const [tagFilter, setTagFilter] = useState<Set<string>>(new Set());
+  const [resultQuery, setResultQuery] = useState("");
+
+  // A different exam starts with a clean set of correction filters.
+  useEffect(() => {
+    setResultFilter("all");
+    setTagFilter(new Set());
+    setResultQuery("");
+  }, [activeExamId]);
 
   function goToQuestion(index: number) {
     if (index < 0 || index >= questions.length) return;
@@ -415,7 +436,41 @@ export default function ExamGeneratorPage() {
 
   function handleSelectAnswer(questionId: string, optionLabel: string) {
     setAnswers((prev) => ({ ...prev, [questionId]: optionLabel }));
+    setAnswerBurst((prev) => ({ questionId, label: optionLabel, nonce: prev.nonce + 1 }));
   }
+
+  // Keyboard cockpit while testing: A–E / 1–5 answer, ← → navigate.
+  const examKeyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  examKeyHandlerRef.current = (e: KeyboardEvent) => {
+    if (examState !== "testing" || e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+    const question = questions[currentQuestionIndex];
+    if (e.key === "ArrowRight") {
+      goToQuestion(currentQuestionIndex + 1);
+      return;
+    }
+    if (e.key === "ArrowLeft") {
+      goToQuestion(currentQuestionIndex - 1);
+      return;
+    }
+    if (!question) return;
+    const key = e.key.toUpperCase();
+    const byLetter = question.options.find((o) => o.label.toUpperCase() === key);
+    const digit = Number(e.key);
+    const byDigit = Number.isInteger(digit) && digit >= 1 ? question.options[digit - 1] : undefined;
+    const option = byLetter ?? byDigit;
+    if (option) {
+      e.preventDefault();
+      handleSelectAnswer(question.id, option.label);
+    }
+  };
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => examKeyHandlerRef.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
 
   const answeredCount = useMemo(() => Object.values(answers).filter(Boolean).length, [answers]);
 
@@ -455,6 +510,18 @@ export default function ExamGeneratorPage() {
         <Checkbox checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={toggleAll} />
         Sélectionner tout
       </label>
+      {courses && courses.length > 5 && (
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+          <input
+            type="search"
+            value={courseQuery}
+            onChange={(e) => setCourseQuery(e.target.value)}
+            placeholder="Filtrer les cours…"
+            className="h-10 w-full rounded-xl border border-white/10 bg-slate-950/60 pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400/50"
+          />
+        </div>
+      )}
     </div>
   );
 
@@ -471,7 +538,9 @@ export default function ExamGeneratorPage() {
   ) : !courses || courses.length === 0 ? (
     <p className="px-3 py-6 text-center text-xs text-muted-foreground">Aucun cours dans ce module pour l&apos;instant.</p>
   ) : (
-    courses.map((course) => {
+    courses
+      .filter((course) => !courseQuery.trim() || course.title.toLowerCase().includes(courseQuery.trim().toLowerCase()))
+      .map((course) => {
       const selected = selectedCourseIds.has(course.id);
       return (
         <label
@@ -634,21 +703,22 @@ export default function ExamGeneratorPage() {
   const testingInnerContent = (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-bold text-foreground">Épreuve Clinique</h2>
+        <div>
+          <p className="cyber-kicker">Mode examen</p>
+          <h2 className="cyber-title text-xl font-black">Épreuve Clinique</h2>
+        </div>
         <div className="flex items-center gap-2">
           <ExamTimer key={activeExamId} />
-          <ProgressRing
-            completed={answeredCount}
-            total={questions.length}
-            size={40}
-            strokeWidth={4}
-            label={
-              <span className="text-[10px] font-bold text-foreground">
-                {answeredCount}/{questions.length}
-              </span>
-            }
+          <NeonRing
+            value={questions.length > 0 ? answeredCount / questions.length : 0}
+            size={52}
+            stroke={5}
             aria-label={`${answeredCount} sur ${questions.length} questions répondues`}
-          />
+          >
+            <span className="text-[10px] font-black tabular-nums text-white">
+              {answeredCount}/{questions.length}
+            </span>
+          </NeonRing>
         </div>
       </div>
 
@@ -657,7 +727,7 @@ export default function ExamGeneratorPage() {
         currentIndex={currentQuestionIndex}
         isAnswered={(i) => Boolean(answers[questions[i]?.id])}
         onJump={goToQuestion}
-        className="mb-4"
+        className="mb-4 shrink-0"
       />
 
       {currentQuestion && (
@@ -676,13 +746,14 @@ export default function ExamGeneratorPage() {
               if (info.offset.x < -80) goToQuestion(currentQuestionIndex + 1);
               else if (info.offset.x > 80) goToQuestion(currentQuestionIndex - 1);
             }}
-            className="glass-card cursor-grab touch-pan-y rounded-2xl border border-border p-4 shadow-soft active:cursor-grabbing sm:p-6"
+            className="cursor-grab touch-pan-y rounded-2xl border border-white/[0.08] bg-[linear-gradient(160deg,rgba(15,23,42,0.85),rgba(2,6,23,0.9))] p-4 shadow-[0_20px_60px_-30px_rgba(34,211,238,0.5)] active:cursor-grabbing sm:p-6"
           >
             <div className="mb-4 flex items-center gap-2">
               <Badge variant="primary">Q{currentQuestionIndex + 1} / {questions.length}</Badge>
               {answers[currentQuestion.id] && <Badge variant="success">Répondue</Badge>}
             </div>
-            <p className="mb-5 text-base font-medium leading-relaxed text-foreground">{currentQuestion.vignette}</p>
+            <p className="mb-5 text-base font-medium leading-relaxed text-white">{currentQuestion.vignette}</p>
+            <p className="mb-3 hidden text-[10px] font-semibold text-slate-500 sm:block">Raccourcis : A–E pour répondre · ← → pour naviguer</p>
             <div className="space-y-2.5" role="radiogroup" aria-label={`Options question ${currentQuestionIndex + 1}`}>
               {currentQuestion.options.map((opt) => {
                 const selected = answers[currentQuestion.id] === opt.label;
@@ -690,12 +761,15 @@ export default function ExamGeneratorPage() {
                   <label
                     key={opt.label}
                     className={cn(
-                      "flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition-all duration-200 active:scale-[0.99]",
+                      "relative flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition-all duration-200 active:scale-[0.99]",
                       selected
-                        ? "border-primary-500 bg-primary-50 shadow-glow dark:border-primary-500 dark:bg-primary-950/30"
-                        : "border-border hover:-translate-y-0.5 hover:bg-accent hover:shadow-soft"
+                        ? "border-cyan-300/80 bg-cyan-400/10 shadow-[0_0_26px_-6px_rgba(34,211,238,0.7)]"
+                        : "border-white/[0.08] bg-slate-950/40 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-white/[0.03]"
                     )}
                   >
+                    {answerBurst.questionId === currentQuestion.id && answerBurst.label === opt.label && (
+                      <ParticleBurst nonce={answerBurst.nonce} count={12} spread={40} />
+                    )}
                     <input
                       type="radio"
                       name={currentQuestion.id}
@@ -705,13 +779,15 @@ export default function ExamGeneratorPage() {
                     />
                     <span
                       className={cn(
-                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold",
-                        selected ? "border-primary-600 bg-primary-600 text-white" : "border-current text-muted-foreground"
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-xs font-black transition-colors",
+                        selected
+                          ? "border-cyan-300 bg-gradient-to-br from-cyan-300 to-sky-500 text-slate-950 shadow-[0_0_14px_rgba(34,211,238,0.7)]"
+                          : "border-white/20 text-slate-400"
                       )}
                     >
                       {opt.label}
                     </span>
-                    <span className="text-foreground">{opt.text}</span>
+                    <span className="text-slate-100">{opt.text}</span>
                   </label>
                 );
               })}
@@ -759,131 +835,310 @@ export default function ExamGeneratorPage() {
   );
 
   const scorePct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
-  const scoreTone = scorePct >= 80 ? "text-emerald-600 dark:text-emerald-400" : scorePct >= 50 ? "text-amber-600 dark:text-amber-400" : "text-rose-600 dark:text-rose-400";
+  const scoreTone = scorePct >= 80 ? "text-emerald-300" : scorePct >= 50 ? "text-amber-300" : "text-rose-300";
+
+  // ── Results analytics: every figure is recomputed from `answers` + the exam's own content ──
+  const questionStatus = useMemo(() => {
+    const map: Record<string, ResultStatus> = {};
+    for (const q of questions) {
+      const correct = q.options.find((o) => o.isCorrect);
+      const answer = answers[q.id];
+      map[q.id] = !answer ? "skipped" : correct && answer === correct.label ? "correct" : "incorrect";
+    }
+    return map;
+  }, [answers, questions]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<ResultStatus, number> = { correct: 0, incorrect: 0, skipped: 0 };
+    for (const q of questions) counts[questionStatus[q.id]]++;
+    return counts;
+  }, [questions, questionStatus]);
+
+  const tagStats = useMemo(() => {
+    const map = new Map<string, { total: number; correct: number }>();
+    for (const q of questions) {
+      const entry = map.get(q.weakPointTag) ?? { total: 0, correct: 0 };
+      entry.total++;
+      if (questionStatus[q.id] === "correct") entry.correct++;
+      map.set(q.weakPointTag, entry);
+    }
+    return Array.from(map.entries())
+      .map(([tag, v]) => ({ tag, ...v, ratio: v.total > 0 ? v.correct / v.total : 0 }))
+      .sort((a, b) => a.ratio - b.ratio || b.total - a.total);
+  }, [questions, questionStatus]);
+
+  const answeredTotal = statusCounts.correct + statusCounts.incorrect;
+  const precision = answeredTotal > 0 ? statusCounts.correct / answeredTotal : 0;
+
+  const filteredResults = useMemo(() => {
+    const q = resultQuery.trim().toLowerCase();
+    return questions
+      .map((question, index) => ({ question, index }))
+      .filter(({ question }) => {
+        if (resultFilter !== "all" && questionStatus[question.id] !== resultFilter) return false;
+        if (tagFilter.size > 0 && !tagFilter.has(question.weakPointTag)) return false;
+        if (!q) return true;
+        return question.vignette.toLowerCase().includes(q) || question.options.some((o) => o.text.toLowerCase().includes(q));
+      });
+  }, [questions, questionStatus, resultFilter, tagFilter, resultQuery]);
+
+  function toggleTagFilter(tag: string) {
+    setTagFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }
+
+  const hasActiveFilters = resultFilter !== "all" || tagFilter.size > 0 || resultQuery.trim().length > 0;
+
+  const statsPanel = (
+    <div className="space-y-4 xl:sticky xl:top-0">
+      <CyberPanel laser="spin" accent={scorePct >= 50 ? "emerald" : "rose"} className="flex flex-col items-center gap-4 p-5 text-center">
+        <NeonRing
+          value={questions.length > 0 ? score / questions.length : 0}
+          size={132}
+          stroke={11}
+          ticks={40}
+          from={scorePct >= 80 ? "#34d399" : scorePct >= 50 ? "#fbbf24" : "#fb7185"}
+          to="#8b5cf6"
+          aria-label={`Score : ${score} sur ${questions.length}`}
+        >
+          <span className={cn("text-3xl font-black tabular-nums", scoreTone)}>{scorePct}%</span>
+          <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            {score} / {questions.length}
+          </span>
+        </NeonRing>
+        <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+          <Trophy className="h-3.5 w-3.5 text-amber-300" /> {tExam("finalScore", language)}
+        </p>
+      </CyberPanel>
+
+      <div className="grid grid-cols-2 gap-2.5">
+        <CyberStat label="Précision" value={`${Math.round(precision * 100)}%`} hint="sur les questions répondues" icon={Crosshair} tone="cyan" ratio={precision} />
+        <CyberStat label="Couverture" value={`${answeredTotal}/${questions.length}`} hint="questions répondues" icon={Target} tone="violet" ratio={questions.length > 0 ? answeredTotal / questions.length : 0} />
+        <CyberStat label="Correctes" value={statusCounts.correct} icon={CheckCircle2} tone="emerald" ratio={questions.length > 0 ? statusCounts.correct / questions.length : 0} />
+        <CyberStat label="Erreurs" value={statusCounts.incorrect} hint={statusCounts.skipped > 0 ? `+ ${statusCounts.skipped} sans réponse` : undefined} icon={XCircle} tone="rose" ratio={questions.length > 0 ? statusCounts.incorrect / questions.length : 0} />
+      </div>
+
+      {tagStats.length > 0 && (
+        <CyberPanel className="p-4">
+          <p className="cyber-kicker flex items-center gap-1.5">
+            <BarChart3 className="h-3.5 w-3.5" /> Analyse par notion
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">Clique une notion pour filtrer ses questions.</p>
+          <div className="cyber-scrollbar mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+            {tagStats.map(({ tag, total, correct, ratio }) => {
+              const active = tagFilter.has(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTagFilter(tag)}
+                  aria-pressed={active}
+                  className={cn(
+                    "w-full rounded-xl border px-3 py-2 text-left transition-colors",
+                    active ? "border-cyan-400/60 bg-cyan-400/10" : "border-white/[0.06] bg-white/[0.02] hover:border-white/20"
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate font-bold text-slate-100">{tag}</span>
+                    <span className="shrink-0 font-black tabular-nums text-slate-300">
+                      {correct}/{total}
+                    </span>
+                  </span>
+                  <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                    <span
+                      className={cn("block h-full rounded-full", ratio >= 0.8 ? "bg-emerald-400" : ratio >= 0.5 ? "bg-amber-400" : "bg-rose-400")}
+                      style={{ width: `${Math.max(4, ratio * 100)}%` }}
+                    />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </CyberPanel>
+      )}
+    </div>
+  );
 
   const resultsInnerContent = (
-    <>
-      <div className="glass-card mb-6 flex flex-col items-center gap-3 rounded-3xl border border-border p-6 text-center shadow-glow sm:flex-row sm:justify-center sm:gap-6">
-        <ProgressRing
-          completed={score}
-          total={Math.max(questions.length, 1)}
-          size={96}
-          strokeWidth={8}
-          label={<span className={cn("text-2xl font-black", scoreTone)}>{scorePct}%</span>}
-          aria-label={`Score : ${score} sur ${questions.length}`}
-        />
-        <div>
-          <p className="flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground sm:justify-start">
-            <Trophy className="h-3.5 w-3.5" /> {tExam("finalScore", language)}
-          </p>
-          <p className="mt-1 text-4xl font-black text-foreground">
-            {score} / {questions.length}
-          </p>
-        </div>
-      </div>
-
-      <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4 sm:space-y-6">
-        {questions.map((q, index) => {
-          const userAnswer = answers[q.id];
-          const correctOption = q.options.find((o) => o.isCorrect);
-          const isCorrect = !!correctOption && userAnswer === correctOption.label;
-          return (
-            <motion.div
-              key={q.id}
-              variants={RESULT_CARD_VARIANTS}
-              className="rounded-2xl border border-border bg-card p-4 shadow-soft sm:p-5"
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <p className="text-sm font-medium leading-relaxed text-foreground">
-                  <span className="mr-2 font-bold text-primary-600 dark:text-primary-400">Q{index + 1}.</span>
-                  {q.vignette}
-                </p>
-                <Badge variant={isCorrect ? "success" : "danger"} className="shrink-0">
-                  {isCorrect ? <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> : <XCircle className="mr-1 h-3.5 w-3.5" />}
-                  {isCorrect ? "Correcte" : "Incorrecte"}
-                </Badge>
-              </div>
-
-              <div className="space-y-2">
-                {q.options.map((opt) => {
-                  const isUserChoice = userAnswer === opt.label;
-                  return (
-                    <div
-                      key={opt.label}
-                      className={cn(
-                        "flex min-h-12 items-center gap-3 rounded-xl border p-3 text-sm",
-                        isUserChoice && opt.isCorrect && "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30",
-                        isUserChoice && !opt.isCorrect && "border-rose-500 bg-rose-50 dark:border-rose-600 dark:bg-rose-950/30",
-                        !isUserChoice && opt.isCorrect && "border-dashed border-emerald-400 bg-card",
-                        !isUserChoice && !opt.isCorrect && "border-border"
-                      )}
-                    >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-xs font-bold text-muted-foreground">
-                        {opt.label}
-                      </span>
-                      <span className="flex-1 text-foreground">{opt.text}</span>
-                      {isUserChoice && opt.isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
-                      {isUserChoice && !opt.isCorrect && <XCircle className="h-4 w-4 shrink-0 text-rose-600" />}
-                      {!isUserChoice && opt.isCorrect && (
-                        <Badge variant="outline" className="shrink-0 text-[10px]">
-                          Bonne réponse
-                        </Badge>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-950/20">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-400">
-                  <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
-                </p>
-                <ul className="space-y-1.5 text-sm text-foreground">
-                  {q.options.map((opt) => (
-                    <li key={opt.label}>
-                      <span className="font-semibold">{opt.label}.</span> {opt.explanation}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </motion.div>
-          );
-        })}
-      </motion.div>
-
-      {weakPoints.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
-          <p className="mb-2.5 flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300">
-            <AlertTriangle className="h-4 w-4" /> Points Faibles Identifiés
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {weakPoints.map((point) => (
-              <Badge key={point} variant="warning">
-                {point}
-              </Badge>
-            ))}
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+      {/* Stats first on phones/tablets (no scrolling past 40+ questions to see the score); right column on xl. */}
+      <div className="xl:order-2">{statsPanel}</div>
+      <div className="min-w-0 xl:order-1">
+        {/* Instant multi-criteria filters: status × notions × free text. */}
+        <div className="mb-4 space-y-2.5">
+          <SegmentedControl<ResultFilter>
+            size="sm"
+            ariaLabel="Filtrer les questions"
+            value={resultFilter}
+            onChange={setResultFilter}
+            options={[
+              { value: "all", label: "Toutes", count: questions.length },
+              { value: "correct", label: "Correctes", icon: CheckCircle2, count: statusCounts.correct },
+              { value: "incorrect", label: "Erreurs", icon: XCircle, count: statusCounts.incorrect },
+              { value: "skipped", label: "Sans réponse", icon: CircleDashed, count: statusCounts.skipped },
+            ]}
+          />
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+              <input
+                type="search"
+                value={resultQuery}
+                onChange={(e) => setResultQuery(e.target.value)}
+                placeholder="Rechercher dans les questions…"
+                className="h-10 w-full rounded-xl border border-white/10 bg-slate-950/60 pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400/50"
+              />
+            </div>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setResultFilter("all");
+                  setTagFilter(new Set());
+                  setResultQuery("");
+                }}
+                className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-white/10 px-3 text-xs font-bold text-slate-300 transition-colors hover:border-white/25 hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" /> Réinitialiser
+              </button>
+            )}
           </div>
+          {tagFilter.size > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {Array.from(tagFilter).map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTagFilter(tag)}
+                  className="flex items-center gap-1 rounded-full border border-cyan-400/40 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-bold text-cyan-100"
+                >
+                  {tag} <X className="h-3 w-3" />
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] font-semibold text-slate-500">
+            {filteredResults.length} question{filteredResults.length > 1 ? "s" : ""} affichée{filteredResults.length > 1 ? "s" : ""}
+          </p>
         </div>
-      )}
 
-      <div className="mt-6 flex flex-col gap-2.5">
-        <Button variant="secondary" className="min-h-12 w-full whitespace-normal text-center leading-snug" onClick={handleStartOver}>
-          <FilePlus2 className="h-4 w-4 shrink-0" />
-          {tExam("generateNewExam", language)}
-        </Button>
-        <Button
-          variant="outline"
-          className="min-h-12 w-full whitespace-normal border-blue-300/60 bg-blue-50 text-center leading-snug text-blue-700 hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
-          onClick={handleRegenerate}
-          disabled={attempts <= 0 || isGenerating}
-        >
-          {isGenerating ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCcw className="h-4 w-4 shrink-0" />}
-          {attempts > 0
-            ? tExam(attempts > 1 ? "regenerateCountPlural" : "regenerateCountSingular", language).replace("{n}", String(attempts))
-            : tExam("noRegenerationsLeft", language)}
-        </Button>
+        <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4">
+          {filteredResults.length === 0 && (
+            <p className="rounded-2xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-slate-500">Aucune question ne correspond à ces filtres.</p>
+          )}
+          {filteredResults.map(({ question: q, index }) => {
+            const userAnswer = answers[q.id];
+            const status = questionStatus[q.id];
+            return (
+              <motion.div
+                key={q.id}
+                variants={RESULT_CARD_VARIANTS}
+                className={cn(
+                  "rounded-2xl border bg-slate-950/50 p-4 [contain-intrinsic-size:auto_420px] [content-visibility:auto] sm:p-5",
+                  status === "correct" ? "border-emerald-400/25" : status === "incorrect" ? "border-rose-400/25" : "border-white/[0.08]"
+                )}
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <p className="text-sm font-medium leading-relaxed text-slate-100">
+                    <span className="mr-2 font-black text-cyan-300">Q{index + 1}.</span>
+                    {q.vignette}
+                  </p>
+                  <Badge variant={status === "correct" ? "success" : status === "incorrect" ? "danger" : "outline"} className="shrink-0">
+                    {status === "correct" ? <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> : status === "incorrect" ? <XCircle className="mr-1 h-3.5 w-3.5" /> : <CircleDashed className="mr-1 h-3.5 w-3.5" />}
+                    {status === "correct" ? "Correcte" : status === "incorrect" ? "Incorrecte" : "Sans réponse"}
+                  </Badge>
+                </div>
+
+                <div className="space-y-2">
+                  {q.options.map((opt) => {
+                    const isUserChoice = userAnswer === opt.label;
+                    return (
+                      <div
+                        key={opt.label}
+                        className={cn(
+                          "flex min-h-12 items-center gap-3 rounded-xl border p-3 text-sm",
+                          isUserChoice && opt.isCorrect && "border-emerald-400/70 bg-emerald-500/10 shadow-[0_0_20px_-8px_rgba(52,211,153,0.7)]",
+                          isUserChoice && !opt.isCorrect && "border-rose-400/70 bg-rose-500/10 shadow-[0_0_20px_-8px_rgba(251,113,133,0.7)]",
+                          !isUserChoice && opt.isCorrect && "border-dashed border-emerald-400/60",
+                          !isUserChoice && !opt.isCorrect && "border-white/[0.07]"
+                        )}
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-current text-xs font-black text-slate-400">{opt.label}</span>
+                        <span className="flex-1 text-slate-100">{opt.text}</span>
+                        {isUserChoice && opt.isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />}
+                        {isUserChoice && !opt.isCorrect && <XCircle className="h-4 w-4 shrink-0 text-rose-300" />}
+                        {!isUserChoice && opt.isCorrect && (
+                          <Badge variant="outline" className="shrink-0 text-[10px]">
+                            Bonne réponse
+                          </Badge>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/[0.06] p-4">
+                  <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-sky-300">
+                    <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
+                  </p>
+                  <ul className="space-y-1.5 text-sm text-slate-200">
+                    {q.options.map((opt) => (
+                      <li key={opt.label}>
+                        <span className="font-bold text-white">{opt.label}.</span> {opt.explanation}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => toggleTagFilter(q.weakPointTag)}
+                    className="mt-3 inline-flex items-center gap-1 rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-bold text-slate-400 transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
+                  >
+                    <Target className="h-3 w-3" /> {q.weakPointTag}
+                  </button>
+                </div>
+              </motion.div>
+            );
+          })}
+        </motion.div>
+
+        {weakPoints.length > 0 && (
+          <div className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-500/[0.06] p-5">
+            <p className="mb-2.5 flex items-center gap-2 text-sm font-black text-amber-200">
+              <AlertTriangle className="h-4 w-4" /> Points Faibles Identifiés
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {weakPoints.map((point) => (
+                <Badge key={point} variant="warning">
+                  {point}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-col gap-2.5">
+          <Button variant="secondary" className="min-h-12 w-full whitespace-normal text-center leading-snug" onClick={handleStartOver}>
+            <FilePlus2 className="h-4 w-4 shrink-0" />
+            {tExam("generateNewExam", language)}
+          </Button>
+          <Button
+            variant="outline"
+            className="min-h-12 w-full whitespace-normal border-sky-400/40 bg-sky-500/10 text-center leading-snug text-sky-100 hover:bg-sky-500/20"
+            onClick={handleRegenerate}
+            disabled={attempts <= 0 || isGenerating}
+          >
+            {isGenerating ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCcw className="h-4 w-4 shrink-0" />}
+            {attempts > 0
+              ? tExam(attempts > 1 ? "regenerateCountPlural" : "regenerateCountSingular", language).replace("{n}", String(attempts))
+              : tExam("noRegenerationsLeft", language)}
+          </Button>
+        </div>
       </div>
-    </>
+    </div>
   );
 
   const resultsContent = (
@@ -918,8 +1173,7 @@ export default function ExamGeneratorPage() {
     // Point 2 fix — explicit w-full max-w-full alongside the existing
     // overflow-hidden, matching the sibling workspace/module page's own
     // identical root treatment.
-    <div className="aurora-canvas-bg relative flex h-dvh w-full max-w-full flex-col overflow-hidden">
-      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+    <div className="dark cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden rounded-none border-0 text-foreground">
       <WorkspaceTopbar title="Générateur d'Examen" />
 
       {/* Mobile-first UX rework — below `md`, aside/main never render side
@@ -1054,7 +1308,9 @@ export default function ExamGeneratorPage() {
         onClose={() => setIsExamFullscreen(false)}
         title={examState === "results" ? "Résultats de l'examen" : "Épreuve Clinique"}
       >
-        <div className="p-4 sm:p-6">{examState === "testing" ? testingInnerContent : examState === "results" ? resultsInnerContent : null}</div>
+        <div className="dark cyber-stage min-h-full rounded-none border-0 p-4 text-foreground sm:p-6">
+          {examState === "testing" ? testingInnerContent : examState === "results" ? resultsInnerContent : null}
+        </div>
       </FullscreenViewerModal>
     </div>
   );

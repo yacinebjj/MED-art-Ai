@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, Sparkles, X } from "lucide-react";
+import { Check, Copy, Loader2, Sparkles, X } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tNotes } from "@/lib/translations/notes";
@@ -12,17 +12,17 @@ interface NoteSummaryButtonProps {
 }
 
 /**
- * On-demand, ephemeral TL;DR for the note currently open — click only
- * (never on mount/selection-change), nothing persisted (no new column, no
- * server-side cache); the popover clears the moment it's dismissed or the
- * student switches notes (this component unmounts/remounts per note since
- * it lives inside the editor pane keyed by note id).
+ * One-click AI TL;DR for the note currently open — on click only (never on
+ * mount/selection-change), nothing persisted; the popover clears when
+ * dismissed or when the student switches notes (the editor pane is keyed by
+ * note id, so this remounts).
  */
 export function NoteSummaryButton({ getPlainText }: NoteSummaryButtonProps) {
   const { toast } = useToast();
   const { language } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function handleClick() {
     const text = getPlainText().trim();
@@ -44,14 +44,26 @@ export function NoteSummaryButton({ getPlainText }: NoteSummaryButtonProps) {
     }
   }
 
+  function handleCopy() {
+    if (!summary) return;
+    navigator.clipboard
+      .writeText(summary)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+      })
+      .catch(() => undefined);
+  }
+
   return (
     <div className="relative">
       <button
         type="button"
         onClick={handleClick}
         disabled={isLoading}
-        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-violet-500/30 px-3 text-xs font-semibold text-violet-600 transition-colors hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60 dark:text-violet-400 dark:hover:bg-violet-950/30 sm:h-8 sm:w-auto"
+        className="group relative flex h-10 w-full items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-violet-400/40 bg-violet-500/10 px-3.5 text-xs font-bold text-violet-100 transition-[background-color,box-shadow] hover:bg-violet-500/20 hover:shadow-[0_0_22px_rgba(139,92,246,0.35)] disabled:cursor-not-allowed disabled:opacity-60 sm:h-9 sm:w-auto"
       >
+        <span aria-hidden className="cyber-sheen" />
         {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
         {tNotes("summarizeButton", language)}
       </button>
@@ -65,22 +77,23 @@ export function NoteSummaryButton({ getPlainText }: NoteSummaryButtonProps) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.97 }}
               transition={{ duration: 0.15 }}
-              className="glass-card absolute bottom-full left-0 z-50 mb-2 w-72 rounded-2xl border border-violet-300/50 p-4 shadow-glass dark:border-violet-800/50 dark:shadow-glass-dark sm:w-80"
+              className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-2xl border border-violet-400/40 bg-slate-950/95 p-4 shadow-[0_20px_60px_-20px_rgba(139,92,246,0.6)] sm:w-96"
             >
               <div className="flex items-start justify-between gap-2">
-                <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-violet-200">
                   <Sparkles className="h-3 w-3" />
                   {tNotes("summaryTitle", language)}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setSummary(null)}
-                  className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-accent"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+                <span className="flex shrink-0 items-center gap-1">
+                  <button type="button" onClick={handleCopy} aria-label="Copier" className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white">
+                    {copied ? <Check className="h-3 w-3 text-emerald-300" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                  <button type="button" onClick={() => setSummary(null)} aria-label="Fermer" className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white">
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
               </div>
-              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-foreground">{summary}</p>
+              <p className="cyber-scrollbar mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-slate-100">{summary}</p>
             </motion.div>
           </>
         )}

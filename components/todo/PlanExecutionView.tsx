@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { motion, Reorder, useReducedMotion } from "framer-motion";
-import { AlertTriangle, ChevronDown, ClipboardCheck, Coffee, PartyPopper, RotateCcw } from "lucide-react";
+import { AlertTriangle, ChevronDown, ClipboardCheck, Coffee, Columns3, GitCommitVertical, LayoutGrid, ListChecks, PartyPopper, RotateCcw } from "lucide-react";
+import { NeonRing, SegmentedControl } from "@/components/cyber/primitives";
+import { useStoredPreference } from "@/components/cyber/hooks";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
@@ -11,6 +14,15 @@ import { tTodo } from "@/lib/translations/todo";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { TaskRow } from "./TaskRow";
 import type { StudyPlanTask } from "@/types/study-planner";
+
+// Timeline / Kanban / Grid live in their own chunk — loaded only when picked.
+const viewLoading = () => <div className="h-64 animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.03]" />;
+const TimelineView = dynamic(() => import("./PlanViews").then((m) => m.TimelineView), { ssr: false, loading: viewLoading });
+const KanbanView = dynamic(() => import("./PlanViews").then((m) => m.KanbanView), { ssr: false, loading: viewLoading });
+const GridView = dynamic(() => import("./PlanViews").then((m) => m.GridView), { ssr: false, loading: viewLoading });
+
+const PLAN_VIEWS = ["list", "timeline", "kanban", "grid"] as const;
+type PlanView = (typeof PLAN_VIEWS)[number];
 
 interface PlanExecutionViewProps {
   planId: number;
@@ -55,6 +67,8 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
   });
   const [todayBurstNonce, setTodayBurstNonce] = useState(0);
   const [planBurstNonce, setPlanBurstNonce] = useState(0);
+  const [view, setView] = useStoredPreference<PlanView>("medart:todo-view", "list", PLAN_VIEWS);
+  const fr = language === "fr";
 
   const today = todayIso();
   const weekEnd = addDaysIso(today, 6);
@@ -252,58 +266,79 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold tracking-tight text-foreground">{tTodo("executionTitle", language)}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-4">
           {tasks.length > 0 && (
             <div className="relative shrink-0">
-              {progressPct === 100 ? (
-                <motion.span
+              <NeonRing
+                value={progressPct / 100}
+                size={76}
+                stroke={7}
+                from={progressPct === 100 ? "#34d399" : "#22d3ee"}
+                to={progressPct === 100 ? "#22d3ee" : "#8b5cf6"}
+                aria-label={`${progressPct}%`}
+              >
+                <span className="text-base font-black tabular-nums text-white">{progressPct}%</span>
+              </NeonRing>
+              {planBurstNonce > 0 && !reduceMotion && <CelebrationBurst key={planBurstNonce} count={22} spread={70} duration={1.3} />}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="cyber-kicker">{fr ? "Mission en cours" : "Active mission"}</p>
+            <h2 className="text-lg font-black tracking-tight text-white">{tTodo("executionTitle", language)}</h2>
+            {tasks.length > 0 &&
+              (progressPct === 100 ? (
+                <motion.p
                   initial={{ scale: 0.85, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                  className="flex items-center gap-1.5 text-sm font-bold text-emerald-600 dark:text-emerald-400"
+                  className="flex items-center gap-1.5 text-sm font-bold text-emerald-300"
                 >
                   <PartyPopper className="h-4 w-4" />
                   {tTodo("progress100", language)}
-                </motion.span>
+                </motion.p>
               ) : (
-                <span className="text-sm font-semibold text-primary">{progressPct}%</span>
-              )}
-              {planBurstNonce > 0 && !reduceMotion && (
-                <CelebrationBurst key={planBurstNonce} count={22} spread={70} duration={1.3} />
-              )}
-            </div>
-          )}
-        </div>
-        <div className="mt-3">
-          <Button type="button" variant="outline" size="lg" onClick={onReset} className="w-full sm:w-auto">
-            <RotateCcw className="h-4 w-4" />
-            {tTodo("backRestart", language)}
-          </Button>
-        </div>
-        {/* Ambient hairline — the hero ring now owns the "what should I look at" job, this is just quiet whole-plan context. */}
-        {tasks.length > 0 && (
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-            <motion.div
-              className={cn("h-full rounded-full", progressPct === 100 ? "bg-gradient-to-r from-emerald-500 to-primary" : "bg-gradient-to-r from-primary to-violet-500")}
-              initial={false}
-              animate={{ width: `${progressPct}%` }}
-              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            />
+                <p className="text-xs font-semibold text-slate-400">
+                  {completedCount} / {tasks.length} {fr ? "tâches validées" : "tasks done"}
+                </p>
+              ))}
           </div>
-        )}
+        </div>
+        <Button type="button" variant="outline" size="lg" onClick={onReset} className="w-full sm:w-auto">
+          <RotateCcw className="h-4 w-4" />
+          {tTodo("backRestart", language)}
+        </Button>
       </div>
+
+      {tasks.length > 0 && (
+        <SegmentedControl<PlanView>
+          ariaLabel={fr ? "Vue du planning" : "Planner view"}
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "list", label: fr ? "Liste" : "List", icon: ListChecks },
+            { value: "timeline", label: "Timeline", icon: GitCommitVertical },
+            { value: "kanban", label: "Kanban", icon: Columns3 },
+            { value: "grid", label: fr ? "Grille" : "Grid", icon: LayoutGrid },
+          ]}
+        />
+      )}
 
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/50 px-6 py-12 text-center">
           <ClipboardCheck className="h-8 w-8 text-muted-foreground/60" />
           <p className="text-sm text-muted-foreground">{tTodo("emptyStateText", language)}</p>
         </div>
+      ) : view === "timeline" ? (
+        <TimelineView tasks={tasks} today={today} onToggle={toggleTask} />
+      ) : view === "kanban" ? (
+        <KanbanView tasks={tasks} today={today} onToggle={toggleTask} />
+      ) : view === "grid" ? (
+        <GridView tasks={tasks} today={today} onToggle={toggleTask} />
       ) : (
         <div className="space-y-4">
           {/* HERO — Aujourd'hui, toujours visible en premier */}
-          <div className="glass-card relative overflow-hidden rounded-3xl border border-primary/30 p-4 shadow-glow sm:p-6">
+          <div className="relative overflow-hidden rounded-3xl border border-cyan-400/30 bg-[linear-gradient(145deg,rgba(8,47,73,0.45),rgba(2,6,23,0.7))] p-4 shadow-[0_0_50px_-20px_rgba(34,211,238,0.55)] sm:p-6">
             {todayTotal === 0 ? (
               <div className="flex flex-col items-center gap-2 py-6 text-center">
                 <Coffee className="h-8 w-8 text-primary/70" />
@@ -510,9 +545,9 @@ function useMemoParticles(count: number, spread: number) {
 function StudyOathBanner() {
   const { language } = useLanguage();
   return (
-    <div className="rounded-2xl border border-orange-300/60 bg-orange-50/70 p-5 text-center dark:border-orange-500/30 dark:bg-orange-950/20">
+    <div className="relative overflow-hidden rounded-2xl border border-orange-400/30 bg-[linear-gradient(135deg,rgba(124,45,18,0.25),rgba(2,6,23,0.6))] p-5 text-center shadow-[0_0_40px_-20px_rgba(251,146,60,0.6)]">
       <AlertTriangle className="mx-auto h-6 w-6 text-orange-500" />
-      <p className="mx-auto mt-3 max-w-xl text-base font-serif italic leading-relaxed text-orange-900 dark:text-orange-200">
+      <p className="mx-auto mt-3 max-w-xl text-base font-serif italic leading-relaxed text-orange-100">
         {tTodo("studyOathText", language)}
       </p>
     </div>

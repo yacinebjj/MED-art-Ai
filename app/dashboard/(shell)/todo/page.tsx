@@ -1,16 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ClipboardCheck, Loader2, ListChecks, Sparkles, SlidersHorizontal } from "lucide-react";
+import { Check, ClipboardCheck, ListChecks, ListTodo, Loader2, Sparkles, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tTodo } from "@/lib/translations/todo";
-import { ModuleChipSelector } from "@/components/todo/ModuleChipSelector";
-import { PlanConfigForm } from "@/components/todo/PlanConfigForm";
-import { PlanGenerationView } from "@/components/todo/PlanGenerationView";
-import { PlanExecutionView } from "@/components/todo/PlanExecutionView";
+import { CyberHeader, CyberPanel, CyberStage } from "@/components/cyber/primitives";
 import type { GeneratedPlanDay, StudyPlan, StudyPlanTask } from "@/types/study-planner";
+
+// Each wizard step is its own chunk — only the one on screen is downloaded.
+const stepLoading = () => (
+  <div className="flex items-center gap-2 py-16 text-sm text-slate-400">
+    <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
+  </div>
+);
+const ModuleChipSelector = dynamic(() => import("@/components/todo/ModuleChipSelector").then((m) => m.ModuleChipSelector), { ssr: false, loading: stepLoading });
+const PlanConfigForm = dynamic(() => import("@/components/todo/PlanConfigForm").then((m) => m.PlanConfigForm), { ssr: false, loading: stepLoading });
+const PlanGenerationView = dynamic(() => import("@/components/todo/PlanGenerationView").then((m) => m.PlanGenerationView), { ssr: false, loading: stepLoading });
+const PlanExecutionView = dynamic(() => import("@/components/todo/PlanExecutionView").then((m) => m.PlanExecutionView), { ssr: false, loading: stepLoading });
 
 type WizardStep =
   | { name: "loading" }
@@ -27,12 +36,10 @@ const STEPS = [
 ] as const;
 
 /**
- * "To-Do List & AI Study Planner" — a 4-step tunnel: sélection des modules
- * (chips) -> configuration + upload -> génération IA + chat d'affinement ->
- * exécution (to-do quotidienne). Resumes automatically on revisit: an
- * `active` plan jumps straight to execution, a `draft` plan that already
- * reached generation jumps back there — anything earlier just restarts the
- * tunnel rather than trying to reconstruct a half-finished config.
+ * "To-Do List & AI Study Planner" — a 4-step tunnel: modules (chips) ->
+ * configuration + upload -> AI generation + refinement chat -> execution.
+ * Resumes on revisit: an `active` plan jumps straight to execution, a
+ * `draft` that already reached generation jumps back there.
  */
 export default function TodoPage() {
   const { language } = useLanguage();
@@ -88,8 +95,7 @@ export default function TodoPage() {
     return () => {
       cancelled = true;
     };
-    // Runs once on mount to resume an in-progress plan — `language` is read
-    // for its value at that moment only, not a reason to refetch.
+    // Runs once on mount to resume an in-progress plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -105,31 +111,19 @@ export default function TodoPage() {
   const currentIndex = step.name === "loading" ? -1 : STEPS.findIndex((s) => s.key === step.name);
 
   return (
-    <div className="mx-auto max-w-3xl lg:max-w-4xl">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">To-Do List &amp; AI Study Planner</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{tTodo("pageSubtitle", language)}</p>
-      </motion.div>
+    <CyberStage accent="emerald" className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
+      <CyberHeader
+        icon={ListTodo}
+        kicker={language === "fr" ? "Planificateur IA" : "AI planner"}
+        title="To-Do List & AI Study Planner"
+        subtitle={tTodo("pageSubtitle", language)}
+      />
 
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
-        className="mt-4 sm:mt-6"
-      >
+      <div className="mt-5 sm:mt-6">
         <TodoStepper currentIndex={currentIndex} />
-      </motion.div>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-        className="glass-card mt-4 overflow-hidden rounded-2xl p-4 shadow-glass dark:shadow-glass-dark sm:mt-6 sm:rounded-3xl sm:p-6 lg:p-8"
-      >
+      <CyberPanel className="mt-4 overflow-hidden p-4 sm:mt-5 sm:p-6 lg:p-8">
         <AnimatePresence mode="wait">
           <motion.div
             key={step.name}
@@ -139,8 +133,8 @@ export default function TodoPage() {
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
           >
             {step.name === "loading" && (
-              <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <div className="flex items-center gap-2 py-16 text-sm text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
                 {tTodo("loading", language)}
               </div>
             )}
@@ -167,23 +161,18 @@ export default function TodoPage() {
               />
             )}
 
-            {step.name === "execute" && (
-              <PlanExecutionView planId={step.planId} initialTasks={step.tasks} onReset={() => setStep({ name: "modules" })} />
-            )}
+            {step.name === "execute" && <PlanExecutionView planId={step.planId} initialTasks={step.tasks} onReset={() => setStep({ name: "modules" })} />}
           </motion.div>
         </AnimatePresence>
-      </motion.div>
-    </div>
+      </CyberPanel>
+    </CyberStage>
   );
 }
 
 /**
- * The tunnel's step indicator — brief explicitly calls for a strong visual
- * continuity between steps, and none existed before. A connecting line
- * fills as steps complete; the active node gets a slow breathing pulse so
- * it reads as "in progress" rather than static. Labels hide below `sm`
- * (icons + fill bar carry the state on narrow phones) to avoid the 4-label
- * row wrapping or squeezing at ~360px.
+ * The tunnel's step indicator: neon nodes linked by a filling laser line;
+ * the active node breathes. Labels hide below `sm` (a caption names the
+ * current / next step there instead).
  */
 function TodoStepper({ currentIndex }: { currentIndex: number }) {
   const { language } = useLanguage();
@@ -191,7 +180,7 @@ function TodoStepper({ currentIndex }: { currentIndex: number }) {
   const next = currentIndex >= 0 && currentIndex < STEPS.length - 1 ? STEPS[currentIndex + 1] : null;
 
   return (
-    <div className="glass-card rounded-2xl px-3 py-3 shadow-glass dark:shadow-glass-dark sm:rounded-3xl sm:px-6 sm:py-4">
+    <CyberPanel className="px-3 py-3 sm:px-6 sm:py-4">
       <div className="flex items-center">
         {STEPS.map((s, i) => {
           const isDone = currentIndex > i;
@@ -204,29 +193,24 @@ function TodoStepper({ currentIndex }: { currentIndex: number }) {
                   animate={isActive ? { scale: [1, 1.08, 1] } : { scale: 1 }}
                   transition={{ duration: 1.8, repeat: isActive ? Infinity : 0, ease: "easeInOut" }}
                   className={cn(
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold transition-colors duration-300 sm:h-10 sm:w-10",
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-bold transition-colors duration-300 sm:h-11 sm:w-11",
                     isDone
-                      ? "border-primary bg-primary text-primary-foreground shadow-glow"
+                      ? "border-emerald-300 bg-gradient-to-br from-emerald-300 to-cyan-400 text-slate-950 shadow-[0_0_18px_rgba(52,211,153,0.55)]"
                       : isActive
-                        ? "border-primary bg-primary/10 text-primary shadow-glow"
-                        : "border-border bg-card text-muted-foreground"
+                        ? "border-cyan-300 bg-cyan-400/15 text-cyan-100 shadow-[0_0_22px_rgba(34,211,238,0.55)]"
+                        : "border-white/10 bg-white/[0.03] text-slate-500"
                   )}
                 >
-                  {isDone ? <Check className="h-4 w-4" /> : <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+                  {isDone ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
                 </motion.span>
-                <span
-                  className={cn(
-                    "hidden text-[11px] font-medium sm:block",
-                    isActive ? "text-primary" : isDone ? "text-foreground" : "text-muted-foreground"
-                  )}
-                >
+                <span className={cn("hidden text-[11px] font-bold sm:block", isActive ? "text-cyan-200" : isDone ? "text-white" : "text-slate-500")}>
                   {tTodo(s.labelKey, language)}
                 </span>
               </div>
               {i < STEPS.length - 1 && (
-                <div className="mx-2 h-0.5 flex-1 overflow-hidden rounded-full bg-border sm:mx-3">
+                <div className="mx-2 h-0.5 flex-1 overflow-hidden rounded-full bg-white/[0.08] sm:mx-3">
                   <motion.div
-                    className="h-full rounded-full bg-primary"
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"
                     initial={false}
                     animate={{ width: isDone ? "100%" : "0%" }}
                     transition={{ duration: 0.45, ease: "easeOut" }}
@@ -238,21 +222,18 @@ function TodoStepper({ currentIndex }: { currentIndex: number }) {
         })}
       </div>
 
-      {/*
-        Labels above hide below `sm` to keep the 4-icon row from wrapping on
-        narrow phones — but that left mobile with zero text context beyond a
-        fill bar. This caption is the phone-sized substitute: it always names
-        the current step and previews the next one, so "where am I / what's
-        next" stays answered without needing the `sm:` labels.
-      */}
       {current && (
         <p className="mt-2.5 flex flex-wrap items-center justify-center gap-x-1.5 text-center text-[11px] leading-relaxed sm:hidden">
-          <span className="font-semibold text-primary">
+          <span className="font-bold text-cyan-200">
             {tTodo("stepWord", language)} {currentIndex + 1}/{STEPS.length} · {tTodo(current.labelKey, language)}
           </span>
-          {next && <span className="text-muted-foreground">{tTodo("nextWord", language)} {tTodo(next.labelKey, language)}</span>}
+          {next && (
+            <span className="text-slate-500">
+              {tTodo("nextWord", language)} {tTodo(next.labelKey, language)}
+            </span>
+          )}
         </p>
       )}
-    </div>
+    </CyberPanel>
   );
 }

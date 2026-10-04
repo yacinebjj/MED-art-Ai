@@ -31,12 +31,12 @@
  * push-notification card (`?cardId=`) bypasses the saved session.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { Layers, Loader2, AlertTriangle, LogIn, Lock, ArrowRight, RotateCcw, Sparkles } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Layers, Loader2, AlertTriangle, LogIn, Lock, ArrowRight, RotateCcw, Sparkles, Flame, Gauge, Zap, Activity, Trophy, Timer } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { FlipFlashcard, type GradeFeedback } from "@/components/study/FlipFlashcard";
+import { CyberPanel, CyberStat, NeonRing } from "@/components/cyber/primitives";
+import { FlipFlashcard, type FlashcardRating, type GradeFeedback } from "@/components/study/FlipFlashcard";
 import { FlashcardCoursePicker } from "@/components/study/FlashcardCoursePicker";
 import { AiLanguageSelect } from "@/components/course/workspace/AiLanguageSelect";
 import { createClient } from "@/lib/supabase/client";
@@ -78,6 +78,16 @@ const COPY: Record<Language, Record<string, string>> = {
     retry: "Réessayer",
     nextError: "Le lot suivant n'a pas pu être préparé.",
     restart: "Recommencer la session",
+    liveTitle: "Mémorisation en direct",
+    mastery: "Rétention",
+    streak: "Série",
+    best: "record",
+    pace: "Rythme",
+    perMinute: "cartes / min",
+    hard: "Difficile",
+    medium: "Moyen",
+    easy: "Facile",
+    noGradeYet: "Note ta première carte pour activer la télémétrie.",
   },
   en: {
     batchDone: "Batch complete",
@@ -89,8 +99,21 @@ const COPY: Record<Language, Record<string, string>> = {
     retry: "Try again",
     nextError: "The next batch could not be prepared.",
     restart: "Restart the session",
+    liveTitle: "Live memory tracking",
+    mastery: "Retention",
+    streak: "Streak",
+    best: "best",
+    pace: "Pace",
+    perMinute: "cards / min",
+    hard: "Hard",
+    medium: "Good",
+    easy: "Easy",
+    noGradeYet: "Rate your first card to start the telemetry.",
   },
 };
+
+type RatingTally = Record<FlashcardRating, number>;
+const EMPTY_TALLY: RatingTally = { hard: 0, medium: 0, easy: 0 };
 
 interface SavedSession {
   deck: FlashcardPoolItem[];
@@ -98,6 +121,17 @@ interface SavedSession {
   score: { correct: number; incorrect: number };
   round: number;
   reviewedTotal: number;
+  /** Self-ratings this session — optional so sessions saved by older versions still load. */
+  ratings?: RatingTally;
+  streak?: number;
+  bestStreak?: number;
+}
+
+function parseTally(value: unknown): RatingTally {
+  if (!value || typeof value !== "object") return { ...EMPTY_TALLY };
+  const raw = value as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  return { hard: n(raw.hard), medium: n(raw.medium), easy: n(raw.easy) };
 }
 
 /** Per user (shared devices), per selection, per content language. */
@@ -153,6 +187,9 @@ function loadSavedSession(key: string): SavedSession | null {
       score,
       round: typeof parsed.round === "number" && parsed.round >= 1 ? parsed.round : 1,
       reviewedTotal: typeof parsed.reviewedTotal === "number" && parsed.reviewedTotal >= 0 ? parsed.reviewedTotal : parsed.index,
+      ratings: parseTally(parsed.ratings),
+      streak: typeof parsed.streak === "number" && parsed.streak >= 0 ? parsed.streak : 0,
+      bestStreak: typeof parsed.bestStreak === "number" && parsed.bestStreak >= 0 ? parsed.bestStreak : 0,
     };
   } catch {
     return null;
@@ -240,6 +277,12 @@ export function ActiveFlashcardsDeck() {
   const [score, setScore] = useState({ correct: 0, incorrect: 0 });
   const [round, setRound] = useState(1);
   const [reviewedTotal, setReviewedTotal] = useState(0);
+  const [ratings, setRatings] = useState<RatingTally>({ ...EMPTY_TALLY });
+  const [streak, setStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  // Pace is measured over THIS visit only (never persisted): grades since the deck became ready.
+  const [visit, setVisit] = useState<{ startedAt: number; graded: number }>({ startedAt: 0, graded: 0 });
+  const [nowTick, setNowTick] = useState(0);
   const [next, setNext] = useState<NextState>({ kind: "idle" });
   const [reloadKey, setReloadKey] = useState(0);
   const [gradeFeedback, setGradeFeedback] = useState<GradeFeedback>(null);
@@ -320,6 +363,10 @@ export function ActiveFlashcardsDeck() {
           setScore(saved.score);
           setRound(saved.round);
           setReviewedTotal(saved.reviewedTotal);
+          setRatings(saved.ratings ?? { ...EMPTY_TALLY });
+          setStreak(saved.streak ?? 0);
+          setBestStreak(saved.bestStreak ?? 0);
+          setVisit({ startedAt: Date.now(), graded: 0 });
           setFlipped(false);
           setStatus("ready");
           return;
@@ -329,6 +376,10 @@ export function ActiveFlashcardsDeck() {
       setScore({ correct: 0, incorrect: 0 });
       setRound(1);
       setReviewedTotal(0);
+      setRatings({ ...EMPTY_TALLY });
+      setStreak(0);
+      setBestStreak(0);
+      setVisit({ startedAt: Date.now(), graded: 0 });
 
       // Opening batch: previously served cards (already shuffled across the
       // selected courses by /pool), topped up with NEW cards when short.
@@ -383,8 +434,15 @@ export function ActiveFlashcardsDeck() {
   // ---- Persist the live session.
   useEffect(() => {
     if (status !== "ready" || !storageKey || deck.length === 0) return;
-    saveSession(storageKey, { deck, index, score, round, reviewedTotal });
-  }, [storageKey, status, deck, index, score, round, reviewedTotal]);
+    saveSession(storageKey, { deck, index, score, round, reviewedTotal, ratings, streak, bestStreak });
+  }, [storageKey, status, deck, index, score, round, reviewedTotal, ratings, streak, bestStreak]);
+
+  // Re-render the pace once every 15 s while studying (cheap, no per-second churn).
+  useEffect(() => {
+    if (status !== "ready") return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 15000);
+    return () => window.clearInterval(id);
+  }, [status]);
 
   // ---- Cross-tab sync (another tab of the same selection moved on).
   useEffect(() => {
@@ -399,6 +457,9 @@ export function ActiveFlashcardsDeck() {
       setScore(saved.score);
       setRound(saved.round);
       setReviewedTotal(saved.reviewedTotal);
+      setRatings(saved.ratings ?? { ...EMPTY_TALLY });
+      setStreak(saved.streak ?? 0);
+      setBestStreak(saved.bestStreak ?? 0);
       setFlipped(false);
     }
     window.addEventListener("storage", handleStorageChange);
@@ -444,9 +505,14 @@ export function ActiveFlashcardsDeck() {
     setIndex(index - 1);
   }
 
-  function handleGrade(isCorrect: boolean) {
+  function handleGrade(isCorrect: boolean, rating: FlashcardRating) {
     if (gradeFeedbackTimeoutRef.current) return;
     setScore((prev) => (isCorrect ? { ...prev, correct: prev.correct + 1 } : { ...prev, incorrect: prev.incorrect + 1 }));
+    setRatings((prev) => ({ ...prev, [rating]: prev[rating] + 1 }));
+    const nextStreak = rating === "hard" ? 0 : streak + 1;
+    setStreak(nextStreak);
+    setBestStreak((best) => Math.max(best, nextStreak));
+    setVisit((v) => ({ ...v, graded: v.graded + 1 }));
     setGradeFeedback(isCorrect ? "correct" : "incorrect");
     gradeFeedbackTimeoutRef.current = setTimeout(() => {
       gradeFeedbackTimeoutRef.current = null;
@@ -455,188 +521,248 @@ export function ActiveFlashcardsDeck() {
     }, GRADE_FEEDBACK_MS);
   }
 
+  const statusShell = (children: ReactNode) => (
+    <CyberPanel laser className="animate-in fade-in-0 duration-300">
+      <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">{children}</div>
+    </CyberPanel>
+  );
+
   if (status === "loading") {
-    return (
-      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-        <CardContent className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-sm">{tStudyTools("preparingFlashcards", language)}</span>
-        </CardContent>
-      </Card>
+    return statusShell(
+      <>
+        <span className="relative flex h-14 w-14 items-center justify-center">
+          <span className="absolute inset-0 animate-ping rounded-full bg-cyan-400/20" />
+          <Loader2 className="h-6 w-6 animate-spin text-cyan-300" />
+        </span>
+        <span className="text-sm text-slate-300">{tStudyTools("preparingFlashcards", language)}</span>
+      </>
     );
   }
 
   if (status === "needs-auth") {
-    return (
-      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <LogIn className="h-6 w-6" />
-          <p className="text-sm">{tStudyTools("signInForFlashcards", language)}</p>
-        </CardContent>
-      </Card>
+    return statusShell(
+      <>
+        <LogIn className="h-6 w-6 text-cyan-300" />
+        <p className="text-sm text-slate-300">{tStudyTools("signInForFlashcards", language)}</p>
+      </>
     );
   }
 
   if (status === "error") {
-    return (
-      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <AlertTriangle className="h-6 w-6 text-amber-500" />
-          <p className="text-sm">{error}</p>
-          <Button variant="secondary" size="sm" onClick={handleRestart}>
-            <RotateCcw className="h-3.5 w-3.5" />
-            {copy.retry}
-          </Button>
-        </CardContent>
-      </Card>
+    return statusShell(
+      <>
+        <AlertTriangle className="h-6 w-6 text-amber-300" />
+        <p className="text-sm text-slate-300">{error}</p>
+        <Button variant="secondary" size="sm" onClick={handleRestart}>
+          <RotateCcw className="h-3.5 w-3.5" />
+          {copy.retry}
+        </Button>
+      </>
     );
   }
 
   if (status === "no-modules-active") {
-    return (
-      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-          <Layers className="h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm font-semibold text-foreground">{tStudyTools("noActiveModulesTitle", language)}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{tStudyTools("noActiveModulesFlashcardsSubtitle", language)}</p>
-          <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
-        </CardContent>
-      </Card>
+    return statusShell(
+      <>
+        <Layers className="h-9 w-9 text-cyan-300/60" />
+        <p className="text-sm font-bold text-white">{tStudyTools("noActiveModulesTitle", language)}</p>
+        <p className="max-w-sm text-xs text-slate-400">{tStudyTools("noActiveModulesFlashcardsSubtitle", language)}</p>
+        <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
+      </>
     );
   }
 
   if (status === "empty-pool") {
-    return (
-      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-          <Layers className="h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm font-semibold text-foreground">{tStudyTools("emptyPoolTitle", language)}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{error ?? tStudyTools("emptyPoolSubtitle", language)}</p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
-            <Button variant="secondary" size="sm" onClick={handleRestart}>
-              <RotateCcw className="h-3.5 w-3.5" />
-              {copy.retry}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+    return statusShell(
+      <>
+        <Layers className="h-9 w-9 text-cyan-300/60" />
+        <p className="text-sm font-bold text-white">{tStudyTools("emptyPoolTitle", language)}</p>
+        <p className="max-w-sm text-xs text-slate-400">{error ?? tStudyTools("emptyPoolSubtitle", language)}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
+          <Button variant="secondary" size="sm" onClick={handleRestart}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            {copy.retry}
+          </Button>
+        </div>
+      </>
     );
   }
 
   if (status === "quota-exceeded") {
-    return (
-      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-          <Lock className="h-8 w-8 text-amber-500" />
-          <p className="text-sm font-semibold text-foreground">{tStudyTools("flashcardQuotaTitle", language)}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{tStudyTools("flashcardQuotaSubtitle", language)}</p>
-        </CardContent>
-      </Card>
+    return statusShell(
+      <>
+        <Lock className="h-9 w-9 text-amber-300" />
+        <p className="text-sm font-bold text-white">{tStudyTools("flashcardQuotaTitle", language)}</p>
+        <p className="max-w-sm text-xs text-slate-400">{tStudyTools("flashcardQuotaSubtitle", language)}</p>
+      </>
     );
   }
 
   const current = deck[index];
+  const graded = score.correct + score.incorrect;
+  const retention = graded > 0 ? score.correct / graded : 0;
+  const elapsedMinutes = visit.startedAt > 0 ? Math.max(1, ((nowTick || Date.now()) - visit.startedAt) / 60000) : 1;
+  const pace = visit.graded > 0 ? visit.graded / elapsedMinutes : 0;
+  const ratingRows: { key: FlashcardRating; label: string; icon: typeof Flame; bar: string; text: string }[] = [
+    { key: "easy", label: copy.easy, icon: Zap, bar: "from-emerald-400 to-teal-400", text: "text-emerald-300" },
+    { key: "medium", label: copy.medium, icon: Gauge, bar: "from-amber-400 to-orange-400", text: "text-amber-300" },
+    { key: "hard", label: copy.hard, icon: Flame, bar: "from-rose-400 to-pink-500", text: "text-rose-300" },
+  ];
+  const ratingTotal = ratings.hard + ratings.medium + ratings.easy;
+
   const header = (
-    <CardHeader className="flex flex-row flex-wrap items-center gap-3">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+    <div className="flex flex-wrap items-center gap-3 border-b border-white/[0.06] p-4 sm:p-5">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-200 ring-1 ring-inset ring-violet-400/30">
         <Layers className="h-5 w-5" />
-      </div>
+      </span>
       <div className="min-w-0 flex-1">
-        <CardTitle>{tStudyTools("flashcardsActiveModulesTitle", language)}</CardTitle>
-        <p className="truncate text-sm text-muted-foreground">
+        <p className="text-sm font-black text-white">{tStudyTools("flashcardsActiveModulesTitle", language)}</p>
+        <p className="truncate text-xs text-slate-400">
           {copy.batchLabel} {round}
           {current ? ` · ${current.courseTitle}` : ""}
         </p>
       </div>
       <AiLanguageSelect compact />
       <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
-    </CardHeader>
+    </div>
+  );
+
+  // Live memory telemetry — every number is this session's real grading.
+  const tracker = (
+    <CyberPanel className="p-5">
+      <p className="cyber-kicker flex items-center gap-1.5">
+        <Activity className="h-3.5 w-3.5" />
+        {copy.liveTitle}
+      </p>
+      <div className="mt-4 flex items-center gap-4">
+        <NeonRing value={retention} size={104} stroke={9} from="#34d399" to="#22d3ee" aria-label={`${copy.mastery} ${Math.round(retention * 100)}%`}>
+          <span className="text-2xl font-black tabular-nums text-white">{graded > 0 ? `${Math.round(retention * 100)}%` : "—"}</span>
+          <span className="mt-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">{copy.mastery}</span>
+        </NeonRing>
+        <div className="min-w-0 flex-1 space-y-2.5">
+          {ratingRows.map(({ key, label, icon: Icon, bar, text }) => (
+            <div key={key}>
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className={`flex items-center gap-1 ${text}`}>
+                  <Icon className="h-3 w-3" />
+                  {label}
+                </span>
+                <span className="tabular-nums text-slate-300">{ratings[key]}</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                <div className={`h-full rounded-full bg-gradient-to-r ${bar} transition-[width] duration-500`} style={{ width: `${ratingTotal > 0 ? (ratings[key] / ratingTotal) * 100 : 0}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2.5">
+        <CyberStat label={copy.streak} value={streak} hint={`${copy.best} ${bestStreak}`} icon={Trophy} tone="amber" />
+        <CyberStat label={copy.pace} value={pace > 0 ? pace.toFixed(1) : "—"} hint={copy.perMinute} icon={Timer} tone="violet" />
+      </div>
+      <p className="mt-3 text-[11px] text-slate-500">
+        {graded === 0 ? copy.noGradeYet : `${reviewedTotal} ${copy.reviewed}`}
+      </p>
+    </CyberPanel>
   );
 
   if (!current) {
     // End of a batch — never a dead end: the next batch is (being) prepared.
     return (
-      <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-        {header}
-        <CardContent className="flex flex-col items-center gap-3 pb-12 pt-4 text-center">
-          <p className="text-sm font-semibold text-foreground">
-            {copy.batchDone} · {copy.batchLabel} {round}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {reviewedTotal} {copy.reviewed} · ✓ {score.correct} · ✗ {score.incorrect}
-          </p>
-
-          {next.kind === "ready" ? (
-            <>
-              {next.extended && (
-                <p className="flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {copy.extended}
-                </p>
-              )}
-              <Button size="sm" onClick={handleContinue}>
-                {copy.continue}
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </>
-          ) : next.kind === "quota" ? (
-            <>
-              <Lock className="h-6 w-6 text-amber-500" />
-              <p className="text-sm font-semibold text-foreground">{tStudyTools("flashcardQuotaTitle", language)}</p>
-              <p className="max-w-sm text-xs text-muted-foreground">{tStudyTools("flashcardQuotaSubtitle", language)}</p>
-            </>
-          ) : next.kind === "error" ? (
-            <>
-              <p className="max-w-sm text-xs text-muted-foreground">
-                {copy.nextError} {next.message}
-              </p>
-              <Button variant="secondary" size="sm" onClick={prefetchNext}>
-                <RotateCcw className="h-3.5 w-3.5" />
-                {copy.retry}
-              </Button>
-            </>
-          ) : (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {copy.preparing}
+      <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+        <CyberPanel laser className="animate-in fade-in-0 duration-300">
+          {header}
+          <div className="flex flex-col items-center gap-3 px-6 pb-12 pt-8 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 text-slate-950 shadow-[0_0_30px_rgba(52,211,153,0.45)]">
+              <Trophy className="h-6 w-6" />
+            </span>
+            <p className="text-base font-black text-white">
+              {copy.batchDone} · {copy.batchLabel} {round}
             </p>
-          )}
+            <p className="text-xs text-slate-400">
+              {reviewedTotal} {copy.reviewed} · ✓ {score.correct} · ↺ {score.incorrect}
+            </p>
 
-          <Button variant="ghost" size="sm" onClick={handleRestart}>
-            <RotateCcw className="h-3.5 w-3.5" />
-            {copy.restart}
-          </Button>
-        </CardContent>
-      </Card>
+            {next.kind === "ready" ? (
+              <>
+                {next.extended && (
+                  <p className="flex items-center gap-1.5 text-xs text-violet-200">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {copy.extended}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleContinue}
+                  className="mt-2 flex min-h-12 items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-300 to-violet-500 px-6 text-sm font-black text-slate-950 shadow-[0_0_30px_rgba(34,211,238,0.45)] transition-transform active:scale-95"
+                >
+                  {copy.continue}
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </>
+            ) : next.kind === "quota" ? (
+              <>
+                <Lock className="h-6 w-6 text-amber-300" />
+                <p className="text-sm font-bold text-white">{tStudyTools("flashcardQuotaTitle", language)}</p>
+                <p className="max-w-sm text-xs text-slate-400">{tStudyTools("flashcardQuotaSubtitle", language)}</p>
+              </>
+            ) : next.kind === "error" ? (
+              <>
+                <p className="max-w-sm text-xs text-slate-400">
+                  {copy.nextError} {next.message}
+                </p>
+                <Button variant="secondary" size="sm" onClick={prefetchNext}>
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {copy.retry}
+                </Button>
+              </>
+            ) : (
+              <p className="flex items-center gap-2 text-sm text-slate-300">
+                <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
+                {copy.preparing}
+              </p>
+            )}
+
+            <Button variant="ghost" size="sm" onClick={handleRestart}>
+              <RotateCcw className="h-3.5 w-3.5" />
+              {copy.restart}
+            </Button>
+          </div>
+        </CyberPanel>
+        {tracker}
+      </div>
     );
   }
 
   return (
-    <Card className="glass-card animate-in fade-in-0 shadow-soft duration-300">
-      {header}
-      <CardContent className="space-y-3">
-        <FlipFlashcard
-          key={current.id}
-          item={current}
-          index={index}
-          total={deck.length}
-          flipped={flipped}
-          onFlip={() => setFlipped((f) => !f)}
-          onPrev={handlePrev}
-          onNext={handleNext}
-          canGoPrev={index > 0}
-          score={score}
-          onGrade={handleGrade}
-          feedback={gradeFeedback}
-        />
-        {next.kind === "loading" && (
-          <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            {tStudyTools("preparingMoreInBackground", language)}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+      <CyberPanel className="animate-in fade-in-0 duration-300">
+        {header}
+        <div className="space-y-3 p-4 sm:p-6">
+          <FlipFlashcard
+            key={current.id}
+            item={current}
+            index={index}
+            total={deck.length}
+            flipped={flipped}
+            onFlip={() => setFlipped((f) => !f)}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            canGoPrev={index > 0}
+            score={score}
+            onGrade={handleGrade}
+            feedback={gradeFeedback}
+          />
+          {next.kind === "loading" && (
+            <div className="mx-auto flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-400">
+              <Loader2 className="h-3 w-3 animate-spin text-cyan-300" />
+              {tStudyTools("preparingMoreInBackground", language)}
+            </div>
+          )}
+        </div>
+      </CyberPanel>
+      {tracker}
+    </div>
   );
 }
