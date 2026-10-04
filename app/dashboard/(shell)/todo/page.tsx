@@ -61,6 +61,7 @@ export default function TodoPage() {
         }
 
         const plans: StudyPlan[] = data.plans ?? [];
+        // Newest first (the API orders by created_at desc) — never an older plan's modules.
         const activePlan = plans.find((p) => p.status === "active");
         const resumableDraft = plans.find((p) => p.status === "draft" && p.generatedPlan);
 
@@ -138,6 +139,9 @@ export default function TodoPage() {
   }, [step.name]);
 
   function handleReset() {
+    // A new plan starts from an empty selection — keeping the previous plan's
+    // modules ticked silently mixed them into the next plan.
+    setSelectedModuleIds(new Set());
     setStep({ name: "modules" });
   }
 

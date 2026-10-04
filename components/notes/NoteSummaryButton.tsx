@@ -71,13 +71,14 @@ export function NoteSummaryButton({ getPlainText }: NoteSummaryButtonProps) {
       <AnimatePresence>
         {summary && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setSummary(null)} />
+            <div className="fixed inset-0 z-40 bg-black/40 sm:bg-transparent" onClick={() => setSummary(null)} />
             <motion.div
               initial={{ opacity: 0, y: 8, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.97 }}
               transition={{ duration: 0.15 }}
-              className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-2xl border border-violet-400/40 bg-slate-950/95 p-4 shadow-[0_20px_60px_-20px_rgba(139,92,246,0.6)] sm:w-96"
+              // Phones: a bottom sheet in its own layer (never painted over the note text). sm+: popover.
+              className="fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-50 rounded-2xl border border-violet-400/40 bg-slate-950 p-4 shadow-[0_20px_60px_-20px_rgba(139,92,246,0.6)] sm:absolute sm:inset-x-auto sm:bottom-full sm:left-0 sm:mb-2 sm:w-96"
             >
               <div className="flex items-start justify-between gap-2">
                 <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-violet-200">
@@ -93,7 +94,7 @@ export function NoteSummaryButton({ getPlainText }: NoteSummaryButtonProps) {
                   </button>
                 </span>
               </div>
-              <p className="cyber-scrollbar mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-slate-100">{summary}</p>
+              <p className="cyber-scrollbar mt-2 max-h-[50vh] overflow-y-auto whitespace-pre-line break-words sm:max-h-72 text-sm leading-relaxed text-slate-100">{summary}</p>
             </motion.div>
           </>
         )}

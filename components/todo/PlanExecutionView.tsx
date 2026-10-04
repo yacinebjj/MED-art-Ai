@@ -57,6 +57,39 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
   const { language } = useLanguage();
   const reduceMotion = useReducedMotion();
   const [tasks, setTasks] = useState<StudyPlanTask[]>(initialTasks);
+  // Module scope of the views below — "all" or one module id of THIS plan.
+  const [moduleFilter, setModuleFilter] = useState<number | "all">("all");
+  const [moduleTitles, setModuleTitles] = useState<Record<number, string>>({});
+  const planModuleIds = useMemo(
+    () => Array.from(new Set(tasks.map((t) => t.moduleId).filter((id): id is number => id !== null))).sort((a, b) => a - b),
+    [tasks]
+  );
+  const planModuleKey = planModuleIds.join(",");
+
+  // Titles for the module filter (only when the plan spans several modules).
+  useEffect(() => {
+    if (planModuleIds.length < 2) return;
+    let cancelled = false;
+    void Promise.all(
+      planModuleIds.map((id) =>
+        fetch(`/api/curriculum/modules/${id}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((body: { module?: { title?: string } } | null) => [id, body?.module?.title ?? `Module ${id}`] as const)
+          .catch(() => [id, `Module ${id}`] as const)
+      )
+    ).then((entries) => {
+      if (!cancelled) setModuleTitles(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // planModuleKey is the content-stable form of planModuleIds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planModuleKey]);
+
+  // A filter pointing at a module no longer in the plan falls back to "all".
+  const activeFilter = moduleFilter !== "all" && planModuleIds.includes(moduleFilter) ? moduleFilter : "all";
+  const visibleTasks = useMemo(() => (activeFilter === "all" ? tasks : tasks.filter((t) => t.moduleId === activeFilter)), [tasks, activeFilter]);
   const [suggestions, setSuggestions] = useState<Record<number, string[]>>({});
   const [suggestingIds, setSuggestingIds] = useState<Set<number>>(new Set());
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -73,8 +106,8 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
   const today = todayIso();
   const weekEnd = addDaysIso(today, 6);
 
-  const completedCount = tasks.filter((t) => t.isCompleted).length;
-  const progressPct = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
+  const completedCount = visibleTasks.filter((t) => t.isCompleted).length;
+  const progressPct = visibleTasks.length > 0 ? Math.round((completedCount / visibleTasks.length) * 100) : 0;
 
   const buckets = useMemo(() => {
     const todayTasks: StudyPlanTask[] = [];
@@ -83,7 +116,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
     const upcomingMap = new Map<string, StudyPlanTask[]>();
     const doneTasks: StudyPlanTask[] = [];
 
-    for (const task of tasks) {
+    for (const task of visibleTasks) {
       if (task.dateScheduled === today) {
         todayTasks.push(task);
       } else if (task.dateScheduled < today) {
@@ -108,7 +141,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
     for (const [, list] of upcomingByDate) list.sort(sortByOrder);
 
     return { todayTasks, overdueTasks, thisWeekByDate, upcomingByDate, doneTasks };
-  }, [tasks, today, weekEnd]);
+  }, [visibleTasks, today, weekEnd]);
 
   const todayTotal = buckets.todayTasks.length;
   const todayCompleted = buckets.todayTasks.filter((t) => t.isCompleted).length;
@@ -300,7 +333,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
                 </motion.p>
               ) : (
                 <p className="text-xs font-semibold text-slate-400">
-                  {completedCount} / {tasks.length} {fr ? "tâches validées" : "tasks done"}
+                  {completedCount} / {visibleTasks.length} {fr ? "tâches validées" : "tasks done"}
                 </p>
               ))}
           </div>
@@ -325,17 +358,39 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
         />
       )}
 
+      {planModuleIds.length > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label={fr ? "Filtrer par module" : "Filter by module"}>
+          {(["all", ...planModuleIds] as const).map((id) => {
+            const active = activeFilter === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setModuleFilter(id)}
+                aria-pressed={active}
+                className={cn(
+                  "min-h-9 max-w-full truncate rounded-full border px-3 text-xs font-bold transition-[border-color,background-color,color]",
+                  active ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-100" : "border-white/10 text-slate-400 hover:border-white/25 hover:text-white"
+                )}
+              >
+                {id === "all" ? (fr ? "Tous les modules" : "All modules") : moduleTitles[id] ?? `Module ${id}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/50 px-6 py-12 text-center">
           <ClipboardCheck className="h-8 w-8 text-muted-foreground/60" />
           <p className="text-sm text-muted-foreground">{tTodo("emptyStateText", language)}</p>
         </div>
       ) : view === "timeline" ? (
-        <TimelineView tasks={tasks} today={today} onToggle={toggleTask} />
+        <TimelineView tasks={visibleTasks} today={today} onToggle={toggleTask} />
       ) : view === "kanban" ? (
-        <KanbanView tasks={tasks} today={today} onToggle={toggleTask} />
+        <KanbanView tasks={visibleTasks} today={today} onToggle={toggleTask} />
       ) : view === "grid" ? (
-        <GridView tasks={tasks} today={today} onToggle={toggleTask} />
+        <GridView tasks={visibleTasks} today={today} onToggle={toggleTask} />
       ) : (
         <div className="space-y-4">
           {/* HERO — Aujourd'hui, toujours visible en premier */}

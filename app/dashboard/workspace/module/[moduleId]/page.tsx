@@ -72,6 +72,24 @@ function workspaceHistoryStorageKey(userId: string, moduleId: number): string {
   return `${WORKSPACE_HISTORY_STORAGE_PREFIX}${userId}_${moduleId}`;
 }
 
+/**
+ * Writes a freshly generated entry straight to storage, independently of
+ * React state — so a result that arrives after the student left the page
+ * (phone locked, app switched, route changed mid-generation) is still there
+ * on return instead of being lost with the unmounted component.
+ */
+function persistEntryNow(userId: string, moduleId: number, entry: HistoryEntry): void {
+  try {
+    const key = workspaceHistoryStorageKey(userId, moduleId);
+    const raw = localStorage.getItem(key);
+    const saved = raw ? (JSON.parse(raw) as { history?: HistoryEntry[] }) : {};
+    const history = [entry, ...(Array.isArray(saved.history) ? saved.history.filter((h) => h.id !== entry.id) : [])].slice(0, 30);
+    localStorage.setItem(key, JSON.stringify({ history, activeHistoryId: entry.id }));
+  } catch {
+    // Storage full / blocked: the in-memory state still shows it this session.
+  }
+}
+
 interface HistoryEntry {
   id: string;
   type: WorkspaceGenerationType;
@@ -139,9 +157,9 @@ export default function ModuleWorkspacePage() {
   useEffect(() => {
     let cancelled = false;
     createClient()
-      .auth.getUser()
+      .auth.getSession()
       .then(({ data }) => {
-        if (!cancelled && data.user) setUserId(data.user.id);
+        if (!cancelled && data.session?.user) setUserId(data.session.user.id);
       });
     return () => {
       cancelled = true;
@@ -174,6 +192,8 @@ export default function ModuleWorkspacePage() {
       const active = saved.history.find((h) => h.id === saved.activeHistoryId) ?? saved.history[0];
       setActiveHistoryId(active.id);
       setOutput(active.content);
+      // On phones only one panel shows: open "Résultats" so the restored result is actually visible.
+      setMobileTab("results");
     } catch {
       // Corrupted or foreign localStorage value — ignore, page just starts empty.
     }
@@ -313,6 +333,7 @@ export default function ModuleWorkspacePage() {
         timestamp: Date.now(),
         content,
       };
+      if (userId) persistEntryNow(userId, moduleId, entry);
       setHistory((prev) => [entry, ...prev]);
       setActiveHistoryId(entry.id);
       // Dès qu'un résultat est généré, on bascule automatiquement sur l'onglet

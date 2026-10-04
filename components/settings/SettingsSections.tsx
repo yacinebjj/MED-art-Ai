@@ -259,14 +259,14 @@ export function AiEngineSection() {
       <CyberPanel className="p-5 sm:p-6">
         <SectionTitle
           icon={Cpu}
-          title={fr ? "Moteur" : "Engine"}
+          title="MedArt Neural Engine"
           subtitle={fr ? "MedArt choisit automatiquement le modèle le plus adapté à chaque tâche." : "MedArt automatically picks the best-suited model for each task."}
         />
         <ul className="space-y-2 text-sm">
           {[
-            { icon: Sparkles, label: fr ? "Explications, résumés, cas cliniques" : "Explanations, summaries, clinical cases", value: "Qwen3" },
-            { icon: Brain, label: fr ? "Flashcards & QCM" : "Flashcards & MCQs", value: fr ? "Qwen3 — JSON strict" : "Qwen3 — strict JSON" },
-            { icon: Bot, label: "Lab IA", value: fr ? "Qwen3 avec repli automatique" : "Qwen3 with automatic fallback" },
+            { icon: Sparkles, label: fr ? "Explications, résumés, cas cliniques" : "Explanations, summaries, clinical cases", value: fr ? "Analyse Médicale Avancée" : "Advanced Medical Analysis" },
+            { icon: Brain, label: fr ? "Flashcards & QCM" : "Flashcards & MCQs", value: fr ? "Clinique Standard" : "Clinical Standard" },
+            { icon: Bot, label: "Lab IA", value: fr ? "Raisonnement Clinique Expert" : "Expert Clinical Reasoning" },
           ].map(({ icon: Icon, label, value }) => (
             <li key={label} className="flex flex-col gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <span className="flex min-w-0 items-center gap-2 text-slate-300">

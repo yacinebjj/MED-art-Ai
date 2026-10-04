@@ -4,6 +4,13 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { isMissingColumnError } from "@/lib/group-chat";
+
+/** Avatar kept in auth user_metadata — the fallback while profiles.avatar_url isn't migrated (20261005_profiles_avatar_url.sql). */
+function metadataAvatarUrl(metadata: Record<string, unknown> | undefined): string | null {
+  const value = metadata?.avatar_url;
+  return typeof value === "string" && value.startsWith("https://") ? value : null;
+}
 
 export const runtime = "nodejs";
 
@@ -59,10 +66,11 @@ export async function GET() {
     .maybeSingle<{ avatar_url: string | null }>();
 
   if (error) {
+    if (isMissingColumnError(error)) return NextResponse.json({ avatarUrl: metadataAvatarUrl(user.user_metadata) });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ avatarUrl: data?.avatar_url ?? null });
+  return NextResponse.json({ avatarUrl: data?.avatar_url ?? metadataAvatarUrl(user.user_metadata) });
 }
 
 /** POST — uploads one new avatar image, stores it in Supabase Storage, and updates `profiles.avatar_url`. */
@@ -150,6 +158,20 @@ export async function POST(request: NextRequest) {
   // guessing, matching every other route in this app that hit the same
   // class of bug.
   const { error: updateError } = await supabase.from("profiles").update({ avatar_url: avatarUrl }).eq("id", user.id);
+
+  // Column not migrated yet: keep the photo in the auth user's metadata instead
+  // (GET above reads it back), so the upload still succeeds for the student.
+  if (updateError && isMissingColumnError(updateError)) {
+    const { error: metadataError } = await supabase.auth.admin.updateUserById(user.id, {
+      user_metadata: { ...(user.user_metadata ?? {}), avatar_url: avatarUrl },
+    });
+    if (!metadataError) {
+      console.warn("[profile/avatar] profiles.avatar_url absent — URL stockée dans user_metadata (migration 20261005 à exécuter).");
+      return NextResponse.json({ success: true, avatarUrl });
+    }
+    console.error("[profile/avatar] Repli user_metadata échoué:", metadataError.message);
+  }
+
   if (updateError) {
     console.error("[profile/avatar] Photo uploadée mais mise à jour du profil échouée:", {
       code: updateError.code,
@@ -160,8 +182,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: `La photo a été envoyée mais le profil n'a pas pu être mis à jour : ${updateError.message}`,
-        supabase: { code: updateError.code, message: updateError.message, details: updateError.details, hint: updateError.hint },
+        error: "La photo a été envoyée mais ton profil n'a pas pu être mis à jour. Réessaie dans un instant.",
       },
       { status: 500 }
     );

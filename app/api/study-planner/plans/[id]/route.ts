@@ -211,11 +211,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     if (!existingCount) {
+      const allowedModuleIds = new Set(plan.moduleIds);
       const rows = plan.generatedPlan.flatMap((day, dayIndex) =>
         day.items.map((item, itemIndex) => ({
           plan_id: id,
           user_id: user.id,
-          module_id: item.moduleId,
+          // Never a module outside this plan's own selection.
+          module_id: item.moduleId !== null && allowedModuleIds.has(item.moduleId) ? item.moduleId : null,
           title: sanitizeForPostgres(item.title),
           date_scheduled: day.date,
           hours: item.hours,
@@ -229,6 +231,17 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         return NextResponse.json({ success: false, error: "Le plan a été activé mais ses tâches n'ont pas pu être créées. Réessaie." }, { status: 500 });
       }
     }
+
+    // One active plan per student: older active plans are archived (kept,
+    // status "completed"), so the to-do never resumes an old plan whose
+    // modules differ from the one just started.
+    const { error: archiveError } = await supabase
+      .from("study_plans")
+      .update({ status: "completed", updated_at: new Date().toISOString() })
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .neq("id", id);
+    if (archiveError) console.warn("[study-planner/plans/[id]:start] Archivage des anciens plans actifs échoué:", archiveError.message);
   }
 
   return NextResponse.json({ success: true, plan });

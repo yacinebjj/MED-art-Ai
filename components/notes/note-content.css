@@ -1,0 +1,58 @@
+/*
+ * Typography containment for the note body (components/notes/NoteEditor.tsx).
+ * Belt-and-braces with lib/notes/sanitize-note-html.ts: even an old note
+ * saved before sanitizing existed can never overlap or bleed out.
+ */
+.note-content {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.note-content * {
+  position: static !important;
+  float: none !important;
+  max-width: 100% !important;
+  transform: none !important;
+}
+
+/* Inline highlights: never vertical padding/height on an inline box (it
+   paints over the neighbouring lines). Wrapped highlights keep their
+   background on every line fragment. */
+.note-content span,
+.note-content strong,
+.note-content em,
+.note-content mark,
+.note-content b,
+.note-content i {
+  display: inline !important;
+  height: auto !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  line-height: inherit !important;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.note-content p,
+.note-content li,
+.note-content h2,
+.note-content h3,
+.note-content div {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* Wide tables scroll inside themselves instead of widening the page. */
+.note-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: normal;
+}
+
+.note-content img {
+  height: auto !important;
+}

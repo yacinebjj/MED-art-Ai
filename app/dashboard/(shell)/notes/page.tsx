@@ -40,6 +40,7 @@ import { tNotes } from "@/lib/translations/notes";
 import { NoteCard } from "@/components/notes/NoteCard";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { NoteSummaryButton } from "@/components/notes/NoteSummaryButton";
+import { sanitizeNoteHtml } from "@/lib/notes/sanitize-note-html";
 import { CyberHeader, CyberPanel, CyberStage, SegmentedControl } from "@/components/cyber/primitives";
 import { useStoredPreference } from "@/components/cyber/hooks";
 import type { UserNote } from "@/types/user-notes";
@@ -245,7 +246,7 @@ function NotesPageContent() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? "L'organisation par l'IA a échoué.");
 
-      setDraftContent(data.organizedContent);
+      setDraftContent(sanitizeNoteHtml(String(data.organizedContent ?? "")));
       toast({ variant: "success", title: `✨ ${tNotes("organizeSuccessToast", language)}` });
     } catch (error) {
       toast({ variant: "error", title: tNotes("toastErrorTitle", language), description: error instanceof Error ? error.message : tNotes("toastErrorUnknown", language) });

@@ -54,8 +54,8 @@ export const COCKPIT_TRANSLATIONS = {
   themeToDark: { fr: "Passer en thème sombre", en: "Switch to dark theme" },
   trialBadge: { fr: "Essai gratuit · {n} j", en: "Free trial · {n} d" },
   memberBadge: { fr: "Membre {plan}", en: "{plan} member" },
-  engineOnline: { fr: "Moteur IA joignable depuis cet appareil", en: "AI engine reachable from this device" },
-  engineOffline: { fr: "Hors ligne — le moteur IA est injoignable", en: "Offline — the AI engine can't be reached" },
+  engineOnline: { fr: "MedArt Neural Engine opérationnel", en: "MedArt Neural Engine online" },
+  engineOffline: { fr: "Hors ligne — reconnecte-toi pour utiliser MedArt Neural Engine", en: "Offline — reconnect to use MedArt Neural Engine" },
   engineDegraded: { fr: "Données non synchronisées — réessaie dans un instant", en: "Data not synced — try again shortly" },
 
   // ---- Notifications

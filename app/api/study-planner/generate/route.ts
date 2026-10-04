@@ -71,6 +71,20 @@ function todayIso(): string {
 }
 
 /** POST body — { planId, manualCourseTitles?, programText? } for a first generation, or { planId, message } to refine an existing one. */
+/**
+ * Strict module scoping: the model occasionally attaches an item to a module
+ * id it was never given (another module of the student's year). Such items
+ * keep their title/date but lose the foreign module link, so a plan only
+ * ever shows tasks of the modules the student actually selected.
+ */
+function scopeDaysToModules<T extends { items: { moduleId: number | null }[] }>(days: T[], allowedModuleIds: number[]): T[] {
+  const allowed = new Set(allowedModuleIds);
+  return days.map((day) => ({
+    ...day,
+    items: day.items.map((item) => (item.moduleId !== null && !allowed.has(item.moduleId) ? { ...item, moduleId: null } : item)),
+  }));
+}
+
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
@@ -188,7 +202,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         assistantReply: result.assistantReply,
-        days: result.days,
+        days: scopeDaysToModules(result.days, planRow.module_ids),
         refinementChat: [...history, { role: "assistant" as const, content: result.assistantReply }],
       });
     }
@@ -212,7 +226,7 @@ export async function POST(request: NextRequest) {
       );
     }, StudyPlanGenerationSchema);
 
-    return NextResponse.json({ success: true, coachMessage: result.coachMessage, days: result.days });
+    return NextResponse.json({ success: true, coachMessage: result.coachMessage, days: scopeDaysToModules(result.days, planRow.module_ids) });
   } catch (error) {
     await refundGeneration(user.id);
     if (error instanceof OpenRouterError) {

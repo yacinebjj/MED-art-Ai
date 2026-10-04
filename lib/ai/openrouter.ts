@@ -391,6 +391,20 @@ function findSystemText(messages: ChatMessageInput[]): string {
   return systemMessage ? extractText(systemMessage.content) : "";
 }
 
+/**
+ * Student-facing wording for an upstream failure. The provider's raw detail
+ * (which can name the underlying model / provider) stays in the server log
+ * only — the UI only ever speaks of "MedArt Neural Engine".
+ */
+function brandedUpstreamMessage(status: number, kind: "text" | "image"): string {
+  const subject = kind === "image" ? "La génération de l'image" : "MedArt Neural Engine";
+  if (status === 429) return `${subject} est très sollicité en ce moment. Réessaie dans une minute.`;
+  if (status === 401 || status === 403) return `${subject} est momentanément indisponible (configuration serveur).`;
+  if (status === 402) return `${subject} est momentanément indisponible. Réessaie un peu plus tard.`;
+  if (status === 400 || status === 413) return "La demande est trop volumineuse ou invalide pour être traitée. Essaie avec moins de contenu.";
+  return kind === "image" ? "La génération de l'image a échoué. Réessaie dans un instant." : "MedArt Neural Engine n'a pas pu répondre. Réessaie dans un instant.";
+}
+
 export class OpenRouterError extends Error {
   status: number;
   /**
@@ -768,7 +782,8 @@ export async function callOpenRouter(
       // generic 502 — every caller of callOpenRouter already forwards
       // OpenRouterError.status straight through to its own API response, so
       // this makes THAT response accurate too, not just the server log.
-      throw new OpenRouterError(`L'appel au modèle IA a échoué : ${detail}`, res.status);
+      console.error("OpenRouter error detail:", detail);
+      throw new OpenRouterError(brandedUpstreamMessage(res.status, "text"), res.status);
     }
 
     data = await res.json();
@@ -778,10 +793,10 @@ export async function callOpenRouter(
     if (error instanceof OpenRouterError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
       console.error(`OpenRouter call timed out after ${timeoutMs}ms (headers or body phase)`);
-      throw new OpenRouterError("Le modèle IA met trop de temps à répondre. Réessaie dans un instant.", 504);
+      throw new OpenRouterError("MedArt Neural Engine met trop de temps à répondre. Réessaie dans un instant.", 504);
     }
     console.error("OpenRouter fetch failed", error);
-    throw new OpenRouterError("L'appel au modèle IA a échoué. Réessaie dans un instant.", 502);
+    throw new OpenRouterError("MedArt Neural Engine n'a pas pu répondre. Réessaie dans un instant.", 502);
   } finally {
     clearTimeout(timeoutId);
   }
@@ -901,7 +916,8 @@ export async function generateOpenRouterImage(
       const body = await res.text().catch(() => "");
       const detail = extractOpenRouterErrorDetail(body);
       console.error(`OpenRouter image API error (${res.status})`, body.slice(0, 500));
-      throw new OpenRouterError(`La génération de l'image a échoué : ${detail}`, res.status);
+      console.error("OpenRouter image error detail:", detail);
+      throw new OpenRouterError(brandedUpstreamMessage(res.status, "image"), res.status);
     }
 
     data = await res.json();
@@ -1336,10 +1352,10 @@ export async function streamOpenRouter(
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       console.error(`OpenRouter stream fetch timed out after ${timeoutMs}ms`);
-      throw new OpenRouterError("Le modèle IA met trop de temps à répondre. Réessaie dans un instant.", 504);
+      throw new OpenRouterError("MedArt Neural Engine met trop de temps à répondre. Réessaie dans un instant.", 504);
     }
     console.error("OpenRouter stream fetch failed", error);
-    throw new OpenRouterError("L'appel au modèle IA a échoué. Réessaie dans un instant.", 502);
+    throw new OpenRouterError("MedArt Neural Engine n'a pas pu répondre. Réessaie dans un instant.", 502);
   }
 
   if (!res.ok || !res.body) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { Camera, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
@@ -42,6 +42,13 @@ export function AvatarUpload({ className, size = 16 }: { className?: string; siz
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  // Instant local preview while the upload runs (object URL, revoked afterwards).
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const initial = (profile?.fullName ?? "").trim().charAt(0).toUpperCase() || "E";
   const sizeClasses = SIZE_CLASSES[size];
@@ -74,6 +81,7 @@ export function AvatarUpload({ className, size = 16 }: { className?: string; siz
     }
 
     setIsUploading(true);
+    setPreviewUrl(URL.createObjectURL(file));
     try {
       const body = new FormData();
       body.append("file", file);
@@ -86,6 +94,7 @@ export function AvatarUpload({ className, size = 16 }: { className?: string; siz
       toast({ variant: "error", title: err instanceof Error ? err.message : "L'envoi de la photo a échoué." });
     } finally {
       setIsUploading(false);
+      setPreviewUrl(null);
     }
   }
 
@@ -104,7 +113,7 @@ export function AvatarUpload({ className, size = 16 }: { className?: string; siz
       )}
     >
       <Avatar className={cn(sizeClasses.box, "border-2 border-border shadow-glass dark:shadow-glass-dark")}>
-        {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} alt="" />}
+        {(previewUrl ?? profile?.avatarUrl) && <AvatarImage src={previewUrl ?? profile?.avatarUrl ?? undefined} alt="" className={cn(isUploading && "opacity-60")} />}
         <AvatarFallback className={sizeClasses.text}>{initial}</AvatarFallback>
       </Avatar>
 
