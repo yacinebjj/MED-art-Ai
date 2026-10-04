@@ -206,7 +206,8 @@ const MAX_CONCURRENT_REQUESTS = 8;
  * parts kept hitting an already-saturated provider in parallel. The
  * endpoints and models are unchanged; the governor only decides when and
  * whether the next request is sent:
- *  - RUN_BUDGET_MS: hard ceiling for the whole generation. No attempt starts
+ *  - RUN_BUDGET_MS (12 min: 3 waves of parts for a 20+ part polycopié): hard
+ *    ceiling for the whole generation. No attempt starts
  *    with less than MIN_ATTEMPT_WINDOW_MS left, and each request's own
  *    timeout is clamped to the budget that remains.
  *  - adaptive concurrency: a 429/503 halves the requests in flight and pauses
@@ -216,7 +217,7 @@ const MAX_CONCURRENT_REQUESTS = 8;
  * Every finished part stays checkpointed, so stopping early never loses
  * work: the next run only generates what is missing.
  */
-const RUN_BUDGET_MS = 8 * 60_000;
+const RUN_BUDGET_MS = 12 * 60_000;
 const MIN_ATTEMPT_WINDOW_MS = 45_000;
 const BREAKER_THRESHOLD = 3;
 /** Total requests one part may spend across retries and subdivision, whatever the budget left. */

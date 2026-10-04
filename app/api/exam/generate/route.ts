@@ -169,6 +169,66 @@ interface EligibleCourseRow {
 const MAX_CONCURRENT_COURSE_GENERATIONS = 8;
 
 /**
+ * 40+ COURSE SAFETY (2026-10-04). Real report: "Échec de génération" on large
+ * course selections. Root cause: with N courses, targetPerCourse is
+ * ceil(40 / N) — ~1 question per course at N=40 — and EVERY course short of
+ * pooled QCMs got its OWN full-batch AI call (8 questions, ~100-150 s on
+ * CHEAP_MODEL). 40 calls at 8 concurrent = 5 waves ≈ 600 s, past this
+ * route's maxDuration (300 s): Vercel killed the whole request.
+ *
+ * Fix (orchestration only — same model, prompts, schemas and validation):
+ *  - MAP-REDUCE GROUPING: when more courses need a shortfall than one
+ *    concurrent wave can hold, courses are dealt into at most
+ *    MAX_CONCURRENT_COURSE_GENERATIONS groups, each generating its combined
+ *    shortfall in ONE call over the group's courses (budget shared inside the
+ *    group: 40k chars / group size — more source per course than the old
+ *    40k / N split). 40 courses ⇒ ~5 calls, one wave.
+ *  - DEADLINE: every batch call shares EXAM_GENERATION_BUDGET_MS (well under
+ *    maxDuration); a call's timeout is clamped to what remains, no attempt
+ *    starts without MIN_BATCH_WINDOW_MS left, and the gap-filling top-up only
+ *    runs when time remains — the route always answers instead of being
+ *    killed mid-flight.
+ *  - 429 pacing: a rate-limited attempt waits briefly before retrying instead
+ *    of re-hitting a saturated provider immediately.
+ */
+const EXAM_GENERATION_BUDGET_MS = 235_000;
+const MIN_BATCH_WINDOW_MS = 30_000;
+const BATCH_CALL_TIMEOUT_MS = 170_000;
+
+interface ShortfallUnit {
+  courses: EligibleCourseRow[];
+  count: number;
+  /** Set when the unit covers exactly one course: its questions are harvested back into that course's pool. */
+  harvestCourseId: number | null;
+}
+
+/** One unit per course while a single concurrent wave can hold them; otherwise courses are dealt round-robin into at most MAX_CONCURRENT_COURSE_GENERATIONS groups. */
+function planShortfallUnits(shortfalls: { id: number; shortfall: number }[], courses: EligibleCourseRow[]): ShortfallUnit[] {
+  const byId = new Map(courses.map((c) => [c.id, c]));
+  const entries = shortfalls
+    .map((s) => ({ course: byId.get(s.id), count: s.shortfall }))
+    .filter((e): e is { course: EligibleCourseRow; count: number } => Boolean(e.course) && e.count > 0);
+  if (entries.length <= MAX_CONCURRENT_COURSE_GENERATIONS) {
+    return entries.map((e) => ({ courses: [e.course], count: e.count, harvestCourseId: e.course.id }));
+  }
+  const total = entries.reduce((sum, e) => sum + e.count, 0);
+  const groupCount = Math.min(MAX_CONCURRENT_COURSE_GENERATIONS, Math.max(1, Math.ceil(total / QUESTIONS_PER_BATCH)));
+  const groups: ShortfallUnit[] = Array.from({ length: groupCount }, () => ({ courses: [], count: 0, harvestCourseId: null }));
+  [...entries]
+    .sort((a, b) => b.count - a.count)
+    .forEach((e, i) => {
+      const g = groups[i % groupCount];
+      g.courses.push(e.course);
+      g.count += e.count;
+    });
+  return groups.filter((g) => g.courses.length > 0).map((g) => (g.courses.length === 1 ? { ...g, harvestCourseId: g.courses[0].id } : g));
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+/**
  * Runs `fn` over every item, at most `limit` in flight at once. Duplicated
  * (not imported) from lib/studio-explication-client.ts's own identical
  * helper: that file is "use client" (browser-only), this is a server route,
@@ -248,7 +308,9 @@ async function generateExamBatch(
   // replaces the default persona/style prompt with
   // buildExamStyleAdaptedSystemPrompt's output. See generateShortfallQuestions
   // and this route's POST handler for the one call path that sets this.
-  systemPromptOverride?: string
+  systemPromptOverride?: string,
+  /** Epoch ms after which no new attempt starts (see EXAM_GENERATION_BUDGET_MS). */
+  deadline?: number
 ): Promise<ExamQuestion[]> {
   const staticSystemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
   let lastError: unknown;
@@ -257,6 +319,11 @@ async function generateExamBatch(
   // instead of throwing.
   let bestPartial: ExamQuestion[] = [];
   for (let attempt = 1; attempt <= MAX_BATCH_ATTEMPTS; attempt++) {
+    const remainingMs = deadline ? deadline - Date.now() : Infinity;
+    if (remainingMs < MIN_BATCH_WINDOW_MS) {
+      lastError = lastError ?? new Error("Temps de génération épuisé pour ce lot.");
+      break;
+    }
     try {
       const batchInstruction = buildExamBatchInstruction(batchIndex, totalBatches, questionsInThisBatch, isVariation, previousTopics);
       const raw = await callOpenRouter(
@@ -287,6 +354,7 @@ async function generateExamBatch(
           model: CHEAP_MODEL,
           maxTokens: EXAM_BATCH_MAX_TOKENS,
           bypassMock: true,
+          ...(Number.isFinite(remainingMs) ? { timeoutMs: Math.min(BATCH_CALL_TIMEOUT_MS, remainingMs - 5_000) } : {}),
           ...(isVariation ? { temperature: VARIATION_TEMPERATURE } : {}),
         }
       );
@@ -331,6 +399,11 @@ async function generateExamBatch(
       // (handled below, after the loop).
     } catch (error) {
       lastError = error;
+      // Rate-limited: give the provider a moment instead of re-hitting it at once.
+      if (error instanceof OpenRouterError && error.status === 429 && attempt < MAX_BATCH_ATTEMPTS) {
+        const left = deadline ? deadline - Date.now() - MIN_BATCH_WINDOW_MS : Infinity;
+        await delay(Math.min(4_000 * attempt, left));
+      }
     }
   }
   // Every attempt exhausted. Previously this always threw here, discarding
@@ -362,7 +435,8 @@ async function generateShortfallQuestions(
   totalNeeded: number,
   isVariation: boolean,
   poolTopics: string[],
-  systemPromptOverride?: string
+  systemPromptOverride?: string,
+  deadline?: number
 ): Promise<ExamQuestion[]> {
   const generated: ExamQuestion[] = [];
   const topics = [...poolTopics];
@@ -375,6 +449,8 @@ async function generateShortfallQuestions(
   const ALL_STANDARD_BATCH_INDEX = 5;
 
   while (remaining > 0) {
+    // Out of time: return what this request already has — the caller's floor decides.
+    if (deadline && deadline - Date.now() < MIN_BATCH_WINDOW_MS) break;
     const count = Math.min(QUESTIONS_PER_BATCH, remaining);
     // ALWAYS request the full QUESTIONS_PER_BATCH, never the smaller
     // remainder `count` — confirmed live (real production failure, then
@@ -387,7 +463,7 @@ async function generateShortfallQuestions(
     // the `count` this chunk still needs and discarding the (tiny,
     // ~fraction-of-a-cent) surplus, is more robust
     // than trying to make the model reliably hit an arbitrary exact number.
-    const batchQuestions = await generateExamBatch(inputs, ALL_STANDARD_BATCH_INDEX, ALL_STANDARD_BATCH_INDEX, QUESTIONS_PER_BATCH, isVariation, topics, systemPromptOverride);
+    const batchQuestions = await generateExamBatch(inputs, ALL_STANDARD_BATCH_INDEX, ALL_STANDARD_BATCH_INDEX, QUESTIONS_PER_BATCH, isVariation, topics, systemPromptOverride, deadline);
     const taken = batchQuestions.slice(0, count);
     generated.push(...taken);
     topics.push(...taken.map((q) => q.weakPointTag));
@@ -729,6 +805,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     }
     reservedGeneration = true;
 
+    const generationDeadline = Date.now() + EXAM_GENERATION_BUDGET_MS;
     try {
       if (isPersonalizedExam) {
         // STYLE-MIMICRY BRANCH (Examen Guidé par le Style Prof): pooling and
@@ -747,7 +824,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         const baseSystemPrompt = styleProfile ? buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile) : buildExamStaticSystemPrompt(courseInputs);
         const preferenceDirective = customPreferences ? buildExamPreferenceDirective(customPreferences) : "";
         const styleSystemPrompt = preferenceDirective ? `${baseSystemPrompt}\n\n${preferenceDirective}` : baseSystemPrompt;
-        const generatedQuestions = await generateShortfallQuestions(courseInputs, EXAM_TARGET_TOTAL, isVariation, [], styleSystemPrompt);
+        const generatedQuestions = await generateShortfallQuestions(courseInputs, EXAM_TARGET_TOTAL, isVariation, [], styleSystemPrompt, generationDeadline);
         const allQuestions = generatedQuestions.slice(0, 60);
 
         const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
@@ -845,12 +922,19 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // course's failure, with no new fabrication risk (a short-changed
         // course just contributes fewer real questions, never an invented one).
         const allTopicsSoFar = pooled.map((q) => q.weakPointTag);
-        const shortfallResults = await mapWithConcurrencyLimit(shortfallByCourse, MAX_CONCURRENT_COURSE_GENERATIONS, async (shortfall) => {
-          const course = eligibleCourses.find((c) => c.id === shortfall.id);
-          if (!course) return []; // unreachable — shortfallByCourse is derived from eligibleCourses itself
-          const courseInputs = buildCourseInputs([course], eligibleCourses.length);
+        // MAP-REDUCE GROUPING — see EXAM_GENERATION_BUDGET_MS' comment: at most
+        // one concurrent wave of calls, whatever the number of courses.
+        const shortfallUnits = planShortfallUnits(shortfallByCourse, eligibleCourses);
+        const shortfallResults = await mapWithConcurrencyLimit(shortfallUnits, MAX_CONCURRENT_COURSE_GENERATIONS, async (unit) => {
+          // Single course: its share of the whole selection's budget (unchanged).
+          // Group: the 40k budget is shared inside the group only.
+          const courseInputs = unit.harvestCourseId !== null ? buildCourseInputs(unit.courses, eligibleCourses.length) : buildCourseInputs(unit.courses, unit.courses.length);
+          const shortfall = { id: unit.harvestCourseId ?? unit.courses[0].id, title: unit.courses.map((c) => c.title).join(" + ") };
           try {
-            const courseQuestions = await generateShortfallQuestions(courseInputs, shortfall.shortfall, isVariation, allTopicsSoFar);
+            const courseQuestions = await generateShortfallQuestions(courseInputs, unit.count, isVariation, allTopicsSoFar, undefined, generationDeadline);
+            // A grouped call cannot say which question belongs to which
+            // course, so only single-course units feed the harvested pool.
+            if (unit.harvestCourseId === null) return courseQuestions;
             for (const question of courseQuestions) {
               // Sanitized the same way the exam's own canonical save is below —
               // a stray control character in raw LLM output would otherwise fail
@@ -893,12 +977,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // Best-effort: a failure here is caught and logged, never thrown —
         // the exam is still served with whatever it already had going in,
         // exactly as if this top-up attempt had never run.
-        if (allQuestions.length < EXAM_TARGET_TOTAL) {
+        // Only when time remains: the route must always answer before maxDuration.
+        if (allQuestions.length < EXAM_TARGET_TOTAL && generationDeadline - Date.now() > 60_000) {
           const gapCount = EXAM_TARGET_TOTAL - allQuestions.length;
           try {
             const topUpInputs = buildCourseInputs(eligibleCourses, eligibleCourses.length);
             const topUpTopics = [...allTopicsSoFar, ...generatedQuestions.map((q) => q.weakPointTag)];
-            const topUpQuestions = await generateShortfallQuestions(topUpInputs, gapCount, isVariation, topUpTopics);
+            const topUpQuestions = await generateShortfallQuestions(topUpInputs, gapCount, isVariation, topUpTopics, undefined, generationDeadline);
             allQuestions = [...allQuestions, ...topUpQuestions].slice(0, 60);
           } catch (error) {
             console.warn("[exam/generate] Top-up de comblement échoué — examen servi avec le compte actuel:", errorMessage(error));

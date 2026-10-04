@@ -272,7 +272,18 @@ export const CHEAP_MODEL = "qwen/qwen-2.5-72b-instruct";
 // pipeline retries and subdivides a slow part automatically — before
 // reconsidering the model. Kept as its own export so only this one line
 // changes if the model ever needs to differ again.
-export const EXPLICATION_MODEL = CHEAP_MODEL;
+// 2026-10-04 — RESTORED to deepseek/deepseek-v3.2 (the exact bfff050
+// configuration), after the regression described above DID resurface on
+// Qwen in production: Explications reported as shallow and truncated. Every
+// Explication budget (CHUNKED_SLICE_CHARS 6,000, EXPLICATION_PART_MAX_TOKENS
+// 12,000, EXPLICATION_PART_TIMEOUT_MS) was calibrated on this model and never
+// changed, and `reasoning: { enabled: false }` in
+// lib/studio-explication-delta.ts was written for it (hybrid model: thinking
+// stays off). Confirmed live 2026-10-04 (GET /api/v1/models/
+// deepseek/deepseek-v3.2/endpoints): 13 providers, $0.21-0.28/M in,
+// $0.31-0.42/M out — no more expensive than CHEAP_MODEL. Every other
+// CHEAP_MODEL call site stays on Qwen.
+export const EXPLICATION_MODEL = "deepseek/deepseek-v3.2";
 
 // FLASHCARD-ONLY MODEL, 2026-10-03 — /api/flashcards/generate. Chosen from
 // the live OpenRouter catalog on three criteria: cost, speed (the route must

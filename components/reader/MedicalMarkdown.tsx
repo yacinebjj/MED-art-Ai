@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, cloneElement, isValidElement, memo, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, memo, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, Activity, Info, Lightbulb } from "lucide-react";
@@ -175,14 +175,42 @@ const COMPONENTS: Components = {
   td: ({ children }) => <td className="px-[0.9em] py-[0.65em] align-top">{children}</td>,
 };
 
+type Decorate = (text: string) => ReactNode;
+
+/** Applies `decorate` to every plain-text run inside rendered children (search/term highlighting), leaving elements intact. */
+function decorateChildren(children: ReactNode, decorate: Decorate): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child === "string") return decorate(child);
+    if (isValidElement<{ children?: ReactNode }>(child) && child.props.children !== undefined) {
+      return cloneElement(child, undefined, decorateChildren(child.props.children, decorate));
+    }
+    return child;
+  });
+}
+
+function withDecoration(decorate: Decorate): Components {
+  const P = COMPONENTS.p as (props: { children?: ReactNode }) => ReactNode;
+  const Td = COMPONENTS.td as (props: { children?: ReactNode }) => ReactNode;
+  return {
+    ...COMPONENTS,
+    p: ({ children }) => P({ children: decorateChildren(children, decorate) }),
+    td: ({ children }) => Td({ children: decorateChildren(children, decorate) }),
+    li: ({ children }) => <li>{decorateChildren(children, decorate)}</li>,
+  };
+}
+
 /**
  * `markdown` should already be callout-normalized by the caller
  * (lib/markdown.ts's normalizeCallouts) when it comes from the Studio.
+ * `decorate` (optional) transforms every text run of paragraphs, list items
+ * and table cells — used by the synthesis explorer for search and medical
+ * term highlighting. Without it, rendering is exactly the default.
  */
-export const MedicalMarkdown = memo(function MedicalMarkdown({ markdown, className }: { markdown: string; className?: string }) {
+export const MedicalMarkdown = memo(function MedicalMarkdown({ markdown, className, decorate }: { markdown: string; className?: string; decorate?: Decorate }) {
+  const components = useMemo(() => (decorate ? withDecoration(decorate) : COMPONENTS), [decorate]);
   return (
     <div dir="auto" className={cn("medical-markdown break-words text-slate-800 [&>*:first-child]:mt-0 [&>h2:first-child]:border-t-0 [&>h2:first-child]:pt-0 [line-height:var(--reader-leading,1.85)] dark:text-slate-200", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {markdown}
       </ReactMarkdown>
     </div>

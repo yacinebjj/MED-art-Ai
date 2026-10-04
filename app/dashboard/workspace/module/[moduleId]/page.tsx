@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/Checkbox";
 import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
-import { ModuleSynthesisView } from "@/components/dashboard/ModuleSynthesisView";
+import { SynthesisExplorer } from "@/components/dashboard/synthesis/SynthesisExplorer";
 import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
 import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -677,15 +677,17 @@ export default function ModuleWorkspacePage() {
             />
           </motion.div>
         ) : output ? (
-          // ModuleSynthesisView splits stitchSummaryChunks' per-course "## "
-          // chunks (global_summary/medical_dictionary) into distinct
-          // "chapter" cards — the "séparateurs de chapitres élégants" the
-          // redesign asked for — while a headerless result (keywords_table's
-          // single combined table) safely renders as one plain block, same
-          // as before. Each chapter card's own stagger delay is what gives
-          // the "puces qui s'illuminent une à une" progressive-reveal feel.
+          // SynthesisExplorer: dedicated interactive view per output type —
+          // collapsible per-course fiches (Résumé global), term cards with
+          // FR/AR + listen (Dictionnaire), category boards (Mots-clés) — with
+          // search, priority/course/category filters and exports. It only
+          // reads the generated Markdown; the content itself is unchanged.
           <motion.div key="output" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
-            <ModuleSynthesisView markdown={output} isDark={isDark} />
+            <SynthesisExplorer
+              markdown={output}
+              kind={history.find((h) => h.id === activeHistoryId)?.type ?? null}
+              title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)}
+            />
           </motion.div>
         ) : (
           <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-6 py-12 text-center sm:py-16">
