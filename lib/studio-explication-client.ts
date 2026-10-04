@@ -1,6 +1,7 @@
 "use client";
 
 import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
+import { AiRunGovernor, classifyUpstreamStatus, type GovernorStopReason } from "@/lib/ai-run-governor";
 import {
   buildVariantKey,
   clearResumableRun,
@@ -195,6 +196,43 @@ const SEAM_WINDOW_CHARS = 1500;
  */
 const MAX_CONCURRENT_REQUESTS = 8;
 
+/**
+ * RUN GOVERNOR (lib/ai-run-governor.ts) — added after a real production
+ * report: one Explication spun for 20+ minutes, then failed with "MedArt
+ * Neural Engine est très sollicité" (an upstream 429) after 11 attempts.
+ * Nothing bounded the run as a whole: a part timing out was subdivided into
+ * 2, 4, then 8 SEQUENTIAL sub-parts, each with its own retries and its own
+ * ~180 s server ceiling (worst case ≈ 45 min for ONE part), while up to 8
+ * parts kept hitting an already-saturated provider in parallel. The
+ * endpoints and models are unchanged; the governor only decides when and
+ * whether the next request is sent:
+ *  - RUN_BUDGET_MS: hard ceiling for the whole generation. No attempt starts
+ *    with less than MIN_ATTEMPT_WINDOW_MS left, and each request's own
+ *    timeout is clamped to the budget that remains.
+ *  - adaptive concurrency: a 429/503 halves the requests in flight and pauses
+ *    new ones (Retry-After honoured); each success adds a slot back.
+ *  - circuit breaker: BREAKER_THRESHOLD consecutive upstream failures stop
+ *    the run at once (fail fast) rather than waiting out the budget.
+ * Every finished part stays checkpointed, so stopping early never loses
+ * work: the next run only generates what is missing.
+ */
+const RUN_BUDGET_MS = 8 * 60_000;
+const MIN_ATTEMPT_WINDOW_MS = 45_000;
+const BREAKER_THRESHOLD = 3;
+/** Total requests one part may spend across retries and subdivision, whatever the budget left. */
+const MAX_REQUESTS_PER_PART = 8;
+
+/** Student-facing failure text: what happened, what is already saved, and what to do — never a raw transport trace. */
+function stopMessage(reason: GovernorStopReason | "failed", completed: number, total: number, detail?: string): string {
+  const saved =
+    completed > 0
+      ? ` ${completed}/${total} partie${completed > 1 ? "s sont" : " est"} déjà prête${completed > 1 ? "s" : ""} et sauvegardée${completed > 1 ? "s" : ""} : relance la génération, seules les parties manquantes seront produites.`
+      : " Rien n'a été perdu : relance la génération dans quelques minutes.";
+  if (reason === "overload") return `MedArt Neural Engine est saturé en ce moment (forte demande).${saved}`;
+  if (reason === "deadline") return `La génération prend plus de temps que prévu, je l'ai arrêtée pour ne pas te faire attendre.${saved}`;
+  return `Une partie du cours n'a pas pu être générée${detail ? ` (${detail})` : ""}.${saved}`;
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -275,7 +313,9 @@ async function postJson(
  * exception already exists for, just at higher odds.
  */
 function isRetryable(status: number): boolean {
-  return status === 0 || status === 401 || status >= 500;
+  // 429 is retryable too now: the run governor paces the retry (Retry-After,
+  // halved concurrency) and its circuit breaker stops a sustained overload.
+  return status === 0 || status === 401 || status === 429 || status >= 500;
 }
 
 async function abandon(courseId: number): Promise<void> {
@@ -310,7 +350,7 @@ async function acquireWakeLock(): Promise<{ release: () => Promise<void> } | nul
   }
 }
 
-type OnePartOutcome = { ok: true; markdown: string } | { ok: false; error: string };
+type OnePartOutcome = { ok: true; markdown: string } | { ok: false; error: string; stoppedBy?: GovernorStopReason };
 
 interface PartStatus {
   attempt: number;
@@ -354,6 +394,7 @@ async function generateOnePart(
   partIndex: number,
   totalParts: number,
   extra: { language?: string; customPrompt?: string },
+  governor: AiRunGovernor,
   onStatus?: (status: PartStatus) => void
 ): Promise<OnePartOutcome> {
   let subPartCount = 1;
@@ -369,6 +410,14 @@ async function generateOnePart(
       let subSucceeded = false;
 
       for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !subSucceeded; attempt++) {
+        // Ask the governor first: it may pause (upstream pressure), or stop
+        // the run (budget spent / provider down) — then nothing is sent.
+        if (totalAttempts >= MAX_REQUESTS_PER_PART) {
+          return { ok: false, error: `${lastError} (${totalAttempts} tentative(s))` };
+        }
+        if (!(await governor.acquire())) {
+          return { ok: false, error: lastError, stoppedBy: governor.stopped ?? "deadline" };
+        }
         totalAttempts++;
         onStatus?.({
           attempt,
@@ -387,23 +436,31 @@ async function generateOnePart(
         // subdivision only (the previous SUB-piece's real text). No longer
         // carries cross-part context — see this function's own doc comment.
         const previousPartTail = collected.length > 0 ? collected[collected.length - 1] : undefined;
-        const outcome = await postJsonWithHeartbeat(
-          "/api/studio/generate/explication-part",
-          {
-            courseId,
-            partIndex,
-            ...(subPartCount > 1 ? { subPartIndex, subPartCount } : {}),
-            previousPartTail,
-            ...extra,
-          },
-          PART_FETCH_TIMEOUT_MS
-        );
+        let outcome: Awaited<ReturnType<typeof postJsonWithHeartbeat>>;
+        try {
+          outcome = await postJsonWithHeartbeat(
+            "/api/studio/generate/explication-part",
+            {
+              courseId,
+              partIndex,
+              ...(subPartCount > 1 ? { subPartIndex, subPartCount } : {}),
+              previousPartTail,
+              ...extra,
+            },
+            governor.timeoutFor(PART_FETCH_TIMEOUT_MS)
+          );
+        } finally {
+          governor.release();
+        }
 
         if (outcome.ok && outcome.data.success === true) {
+          governor.reportSuccess();
           collected.push(String(outcome.data.partMarkdown ?? ""));
           subSucceeded = true;
           break;
         }
+        const upstream = classifyUpstreamStatus(outcome.status);
+        if (upstream) governor.reportUpstreamFailure(upstream, outcome.retryAfterSeconds);
 
         const baseError = typeof outcome.data.error === "string" ? outcome.data.error : `Erreur ${outcome.status}.`;
         lastError = `${baseError} [${outcome.diagnostic}]`;
@@ -425,7 +482,8 @@ async function generateOnePart(
         }
 
         if (isRetryable(outcome.status) && attempt < MAX_PART_ATTEMPTS) {
-          await wait(backoffDelayMs(attempt));
+          // Overload pauses are applied by the governor itself (next acquire()).
+          if (upstream !== "overload") await wait(Math.min(backoffDelayMs(attempt), Math.max(0, governor.remainingMs() - MIN_ATTEMPT_WINDOW_MS)));
           continue;
         }
 
@@ -600,13 +658,20 @@ async function runGenerationInParts(
     let completedCount = completedFromResume;
     const activeStatusByPart = new Map<number, PartStatus>();
     let firstFailure: string | null = null;
+    let stoppedBy: GovernorStopReason | null = null;
+    const governor = new AiRunGovernor({
+      deadlineMs: RUN_BUDGET_MS,
+      maxConcurrency: MAX_CONCURRENT_REQUESTS,
+      breakerThreshold: BREAKER_THRESHOLD,
+      minAttemptWindowMs: MIN_ATTEMPT_WINDOW_MS,
+    });
 
     const emitProgress = () => {
       onProgress?.({
         completedParts: completedCount,
         totalParts,
         inFlightParts: activeStatusByPart.size,
-        isRecovering: [...activeStatusByPart.values()].some((s) => s.isRecovering),
+        isRecovering: governor.isThrottled || [...activeStatusByPart.values()].some((s) => s.isRecovering),
         phase: "generating",
       });
     };
@@ -623,7 +688,7 @@ async function runGenerationInParts(
       activeStatusByPart.set(partIndex, { attempt: 1, subPartIndex: 0, subPartCount: 1, isRecovering: false });
       emitProgress();
 
-      const outcome = await generateOnePart(courseId, partIndex, totalParts, extra, (status) => {
+      const outcome = await generateOnePart(courseId, partIndex, totalParts, extra, governor, (status) => {
         activeStatusByPart.set(partIndex, status);
         emitProgress();
       });
@@ -637,11 +702,20 @@ async function runGenerationInParts(
         if (resume) saveResumableParts(resume, parts);
       } else {
         firstFailure = firstFailure ?? outcome.error;
+        stoppedBy = stoppedBy ?? outcome.stoppedBy ?? governor.stopped;
       }
       emitProgress();
     });
 
-    if (firstFailure) {
+    // Read back through a typed snapshot: both are assigned inside the worker
+    // callbacks above, which TypeScript's flow analysis cannot see.
+    const failure = firstFailure as string | null;
+    const stopReason = stoppedBy as GovernorStopReason | null;
+    if (failure) {
+      // The raw per-attempt trace (status, heartbeats, attempt count) stays in the console for diagnosis.
+      console.warn("[explication] Génération interrompue:", failure);
+      const detail = failure.split(" [")[0].replace(/\s*\(\d+ tentative.*$/, "").trim();
+      firstFailure = stopReason ? stopMessage(stopReason, completedCount, totalParts) : stopMessage("failed", completedCount, totalParts, detail);
       // Deliberately does NOT clear the checkpoint: everything generated so
       // far is exactly what makes the student's next attempt cheap, and it
       // stays valid as long as the course's source text does not change

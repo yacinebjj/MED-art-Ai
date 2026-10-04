@@ -18,6 +18,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { CHUNK_SECONDS, computePeaks, encodeLectureChunk, prepareLectureAudio, type PreparedLectureAudio } from "@/lib/audio/browser-chunking";
 import { buildTimestampedTranscript } from "@/lib/lecture-transcript";
+import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
 
 export type PipelineStage = "decoding" | "transcribing" | "analyzing";
 
@@ -46,6 +47,12 @@ const CONCURRENCY = 3;
 const MAX_ATTEMPTS = 4;
 const CHECKPOINT_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 const UPLOAD_TIMEOUT_MS = 120_000;
+/** Whole-transcription budget: a 2-hour lecture needs ~5-10 min; past this, stop and let the student resume. */
+const TRANSCRIPTION_BUDGET_MS = 25 * 60_000;
+/** Consecutive upstream failures (429/5xx/network) that stop the run at once instead of retrying into the void. */
+const TRANSCRIPTION_BREAKER_THRESHOLD = 5;
+/** Longest the client waits on the notes job before treating it as stuck (server stale threshold is 6 min). */
+const NOTES_POLL_BUDGET_MS = 8 * 60_000;
 
 export class LecturePipelineError extends Error {
   /** True when some chunks are checkpointed: re-running the same file resumes. */
@@ -180,25 +187,48 @@ export async function transcribeLecture(
     });
   report();
 
+  // Run governor (lib/ai-run-governor.ts): global budget, adaptive
+  // concurrency on 429/503, and a circuit breaker so a saturated or down
+  // transcription provider stops the run quickly — every finished chunk stays
+  // checkpointed, so "Reprendre" only redoes what is missing.
+  const governor = new AiRunGovernor({
+    deadlineMs: TRANSCRIPTION_BUDGET_MS,
+    maxConcurrency: CONCURRENCY,
+    breakerThreshold: TRANSCRIPTION_BREAKER_THRESHOLD,
+    minAttemptWindowMs: 30_000,
+  });
   const outcome: { failure: unknown } = { failure: null };
   async function worker() {
     while (pending.length > 0 && !outcome.failure) {
       const index = pending.shift()!;
       for (let attempt = 1; ; attempt++) {
         if (signal.aborted) throw new DOMException("Annulé", "AbortError");
+        if (!(await governor.acquire())) {
+          outcome.failure = new Error(
+            governor.stopped === "overload"
+              ? "Le service de transcription est saturé en ce moment."
+              : "La transcription prend plus de temps que prévu, je l'ai mise en pause."
+          );
+          return;
+        }
         try {
           checkpoint.results[String(index)] = await uploadAndTranscribe(prepared, checkpoint.uploadId, index, signal);
+          governor.reportSuccess();
           writeCheckpoint(file, checkpoint);
           done++;
           report();
           break;
         } catch (error) {
+          const upstream = error instanceof HttpError ? classifyUpstreamStatus(error.status) : error instanceof DOMException ? null : "network";
+          if (upstream) governor.reportUpstreamFailure(upstream, error instanceof HttpError && error.retryAfterMs ? error.retryAfterMs / 1000 : null);
           if (attempt >= MAX_ATTEMPTS || !isRetryable(error)) {
             outcome.failure = error;
             return;
           }
-          const wait = error instanceof HttpError && error.retryAfterMs ? error.retryAfterMs : 1500 * 2 ** (attempt - 1);
-          await sleep(Math.min(wait, 60_000), signal);
+          // Overload pauses are applied by the governor on the next acquire().
+          if (upstream !== "overload") await sleep(Math.min(1500 * 2 ** (attempt - 1), 30_000), signal);
+        } finally {
+          governor.release();
         }
       }
     }
@@ -242,6 +272,9 @@ export class StaleJobError extends Error {
 export async function waitForNotes(jobId: number, options: { signal: AbortSignal; onTick?: (elapsedMs: number) => void }): Promise<string> {
   const started = Date.now();
   for (let i = 0; ; i++) {
+    // Bounded: a job the status endpoint never reports as finished is treated
+    // as stuck — the caller then offers the one-click relaunch.
+    if (Date.now() - started > NOTES_POLL_BUDGET_MS) throw new StaleJobError(jobId);
     await sleep(i === 0 ? 2500 : 4000, options.signal);
     options.onTick?.(Date.now() - started);
     let data: { status?: string; smartNotes?: string | null; error?: string | null; stale?: boolean; success?: boolean };
