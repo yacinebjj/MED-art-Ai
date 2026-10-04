@@ -3,6 +3,22 @@ import { getSubscription, isSubscriptionActive, resolveEffectivePlan } from "@/l
 import { getProfile, isTrialActive, getTrialDaysRemaining } from "@/lib/trial";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { PLANS } from "@/lib/pricing";
+import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+
+/** Mirrors MODULE_EXAM_REGENERATE_CAP in app/api/exam/generate/route.ts. */
+const EXAM_REGENERATE_CAP = 5;
+
+/** Exam regenerations used — tolerant: 0 when the column isn't migrated yet. */
+async function readExamRegenerationsUsed(userId: string): Promise<number> {
+  if (!isSupabaseConfigured()) return 0;
+  const { data, error } = await getSupabaseAdmin()
+    .from("profiles")
+    .select("module_exam_regenerations_used")
+    .eq("id", userId)
+    .maybeSingle<{ module_exam_regenerations_used: number | null }>();
+  if (error || !data) return 0;
+  return Math.max(0, Number(data.module_exam_regenerations_used ?? 0));
+}
 
 export const runtime = "nodejs";
 
@@ -12,7 +28,7 @@ export async function GET() {
     return NextResponse.json({ subscription: null, trial: null }, { status: 401 });
   }
 
-  const [sub, profile] = await Promise.all([getSubscription(user.id), getProfile(user.id)]);
+  const [sub, profile, examRegenerationsUsed] = await Promise.all([getSubscription(user.id), getProfile(user.id), readExamRegenerationsUsed(user.id)]);
 
   const trialing = isTrialActive(profile, user.created_at);
   // The plan actually governing quotas right now — falls back to Freemium
@@ -37,6 +53,13 @@ export async function GET() {
         courseCap: effectivePlan.courseCap,
         highlightMessagesUsed: sub.highlight_messages_used,
         highlightMessageCap: effectivePlan.highlightMessageCap,
+        chatMessagesUsed: sub.chat_messages_used,
+        chatMessageCap: effectivePlan.chatMessageCap,
+        remediationUsed: sub.remediation_used,
+        remediationCap: effectivePlan.remediationCap,
+        examRegenerationsUsed,
+        examRegenerationCap: EXAM_REGENERATE_CAP,
+        periodStart: sub.period_start,
       }
     : null;
 

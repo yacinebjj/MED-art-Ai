@@ -1,5 +1,7 @@
 import webpush from "web-push";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { isMissingColumnError } from "@/lib/group-chat";
+import { normalizeFlashcardPushInterval } from "@/lib/push/cadence";
 
 let vapidConfigured = false;
 
@@ -41,6 +43,39 @@ interface StudioCourseFlashcardRow {
 interface FlashcardProfileRow {
   flashcard_active_module_ids: number[] | null;
   push_subscriptions: PushSubscriptionRecord[] | null;
+  /** Absent until supabase/migrations/20261004_flashcard_push_cadence.sql has run. */
+  flashcard_push_interval_minutes?: number | null;
+  flashcard_push_last_sent_at?: string | null;
+}
+
+type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
+
+/**
+ * Slack so a reminder sent at 10:00:05 is still due when the next hourly
+ * cron fires at 11:00:01 (otherwise that run would skip and leave a 2 h gap).
+ */
+const CADENCE_TOLERANCE_MS = 5 * 60 * 1000;
+
+/**
+ * Claims this student's next reminder slot — the single gate every trigger
+ * (hourly cron, open-tab fallback on any device) goes through, so a student
+ * gets exactly ONE flashcard push per interval no matter how many devices
+ * are open. Compare-and-set on flashcard_push_last_sent_at: if two triggers
+ * race, only one update matches. "untracked" = cadence columns not migrated
+ * yet (the caller's own interval is then the only throttle).
+ */
+async function claimFlashcardSlot(supabase: SupabaseAdmin, userId: string, profile: FlashcardProfileRow, cadenceTracked: boolean): Promise<boolean | "untracked"> {
+  if (!cadenceTracked) return "untracked";
+  const intervalMs = normalizeFlashcardPushInterval(profile.flashcard_push_interval_minutes) * 60 * 1000;
+  const last = profile.flashcard_push_last_sent_at ?? null;
+  if (last) {
+    const lastMs = new Date(last).getTime();
+    if (Number.isFinite(lastMs) && Date.now() - lastMs < intervalMs - CADENCE_TOLERANCE_MS) return false;
+  }
+  const update = supabase.from("profiles").update({ flashcard_push_last_sent_at: new Date().toISOString() }).eq("id", userId);
+  const { data, error } = await (last ? update.eq("flashcard_push_last_sent_at", last) : update.is("flashcard_push_last_sent_at", null)).select("id");
+  if (error) return isMissingColumnError(error) ? "untracked" : false;
+  return (data?.length ?? 0) > 0;
 }
 
 /**
@@ -73,7 +108,7 @@ async function sendFlashcardPushForProfile(
   const payload = JSON.stringify({
     title: "🧠 Rappel Flash - Médecine",
     body: card.question,
-    url: `/study?tab=flashcards&cardId=${card.id}`,
+    url: `/dashboard/study?tab=flashcards&cardId=${encodeURIComponent(card.id)}`,
   });
 
   const results = await Promise.allSettled(subscriptions.map((subscription) => webpush.sendNotification(subscription, payload)));
@@ -118,16 +153,28 @@ export async function dispatchFlashcardPushToUser(userId: string): Promise<numbe
   ensureVapidConfigured();
   const supabase = getSupabaseAdmin();
 
-  const { data: profile, error: profileError } = await supabase
+  let cadenceTracked = true;
+  let { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("flashcard_active_module_ids, push_subscriptions")
+    .select("flashcard_active_module_ids, push_subscriptions, flashcard_push_interval_minutes, flashcard_push_last_sent_at")
     .eq("id", userId)
     .maybeSingle<FlashcardProfileRow>();
+  if (isMissingColumnError(profileError)) {
+    cadenceTracked = false;
+    ({ data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("flashcard_active_module_ids, push_subscriptions")
+      .eq("id", userId)
+      .maybeSingle<FlashcardProfileRow>());
+  }
 
   if (profileError || !profile) return 0;
 
   const activeModuleIds = profile.flashcard_active_module_ids ?? [];
   if ((profile.push_subscriptions?.length ?? 0) === 0 || activeModuleIds.length === 0) return 0;
+
+  // Exactly one reminder per interval, across all the student's devices and the cron.
+  if ((await claimFlashcardSlot(supabase, userId, profile, cadenceTracked)) === false) return 0;
 
   const { data: courses } = await supabase
     .from("studio_courses")
@@ -214,7 +261,14 @@ export async function dispatchFlashcardPushToAllUsers(): Promise<{ usersNotified
   ensureVapidConfigured();
   const supabase = getSupabaseAdmin();
 
-  const { data, error } = await supabase.from("profiles").select("id, flashcard_active_module_ids, push_subscriptions");
+  let cadenceTracked = true;
+  let { data, error } = await supabase
+    .from("profiles")
+    .select("id, flashcard_active_module_ids, push_subscriptions, flashcard_push_interval_minutes, flashcard_push_last_sent_at");
+  if (isMissingColumnError(error)) {
+    cadenceTracked = false;
+    ({ data, error } = await supabase.from("profiles").select("id, flashcard_active_module_ids, push_subscriptions"));
+  }
 
   if (error) throw new Error(error.message);
 
@@ -250,7 +304,9 @@ export async function dispatchFlashcardPushToAllUsers(): Promise<{ usersNotified
     eligibleProfiles.map((profile) => {
       const activeModuleIds = new Set(profile.flashcard_active_module_ids ?? []);
       const userCourses = (coursesByUser.get(profile.id) ?? []).filter((c) => activeModuleIds.has(c.curriculum_module_id));
-      return sendFlashcardPushForProfile(profile.id, supabase, profile, userCourses);
+      return claimFlashcardSlot(supabase, profile.id, profile, cadenceTracked).then((claimed) =>
+        claimed === false ? 0 : sendFlashcardPushForProfile(profile.id, supabase, profile, userCourses)
+      );
     })
   );
 

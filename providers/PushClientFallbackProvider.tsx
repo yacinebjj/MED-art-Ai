@@ -21,11 +21,13 @@ import { useEffect, useRef } from "react";
 import { getPushStatus } from "@/lib/push/subscribe";
 
 /**
- * TESTING VALUE — 2 minutes, so this is actually observable while
- * building/QAing. For production, change this one constant to
- * 60 * 60 * 1000 (60 minutes) and nothing else needs to change.
+ * 60 minutes. (Was a 2-minute TESTING value left in production — the cause
+ * of the "one flashcard notification every couple of minutes" reports.) The
+ * server is the real authority anyway: lib/push/dispatch.ts sends at most one
+ * reminder per student per chosen interval (1 h / 2 h / 4 h) across every
+ * device and the cron, so several open devices can no longer multiply it.
  */
-const DISPATCH_INTERVAL_MS = 2 * 60 * 1000;
+const DISPATCH_INTERVAL_MS = 60 * 60 * 1000;
 
 /** How often we check whether DISPATCH_INTERVAL_MS has elapsed — cheap (a localStorage read + Date.now() compare) until it actually has. */
 const CHECK_INTERVAL_MS = 30 * 1000;
@@ -52,8 +54,9 @@ export function PushClientFallbackProvider({ children }: { children: React.React
         const status = await getPushStatus();
         if (status !== "subscribed") return; // never opted in — nothing to dispatch, stay silent
 
-        await fetch("/api/push/dispatch-self", { method: "POST" }).catch(() => null);
+        // Claim the slot BEFORE the request so two tabs of this browser can never both fire.
         localStorage.setItem(STORAGE_KEY, String(Date.now()));
+        await fetch("/api/push/dispatch-self", { method: "POST" }).catch(() => null);
       } finally {
         checkingRef.current = false;
       }
@@ -62,6 +65,26 @@ export function PushClientFallbackProvider({ children }: { children: React.React
     tick();
     const interval = setInterval(tick, CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
+  }, []);
+
+  // A reminder clicked while this tab is open but not controlled by the service
+  // worker: public/sw.js asks the page to open the notified flashcard itself.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    function handleMessage(event: MessageEvent) {
+      const data: unknown = event.data;
+      if (!data || typeof data !== "object") return;
+      const { type, url } = data as { type?: unknown; url?: unknown };
+      if (type !== "medart:navigate" || typeof url !== "string") return;
+      try {
+        const target = new URL(url, window.location.origin);
+        if (target.origin === window.location.origin) window.location.assign(target.href);
+      } catch {
+        // Malformed URL — ignore.
+      }
+    }
+    navigator.serviceWorker.addEventListener("message", handleMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", handleMessage);
   }, []);
 
   return <>{children}</>;

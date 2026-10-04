@@ -235,6 +235,19 @@ async function fetchPool(
   };
 }
 
+/** The card a reminder notification pointed at (GET /api/flashcards/card) — null when it no longer exists. */
+async function fetchLinkedCard(cardId: string, signal: AbortSignal): Promise<FlashcardPoolItem | null> {
+  try {
+    const res = await fetch(`/api/flashcards/card?id=${encodeURIComponent(cardId)}`, { signal });
+    if (!res.ok) return null;
+    const body: unknown = await res.json();
+    const card = body && typeof body === "object" ? (body as { card?: unknown }).card : null;
+    return isFlashcardPoolItem(card) ? card : null;
+  } catch {
+    return null;
+  }
+}
+
 type BatchResult =
   | { kind: "ok"; items: FlashcardPoolItem[]; extended: boolean }
   | { kind: "quota" }
@@ -402,8 +415,14 @@ export function ActiveFlashcardsDeck() {
       }
 
       const deepLinkIndex = deepLinkCardId ? opening.findIndex((item) => item.id === deepLinkCardId) : -1;
-      const ordered =
+      let ordered =
         deepLinkIndex > 0 ? [opening[deepLinkIndex], ...opening.slice(0, deepLinkIndex), ...opening.slice(deepLinkIndex + 1)] : opening;
+      // Opened from a reminder notification whose card isn't in this batch: fetch it and show it first.
+      if (deepLinkCardId && deepLinkIndex < 0) {
+        const linked = await fetchLinkedCard(deepLinkCardId, controller.signal);
+        if (!isCurrent()) return;
+        if (linked) ordered = [linked, ...opening.filter((item) => item.id !== linked.id)].slice(0, BATCH_SIZE);
+      }
 
       setDeck(ordered);
       setIndex(0);

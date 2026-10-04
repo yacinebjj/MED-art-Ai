@@ -32,7 +32,7 @@ self.addEventListener("push", (event) => {
 
   const title = payload.title || "🧠 Rappel Flash - Médecine";
   const body = payload.body || "Une nouvelle flashcard t'attend.";
-  const url = payload.url || "/study?tab=flashcards";
+  const url = payload.url || "/dashboard/study?tab=flashcards";
 
   event.waitUntil(
     self.registration.showNotification(title, {
@@ -45,24 +45,40 @@ self.addEventListener("push", (event) => {
 });
 
 /**
- * Deep-links back into /study on the "Flashcards" tab, focusing an
- * already-open tab instead of always spawning a new one when one already
- * exists for this app.
+ * Deep-links to the exact flashcard on the Flashcards tab, reusing an open
+ * app tab when there is one. client.navigate() only works on tabs this
+ * worker CONTROLS (it rejects on the "includeUncontrolled" ones — a click
+ * then used to do nothing), so: navigate when possible, otherwise ask the
+ * page itself to go there (PushClientFallbackProvider listens), otherwise
+ * open a new window. Every step is guarded — a click always lands somewhere.
  */
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || "/study?tab=flashcards";
+  const rawUrl = (event.notification.data && event.notification.data.url) || "/dashboard/study?tab=flashcards";
+  const targetUrl = new URL(rawUrl, self.location.origin).href;
 
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ("navigate" in client && "focus" in client) {
-          return client.navigate(targetUrl).then((navigated) => navigated && navigated.focus());
+    (async () => {
+      const clientList = await clients.matchAll({ type: "window", includeUncontrolled: true });
+      const appClient = clientList.find((client) => client.url.startsWith(self.location.origin));
+      if (appClient) {
+        try {
+          if ("focus" in appClient) await appClient.focus();
+        } catch (error) {
+          // Focus can be refused (no user activation on some platforms) — keep going.
         }
+        try {
+          if ("navigate" in appClient) {
+            const navigated = await appClient.navigate(targetUrl);
+            if (navigated) return;
+          }
+        } catch (error) {
+          // Uncontrolled tab: fall through to the message.
+        }
+        appClient.postMessage({ type: "medart:navigate", url: targetUrl });
+        return;
       }
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
-      }
-    })
+      if (clients.openWindow) await clients.openWindow(targetUrl);
+    })()
   );
 });

@@ -1,13 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Bell, Check, Lock } from "lucide-react";
-import { Card } from "@/components/ui/Card";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useRouter, useSearchParams } from "next/navigation";
+import { BellRing, Check, Cpu, GraduationCap, Lock, Palette, Settings2, Smartphone } from "lucide-react";
+import { CyberHeader, CyberPanel, CyberStage, SegmentedControl } from "@/components/cyber/primitives";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
-import { RevealSection } from "@/components/ui/RevealSection";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { AvatarUpload } from "@/components/settings/AvatarUpload";
@@ -15,13 +16,26 @@ import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/providers/AuthProvider";
 import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
-import { PushOptInButton } from "@/components/push/PushOptInButton";
 import type { StudentProfile } from "@/lib/types";
 import type { AcademicYear, Specialty } from "@/types/academic";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tSettings } from "@/lib/translations/settings";
 
 const FACULTY_OPTIONS = ALGERIAN_FACULTIES.map((name) => ({ value: name, label: name }));
+
+// Every section but "Profil & Cursus" is its own lazily-loaded chunk.
+const sectionLoading = () => <div className="h-64 animate-pulse rounded-3xl border border-white/[0.06] bg-white/[0.03]" />;
+const RemindersSection = dynamic(() => import("@/components/settings/SettingsSections").then((m) => m.RemindersSection), { ssr: false, loading: sectionLoading });
+const AiEngineSection = dynamic(() => import("@/components/settings/SettingsSections").then((m) => m.AiEngineSection), { ssr: false, loading: sectionLoading });
+const AppearanceSection = dynamic(() => import("@/components/settings/SettingsSections").then((m) => m.AppearanceSection), { ssr: false, loading: sectionLoading });
+const DevicesSection = dynamic(() => import("@/components/settings/SettingsSections").then((m) => m.DevicesSection), { ssr: false, loading: sectionLoading });
+
+const SECTIONS = ["profile", "ai", "reminders", "appearance", "devices"] as const;
+type SettingsSection = (typeof SECTIONS)[number];
+
+function isSettingsSection(value: string | null): value is SettingsSection {
+  return value !== null && (SECTIONS as readonly string[]).includes(value);
+}
 
 const EMPTY_FORM: StudentProfile = {
   fullName: "",
@@ -90,10 +104,19 @@ function LockedFieldLabel({ children }: { children: string }) {
  * ALL BEFORE the form's first render, gated by `ready` below — so every
  * <Select>'s `options` and `value` are correct from the very first paint.
  */
-export default function SettingsPage() {
+function SettingsHub() {
   const { profile, refreshUser, refreshCurriculumProfile } = useAuth();
   const { toast } = useToast();
   const { language } = useLanguage();
+  const fr = language === "fr";
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sectionParam = searchParams.get("section");
+  const section: SettingsSection = isSettingsSection(sectionParam) ? sectionParam : "profile";
+
+  function openSection(next: SettingsSection) {
+    router.replace(next === "profile" ? "/dashboard/settings" : `/dashboard/settings?section=${next}`, { scroll: false });
+  }
   const [form, setForm] = useState<StudentProfile>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -268,143 +291,127 @@ export default function SettingsPage() {
     toast({ variant: "info", title: INTERN_YEAR_LOCKED_MESSAGE });
   }
 
-  return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="text-2xl font-bold tracking-tight text-foreground">{tSettings("profileSettingsTitle", language)}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Ces informations personnalisent le contenu généré par l'IA à ton parcours.
-      </p>
+  const profileSection = (
+    <CyberPanel className="p-5 sm:p-6">
+      <div className="mb-5 flex items-center gap-3">
+        <AvatarUpload />
+        <div className="min-w-0">
+          <h2 className="text-sm font-black text-white">{tSettings("accountInfoTitle", language)}</h2>
+          <p className="text-xs text-slate-400">Visibles par toi seul(e) &middot; JPG, PNG, WEBP ou GIF, 5&nbsp;Mo max pour la photo.</p>
+        </div>
+      </div>
 
-      <RevealSection>
-        <Card className="mt-6 p-6">
-          <div className="mb-5 flex items-center gap-3">
-            <AvatarUpload />
-            <div>
-              <h2 className="text-sm font-bold text-foreground">{tSettings("accountInfoTitle", language)}</h2>
-              <p className="text-xs text-muted-foreground">
-                Visibles par toi seul(e) &middot; JPG, PNG, WEBP ou GIF, 5&nbsp;Mo max pour la photo.
-              </p>
+      {!ready ? (
+        <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-slate-400">
+          <BrandLoader className="h-6 w-6" />
+          Chargement de ton profil...
+        </div>
+      ) : (
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
+
+          <div>
+            <LockedFieldLabel>Adresse e-mail</LockedFieldLabel>
+            <div className="relative">
+              <Input name="email" value={form.email ?? ""} disabled className={LOCKED_INPUT_CLASS} />
+              <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
             </div>
           </div>
 
-          {!ready ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <BrandLoader className="h-6 w-6" />
-              Chargement de ton profil...
+          <div>
+            <LockedFieldLabel>{tSettings("fullNameLabel", language)}</LockedFieldLabel>
+            <div className="relative">
+              <Input name="fullName" value={form.fullName} disabled className={LOCKED_INPUT_CLASS} />
+              <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
             </div>
-          ) : (
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              {error && (
-                <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
+            <p className="mt-1.5 text-xs text-muted-foreground">Le nom associé à ton compte ne peut pas être modifié ici.</p>
+          </div>
 
-              <div>
-                <LockedFieldLabel>Adresse e-mail</LockedFieldLabel>
-                <div className="relative">
-                  <Input name="email" value={form.email ?? ""} disabled className={LOCKED_INPUT_CLASS} />
-                  <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
-                </div>
-              </div>
+          <Select label="Faculté (Algérie)" name="university" options={FACULTY_OPTIONS} value={form.university} onValueChange={(value) => update("university", value)} />
 
-              <div>
-                <LockedFieldLabel>{tSettings("fullNameLabel", language)}</LockedFieldLabel>
-                <div className="relative">
-                  <Input name="fullName" value={form.fullName} disabled className={LOCKED_INPUT_CLASS} />
-                  <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Le nom associé à ton compte ne peut pas être modifié ici.
-                </p>
-              </div>
-
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="min-w-0">
+              <FieldLabelRow htmlFor="specialty" locked={specialtyLocked}>
+                Spécialité
+              </FieldLabelRow>
               <Select
-                label="Faculté (Algérie)"
-                name="university"
-                options={FACULTY_OPTIONS}
-                value={form.university}
-                onValueChange={(value) => update("university", value)}
+                name="specialty"
+                placeholder={tSettings("choosePlaceholder", language)}
+                options={specialtyOptions}
+                value={specialtyId != null ? String(specialtyId) : ""}
+                onValueChange={handleSpecialtyChange}
+                disabled={specialtyLocked}
+                className={specialtyLocked ? LOCKED_SELECT_CLASS : undefined}
               />
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <FieldLabelRow htmlFor="specialty" locked={specialtyLocked}>
-                    Spécialité
-                  </FieldLabelRow>
-                  <Select
-                    name="specialty"
-                    placeholder={tSettings("choosePlaceholder", language)}
-                    options={specialtyOptions}
-                    value={specialtyId != null ? String(specialtyId) : ""}
-                    onValueChange={handleSpecialtyChange}
-                    disabled={specialtyLocked}
-                    className={specialtyLocked ? LOCKED_SELECT_CLASS : undefined}
-                  />
-                  {specialtyLocked && (
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      La spécialité ne peut pas être modifiée après l&apos;inscription.
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <FieldLabelRow htmlFor="academicYear">Année</FieldLabelRow>
-                  <Select
-                    name="academicYear"
-                    placeholder={
-                      specialtyId == null
-                        ? tSettings("chooseSpecialtyFirstPlaceholder", language)
-                        : yearsLoading
-                          ? tSettings("loadingEllipsis", language)
-                          : tSettings("choosePlaceholder", language)
-                    }
-                    options={yearOptions}
-                    value={academicYearId != null ? String(academicYearId) : ""}
-                    onValueChange={handleYearChange}
-                    disabled={specialtyId == null || yearsLoading}
-                    onDisabledOptionClick={handleDisabledYearClick}
-                  />
-                </div>
-              </div>
-
-              <Button type="submit" isLoading={isSaving} disabled={isSaving} className="w-full sm:w-auto">
-                {saved && !isSaving && <Check className="h-4 w-4" />}
-                {saved && !isSaving ? tSettings("saved", language) : tSettings("saveChanges", language)}
-              </Button>
-            </form>
-          )}
-        </Card>
-      </RevealSection>
-
-      <RevealSection delay={0.08}>
-        <Card className="mt-6 p-4 sm:p-6">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
-              <Bell className="h-4 w-4" />
-            </span>
-            <h2 className="text-sm font-bold text-foreground">{tSettings("flashRemindersTitle", language)}</h2>
+              {specialtyLocked && <p className="mt-1.5 text-xs text-muted-foreground">La spécialité ne peut pas être modifiée après l&apos;inscription.</p>}
+            </div>
+            <div className="min-w-0">
+              <FieldLabelRow htmlFor="academicYear">Année</FieldLabelRow>
+              <Select
+                name="academicYear"
+                placeholder={
+                  specialtyId == null
+                    ? tSettings("chooseSpecialtyFirstPlaceholder", language)
+                    : yearsLoading
+                      ? tSettings("loadingEllipsis", language)
+                      : tSettings("choosePlaceholder", language)
+                }
+                options={yearOptions}
+                value={academicYearId != null ? String(academicYearId) : ""}
+                onValueChange={handleYearChange}
+                disabled={specialtyId == null || yearsLoading}
+                onDisabledOptionClick={handleDisabledYearClick}
+              />
+            </div>
           </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Reçois de temps en temps une notification de ton navigateur avec une flashcard de tes modules actifs — même
-            quand l&apos;onglet n&apos;est pas ouvert.
-          </p>
-          {/*
-            PushOptInButton renders a fixed-height, single-line (whitespace-nowrap)
-            Button and exposes no className passthrough, so its label itself can't
-            be made to wrap from here. On the narrowest phones (320-360px), "Désactiver
-            les rappels flash" can exceed what's left after the shell's own gutters plus
-            this card's padding. overflow-x-auto keeps any overflow contained to this one
-            row (a short local swipe) instead of it leaking into a page-wide horizontal
-            scroll on <main> — which inherits an effective overflow-x:auto the moment any
-            ancestor sets overflow-y:auto — or the label silently bleeding past the
-            card's rounded border. p-4 on mobile (vs p-6 from sm: up) also buys back 16px
-            of width so the common 375-428px phones fit with no scrolling at all.
-          */}
-          <div className="mt-4 overflow-x-auto scrollbar-thin">
-            <PushOptInButton />
-          </div>
-        </Card>
-      </RevealSection>
-    </div>
+
+          <Button type="submit" isLoading={isSaving} disabled={isSaving} className="w-full sm:w-auto">
+            {saved && !isSaving && <Check className="h-4 w-4" />}
+            {saved && !isSaving ? tSettings("saved", language) : tSettings("saveChanges", language)}
+          </Button>
+        </form>
+      )}
+    </CyberPanel>
+  );
+
+  return (
+    <CyberStage className="mx-auto max-w-4xl overflow-x-clip p-4 sm:p-6 lg:p-8">
+      <CyberHeader
+        icon={Settings2}
+        kicker={fr ? "Centre de contrôle" : "Control center"}
+        title={tSettings("profileSettingsTitle", language)}
+        subtitle={fr ? "Profil, moteur IA, rappels, apparence et appareils — tout au même endroit." : "Profile, AI engine, reminders, appearance and devices — all in one place."}
+      />
+
+      <SegmentedControl<SettingsSection>
+        className="mt-6"
+        ariaLabel={fr ? "Sections des paramètres" : "Settings sections"}
+        value={section}
+        onChange={openSection}
+        options={[
+          { value: "profile", label: fr ? "Profil & Cursus" : "Profile", icon: GraduationCap },
+          { value: "ai", label: fr ? "Moteur IA" : "AI engine", icon: Cpu },
+          { value: "reminders", label: fr ? "Rappels" : "Reminders", icon: BellRing },
+          { value: "appearance", label: fr ? "Apparence" : "Appearance", icon: Palette },
+          { value: "devices", label: fr ? "Appareils" : "Devices", icon: Smartphone },
+        ]}
+      />
+
+      <div className="mt-6">
+        {section === "profile" && profileSection}
+        {section === "ai" && <AiEngineSection />}
+        {section === "reminders" && <RemindersSection />}
+        {section === "appearance" && <AppearanceSection />}
+        {section === "devices" && <DevicesSection />}
+      </div>
+    </CyberStage>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto h-40 max-w-4xl animate-pulse rounded-[1.75rem] bg-muted" />}>
+      <SettingsHub />
+    </Suspense>
   );
 }

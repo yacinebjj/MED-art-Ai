@@ -4,6 +4,8 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import type { StudentCurriculumProfile } from "@/types/academic";
+import { isMissingColumnError } from "@/lib/group-chat";
+import { isFlashcardPushInterval, normalizeFlashcardPushInterval } from "@/lib/push/cadence";
 
 /**
  * The student's real curriculum choice (specialty_id / academic_year_id on
@@ -55,7 +57,54 @@ export async function GET() {
       : null,
   };
 
-  return NextResponse.json({ profile });
+  // Reminder settings (Paramètres → Rappels). Read separately and tolerantly:
+  // the cadence column only exists once 20261004_flashcard_push_cadence.sql ran.
+  const reminders = await readReminderSettings(supabase, user.id);
+
+  return NextResponse.json({ profile, reminders });
+}
+
+interface PushDevice {
+  endpoint: string;
+  platform: string;
+}
+
+/** Human label for a Web Push endpoint's push service (the only device info a subscription carries). */
+function pushPlatformLabel(endpoint: string): string {
+  try {
+    const host = new URL(endpoint).hostname;
+    if (host.endsWith("push.apple.com")) return "Safari (iPhone, iPad ou Mac)";
+    if (host.endsWith("googleapis.com")) return "Chrome / Android";
+    if (host.endsWith("mozilla.com")) return "Firefox";
+    if (host.endsWith("notify.windows.com")) return "Edge / Windows";
+    return host;
+  } catch {
+    return "Appareil inconnu";
+  }
+}
+
+async function readReminderSettings(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  userId: string
+): Promise<{ intervalMinutes: number; cadenceAvailable: boolean; devices: PushDevice[] }> {
+  let cadenceAvailable = true;
+  let { data, error } = await supabase
+    .from("profiles")
+    .select("push_subscriptions, flashcard_push_interval_minutes")
+    .eq("id", userId)
+    .maybeSingle<{ push_subscriptions: { endpoint: string }[] | null; flashcard_push_interval_minutes?: number | null }>();
+  if (isMissingColumnError(error)) {
+    cadenceAvailable = false;
+    ({ data, error } = await supabase
+      .from("profiles")
+      .select("push_subscriptions")
+      .eq("id", userId)
+      .maybeSingle<{ push_subscriptions: { endpoint: string }[] | null; flashcard_push_interval_minutes?: number | null }>());
+  }
+  const devices = (data?.push_subscriptions ?? [])
+    .filter((sub) => typeof sub?.endpoint === "string")
+    .map((sub) => ({ endpoint: sub.endpoint, platform: pushPlatformLabel(sub.endpoint) }));
+  return { intervalMinutes: normalizeFlashcardPushInterval(data?.flashcard_push_interval_minutes), cadenceAvailable: cadenceAvailable && !error, devices };
 }
 
 /** Body: { specialtyId: number, academicYearId: number }. Both required together — an année only makes sense paired with its filière. */
@@ -84,7 +133,30 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { specialtyId, academicYearId } = (body ?? {}) as { specialtyId?: unknown; academicYearId?: unknown };
+  const { specialtyId, academicYearId, flashcardPushIntervalMinutes } = (body ?? {}) as {
+    specialtyId?: unknown;
+    academicYearId?: unknown;
+    flashcardPushIntervalMinutes?: unknown;
+  };
+
+  // Reminder cadence only (Paramètres → Rappels): 60, 120 or 240 minutes.
+  if (flashcardPushIntervalMinutes !== undefined && specialtyId === undefined && academicYearId === undefined) {
+    if (!isFlashcardPushInterval(flashcardPushIntervalMinutes)) {
+      return NextResponse.json({ error: "'flashcardPushIntervalMinutes' doit valoir 60, 120 ou 240." }, { status: 400 });
+    }
+    const { error: cadenceError } = await getSupabaseAdmin()
+      .from("profiles")
+      .update({ flashcard_push_interval_minutes: flashcardPushIntervalMinutes })
+      .eq("id", user.id);
+    if (cadenceError) {
+      if (isMissingColumnError(cadenceError)) {
+        return NextResponse.json({ error: "Le choix de la fréquence sera disponible après la prochaine mise à jour du serveur. En attendant : 1 rappel par heure." }, { status: 409 });
+      }
+      return NextResponse.json({ error: cadenceError.message }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, flashcardPushIntervalMinutes });
+  }
+
   if (!Number.isInteger(specialtyId) || !Number.isInteger(academicYearId)) {
     return NextResponse.json({ error: "'specialtyId' et 'academicYearId' sont requis (nombres entiers)." }, { status: 400 });
   }

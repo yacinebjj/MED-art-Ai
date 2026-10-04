@@ -21,6 +21,11 @@ export const maxDuration = 60;
  * delivery without a browser tab open); see app/api/push/dispatch-self for
  * the narrower, session-scoped fallback this app also offers.
  */
+/** Vercel Cron calls with GET (and the same Bearer CRON_SECRET header). */
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
+
 export async function POST(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
