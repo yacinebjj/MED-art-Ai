@@ -12,6 +12,7 @@ import { useCockpitStore } from "@/store/useCockpitStore";
 import { activeDays, computeStreak, focusLastSevenDays, focusSecondsOn, formatDuration, recentDays } from "@/lib/dashboard/metrics";
 import {
   DEFAULT_DAILY_GOAL_MINUTES,
+  onLocalActivitySynced,
   readDailyGoalMinutes,
   readFlashcardSession,
   writeDailyGoalMinutes,
@@ -38,7 +39,10 @@ function StreakWidget({ userId }: { userId: string | null }) {
   const now = useNow();
   const [goal, setGoal] = useState(DEFAULT_DAILY_GOAL_MINUTES);
   useEffect(() => {
-    if (userId) setGoal(readDailyGoalMinutes(userId));
+    if (!userId) return;
+    setGoal(readDailyGoalMinutes(userId));
+    // Another device's newer goal arrived (cross-device sync).
+    return onLocalActivitySynced(() => setGoal(readDailyGoalMinutes(userId)));
   }, [userId]);
 
   const dayCount = Object.keys(focusLog).length;

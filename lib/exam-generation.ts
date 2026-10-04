@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, CHEAP_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, EXAM_FALLBACK_MODEL, EXAM_MODEL } from "@/lib/ai/openrouter";
 import { buildExamBatchInstruction, buildExamStaticSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
 import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
 import { parseJsonResponse } from "@/lib/course-generation-shared";
@@ -348,7 +348,9 @@ export async function generateExamBatch(
           // touches this call at all — this function only ever generates
           // the SHORTFALL, a residual top-up, so this model choice only
           // affects a fraction of the exam.
-          model: CHEAP_MODEL,
+          // EXAM_MODEL (qwen3-235b, see lib/ai/openrouter.ts): ~5x faster
+          // and cheaper per batch than the old CHEAP_MODEL, same family.
+          model: EXAM_MODEL,
           maxTokens: EXAM_BATCH_MAX_TOKENS,
           bypassMock: true,
           // Same model, fastest available providers first (output speed is
@@ -510,4 +512,58 @@ export function friendlyOpenRouterErrorMessage(error: OpenRouterError): string {
     return "Le contenu sélectionné est trop volumineux pour être traité en une seule fois (trop de cours, ou des cours très longs). Réessaie avec moins de cours sélectionnés à la fois.";
   }
   return error.message;
+}
+
+/**
+ * ONE exam job for the client-orchestrated run (app/api/exam/run): asks for
+ * exactly `count` QCMs and returns as soon as a model delivers — EXAM_MODEL
+ * first, EXAM_FALLBACK_MODEL only when the first produced nothing usable.
+ * No in-request retry loop: a short answer is returned as-is and the
+ * browser re-queues only the missing questions (re-sending a whole batch
+ * for one missing QCM is what multiplied time and cost before).
+ */
+export async function generateExamJob(
+  inputs: ExamCourseInput[],
+  count: number,
+  isVariation: boolean,
+  systemPromptOverride?: string
+): Promise<ExamQuestion[]> {
+  const systemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
+  const instruction = buildExamBatchInstruction(5, 5, count, isVariation, []);
+  const chain: { model: string; timeoutMs: number }[] = [
+    { model: EXAM_MODEL, timeoutMs: 110_000 },
+    { model: EXAM_FALLBACK_MODEL, timeoutMs: 80_000 },
+  ];
+  let lastError: unknown = null;
+  for (const step of chain) {
+    try {
+      const raw = await callOpenRouter(
+        [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: instruction },
+        ],
+        {
+          model: step.model,
+          // ~350 tokens per QCM measured; generous headroom, never the old 16k.
+          maxTokens: 1_000 * count + 1_500,
+          bypassMock: true,
+          providerSort: "throughput",
+          timeoutMs: step.timeoutMs,
+          ...(isVariation ? { temperature: VARIATION_TEMPERATURE } : {}),
+        }
+      );
+      const parsed = parseJsonResponse(raw);
+      const rawQuestions: unknown[] =
+        parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions) ? (parsed as { questions: unknown[] }).questions : [];
+      const valid = rawQuestions
+        .map((q) => ExamQuestionSchema.safeParse(q))
+        .filter((r): r is z.SafeParseSuccess<ExamQuestion> => r.success)
+        .map((r) => r.data);
+      if (valid.length > 0) return valid.slice(0, count);
+      lastError = new Error("Aucun QCM valide dans la réponse.");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Lot d'examen en échec.");
 }

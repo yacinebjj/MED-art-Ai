@@ -13,6 +13,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { useToast } from "@/components/ui/Toast";
 import { SynthesisExplorer } from "@/components/dashboard/synthesis/SynthesisExplorer";
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
+import { putSyncDoc, reconcileList } from "@/lib/user-sync";
 import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
 import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -53,11 +54,11 @@ import { SUMMARY_DEPTHS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type Sum
 type SelectAllState = "checked" | "unchecked" | "indeterminate";
 type WorkspaceGenerationType = "global_summary" | "keywords_table" | "medical_dictionary";
 
-// No per-student Supabase table exists yet for "this student's last
-// Workspace output" — course_workspace_cache (see schema.sql) is a GLOBAL,
-// cross-student, service-role-only dedup cache keyed by content hash, not a
-// per-user history, so it can't answer "what was on this student's screen
-// last time". localStorage fills that gap until a real table exists.
+// CROSS-DEVICE (2026-10-06): every entry is also stored server-side
+// (lib/user-sync.ts → user_sync_documents, namespace
+// "workspace-history:<moduleId>", one document per entry) — a Résumé
+// generated on PC now shows on the phone with the same account.
+// localStorage stays as the instant first paint / offline copy.
 //
 // SECURITY FIX: this key was previously scoped ONLY by moduleId, with no
 // user component at all — since localStorage is scoped to the BROWSER
@@ -82,7 +83,19 @@ function workspaceHistoryStorageKey(userId: string, moduleId: number): string {
  * (phone locked, app switched, route changed mid-generation) is still there
  * on return instead of being lost with the unmounted component.
  */
+function workspaceHistoryNamespace(moduleId: number): string {
+  return `workspace-history:${moduleId}`;
+}
+
+function isHistoryEntry(value: unknown): value is HistoryEntry {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Partial<HistoryEntry>;
+  return typeof v.id === "string" && typeof v.content === "string" && typeof v.timestamp === "number" && typeof v.type === "string";
+}
+
 function persistEntryNow(userId: string, moduleId: number, entry: HistoryEntry): void {
+  // Server copy first: it is what makes the entry visible on other devices.
+  putSyncDoc(workspaceHistoryNamespace(moduleId), entry.id, entry, true);
   try {
     const key = workspaceHistoryStorageKey(userId, moduleId);
     const raw = localStorage.getItem(key);
@@ -210,20 +223,39 @@ export default function ModuleWorkspacePage() {
     } catch {
       // Storage unavailable — nothing to clean up either way.
     }
-    try {
-      const raw = localStorage.getItem(workspaceHistoryStorageKey(userId, moduleId));
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { history?: HistoryEntry[]; activeHistoryId?: string | null };
-      if (!Array.isArray(saved.history) || saved.history.length === 0) return;
-      setHistory(saved.history);
-      const active = saved.history.find((h) => h.id === saved.activeHistoryId) ?? saved.history[0];
+    let local: HistoryEntry[] = [];
+    let localActiveId: string | null = null;
+    const show = (entries: HistoryEntry[], preferredId: string | null) => {
+      if (entries.length === 0) return;
+      setHistory(entries);
+      const active = entries.find((h) => h.id === preferredId) ?? entries[0];
       setActiveHistoryId(active.id);
       setOutput(active.content);
       // On phones only one panel shows: open "Résultats" so the restored result is actually visible.
       setMobileTab("results");
+    };
+    try {
+      const raw = localStorage.getItem(workspaceHistoryStorageKey(userId, moduleId));
+      if (raw) {
+        const saved = JSON.parse(raw) as { history?: unknown[]; activeHistoryId?: string | null };
+        local = Array.isArray(saved.history) ? saved.history.filter(isHistoryEntry) : [];
+        localActiveId = saved.activeHistoryId ?? null;
+        show(local, localActiveId);
+      }
     } catch {
-      // Corrupted or foreign localStorage value — ignore, page just starts empty.
+      // Corrupted or foreign localStorage value — ignore, the server copy below still loads.
     }
+    // Then the account-wide copy: entries made on another device appear, and
+    // entries only this browser had (made before sync existed) are uploaded.
+    let cancelled = false;
+    void reconcileList(workspaceHistoryNamespace(moduleId), local, { sortKey: (h) => h.timestamp, max: 30, isValid: isHistoryEntry }).then((merged) => {
+      if (cancelled || !merged || merged.length === 0) return;
+      const changed = merged.length !== local.length || merged.some((h, i) => h.id !== local[i]?.id);
+      if (changed) show(merged, localActiveId);
+    });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduleId, userId]);
 

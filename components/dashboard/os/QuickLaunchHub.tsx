@@ -9,7 +9,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { useCockpitUi } from "@/store/useCockpitUi";
-import { readFlashcardSession, readLastOpenedCourse, type FlashcardSessionSummary, type LastOpenedCourse } from "@/lib/dashboard/local-activity";
+import { onLocalActivitySynced, readFlashcardSession, readLastOpenedCourse, type FlashcardSessionSummary, type LastOpenedCourse } from "@/lib/dashboard/local-activity";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit, type CockpitKey } from "@/lib/translations/cockpit";
 import type { LabToolId } from "@/lib/workspace-lab";
@@ -110,6 +110,10 @@ function ResumeCard() {
   useEffect(() => {
     setLastOpened(user?.id ? readLastOpenedCourse(user.id) : null);
     setSession(user?.id ? readFlashcardSession(user.id) : null);
+    const userId = user?.id;
+    if (!userId) return;
+    // Opened on another device (cross-device sync).
+    return onLocalActivitySynced(() => setLastOpened(readLastOpenedCourse(userId)));
   }, [user?.id]);
 
   const course = useMemo(() => {

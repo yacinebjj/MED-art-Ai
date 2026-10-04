@@ -25,6 +25,7 @@ import { findBestMatchingSection } from "@/lib/weakness-matching";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
 import { createClient } from "@/lib/supabase/client";
+import { putSyncDoc, reconcileValue } from "@/lib/user-sync";
 import { CalibrationReport, ConcoursModeBar, ConfidencePicker, type Confidence, type TimerMode } from "@/components/course/workspace/exam/ConcoursToolkit";
 
 /**
@@ -429,9 +430,37 @@ interface PersistedQuizState {
   confidence?: Record<number, Confidence>;
   /** Mode Concours countdown, so a remount (full-screen toggle, Zen) resumes the same timed run. */
   timer?: { mode: TimerMode; startedAt: number | null };
+  /** When this progress was last changed (ms) — decides which device wins in cross-device sync. Absent in older saves (treated as 0). */
+  savedAt?: number;
 }
 
 const QUIZ_PROGRESS_STORAGE_PREFIX = "medart:quiz-progress:";
+
+/** Cross-device sync (lib/user-sync.ts): one document per course, keyed by its slug. */
+const QUIZ_PROGRESS_SYNC_NS = "quiz-progress";
+
+function quizProgressSyncKey(courseSlug: string): string {
+  return courseSlug.trim().slice(0, 200) || "_";
+}
+
+/** JSON with sorted object keys — the server (jsonb) does not keep key order, so content is compared on this form. */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/** Content fingerprint of a saved state, ignoring `savedAt`. */
+function quizStateFingerprint(state: PersistedQuizState): string {
+  const content: PersistedQuizState = { ...state };
+  delete content.savedAt;
+  return stableStringify(content);
+}
 
 /**
  * SECURITY FIX: previously keyed ONLY by courseSlug, with no user component
@@ -497,6 +526,9 @@ export function InteractiveQuiz({
   // effects in dev to surface missing-cleanup bugs; without this guard the
   // toast below would show twice on every load).
   const hasRestoredRef = useRef(false);
+  // Fingerprint of the progress last saved/restored — the auto-save effect
+  // only writes (and syncs) when the content actually changed.
+  const syncedFingerprintRef = useRef<string | null>(null);
   // Resolved once on mount — see quizProgressStorageKey's own comment for
   // why both the restore and auto-save effects below are gated on this
   // being non-null first (never touch storage before knowing WHOSE slot it
@@ -534,26 +566,59 @@ export function InteractiveQuiz({
       saved = null; // Corrupted or unavailable localStorage — start fresh, never crash the quiz over it.
     }
 
-    // Mode Concours state is restored even before any answer exists — the
-    // student may have rated certainty or started the clock, then remounted.
-    if (concoursTools && saved) {
-      setConfidence(saved.confidence ?? {});
-      if (saved.timer) {
-        setTimerMode(saved.timer.mode);
-        setTimerStartedAt(saved.timer.startedAt);
+    let toasted = false;
+    /** Applies a saved state to the UI; returns the state the auto-save effect will then see (so it doesn't re-save it as "new"). */
+    const applySaved = (state: PersistedQuizState): PersistedQuizState => {
+      // Mode Concours state is restored even before any answer exists — the
+      // student may have rated certainty or started the clock, then remounted.
+      if (concoursTools) {
+        setConfidence(state.confidence ?? {});
+        if (state.timer) {
+          setTimerMode(state.timer.mode);
+          setTimerStartedAt(state.timer.startedAt);
+        }
       }
-    }
+      const hasAnswers = Object.keys(state.qcmAnswers ?? {}).length > 0;
+      setQcmAnswers(hasAnswers ? state.qcmAnswers : {});
+      setRevealedQrocs(hasAnswers ? state.revealedQrocs ?? {} : {});
+      setGradedQrocs(hasAnswers ? state.gradedQrocs ?? {} : {});
+      if (hasAnswers) {
+        if (!toasted) {
+          toasted = true;
+          toast({
+            variant: "info",
+            title: "Progression restaurée",
+            description: "Tu reprends exactement où tu t'étais arrêté(e).",
+          });
+        }
+      }
+      return {
+        qcmAnswers: hasAnswers ? state.qcmAnswers : {},
+        revealedQrocs: hasAnswers ? state.revealedQrocs ?? {} : {},
+        gradedQrocs: hasAnswers ? state.gradedQrocs ?? {} : {},
+        ...(concoursTools ? { confidence: state.confidence ?? {}, timer: state.timer ?? { mode: "libre" as TimerMode, startedAt: null } } : {}),
+      };
+    };
 
-    if (saved && Object.keys(saved.qcmAnswers ?? {}).length > 0) {
-      setQcmAnswers(saved.qcmAnswers);
-      setRevealedQrocs(saved.revealedQrocs ?? {});
-      setGradedQrocs(saved.gradedQrocs ?? {});
-      toast({
-        variant: "info",
-        title: "Progression restaurée",
-        description: "Tu reprends exactement où tu t'étais arrêté(e).",
-      });
-    }
+    if (saved) syncedFingerprintRef.current = quizStateFingerprint(applySaved(saved));
+    if (isPreview) return;
+
+    // Cross-device: after the local first paint, adopt another device's newer
+    // progress — unless the student already interacted in the meantime.
+    const localFingerprint = syncedFingerprintRef.current;
+    const local = saved ? { value: saved, savedAt: saved.savedAt ?? 0 } : null;
+    void reconcileValue<PersistedQuizState>(QUIZ_PROGRESS_SYNC_NS, quizProgressSyncKey(courseSlug), local).then((winner) => {
+      if (!winner || winner === local || !winner.value || typeof winner.value !== "object") return;
+      if (local && winner.savedAt <= local.savedAt) return;
+      if (syncedFingerprintRef.current !== localFingerprint) return;
+      const remote: PersistedQuizState = { ...winner.value, savedAt: winner.savedAt };
+      try {
+        localStorage.setItem(key, JSON.stringify(remote));
+      } catch {
+        // Storage blocked — the remote progress still shows for this visit.
+      }
+      syncedFingerprintRef.current = quizStateFingerprint(applySaved(remote));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseSlug, userId]);
 
@@ -565,18 +630,25 @@ export function InteractiveQuiz({
     if (!userId) return;
     const hasConcoursState = concoursTools && (Object.keys(confidence).length > 0 || timerMode !== "libre");
     if (Object.keys(qcmAnswers).length === 0 && Object.keys(revealedQrocs).length === 0 && !hasConcoursState) return;
+    const state: PersistedQuizState = {
+      qcmAnswers,
+      revealedQrocs,
+      gradedQrocs,
+      ...(concoursTools ? { confidence, timer: { mode: timerMode, startedAt: timerStartedAt } } : {}),
+    };
+    // Unchanged content (e.g. right after a restore) keeps its original
+    // `savedAt` — re-stamping it would make this device "win" sync for nothing.
+    const fingerprint = quizStateFingerprint(state);
+    if (fingerprint === syncedFingerprintRef.current) return;
+    syncedFingerprintRef.current = fingerprint;
+    state.savedAt = Date.now();
     try {
-      const state: PersistedQuizState = {
-        qcmAnswers,
-        revealedQrocs,
-        gradedQrocs,
-        ...(concoursTools ? { confidence, timer: { mode: timerMode, startedAt: timerStartedAt } } : {}),
-      };
       localStorage.setItem(quizProgressStorageKey(userId, courseSlug), JSON.stringify(state));
     } catch {
       // Quota exceeded / private mode — losing the local save is not worth interrupting the quiz over.
     }
-  }, [courseSlug, userId, qcmAnswers, revealedQrocs, gradedQrocs, confidence, concoursTools, timerMode, timerStartedAt]);
+    if (!isPreview) putSyncDoc(QUIZ_PROGRESS_SYNC_NS, quizProgressSyncKey(courseSlug), { value: state, savedAt: state.savedAt });
+  }, [courseSlug, userId, qcmAnswers, revealedQrocs, gradedQrocs, confidence, concoursTools, timerMode, timerStartedAt, isPreview]);
 
   function handleTimerModeChange(mode: TimerMode) {
     setTimerMode(mode);

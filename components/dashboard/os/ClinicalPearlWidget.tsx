@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { localDayKey } from "@/providers/PomodoroProvider";
 import { pearlOfTheDay } from "@/lib/dashboard/clinical-pearls";
-import { readPearlAnswer, writePearlAnswer } from "@/lib/dashboard/local-activity";
+import { onLocalActivitySynced, readPearlAnswer, writePearlAnswer } from "@/lib/dashboard/local-activity";
 import { tCockpit } from "@/lib/translations/cockpit";
 import { OsCard, WidgetSkeleton, useNow } from "./primitives";
 
@@ -22,7 +22,10 @@ export function ClinicalPearlWidget({ userId }: { userId: string | null }) {
   const [choice, setChoice] = useState<number | null>(null);
 
   useEffect(() => {
-    if (userId && day && pearl) setChoice(readPearlAnswer(userId, day, pearl.id));
+    if (!userId || !day || !pearl) return;
+    setChoice(readPearlAnswer(userId, day, pearl.id));
+    // Answered on another device (cross-device sync).
+    return onLocalActivitySynced(() => setChoice(readPearlAnswer(userId, day, pearl.id)));
   }, [userId, day, pearl]);
 
   if (!pearl || !day) return <WidgetSkeleton />;

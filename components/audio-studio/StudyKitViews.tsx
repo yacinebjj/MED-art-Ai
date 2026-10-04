@@ -5,8 +5,11 @@ import { motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Download, Loader2, NotebookPen, RefreshCw, RotateCcw, Sparkles, Target } from "lucide-react";
 import type { LectureStudyKit } from "@/types/lecture-study-kit";
 import { cn } from "@/lib/utils";
+import { putSyncDoc, reconcileValue, type SyncedValue } from "@/lib/user-sync";
 
 const KIT_CACHE_PREFIX = "medart:lecture-kit:";
+/** Cross-device copy (lib/user-sync.ts), keyed by the same Smart Notes hash. */
+const KIT_SYNC_NS = "lecture-kit";
 
 /** Small stable hash so a kit is cached per exact Smart Notes text. */
 function hashText(text: string): string {
@@ -19,29 +22,63 @@ export function useStudyKit(smartNotes: string | null) {
   const [kit, setKit] = useState<LectureStudyKit | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const key = smartNotes ? `${KIT_CACHE_PREFIX}${hashText(smartNotes)}` : null;
+  const syncKey = smartNotes ? hashText(smartNotes) : null;
+  const key = syncKey ? `${KIT_CACHE_PREFIX}${syncKey}` : null;
 
   useEffect(() => {
     setKit(null);
     setError(null);
-    if (!key) return;
+    if (!key || !syncKey) return;
+    let local: SyncedValue<LectureStudyKit> | null = null;
     try {
       const raw = window.localStorage.getItem(key);
-      if (raw) setKit(JSON.parse(raw) as LectureStudyKit);
+      if (raw) {
+        const cached = JSON.parse(raw) as LectureStudyKit;
+        setKit(cached);
+        // The local cache has no timestamp: 0 lets a remote copy win, and
+        // still uploads it when the server has none.
+        local = { value: cached, savedAt: 0 };
+      }
     } catch {
       // No cache available — generated on demand.
     }
-  }, [key]);
+    // A kit generated on another device appears here without regenerating.
+    let cancelled = false;
+    void reconcileValue<LectureStudyKit>(KIT_SYNC_NS, syncKey, local).then((winner) => {
+      if (cancelled || !winner || winner === local || !winner.value) return;
+      setKit((current) => current ?? winner.value);
+      try {
+        window.localStorage.setItem(key, JSON.stringify(winner.value));
+      } catch {
+        // Not cached on this device; still shown.
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [key, syncKey]);
 
   const generate = useCallback(async () => {
-    if (!smartNotes || !key) return;
+    if (!smartNotes || !key || !syncKey) return;
     setLoading(true);
     setError(null);
     try {
+      // Generated on another device since this page loaded? Use it instead of a new AI run.
+      const remote = await reconcileValue<LectureStudyKit>(KIT_SYNC_NS, syncKey, null);
+      if (remote?.value) {
+        setKit(remote.value);
+        try {
+          window.localStorage.setItem(key, JSON.stringify(remote.value));
+        } catch {
+          // Not cached on this device; still shown.
+        }
+        return;
+      }
       const res = await fetch("/api/lecture-notes/study-kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ smartNotes }) });
       const data = (await res.json().catch(() => ({}))) as { success?: boolean; kit?: LectureStudyKit; error?: string };
       if (!res.ok || !data.success || !data.kit) throw new Error(data.error ?? "La génération du kit a échoué.");
       setKit(data.kit);
+      putSyncDoc(KIT_SYNC_NS, syncKey, { value: data.kit, savedAt: Date.now() } satisfies SyncedValue<LectureStudyKit>, true);
       try {
         window.localStorage.setItem(key, JSON.stringify(data.kit));
       } catch {
@@ -52,7 +89,7 @@ export function useStudyKit(smartNotes: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [smartNotes, key]);
+  }, [smartNotes, key, syncKey]);
 
   return { kit, loading, error, generate };
 }
@@ -65,7 +102,7 @@ export function KitGate({ loading, error, onGenerate, what }: { loading: boolean
       </span>
       <div>
         <p className="text-sm font-bold text-foreground">{loading ? "Préparation du kit de révision…" : `Générer ${what}`}</p>
-        <p className="mt-1 max-w-sm text-xs text-muted-foreground">Flashcards, points High-Yield et carte mentale sont créés ensemble, uniquement à partir de tes Smart Notes, puis gardés sur cet appareil.</p>
+        <p className="mt-1 max-w-sm text-xs text-muted-foreground">Flashcards, points High-Yield et carte mentale sont créés ensemble, uniquement à partir de tes Smart Notes, puis gardés sur ton compte (retrouvés sur tous tes appareils).</p>
       </div>
       {error && <p className="text-xs font-semibold text-destructive">{error}</p>}
       <button

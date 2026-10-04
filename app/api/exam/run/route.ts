@@ -17,10 +17,9 @@ import { createSynthesisRunToken, sealRunPayload, verifyRunPayload, verifySynthe
 import {
   EXAM_TARGET_TOTAL,
   MAX_EXAM_VARIATIONS,
-  MAX_TOTAL_EXAM_CHARS,
   MODULE_EXAM_REGENERATE_CAP,
   friendlyOpenRouterErrorMessage,
-  generateExamBatch,
+  generateExamJob,
   isMissingRpcError,
   refundRegenerationFallback,
   reserveRegenerationFallback,
@@ -62,8 +61,8 @@ const JOB_QUESTIONS = 5;
 const JOB_MAX_COURSES = 5;
 const JOB_MAX_SEGMENTS = 12;
 const MIN_SEGMENT_CHARS = 2_500;
-const BATCH_DEADLINE_MS = 270_000;
-const BATCH_CALL_TIMEOUT_MS = 240_000;
+/** Source text per job: ~7k tokens, measured enough for 5 precise QCMs (more only cost time and money). */
+const JOB_INPUT_CHARS = 24_000;
 const MAX_FINAL_QUESTIONS = 60;
 /** Batch calls one run may make (jobs + silent retries), per server instance. */
 const RUN_BATCH_LIMIT = { limit: 120, windowMs: 30 * 60_000 };
@@ -183,7 +182,7 @@ function distribute(courseIds: number[], total: number, caps: Map<number, number
 }
 
 function jobInputs(courses: EligibleCourseRow[], segment: [number, number] | null): ExamCourseInput[] {
-  const cap = Math.max(500, Math.floor(MAX_TOTAL_EXAM_CHARS / Math.max(1, courses.length)));
+  const cap = Math.max(500, Math.floor(JOB_INPUT_CHARS / Math.max(1, courses.length)));
   return courses.map((course) => {
     let text = course.explication ?? course.raw_text;
     let title = course.title;
@@ -437,11 +436,7 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
   }
 
   try {
-    // One extra question requested: a slightly-over answer is trimmed for
-    // free, a slightly-short one still covers the job.
-    const requested = Math.min(8, job.count + 1);
-    const generated = await generateExamBatch(inputs, 5, 5, requested, params.isVariation, [], systemPrompt, Date.now() + BATCH_DEADLINE_MS, BATCH_CALL_TIMEOUT_MS);
-    const questions = generated.slice(0, job.count);
+    const questions = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt);
     // Single-course, canonical questions feed that course's reusable pool.
     if (!params.isPersonalized && courses.length === 1) {
       for (const question of questions) void storeHarvestedQcm(courses[0].id, sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));

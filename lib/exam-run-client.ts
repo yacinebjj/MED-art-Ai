@@ -97,7 +97,7 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
     // The run token lives 30 min: leave room to assemble.
     deadlineMs: 25 * 60_000,
     stallMs: 8 * 60_000,
-    maxConcurrency: 8,
+    maxConcurrency: 12,
     breakerThreshold: 6,
     minAttemptWindowMs: 20_000,
   });
@@ -153,7 +153,7 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
         }
       }
     }
-    await Promise.all(Array.from({ length: 8 }, worker));
+    await Promise.all(Array.from({ length: 12 }, worker));
   }
 
   async function refund(): Promise<ExamRunResponse> {

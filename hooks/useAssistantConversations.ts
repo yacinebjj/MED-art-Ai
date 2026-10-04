@@ -1,21 +1,18 @@
 "use client";
 
 /**
- * MedArt Assistant conversation persistence — localStorage, not Supabase,
- * a deliberate scope choice: this app already has a proven server-side
- * history pattern (course_chat_history), but that needs a new table, a new
- * GET/POST pair, and auth-scoped queries — real work, not a "tonight" fix.
- * localStorage is genuinely robust for what's actually being asked (survive
- * a refresh/navigation on the SAME device) and ships immediately.
- *
- * Disclosed limitation, not hidden: this is per-browser, per-device only.
- * No cross-device sync, and clearing browser data/history wipes it. If
- * conversations need to survive that, this hook is the wrong layer — that
- * needs the Supabase path instead, as a separate, real feature.
+ * MedArt Assistant conversation persistence — localStorage for the instant
+ * first paint (and offline), mirrored to the cross-device sync store
+ * (lib/user-sync.ts, namespace SYNC_NS, one document per conversation id) so
+ * a conversation started on the PC is there on the phone. When the sync
+ * store is unavailable (offline, migration not run) every helper degrades to
+ * a no-op and this hook behaves exactly as the local-only version did.
+ * The active conversation id stays per-device on purpose.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import type { AssistantMode } from "@/lib/assistant-modes";
+import { deleteSyncDoc, putSyncDoc, reconcileList } from "@/lib/user-sync";
 
 export interface ChatMessage {
   id: string;
@@ -34,6 +31,7 @@ export interface StoredConversation {
 
 const MAX_STORED_CONVERSATIONS = 100; // bounds localStorage growth — oldest conversations past this are dropped, not silently kept forever
 const TITLE_MAX_CHARS = 60;
+const SYNC_NS = "assistant-conversations";
 
 /**
  * Storage keys are namespaced by userId — WAS a fixed global string before
@@ -53,16 +51,19 @@ function activeIdKeyFor(userId: string | null): string | null {
   return userId ? `medart-assistant-active-id:${userId}` : null;
 }
 
+function isStoredConversation(item: unknown): item is StoredConversation {
+  if (!item || typeof item !== "object") return false;
+  const c = item as Partial<StoredConversation>;
+  return typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.messages) && typeof c.updatedAt === "number";
+}
+
 function readConversationsFromStorage(storageKey: string): StoredConversation[] {
   try {
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item): item is StoredConversation =>
-        item && typeof item.id === "string" && typeof item.title === "string" && Array.isArray(item.messages) && typeof item.updatedAt === "number"
-    );
+    return parsed.filter(isStoredConversation);
   } catch (error) {
     console.warn("[assistant] Historique local illisible (corrompu ou format inattendu) — repart de zéro:", error);
     return [];
@@ -117,6 +118,34 @@ export function useAssistantConversations(userId: string | null) {
     const savedActiveId = window.localStorage.getItem(activeIdKey);
     setActiveId(savedActiveId && stored.some((c) => c.id === savedActiveId) ? savedActiveId : null);
     setHydrated(true);
+
+    // Then merge with the server copy (other devices' conversations come in,
+    // local-only ones are uploaded, ones deleted elsewhere drop out). null =
+    // sync unavailable → the local list above simply stays.
+    let cancelled = false;
+    const storedIds = new Set(stored.map((c) => c.id));
+    void reconcileList(SYNC_NS, stored, { sortKey: (c) => c.updatedAt, max: MAX_STORED_CONVERSATIONS, isValid: isStoredConversation }).then((merged) => {
+      if (cancelled || !merged) return;
+      setConversations((prev) => {
+        // Keep what changed locally while the request was in flight: new
+        // conversations (not in the initial read), newer local edits, and
+        // deletions (in the initial read, gone from the live list).
+        const prevIds = new Set(prev.map((c) => c.id));
+        const byId = new Map(merged.filter((c) => !storedIds.has(c.id) || prevIds.has(c.id)).map((c) => [c.id, c]));
+        for (const c of prev) {
+          const remote = byId.get(c.id);
+          if (remote ? c.updatedAt > remote.updatedAt : !storedIds.has(c.id)) byId.set(c.id, c);
+        }
+        const next = Array.from(byId.values())
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, MAX_STORED_CONVERSATIONS);
+        writeConversationsToStorage(storageKey, next);
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   /**
@@ -140,12 +169,15 @@ export function useAssistantConversations(userId: string | null) {
       setConversations((prev) => {
         const existingIndex = activeId ? prev.findIndex((c) => c.id === activeId) : -1;
         let next: StoredConversation[];
+        let changed: StoredConversation;
 
         if (existingIndex >= 0) {
-          next = prev.map((c, i) => (i === existingIndex ? { ...c, messages, title, updatedAt: now } : c));
+          changed = { ...prev[existingIndex], messages, title, updatedAt: now };
+          next = prev.map((c, i) => (i === existingIndex ? changed : c));
         } else {
           const newId = crypto.randomUUID();
-          next = [{ id: newId, title, messages, updatedAt: now }, ...prev];
+          changed = { id: newId, title, messages, updatedAt: now };
+          next = [changed, ...prev];
           setActiveId(newId);
           try {
             window.localStorage.setItem(activeIdKey, newId);
@@ -158,6 +190,9 @@ export function useAssistantConversations(userId: string | null) {
         next.sort((a, b) => b.updatedAt - a.updatedAt);
         const bounded = next.slice(0, MAX_STORED_CONVERSATIONS);
         writeConversationsToStorage(storageKey, bounded);
+        // Debounced per conversation id — the user-message save and the
+        // reply save that follows it collapse into one request.
+        putSyncDoc(SYNC_NS, changed.id, changed);
         return bounded;
       });
     },
@@ -205,6 +240,7 @@ export function useAssistantConversations(userId: string | null) {
         writeConversationsToStorage(storageKey, next);
         return next;
       });
+      deleteSyncDoc(SYNC_NS, id);
       if (activeId === id) {
         setActiveId(null);
         try {

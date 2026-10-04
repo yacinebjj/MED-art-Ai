@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { daysUntil } from "@/lib/dashboard/metrics";
-import { readCustomExam, writeCustomExam, type CustomExam } from "@/lib/dashboard/local-activity";
+import { onLocalActivitySynced, readCustomExam, writeCustomExam, type CustomExam } from "@/lib/dashboard/local-activity";
 import { localDayKey } from "@/providers/PomodoroProvider";
 import { tCockpit } from "@/lib/translations/cockpit";
 import { OsCard, WidgetSkeleton, useNow } from "./primitives";
@@ -30,6 +30,9 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
 
   useEffect(() => {
     setCustom(userId ? readCustomExam(userId) : null);
+    if (!userId) return;
+    // Set or cleared on another device (cross-device sync).
+    return onLocalActivitySynced(() => setCustom(readCustomExam(userId)));
   }, [userId]);
 
   if (!now || custom === undefined || !overview) return <WidgetSkeleton />;

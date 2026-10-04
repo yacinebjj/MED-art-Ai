@@ -321,6 +321,19 @@ export const FLASHCARD_MODEL = "qwen/qwen3-30b-a3b-instruct-2507";
 export const LAB_PRIMARY_MODEL = FLASHCARD_MODEL;
 export const LAB_FALLBACK_MODEL = "qwen/qwen3-235b-a22b-2507";
 
+// EXAM QCM MODELS, 2026-10-04. Real report: a 21-course, 40-QCM exam took
+// ~20 min and cost $0.13. Measured live on the real exam prompt (5 QCMs over
+// 5 course excerpts, ~8k input tokens, ~1.5k output):
+//   - qwen-2.5-72b (CHEAP_MODEL, previous exam model): 14 tok/s, 130 s per
+//     batch, $0.0037 — and the "throughput" route returned unparseable JSON.
+//   - qwen3-235b-a22b-2507 + provider sort "throughput": 8/8 batches valid
+//     (5/5 QCMs each), 22-30 s, $0.0026-0.0031 — the strongest Qwen, so no
+//     quality trade-off versus the 72B it replaces.
+//   - qwen3-30b-a3b-instruct-2507: 5/5 valid, 14 s, $0.0008 — fallback.
+// A 40-QCM exam is now ~8 parallel batches: ~30 s wall clock, ~$0.02-0.03.
+export const EXAM_MODEL = LAB_FALLBACK_MODEL;
+export const EXAM_FALLBACK_MODEL = FLASHCARD_MODEL;
+
 /**
  * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
  * decoding to the schema (structured outputs); `json_object` only guarantees

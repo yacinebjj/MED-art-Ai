@@ -11,7 +11,7 @@ import { usePomodoro } from "@/providers/PomodoroProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import { activeDays, computeStreak, daysUntil } from "@/lib/dashboard/metrics";
-import { readCustomExam, readSeenNotificationIds, writeSeenNotificationIds } from "@/lib/dashboard/local-activity";
+import { onLocalActivitySynced, readCustomExam, readSeenNotificationIds, writeSeenNotificationIds } from "@/lib/dashboard/local-activity";
 import { tCockpit } from "@/lib/translations/cockpit";
 import type { DashboardOverview } from "@/types/dashboard-overview";
 
@@ -152,6 +152,8 @@ export function NotificationCenter() {
     if (!userId) return;
     setSeen(readSeenNotificationIds(userId));
     setCustomExamDate(readCustomExam(userId)?.date ?? null);
+    // Exam date set or cleared on another device (cross-device sync).
+    const unsubscribe = onLocalActivitySynced(() => setCustomExamDate(readCustomExam(userId)?.date ?? null));
     let cancelled = false;
     fetch("/api/groups")
       .then((res) => (res.ok ? res.json() : null))
@@ -162,6 +164,7 @@ export function NotificationCenter() {
       .catch(() => {});
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [userId, overview]);
 

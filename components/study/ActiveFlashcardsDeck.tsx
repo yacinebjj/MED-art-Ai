@@ -40,6 +40,7 @@ import { FlipFlashcard, type FlashcardRating, type GradeFeedback } from "@/compo
 import { FlashcardCoursePicker } from "@/components/study/FlashcardCoursePicker";
 import { AiLanguageSelect } from "@/components/course/workspace/AiLanguageSelect";
 import { createClient } from "@/lib/supabase/client";
+import { deleteSyncDoc, fetchSyncNamespace, putSyncDoc, type SyncedValue } from "@/lib/user-sync";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { tStudyTools } from "@/lib/translations/studyTools";
@@ -65,6 +66,12 @@ type NextState =
   | { kind: "error"; message: string };
 
 const STORAGE_PREFIX = "medart:flashcards-session:";
+
+/** Cross-device sync (lib/user-sync.ts): one document per selection + language. */
+const SYNC_NS = "flashcards-session";
+
+/** How long a session load waits for the server copy (then keeps the local / a fresh deck). */
+const SYNC_WAIT_MS = 3000;
 
 /** Strings introduced by the batch flow (kept here rather than in the shared translations file). */
 const COPY: Record<Language, Record<string, string>> = {
@@ -125,6 +132,8 @@ interface SavedSession {
   ratings?: RatingTally;
   streak?: number;
   bestStreak?: number;
+  /** When the session last changed (ms) — decides which device wins in cross-device sync. Absent in older saves (treated as 0). */
+  savedAt?: number;
 }
 
 function parseTally(value: unknown): RatingTally {
@@ -139,6 +148,70 @@ function getStorageKey(userId: string, activeModuleIds: number[], activeCourseId
   const modulesPart = [...activeModuleIds].sort((a, b) => a - b).join(",");
   const coursesPart = [...activeCourseIds].sort((a, b) => a - b).join(",");
   return `${STORAGE_PREFIX}${userId}:${modulesPart}:${coursesPart}:${contentLanguage}`;
+}
+
+/** FNV-1a (32-bit, base 36) — a short, stable id for a long selection string. */
+function hashString(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/** Sync key = hash of the `${modules}:${courses}:${lang}` part of the storage key (the user is implied server-side). */
+function syncKeyFromStorageKey(storageKey: string): string {
+  const rest = storageKey.slice(STORAGE_PREFIX.length);
+  return hashString(rest.slice(rest.indexOf(":") + 1));
+}
+
+/** Content fingerprint (everything but `savedAt`), so an unchanged session is never re-stamped as "newer". */
+function sessionFingerprint(session: SavedSession): string {
+  return JSON.stringify([
+    session.deck.map((item) => item.id),
+    session.index,
+    session.score.correct,
+    session.score.incorrect,
+    session.round,
+    session.reviewedTotal,
+    session.ratings ? [session.ratings.hard, session.ratings.medium, session.ratings.easy] : null,
+    session.streak ?? 0,
+    session.bestStreak ?? 0,
+  ]);
+}
+
+type SessionReconcile = { kind: "unavailable" } | { kind: "local" } | { kind: "remote"; session: SavedSession } | { kind: "deleted" };
+
+/**
+ * Newest-wins against the server copy (same rule as reconcileValue in
+ * lib/user-sync.ts) but tombstone-aware: a session restarted on another
+ * device AFTER this one last changed is dropped here instead of being
+ * re-uploaded. "unavailable" = server unreachable / sync off (bounded by
+ * SYNC_WAIT_MS) — the local copy is then used exactly as before sync existed.
+ */
+async function reconcileSession(syncKey: string, local: SavedSession | null): Promise<SessionReconcile> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), SYNC_WAIT_MS);
+  });
+  const docs = await Promise.race([fetchSyncNamespace(SYNC_NS, syncKey), timeout]);
+  clearTimeout(timer);
+  if (!docs) return { kind: "unavailable" };
+  const doc = docs.find((d) => d.key === syncKey);
+  const localSavedAt = local?.savedAt ?? 0;
+  let remoteSavedAt = -1;
+  if (doc?.deleted) {
+    if (local && Date.parse(doc.updatedAt) > localSavedAt) return { kind: "deleted" };
+  } else if (doc?.data && typeof doc.data === "object" && "savedAt" in doc.data) {
+    const remote = doc.data as SyncedValue<unknown>;
+    remoteSavedAt = typeof remote.savedAt === "number" ? remote.savedAt : 0;
+    const session = parseSavedSession(remote.value);
+    if (session && (!local || remoteSavedAt > localSavedAt)) return { kind: "remote", session: { ...session, savedAt: remoteSavedAt } };
+  }
+  // This device is newer (or the only copy, e.g. a session from before sync existed): upload it.
+  if (local && localSavedAt > remoteSavedAt) putSyncDoc(SYNC_NS, syncKey, { value: local, savedAt: localSavedAt }, true);
+  return { kind: "local" };
 }
 
 /** Removes every OTHER flashcard-session entry (other users on a shared device, older key formats). Best-effort. */
@@ -173,27 +246,37 @@ function loadSavedSession(key: string): SavedSession | null {
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.deck) || !parsed.deck.every(isFlashcardPoolItem)) return null;
-    if (parsed.deck.length === 0 || parsed.deck.length > BATCH_SIZE * 2) return null;
-    if (typeof parsed.index !== "number" || parsed.index < 0 || parsed.index > parsed.deck.length) return null;
-    const score =
-      parsed.score && typeof parsed.score.correct === "number" && typeof parsed.score.incorrect === "number"
-        ? parsed.score
-        : { correct: 0, incorrect: 0 };
-    return {
-      deck: parsed.deck,
-      index: parsed.index,
-      score,
-      round: typeof parsed.round === "number" && parsed.round >= 1 ? parsed.round : 1,
-      reviewedTotal: typeof parsed.reviewedTotal === "number" && parsed.reviewedTotal >= 0 ? parsed.reviewedTotal : parsed.index,
-      ratings: parseTally(parsed.ratings),
-      streak: typeof parsed.streak === "number" && parsed.streak >= 0 ? parsed.streak : 0,
-      bestStreak: typeof parsed.bestStreak === "number" && parsed.bestStreak >= 0 ? parsed.bestStreak : 0,
-    };
+    return parseSavedSession(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+/** Validates a session read from localStorage or from the sync server. */
+function parseSavedSession(value: unknown): SavedSession | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed = value as Record<string, unknown>;
+  const deck = parsed.deck;
+  if (!Array.isArray(deck) || !deck.every(isFlashcardPoolItem)) return null;
+  if (deck.length === 0 || deck.length > BATCH_SIZE * 2) return null;
+  const index = parsed.index;
+  if (typeof index !== "number" || index < 0 || index > deck.length) return null;
+  const rawScore = parsed.score && typeof parsed.score === "object" ? (parsed.score as Record<string, unknown>) : null;
+  const score =
+    rawScore && typeof rawScore.correct === "number" && typeof rawScore.incorrect === "number"
+      ? { correct: rawScore.correct, incorrect: rawScore.incorrect }
+      : { correct: 0, incorrect: 0 };
+  return {
+    deck,
+    index,
+    score,
+    round: typeof parsed.round === "number" && parsed.round >= 1 ? parsed.round : 1,
+    reviewedTotal: typeof parsed.reviewedTotal === "number" && parsed.reviewedTotal >= 0 ? parsed.reviewedTotal : index,
+    ratings: parseTally(parsed.ratings),
+    streak: typeof parsed.streak === "number" && parsed.streak >= 0 ? parsed.streak : 0,
+    bestStreak: typeof parsed.bestStreak === "number" && parsed.bestStreak >= 0 ? parsed.bestStreak : 0,
+    ...(typeof parsed.savedAt === "number" && Number.isFinite(parsed.savedAt) ? { savedAt: parsed.savedAt } : {}),
+  };
 }
 
 function saveSession(key: string, session: SavedSession): void {
@@ -301,6 +384,24 @@ export function ActiveFlashcardsDeck() {
   const [gradeFeedback, setGradeFeedback] = useState<GradeFeedback>(null);
   const gradeFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [storageKey, setStorageKey] = useState<string | null>(null);
+  // What is already saved for `key` — the persist effect only re-stamps
+  // `savedAt` (and syncs) when the session content actually changed.
+  const persistedRef = useRef<{ key: string; fingerprint: string } | null>(null);
+  // Sync key of a session just restarted here — the reload must not adopt its server copy.
+  const restartedSyncKeyRef = useRef<string | null>(null);
+
+  /** Shows a saved session (local restore, another tab, or another device). */
+  const applySavedSession = useCallback((saved: SavedSession) => {
+    setDeck(saved.deck);
+    setIndex(saved.index);
+    setScore(saved.score);
+    setRound(saved.round);
+    setReviewedTotal(saved.reviewedTotal);
+    setRatings(saved.ratings ?? { ...EMPTY_TALLY });
+    setStreak(saved.streak ?? 0);
+    setBestStreak(saved.bestStreak ?? 0);
+    setFlipped(false);
+  }, []);
 
   // One request at a time, aborted on any session change / unmount. The
   // session id makes a late response from a previous session a no-op.
@@ -367,20 +468,44 @@ export function ActiveFlashcardsDeck() {
       const key = getStorageKey(user.id, pool.activeModuleIds, pool.activeCourseIds, contentLanguage);
       purgeForeignFlashcardSessions(key);
       setStorageKey(key);
+      const syncKey = syncKeyFromStorageKey(key);
 
       if (!deepLinkCardId) {
         const saved = loadSavedSession(key);
         if (saved) {
-          setDeck(saved.deck);
-          setIndex(saved.index);
-          setScore(saved.score);
-          setRound(saved.round);
-          setReviewedTotal(saved.reviewedTotal);
-          setRatings(saved.ratings ?? { ...EMPTY_TALLY });
-          setStreak(saved.streak ?? 0);
-          setBestStreak(saved.bestStreak ?? 0);
+          const fingerprint = sessionFingerprint(saved);
+          persistedRef.current = { key, fingerprint };
+          applySavedSession(saved);
           setVisit({ startedAt: Date.now(), graded: 0 });
-          setFlipped(false);
+          setStatus("ready");
+          // Local first paint above; then adopt another device's newer progress
+          // (or its restart) — unless a card was graded here in the meantime.
+          void reconcileSession(syncKey, saved).then((synced) => {
+            if (!isCurrent() || persistedRef.current?.key !== key || persistedRef.current.fingerprint !== fingerprint) return;
+            if (synced.kind === "remote") {
+              saveSession(key, synced.session);
+              persistedRef.current = { key, fingerprint: sessionFingerprint(synced.session) };
+              applySavedSession(synced.session);
+            } else if (synced.kind === "deleted") {
+              clearSavedSession(key);
+              persistedRef.current = null;
+              setReloadKey((k) => k + 1);
+            }
+          });
+          return;
+        }
+        // Nothing on this device: continue the session from another device if
+        // there is one (not right after a restart here — the tombstone may
+        // not have reached the server yet).
+        const justRestarted = restartedSyncKeyRef.current === syncKey;
+        restartedSyncKeyRef.current = null;
+        const synced = justRestarted ? null : await reconcileSession(syncKey, null);
+        if (!isCurrent()) return;
+        if (synced?.kind === "remote") {
+          saveSession(key, synced.session);
+          persistedRef.current = { key, fingerprint: sessionFingerprint(synced.session) };
+          applySavedSession(synced.session);
+          setVisit({ startedAt: Date.now(), graded: 0 });
           setStatus("ready");
           return;
         }
@@ -453,7 +578,13 @@ export function ActiveFlashcardsDeck() {
   // ---- Persist the live session.
   useEffect(() => {
     if (status !== "ready" || !storageKey || deck.length === 0) return;
-    saveSession(storageKey, { deck, index, score, round, reviewedTotal, ratings, streak, bestStreak });
+    const session: SavedSession = { deck, index, score, round, reviewedTotal, ratings, streak, bestStreak };
+    const fingerprint = sessionFingerprint(session);
+    if (persistedRef.current?.key === storageKey && persistedRef.current.fingerprint === fingerprint) return;
+    persistedRef.current = { key: storageKey, fingerprint };
+    const savedAt = Date.now();
+    saveSession(storageKey, { ...session, savedAt });
+    putSyncDoc(SYNC_NS, syncKeyFromStorageKey(storageKey), { value: session, savedAt });
   }, [storageKey, status, deck, index, score, round, reviewedTotal, ratings, streak, bestStreak]);
 
   // Re-render the pace once every 15 s while studying (cheap, no per-second churn).
@@ -471,19 +602,13 @@ export function ActiveFlashcardsDeck() {
       if (!key || e.key !== key || e.newValue === null || status !== "ready") return;
       const saved = loadSavedSession(key);
       if (!saved) return;
-      setDeck(saved.deck);
-      setIndex(saved.index);
-      setScore(saved.score);
-      setRound(saved.round);
-      setReviewedTotal(saved.reviewedTotal);
-      setRatings(saved.ratings ?? { ...EMPTY_TALLY });
-      setStreak(saved.streak ?? 0);
-      setBestStreak(saved.bestStreak ?? 0);
-      setFlipped(false);
+      // Already saved (and synced) by the other tab — don't re-stamp it here.
+      persistedRef.current = { key, fingerprint: sessionFingerprint(saved) };
+      applySavedSession(saved);
     }
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
-  }, [storageKey, status]);
+  }, [storageKey, status, applySavedSession]);
 
   useEffect(() => {
     return () => {
@@ -492,7 +617,14 @@ export function ActiveFlashcardsDeck() {
   }, []);
 
   function handleRestart() {
-    if (storageKey) clearSavedSession(storageKey);
+    if (storageKey) {
+      clearSavedSession(storageKey);
+      // Restarted here = restarted everywhere (tombstone, see reconcileSession).
+      const syncKey = syncKeyFromStorageKey(storageKey);
+      deleteSyncDoc(SYNC_NS, syncKey);
+      restartedSyncKeyRef.current = syncKey;
+    }
+    persistedRef.current = null;
     setReloadKey((k) => k + 1);
   }
 

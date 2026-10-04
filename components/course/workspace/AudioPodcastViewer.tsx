@@ -16,7 +16,8 @@
  *   falls back to a plain progress bar — playback itself never depends on it;
  * - ±15 s, persisted playback speed, Media Session (lock-screen controls);
  * - "Moments clés": timestamped, optionally labelled bookmarks persisted per
- *   episode in localStorage, also drawn as markers on the waveform;
+ *   episode in localStorage and synced across the student's devices (as is
+ *   the resume position), also drawn as markers on the waveform;
  * - keyboard: Space play/pause, ←/→ ±5 s, B bookmark — active only once the
  *   student last clicked/focused inside the player, and ignored while a text
  *   field (or a foreign menu/dialog) has focus.
@@ -32,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
+import { deleteSyncDoc, putSyncDoc, reconcileList, reconcileValue, type SyncedValue } from "@/lib/user-sync";
 
 const SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 2] as const;
 type Speed = (typeof SPEED_OPTIONS)[number];
@@ -42,6 +44,11 @@ const BOOKMARKS_STORAGE_PREFIX = "medart:podcast-bookmarks:";
 const RESUME_STORAGE_PREFIX = "medart:podcast-resume:";
 /** Positions this close to the start or the end are not worth resuming. */
 const RESUME_EDGE_SECONDS = 15;
+/** Sync namespaces (lib/user-sync.ts): bookmarks get one namespace per episode (one doc per bookmark), resume positions one doc per episode. */
+const BOOKMARKS_SYNC_NS_PREFIX = "podcast-bookmarks:";
+const RESUME_SYNC_NS = "podcast-resume";
+/** While playing, the resume position is also saved (and synced) at most this often — not only on pause. */
+const RESUME_SYNC_INTERVAL_MS = 10_000;
 
 /** Fixed per page load: a stable cache-busting query for the second playback attempt. */
 const CACHE_BUST_TOKEN = Date.now().toString(36);
@@ -139,27 +146,52 @@ function readBookmarks(key: string): PodcastBookmark[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    const valid = parsed.filter(
-      (item): item is PodcastBookmark =>
-        !!item &&
-        typeof item === "object" &&
-        typeof (item as PodcastBookmark).id === "string" &&
-        typeof (item as PodcastBookmark).time === "number" &&
-        Number.isFinite((item as PodcastBookmark).time) &&
-        (item as PodcastBookmark).time >= 0 &&
-        typeof (item as PodcastBookmark).label === "string"
-    );
-    return sortBookmarks(
-      valid.map((item) => ({
-        id: item.id,
-        time: item.time,
-        label: item.label.slice(0, MAX_BOOKMARK_LABEL),
-        createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : 0,
-      }))
-    );
+    return normalizeBookmarks(parsed.filter(isPodcastBookmark));
   } catch {
     return [];
   }
+}
+
+function normalizeBookmarks(valid: PodcastBookmark[]): PodcastBookmark[] {
+  return sortBookmarks(
+    valid.map((item) => ({
+      id: item.id,
+      time: item.time,
+      label: item.label.slice(0, MAX_BOOKMARK_LABEL),
+      createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : 0,
+    }))
+  );
+}
+
+function isPodcastBookmark(item: unknown): item is PodcastBookmark {
+  if (!item || typeof item !== "object") return false;
+  const b = item as Partial<PodcastBookmark>;
+  return typeof b.id === "string" && typeof b.time === "number" && Number.isFinite(b.time) && b.time >= 0 && typeof b.label === "string";
+}
+
+/** Restricts a value to the sync namespace/key charset ([a-z0-9:_.-]). */
+function syncSafe(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9:_.-]/g, "_").slice(0, 100) || "_";
+}
+
+/** Resume entry: JSON `{ value, savedAt }`; older entries were a bare number of seconds (savedAt 0 → any synced copy wins). */
+function readStoredResume(key: string): SyncedValue<number> | null {
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return null;
+  let entry: SyncedValue<number> | null = null;
+  const legacy = Number(raw);
+  if (Number.isFinite(legacy)) entry = { value: legacy, savedAt: 0 };
+  else {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && typeof (parsed as SyncedValue<number>).value === "number" && typeof (parsed as SyncedValue<number>).savedAt === "number") {
+        entry = parsed as SyncedValue<number>;
+      }
+    } catch {
+      entry = null;
+    }
+  }
+  return entry && Number.isFinite(entry.value) && entry.value > RESUME_EDGE_SECONDS ? entry : null;
 }
 
 function writeBookmarks(key: string, list: PodcastBookmark[]): void {
@@ -606,26 +638,39 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
   // Scoped per account: one podcast file is shared by every student on the
   // same course, so two accounts on one browser must not see each other's bookmarks.
   const { user } = useAuth();
-  const bookmarksKey = `${BOOKMARKS_STORAGE_PREFIX}${user?.id ?? "anonymous"}:${hashString(audioUrl)}`;
-  const resumeKey = `${RESUME_STORAGE_PREFIX}${user?.id ?? "anonymous"}:${hashString(audioUrl)}`;
+  const userId = user?.id ?? null;
+  const episodeHash = hashString(audioUrl);
+  const bookmarksKey = `${BOOKMARKS_STORAGE_PREFIX}${userId ?? "anonymous"}:${episodeHash}`;
+  const resumeKey = `${RESUME_STORAGE_PREFIX}${userId ?? "anonymous"}:${episodeHash}`;
+  // Cross-device copies (lib/user-sync.ts) — signed-in students only; the
+  // server scopes them by account, so the user id is not part of the key.
+  const bookmarksSyncNs = `${BOOKMARKS_SYNC_NS_PREFIX}${syncSafe(episodeHash)}`;
+  const resumeSyncKey = syncSafe(episodeHash);
+  const lastResumeSyncRef = useRef(0);
 
   function readResumePosition(): number {
     try {
-      const value = Number(window.localStorage.getItem(resumeKey));
-      return Number.isFinite(value) && value > RESUME_EDGE_SECONDS ? value : 0;
+      return readStoredResume(resumeKey)?.value ?? 0;
     } catch {
       return 0;
     }
   }
 
   function saveResumePosition(time: number, duration: number): void {
+    const atEdge = time <= RESUME_EDGE_SECONDS || (Number.isFinite(duration) && duration > 0 && time >= duration - RESUME_EDGE_SECONDS);
+    const entry: SyncedValue<number> = { value: atEdge ? 0 : Math.floor(time), savedAt: Date.now() };
     try {
-      if (time <= RESUME_EDGE_SECONDS || (Number.isFinite(duration) && duration > 0 && time >= duration - RESUME_EDGE_SECONDS)) window.localStorage.removeItem(resumeKey);
-      else window.localStorage.setItem(resumeKey, String(Math.floor(time)));
+      if (atEdge) window.localStorage.removeItem(resumeKey);
+      else window.localStorage.setItem(resumeKey, JSON.stringify(entry));
     } catch {
       // Best-effort convenience.
     }
+    // value 0 also syncs, so finishing an episode on one device resets it on the others.
+    if (userId) putSyncDoc(RESUME_SYNC_NS, resumeSyncKey, entry);
+    lastResumeSyncRef.current = Date.now();
   }
+  const saveResumePositionRef = useRef(saveResumePosition);
+  saveResumePositionRef.current = saveResumePosition;
   const [bookmarks, setBookmarks] = useState<PodcastBookmark[]>([]);
   const [hydratedBookmarksKey, setHydratedBookmarksKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
@@ -810,16 +855,90 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
 
   // --- Bookmarks -------------------------------------------------------------------
 
+  /** Last bookmark list known to match the server (per key, id → JSON) — the write effect only syncs the difference, so the reconcile's own state update sends nothing back. */
+  const syncedBookmarksRef = useRef<{ key: string; byId: Map<string, string> } | null>(null);
+
   useEffect(() => {
-    setBookmarks(readBookmarks(bookmarksKey));
+    const local = readBookmarks(bookmarksKey);
+    setBookmarks(local);
     setEditing(null);
     setHydratedBookmarksKey(bookmarksKey);
-  }, [bookmarksKey]);
+    if (!userId) return;
+    // Merge with the other devices' bookmarks; null = sync unavailable, local list stays.
+    let cancelled = false;
+    const localIds = new Set(local.map((bookmark) => bookmark.id));
+    void reconcileList(bookmarksSyncNs, local, { sortKey: (bookmark) => bookmark.createdAt, isValid: isPodcastBookmark }).then((merged) => {
+      if (cancelled || !merged) return;
+      const remote = normalizeBookmarks(merged);
+      syncedBookmarksRef.current = { key: bookmarksKey, byId: new Map(remote.map((bookmark) => [bookmark.id, JSON.stringify(bookmark)])) };
+      setBookmarks((previous) => {
+        // Bookmarks added/edited/removed while the request was in flight win.
+        const previousById = new Map(previous.map((bookmark) => [bookmark.id, bookmark]));
+        const next = remote.filter((bookmark) => !localIds.has(bookmark.id) || previousById.has(bookmark.id)).map((bookmark) => previousById.get(bookmark.id) ?? bookmark);
+        for (const bookmark of previous) if (!localIds.has(bookmark.id) && !next.some((item) => item.id === bookmark.id)) next.push(bookmark);
+        return sortBookmarks(next);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookmarksKey, bookmarksSyncNs, userId]);
 
   useEffect(() => {
     if (hydratedBookmarksKey !== bookmarksKey) return;
     writeBookmarks(bookmarksKey, bookmarks);
-  }, [bookmarks, bookmarksKey, hydratedBookmarksKey]);
+    if (!userId) return;
+    const synced = syncedBookmarksRef.current;
+    const current = new Map(bookmarks.map((bookmark) => [bookmark.id, JSON.stringify(bookmark)]));
+    syncedBookmarksRef.current = { key: bookmarksKey, byId: current };
+    // First pass for this key (fresh local read): reconcileList uploads it, nothing to diff.
+    if (!synced || synced.key !== bookmarksKey) return;
+    for (const [id, json] of Array.from(current)) {
+      if (synced.byId.get(id) !== json) putSyncDoc(bookmarksSyncNs, id, bookmarks.find((bookmark) => bookmark.id === id));
+    }
+    for (const id of Array.from(synced.byId.keys())) if (!current.has(id)) deleteSyncDoc(bookmarksSyncNs, id);
+  }, [bookmarks, bookmarksKey, bookmarksSyncNs, hydratedBookmarksKey, userId]);
+
+  // Resume position: the newest save across devices wins (local first, then reconciled).
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    let local: SyncedValue<number> | null = null;
+    try {
+      local = readStoredResume(resumeKey);
+    } catch {
+      local = null;
+    }
+    void reconcileValue<number>(RESUME_SYNC_NS, resumeSyncKey, local).then((winner) => {
+      if (cancelled || !winner || winner === local || typeof winner.value !== "number") return;
+      try {
+        if (winner.value > RESUME_EDGE_SECONDS) window.localStorage.setItem(resumeKey, JSON.stringify(winner));
+        else window.localStorage.removeItem(resumeKey);
+      } catch {
+        // Best-effort convenience.
+      }
+      // Metadata already loaded and nothing played yet: jump to the synced position now.
+      const audio = audioRef.current;
+      if (audio && audio.paused && audio.currentTime < 1 && winner.value > RESUME_EDGE_SECONDS && Number.isFinite(audio.duration) && winner.value < audio.duration - RESUME_EDGE_SECONDS) {
+        audio.currentTime = winner.value;
+        setCurrentTime(winner.value);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeKey, resumeSyncKey, userId]);
+
+  // While playing, save the position every RESUME_SYNC_INTERVAL_MS (pause/end still save immediately).
+  useEffect(() => {
+    if (!isPlaying) return;
+    const timer = window.setInterval(() => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused || Date.now() - lastResumeSyncRef.current < RESUME_SYNC_INTERVAL_MS) return;
+      saveResumePositionRef.current(audio.currentTime, audio.duration);
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [isPlaying]);
 
   const addBookmark = useCallback(() => {
     const audio = audioRef.current;
@@ -1388,7 +1507,7 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
           onCancelEdit={cancelEdit}
           onDelete={deleteBookmark}
         />
-        <p className="text-[11px] text-muted-foreground">Enregistrés sur cet appareil.</p>
+        <p className="text-[11px] text-muted-foreground">Enregistrés sur ton compte, sur tous tes appareils.</p>
       </section>
 
       <div className="flex justify-center">

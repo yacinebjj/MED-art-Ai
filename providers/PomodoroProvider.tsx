@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import { fetchSyncNamespace, putSyncDoc, type SyncedValue } from "@/lib/user-sync";
+import { hydrateLocalActivityFromServer } from "@/lib/dashboard/local-activity";
 
 export type PomodoroMode = "study" | "break";
 
@@ -74,6 +76,27 @@ function pruneFocusLog(log: FocusLog): FocusLog {
   return kept;
 }
 
+/** Cross-device sync (lib/user-sync.ts): the whole focus log is one document. Running-timer keys stay local. */
+const FOCUS_LOG_SYNC_NS = "activity";
+const FOCUS_LOG_SYNC_KEY = "focus-log";
+
+/** While the timer runs, the focus log is merged with the server copy this often. */
+const FOCUS_LOG_SYNC_INTERVAL_MS = 60_000;
+
+/** Per day, the larger count wins: time studied on two devices never erases itself, and re-merging is harmless. */
+function mergeFocusLogs(a: FocusLog, b: FocusLog): FocusLog {
+  const merged: FocusLog = { ...a };
+  for (const [day, value] of Object.entries(b)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && typeof value === "number" && Number.isFinite(value) && value > (merged[day] ?? 0)) merged[day] = value;
+  }
+  return pruneFocusLog(merged);
+}
+
+function sameFocusLog(a: FocusLog, b: FocusLog): boolean {
+  const days = Object.keys(a);
+  return days.length === Object.keys(b).length && days.every((day) => a[day] === b[day]);
+}
+
 const PomodoroContext = createContext<PomodoroContextType | undefined>(undefined);
 
 // "anonymous" — the bucket used before a real user id is known (logged-out
@@ -106,6 +129,9 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const [currentCycle, setCurrentCycle] = useState(1);
   const [currentMode, setCurrentMode] = useState<PomodoroMode>("study");
   const [focusLog, setFocusLog] = useState<FocusLog>({});
+  // Updated synchronously in setUserId (before any effect cleanup runs), so a
+  // sync started for one account never writes into another one.
+  const bucketRef = useRef(ANONYMOUS_BUCKET);
 
   // استرجاع الحالة الحقيقية من localStorage عند تحميل التطبيق — يعاد أيضاً
   // في كل مرة يتغيّر فيها bucket (تبديل حساب على نفس الجهاز، أو تحديد هوية
@@ -121,6 +147,58 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     if (savedVisible !== null) setIsVisible(savedVisible === "true");
     setFocusLog(readFocusLog(keys.focusLog));
   }, [bucket]);
+
+  // Cross-device focus log: merged with the server copy (per-day max, written
+  // back to both sides) once the account is known, every minute while the
+  // timer runs, and when it stops. The local side is read from localStorage
+  // (written every tick), never from possibly-stale state. Sync unavailable =
+  // no-op, the log stays device-local exactly as before.
+  const syncFocusLog = useCallback(async () => {
+    if (bucket === ANONYMOUS_BUCKET || bucketRef.current !== bucket) return;
+    const docs = await fetchSyncNamespace(FOCUS_LOG_SYNC_NS, FOCUS_LOG_SYNC_KEY);
+    if (!docs || bucketRef.current !== bucket) return;
+    const doc = docs.find((d) => d.key === FOCUS_LOG_SYNC_KEY && !d.deleted);
+    const remoteValue = doc && doc.data && typeof doc.data === "object" ? (doc.data as Partial<SyncedValue<unknown>>).value : null;
+    const remote = remoteValue && typeof remoteValue === "object" ? mergeFocusLogs({}, remoteValue as FocusLog) : {};
+    const local = readFocusLog(keysFor(bucket).focusLog);
+    const merged = mergeFocusLogs(local, remote);
+    if (!sameFocusLog(merged, local)) {
+      setFocusLog((prev) => {
+        const next = mergeFocusLogs(prev, remote);
+        try {
+          localStorage.setItem(keysFor(bucket).focusLog, JSON.stringify(next));
+        } catch {
+          // Storage full or blocked: the in-memory log still shows the merged time.
+        }
+        return next;
+      });
+    }
+    if (!doc || !sameFocusLog(merged, remote)) {
+      const upload: SyncedValue<FocusLog> = { value: merged, savedAt: Date.now() };
+      putSyncDoc(FOCUS_LOG_SYNC_NS, FOCUS_LOG_SYNC_KEY, upload, true);
+    }
+  }, [bucket]);
+
+  // Account known: merge the focus log, and reconcile the dashboard's own
+  // synced values (lib/dashboard/local-activity.ts). This Provider is the one
+  // place always mounted with the real user id, so it hydrates once here and
+  // the dashboard widgets re-read on its "medart:local-activity-synced" event.
+  useEffect(() => {
+    if (bucket === ANONYMOUS_BUCKET) return;
+    void syncFocusLog();
+    void hydrateLocalActivityFromServer(bucket);
+  }, [bucket, syncFocusLog]);
+
+  useEffect(() => {
+    if (!isActive || bucket === ANONYMOUS_BUCKET) return;
+    const id = setInterval(() => void syncFocusLog(), FOCUS_LOG_SYNC_INTERVAL_MS);
+    return () => {
+      clearInterval(id);
+      // Timer stopped (or unmount): push the time counted since the last merge.
+      // After an account switch this is a no-op (bucketRef already moved on).
+      void syncFocusLog();
+    };
+  }, [isActive, bucket, syncFocusLog]);
 
   // تشغيل العداد وتحديث التخزين المحلي في الخلفية بشكل متزامن
   useEffect(() => {
@@ -174,6 +252,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   };
 
   const setUserId = (userId: string | null) => {
+    bucketRef.current = userId ?? ANONYMOUS_BUCKET;
     setBucket(userId ?? ANONYMOUS_BUCKET);
   };
 
