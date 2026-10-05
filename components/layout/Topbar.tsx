@@ -58,7 +58,9 @@ function PomodoroWidget() {
           title="Afficher le chronomètre"
           aria-label="Afficher le chronomètre d'étude"
           className={cn(
-            "flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent/70 hover:text-foreground",
+            // Phones: the idle chrono is one more icon to parse in a 5-icon bar —
+            // it lives in Réviser → Pomodoro there, and shows up here once running.
+            "flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent/70 hover:text-foreground max-sm:hidden",
             ICON_BUTTON_FOCUS
           )}
         >
@@ -205,7 +207,7 @@ function SpotlightTrigger() {
         type="button"
         onClick={() => setSpotlightOpen(true)}
         aria-label={tCockpit("spotlightTrigger", language)}
-        className="flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+        className="flex h-10 w-10 items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
       >
         <Search className="h-4 w-4" />
       </button>
@@ -230,7 +232,7 @@ export function Topbar({ title, className }: { title: string; className?: string
   return (
     <header
       className={cn(
-        "glass-panel z-20 flex h-14 shrink-0 items-center justify-between gap-3 rounded-2xl px-3 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-5",
+        "glass-panel z-20 flex h-14 shrink-0 items-center justify-between gap-3 rounded-2xl pl-3 pr-2 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-5",
         className
       )}
     >
@@ -263,11 +265,13 @@ export function Topbar({ title, className }: { title: string; className?: string
         <div className="md:hidden">
           <SpotlightTrigger />
         </div>
-        <UnifiedLanguageSwitch className="hidden sm:flex" />
-        <ThemeModeSwitcher className="hidden sm:flex" />
+        {/* Below lg the bottom nav's Menu sheet carries language, appearance and
+            the account — the bar keeps only search + notifications. */}
+        <UnifiedLanguageSwitch className="hidden lg:flex" />
+        <ThemeModeSwitcher className="hidden lg:flex" />
         <NotificationCenter />
         <DropdownMenu>
-          <DropdownMenuTrigger className="ml-0.5 rounded-full transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+          <DropdownMenuTrigger className="ml-0.5 hidden rounded-full lg:block transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
             <Avatar>
               {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} alt="" />}
               <AvatarFallback>{initial}</AvatarFallback>

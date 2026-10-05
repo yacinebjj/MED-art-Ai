@@ -30,6 +30,7 @@ import { LAB_TOOLS } from "@/lib/workspace-lab";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit } from "@/lib/translations/cockpit";
 import { ASSISTANT_PREFILL_KEY } from "@/lib/dashboard/assistant-prefill";
+import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 
 const GROUPS = {
   fr: { ask: "Assistant IA", nav: "Navigation", lab: "MedArt Lab", courses: "Cours", modules: "Modules", notes: "Notes", audio: "Smart Notes audio", prefs: "Préférences" },
@@ -45,7 +46,6 @@ const PREFETCH_ON_OPEN = [
   "/dashboard/groups",
   "/dashboard/billing",
   "/dashboard/settings",
-  "/dashboard/audio-workspace",
 ];
 
 /**
@@ -93,7 +93,10 @@ export function Spotlight() {
       { id: "nav-groups", group: g.nav, label: tCockpit("navGroups", language), icon: Users, keywords: ["communauté", "chat"], run: go("/dashboard/groups") },
       { id: "nav-billing", group: g.nav, label: tCockpit("navBilling", language), icon: CreditCard, keywords: ["quota", "abonnement", "plan"], run: go("/dashboard/billing") },
       { id: "nav-settings", group: g.nav, label: tCockpit("navSettings", language), icon: Settings, run: go("/dashboard/settings") },
-      { id: "nav-audio", group: g.lab, label: tCockpit("navAudio", language), description: tCockpit("navAudioHint", language), icon: Mic, keywords: ["enregistrement", "cours audio"], run: go("/dashboard/audio-workspace") },
+      // Held back for V2 (lib/feature-flags.ts).
+      ...(AUDIO_SMART_NOTES_ENABLED
+        ? [{ id: "nav-audio", group: g.lab, label: tCockpit("navAudio", language), description: tCockpit("navAudioHint", language), icon: Mic, keywords: ["enregistrement", "cours audio"], run: go(AUDIO_SMART_NOTES_PAGE) }]
+        : []),
       ...LAB_TOOLS.map<CommandItem>((tool) => ({
         id: `lab-${tool.id}`,
         group: g.lab,
@@ -151,8 +154,10 @@ export function Spotlight() {
       for (const note of overview.notes) {
         list.push({ id: `note-${note.id}`, group: g.notes, label: note.title || tCockpit("untitledNote", language), icon: FileText, run: go("/dashboard/notes") });
       }
-      for (const job of overview.lectureNotes) {
-        list.push({ id: `audio-${job.id}`, group: g.audio, label: job.title, icon: Mic, run: go(`/dashboard/audio-workspace?jobId=${job.id}`) });
+      if (AUDIO_SMART_NOTES_ENABLED) {
+        for (const job of overview.lectureNotes) {
+          list.push({ id: `audio-${job.id}`, group: g.audio, label: job.title, icon: Mic, run: go(`${AUDIO_SMART_NOTES_PAGE}?jobId=${job.id}`) });
+        }
       }
     }
 

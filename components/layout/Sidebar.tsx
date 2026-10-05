@@ -35,6 +35,7 @@ import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { useCockpitUi, type LauncherTarget } from "@/store/useCockpitUi";
 import { LAB_TOOLS } from "@/lib/workspace-lab";
+import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 import { t } from "@/lib/translations";
 import { tCockpit, type CockpitKey } from "@/lib/translations/cockpit";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
@@ -227,7 +228,8 @@ const SECTIONS: NavSection[] = [
         hue: LAB_HUES[tool.id] ?? "slate",
         launch: { kind: "lab", tool: tool.id },
       })),
-      { id: "audio", labelKey: "navAudio", icon: Mic, href: "/dashboard/audio-workspace", hue: "rose" },
+      // Held back for V2 (lib/feature-flags.ts).
+      ...(AUDIO_SMART_NOTES_ENABLED ? [{ id: "audio", labelKey: "navAudio", icon: Mic, href: AUDIO_SMART_NOTES_PAGE, hue: "rose" } satisfies NavEntry] : []),
     ],
   },
   {
@@ -256,13 +258,6 @@ const SECTIONS: NavSection[] = [
   {
     titleKey: "sectionCommunity",
     items: [{ id: "groups", labelKey: "navGroups", icon: Users, href: "/dashboard/groups", hue: "blue", isActive: (p) => p.startsWith("/dashboard/groups") }],
-  },
-  {
-    titleKey: "sectionSystem",
-    items: [
-      { id: "billing", labelKey: "navBilling", icon: CreditCard, href: "/dashboard/billing", hue: "emerald" },
-      { id: "settings", labelKey: "navSettings", icon: Settings, href: "/dashboard/settings", hue: "slate" },
-    ],
   },
 ];
 
@@ -458,7 +453,8 @@ function SyncStatus({ collapsed, language }: { collapsed: boolean; language: Lan
 /**
  * "Medical Cockpit 3.0" — desktop-only floating glass sidebar (lg+); mobile
  * uses MobileBottomNav. Thematic sections (Cockpit / Lab / Révision /
- * Communauté / Système), an icon-only rail mode remembered per device, and
+ * Communauté — Abonnement & Paramètres live in the account menu at the
+ * bottom, never as nav rows), an icon-only rail mode remembered per device, and
  * live widgets at the bottom (AI quota, data sync). Lab tools and the
  * evaluation entry open the course/module picker (LabLauncher), since they
  * work on a specific course.
@@ -523,6 +519,12 @@ export function Sidebar() {
                 <DropdownMenuContent side="top" align="start" className="w-56">
                   <DropdownMenuLabel className="truncate">{profile?.fullName || profile?.email || "Étudiant(e)"}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/billing">
+                      <CreditCard className="h-4 w-4" />
+                      {t("billing", language)}
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard/settings">
                       <Settings className="h-4 w-4" />

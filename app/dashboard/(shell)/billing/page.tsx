@@ -39,6 +39,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tSettings } from "@/lib/translations/settings";
 import { cn } from "@/lib/utils";
+import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 
 interface SubscriptionInfo {
   plan: PlanId;
@@ -281,22 +282,26 @@ function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: bo
           hint="Chaque génération Résumé, Mots-clés ou Dictionnaire compte pour 1 ; les résultats déjà en cache sont gratuits."
           lockedText={trial ? lockedPaid : undefined}
         />
-        <UsageBar
-          icon={AudioLines}
-          label="Audio → Smart Notes (jour)"
-          used={usage.audio.usedToday}
-          cap={usage.audio.capPerDay}
-          caption="aujourd'hui"
-          lockedText={trial ? lockedPaid : undefined}
-        />
-        <UsageBar
-          icon={AudioLines}
-          label="Audio → Smart Notes (mois)"
-          used={usage.audio.usedThisMonth}
-          cap={usage.audio.capPerMonth}
-          caption="ce mois-ci"
-          lockedText={trial ? lockedPaid : undefined}
-        />
+        {AUDIO_SMART_NOTES_ENABLED && (
+          <>
+            <UsageBar
+              icon={AudioLines}
+              label="Audio → Smart Notes (jour)"
+              used={usage.audio.usedToday}
+              cap={usage.audio.capPerDay}
+              caption="aujourd'hui"
+              lockedText={trial ? lockedPaid : undefined}
+            />
+            <UsageBar
+              icon={AudioLines}
+              label="Audio → Smart Notes (mois)"
+              used={usage.audio.usedThisMonth}
+              cap={usage.audio.capPerMonth}
+              caption="ce mois-ci"
+              lockedText={trial ? lockedPaid : undefined}
+            />
+          </>
+        )}
       </div>
       <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-400">
         <InfinityIcon className="h-4 w-4 shrink-0 text-emerald-300" />

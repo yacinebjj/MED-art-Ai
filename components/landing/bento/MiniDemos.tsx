@@ -273,7 +273,7 @@ export function LabDemo({ language }: { language: Language }) {
 }
 
 // ---------------------------------------------------------------------------
-// Audio: podcast + smart notes
+// Audio: course podcast (the lecture-recording "Smart Notes" line returns with V2 — lib/feature-flags.ts)
 
 export function AudioDemo({ language }: { language: Language }) {
   const reduce = useReducedMotion();
@@ -311,8 +311,8 @@ export function AudioDemo({ language }: { language: Language }) {
       <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-2.5 text-xs text-slate-300">
         <Mic className="mt-0.5 h-4 w-4 shrink-0 text-orange-300" />
         {language === "fr"
-          ? "Enregistre l'amphi : l'IA transcrit et rend des Smart Notes structurées."
-          : "Record the lecture: AI transcribes it into structured Smart Notes."}
+          ? "Écoute ton cours : intro, points clés, pièges et conclusion."
+          : "Listen to your course: intro, key points, pitfalls and wrap-up."}
       </div>
     </div>
   );

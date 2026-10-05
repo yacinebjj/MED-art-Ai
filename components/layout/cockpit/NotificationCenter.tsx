@@ -7,13 +7,14 @@ import { Bell, BellOff, CalendarClock, CheckCheck, Flame, Gauge, Mic, MessageCir
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
-import { usePomodoro } from "@/providers/PomodoroProvider";
+import { useFocusLog } from "@/providers/PomodoroProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import { activeDays, computeStreak, daysUntil } from "@/lib/dashboard/metrics";
 import { onLocalActivitySynced, readCustomExam, readSeenNotificationIds, writeSeenNotificationIds } from "@/lib/dashboard/local-activity";
 import { tCockpit } from "@/lib/translations/cockpit";
 import type { DashboardOverview } from "@/types/dashboard-overview";
+import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 
 interface CockpitNotification {
   /** Stable for one occurrence (includes a date/count), so "read" sticks until something new happens. */
@@ -100,7 +101,7 @@ function buildNotifications(
     });
   }
 
-  const recentAudio = overview.lectureNotes.find((job) => now.getTime() - new Date(job.updatedAt).getTime() < 2 * DAY_MS);
+  const recentAudio = AUDIO_SMART_NOTES_ENABLED && overview.lectureNotes.find((job) => now.getTime() - new Date(job.updatedAt).getTime() < 2 * DAY_MS);
   if (recentAudio) {
     list.push({
       id: `audio:${recentAudio.id}`,
@@ -108,7 +109,7 @@ function buildNotifications(
       tone: "text-orange-500",
       title: tCockpit("notifAudioTitle", language),
       body: recentAudio.title,
-      href: `/dashboard/audio-workspace?jobId=${recentAudio.id}`,
+      href: `${AUDIO_SMART_NOTES_PAGE}?jobId=${recentAudio.id}`,
     });
   }
 
@@ -140,7 +141,7 @@ export function NotificationCenter() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const { language } = useLanguage();
-  const { focusLog } = usePomodoro();
+  const focusLog = useFocusLog();
   const overview = useCockpitStore((state) => state.overview);
   const [groupsUnread, setGroupsUnread] = useState(0);
   const [seen, setSeen] = useState<string[]>([]);
@@ -192,7 +193,7 @@ export function NotificationCenter() {
     <DropdownMenu onOpenChange={(open) => !open && unread.length > 0 && markAllRead()}>
       <DropdownMenuTrigger
         aria-label={tCockpit("notifications", language)}
-        className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative flex h-10 w-10 items-center sm:h-9 sm:w-9 justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Bell className={cn("h-4 w-4", unread.length > 0 && "text-foreground")} />
         <AnimatePresence>

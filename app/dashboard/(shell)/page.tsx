@@ -7,7 +7,8 @@ import { motion } from "framer-motion";
 import { GraduationCap, Settings } from "lucide-react";
 import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcons";
 import { CockpitHeader } from "@/components/dashboard/os/CockpitHeader";
-import { AnalyticsHub } from "@/components/dashboard/os/AnalyticsHub";
+import dynamic from "next/dynamic";
+import { WidgetSkeleton } from "@/components/dashboard/os/primitives";
 import { QuickLaunchHub } from "@/components/dashboard/os/QuickLaunchHub";
 import { CurriculumHub, CurriculumHubSkeleton } from "@/components/dashboard/os/CurriculumHub";
 import { useAuth } from "@/providers/AuthProvider";
@@ -17,9 +18,22 @@ import { tCockpit } from "@/lib/translations/cockpit";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import type { CurriculumYearData } from "@/types/academic";
 
+// Last section of the page, below the fold on every phone: its six widgets
+// (and their charts/metrics code) load after the first paint instead of in it.
+const AnalyticsHub = dynamic(() => import("@/components/dashboard/os/AnalyticsHub").then((m) => m.AnalyticsHub), {
+  loading: () => (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
+      <WidgetSkeleton />
+      <WidgetSkeleton />
+    </div>
+  ),
+});
+
 /**
- * MedArt "Medical OS 3.0" home: cockpit header → Analytics & Productivity Hub
- * → Quick-Launch (Lab tools, resume) → Curriculum 3.0. Every widget reads the
+ * MedArt "Medical OS 3.0" home, ordered by what a student on rounds needs
+ * first: greeting → Resume + Lab tools (the one-tap actions) → Curriculum
+ * (where every course lives) → Analytics last (context, not a decision —
+ * collapsed to two widgets on phones). Every widget reads the
  * shared /api/dashboard/overview (store/useCockpitStore, fetched once by the
  * shell layout) or per-device data (Pomodoro focus log, flashcard session);
  * the curriculum itself still comes from /api/curriculum.
@@ -75,11 +89,10 @@ export default function DashboardPage() {
 
   return (
     // relative — anchors FloatingMedicalIcons' absolute inset-0 layer to this page's own content height.
-    <div className="relative mx-auto max-w-[1600px] space-y-6 sm:space-y-8">
+    <div className="relative mx-auto max-w-[1600px] space-y-5 sm:space-y-8">
       <FloatingMedicalIcons />
 
       <CockpitHeader />
-      <AnalyticsHub />
       <QuickLaunchHub />
 
       <motion.section
@@ -136,6 +149,10 @@ export default function DashboardPage() {
           <CurriculumHub data={curriculumData} />
         ) : null}
       </motion.section>
+
+      <div className="render-lazy">
+        <AnalyticsHub />
+      </div>
     </div>
   );
 }

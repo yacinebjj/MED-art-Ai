@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import { formatDZD, groupLeaderTotalDZD, PAID_LIMITS, PLANS, PROMO_SIZE, type Plan } from "@/lib/pricing";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
+import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 
 /** What every paid plan includes, per member — mirrors PAID_LIMITS (lib/pricing.ts). */
 export const PAID_LIMIT_LINES: { text: Record<Language, string>; hint?: Record<Language, string> }[] = [
@@ -28,12 +29,17 @@ export const PAID_LIMIT_LINES: { text: Record<Language, string>; hint?: Record<L
     text: { fr: `${PAID_LIMITS.premiumMessagesPerDay} messages/jour avec l'IA premium`, en: `${PAID_LIMITS.premiumMessagesPerDay} premium-AI messages a day` },
     hint: { fr: "Ensuite, modèle standard automatiquement — jamais bloqué", en: "Then the standard model automatically — never blocked" },
   },
-  {
-    text: {
-      fr: `Audio → Smart Notes : ${PAID_LIMITS.audioPerDay}/jour (${PAID_LIMITS.audioPerMonth}/mois)`,
-      en: `Audio → Smart Notes: ${PAID_LIMITS.audioPerDay}/day (${PAID_LIMITS.audioPerMonth}/month)`,
-    },
-  },
+  // Held back for V2 (lib/feature-flags.ts).
+  ...(AUDIO_SMART_NOTES_ENABLED
+    ? [
+        {
+          text: {
+            fr: `Audio → Smart Notes : ${PAID_LIMITS.audioPerDay}/jour (${PAID_LIMITS.audioPerMonth}/mois)`,
+            en: `Audio → Smart Notes: ${PAID_LIMITS.audioPerDay}/day (${PAID_LIMITS.audioPerMonth}/month)`,
+          },
+        },
+      ]
+    : []),
   { text: { fr: "Flashcards, To-Do et Notes illimités", en: "Unlimited Flashcards, To-Do and Notes" } },
 ];
 

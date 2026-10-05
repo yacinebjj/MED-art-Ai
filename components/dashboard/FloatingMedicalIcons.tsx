@@ -1,7 +1,8 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 /**
  * Source sprite (public/illustrations/medical-icons-sprite.png) — a 12-icon
@@ -86,6 +87,12 @@ const FLOATERS: FloaterSpec[] = [
  * phone's viewport has no room to spare for ambient decoration.
  */
 export function FloatingMedicalIcons() {
+  // `hidden md:block` alone still MOUNTED the 7 infinite framer-motion loops
+  // on phones (animating inside a display:none box, every frame). Mounting
+  // only on a desktop-class pointer keeps them off the phone's main thread.
+  const isDesktop = useMediaQuery("(min-width: 768px) and (hover: hover)");
+  const reduceMotion = useReducedMotion();
+  if (!isDesktop || reduceMotion) return null;
   return (
     // NOT -z-10 — a NEGATIVE z-index on a child inside a `position:
     // relative` parent (a new stacking context) renders BEHIND that

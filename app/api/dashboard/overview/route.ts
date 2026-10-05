@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSubscription, getUsageSnapshot, isSubscriptionActive, resolveEffectivePlan } from "@/lib/subscription";
 import { PLANS } from "@/lib/pricing";
+import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 import type { DashboardOverview } from "@/types/dashboard-overview";
 
 export const runtime = "nodejs";
@@ -100,7 +101,10 @@ export async function GET() {
       .order("last_opened_at", { ascending: false })
       .limit(30),
     supabase.from("user_notes").select("id, title, module_id, updated_at").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(200),
-    supabase.from("lecture_notes_jobs").select("id, title, status, updated_at").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(50),
+    // Audio Smart Notes is held back for V2 (lib/feature-flags.ts): no query at all while it is off.
+    AUDIO_SMART_NOTES_ENABLED
+      ? supabase.from("lecture_notes_jobs").select("id, title, status, updated_at").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(50)
+      : Promise.resolve({ data: [] as unknown[], error: null }),
     supabase.from("profiles").select("flashcard_active_module_ids").eq("id", user.id).maybeSingle<{ flashcard_active_module_ids: number[] | null }>(),
     getSubscription(user.id),
     getUsageSnapshot(user.id),

@@ -6,6 +6,7 @@ import { ArrowLeft, CalendarClock, Check, GraduationCap, Info, Lock, Sparkles, U
 import type { PaywallReason, UsageSnapshot } from "@/lib/subscription";
 import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, PROMO_SIZE, formatDZD } from "@/lib/pricing";
 import { Button } from "@/components/ui/Button";
+import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 import { cn } from "@/lib/utils";
 
 /** What the modal shows: a server paywall reason, or the hard lock once the whole trial is used. */
@@ -117,7 +118,7 @@ function TrialContent({ view, usage, locked, onChoosePlan, onBackToCourse }: { v
 
   const title = isFeature ? "Une fonction des formules payantes ✨" : "Ton essai gratuit est terminé 🎓";
   const intro = isFeature
-    ? "Les examens, résumés de module et Audio → Smart Notes font partie des formules payantes."
+    ? `Les examens${AUDIO_SMART_NOTES_ENABLED ? ", résumés de module et Audio → Smart Notes" : " et résumés de module"} font partie des formules payantes.`
     : view === "trial_courses"
       ? "Tu as déjà importé ton cours gratuit. Pour importer d'autres cours, choisis ta formule."
       : view === "trial_messages"

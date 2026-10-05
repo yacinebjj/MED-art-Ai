@@ -8,8 +8,6 @@ import { ToastProvider } from "@/components/ui/Toast";
 import { PushClientFallbackProvider } from "@/providers/PushClientFallbackProvider";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { SecurityGuard } from "@/components/security/SecurityGuard";
-import "react-pdf/dist/Page/AnnotationLayer.css";
-import "react-pdf/dist/Page/TextLayer.css";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });

@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Brain, Clock3, Flame, Minus, Plus, Target, Timer } from "lucide-react";
+import { ArrowRight, Brain, ChevronDown, Clock3, Flame, Minus, Plus, Target, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
-import { usePomodoro } from "@/providers/PomodoroProvider";
+import { useFocusLog, usePomodoro } from "@/providers/PomodoroProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { activeDays, computeStreak, focusLastSevenDays, focusSecondsOn, formatDuration, recentDays } from "@/lib/dashboard/metrics";
 import {
@@ -34,7 +34,7 @@ function weekdayInitial(date: Date, language: Language) {
 
 function StreakWidget({ userId }: { userId: string | null }) {
   const { language } = useLanguage();
-  const { focusLog } = usePomodoro();
+  const focusLog = useFocusLog();
   const overview = useCockpitStore((state) => state.overview);
   const now = useNow();
   const [goal, setGoal] = useState(DEFAULT_DAILY_GOAL_MINUTES);
@@ -323,6 +323,9 @@ export function AnalyticsHub() {
   const error = useCockpitStore((state) => state.error);
   const refresh = useCockpitStore((state) => state.refresh);
   const hasOverview = useCockpitStore((state) => state.overview !== null);
+  // Phones show the two widgets that drive today's behavior (streak, next
+  // exam); the rest is one tap away instead of six cards of scrolling.
+  const [showAll, setShowAll] = useState(false);
 
   return (
     <section aria-labelledby="analytics-heading">
@@ -331,7 +334,7 @@ export function AnalyticsHub() {
           <h2 id="analytics-heading" className="text-base font-bold tracking-tight text-foreground sm:text-lg">
             {tCockpit("analyticsHeading", language)}
           </h2>
-          <p className="text-xs text-muted-foreground">{tCockpit("analyticsSub", language)}</p>
+          <p className="text-xs text-muted-foreground max-sm:hidden">{tCockpit("analyticsSub", language)}</p>
         </div>
         {status === "error" && !hasOverview && (
           <button type="button" onClick={() => void refresh({ force: true })} className="text-xs font-semibold text-rose-600 hover:underline dark:text-rose-400" title={error ?? undefined}>
@@ -341,12 +344,23 @@ export function AnalyticsHub() {
       </div>
       <motion.div variants={GRID} initial="hidden" animate="show" className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
         <StreakWidget userId={userId} />
-        <QcmWidget />
-        <FlashcardWidget userId={userId} />
-        <FocusWidget />
         <ExamCountdownWidget userId={userId} />
-        <ClinicalPearlWidget userId={userId} />
+        <div className={cn("contents", !showAll && "max-sm:hidden")}>
+          <QcmWidget />
+          <FlashcardWidget userId={userId} />
+          <FocusWidget />
+          <ClinicalPearlWidget userId={userId} />
+        </div>
       </motion.div>
+      <button
+        type="button"
+        onClick={() => setShowAll((v) => !v)}
+        aria-expanded={showAll}
+        className="press-feedback mt-3 flex h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-border/60 bg-background/60 text-sm font-semibold text-muted-foreground sm:hidden"
+      >
+        {showAll ? tCockpit("statsShowLess", language) : tCockpit("statsShowAll", language)}
+        <ChevronDown className={cn("h-4 w-4 transition-transform", showAll && "rotate-180")} />
+      </button>
     </section>
   );
 }

@@ -1,7 +1,23 @@
-import { type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
+import { AUDIO_SMART_NOTES_API, AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Withdrawn features (lib/feature-flags.ts). The API branch returns before
+  // any Supabase call, so it never joins the refresh-token race described below.
+  if (pathname.startsWith(AUDIO_SMART_NOTES_API)) {
+    if (AUDIO_SMART_NOTES_ENABLED) return NextResponse.next();
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (!AUDIO_SMART_NOTES_ENABLED && pathname.startsWith(AUDIO_SMART_NOTES_PAGE)) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   return await updateSession(request);
 }
 
@@ -24,5 +40,8 @@ export const config = {
      * loses no functionality while removing the race's other half.
      */
     "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // Feature-flag gate only (see above) — never reaches updateSession.
+    "/api/lecture-notes/:path*",
+    "/api/lecture-notes",
   ],
 };

@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, FileText, Minus, Plus } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
+// Loaded with this (dynamically imported) viewer only, not in every page's render-blocking CSS.
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/Dialog";
 import { PptxPresentationViewer } from "@/components/course/workspace/PptxPresentationViewer";
 

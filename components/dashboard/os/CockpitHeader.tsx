@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Cpu, Crown, GraduationCap, Hourglass, Search, Sparkles } from "lucide-react";
+import { Cpu, Crown, GraduationCap, Hourglass, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -48,7 +48,12 @@ function Pill({ icon: Icon, children, className }: { icon: typeof Cpu; children:
   );
 }
 
-/** Contextual greeting + live identity badges (study level, plan, AI engine connectivity) + Spotlight entry. */
+/**
+ * Contextual greeting + live identity badges (study level, plan, AI engine
+ * connectivity) + Spotlight entry. On phones it is just the date and the
+ * greeting, set straight on the page (no card) — the Resume card right below
+ * is what the student came for.
+ */
 export function CockpitHeader() {
   const { profile, curriculumProfile } = useAuth();
   const { language } = useLanguage();
@@ -74,10 +79,11 @@ export function CockpitHeader() {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-      className="glass-card relative overflow-hidden rounded-3xl border border-white/30 p-4 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark sm:p-6 lg:p-7"
+      className="glass-card relative overflow-hidden rounded-3xl border border-white/30 px-1 pt-1 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark flat-on-phone sm:p-6 lg:p-7"
     >
-      <div aria-hidden className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-primary-400/20 blur-3xl dark:bg-primary-500/10" />
-      <div aria-hidden className="pointer-events-none absolute -bottom-28 right-10 h-64 w-64 rounded-full bg-violet-400/20 blur-3xl dark:bg-violet-500/10" />
+      {/* Decorative glows: desktop only — a 64-unit blur-3xl is a full-layer GPU filter phones pay for on every scroll frame. */}
+      <div aria-hidden className="pointer-events-none absolute -left-24 -top-24 hidden h-64 w-64 rounded-full bg-primary-400/20 blur-3xl dark:bg-primary-500/10 sm:block" />
+      <div aria-hidden className="pointer-events-none absolute -bottom-28 right-10 hidden h-64 w-64 rounded-full bg-violet-400/20 blur-3xl dark:bg-violet-500/10 sm:block" />
 
       <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
@@ -85,9 +91,9 @@ export function CockpitHeader() {
           <h1 className="mt-1 text-xl font-extrabold tracking-tight text-foreground sm:text-2xl lg:text-[1.75rem]">
             {greeting}, <span className="bg-gradient-to-r from-primary-600 via-cyan-500 to-violet-600 bg-clip-text text-transparent dark:from-primary-300 dark:via-cyan-300 dark:to-violet-300">Dr. {firstName}</span>
           </h1>
-          <p className="mt-1.5 line-clamp-2 text-sm italic text-muted-foreground">« {QUOTES[language][quoteIndex]} »</p>
+          <p className="mt-1.5 line-clamp-2 text-sm italic text-muted-foreground max-sm:hidden">« {QUOTES[language][quoteIndex]} »</p>
 
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-3 hidden flex-wrap gap-1.5 sm:flex">
             {year ? (
               <Pill icon={GraduationCap} className="border-primary-200/70 bg-primary-50/70 text-primary-700 dark:border-primary-900/50 dark:bg-primary-950/40 dark:text-primary-300">
                 {translateCurriculumName(year, language)}
@@ -120,15 +126,7 @@ export function CockpitHeader() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setSpotlightOpen(true)}
-            className="group flex flex-1 items-center gap-3 rounded-2xl border border-white/40 bg-white/50 px-4 py-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-primary-800 sm:hidden"
-          >
-            <Search className="h-4 w-4 text-primary-500" />
-            <span className="flex-1 text-sm text-muted-foreground">{tCockpit("spotlightTrigger", language)}</span>
-          </button>
+        <div className="hidden items-center gap-4 sm:flex">
           <div className="hidden flex-col items-end gap-2 sm:flex">
             <HeroMascot className="h-24 w-24 lg:h-28 lg:w-28" />
             <button

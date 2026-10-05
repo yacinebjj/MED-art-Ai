@@ -623,3 +623,49 @@ textarea,
 .stream-word {
   animation: stream-word-in 240ms ease-out both;
 }
+
+/* ---------------------------------------------------------------------
+   Phone comfort & frame budget (unlayered, so it beats the glass/aurora
+   utilities above — same reasoning as the (hover: none) block).
+   --------------------------------------------------------------------- */
+
+/* A surface that is a glass card on tablet/desktop but sits flat on the page
+   on phones (the dashboard greeting): one less box to parse at a glance. */
+@media (max-width: 639px) {
+  .flat-on-phone {
+    background-color: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* Touch devices: the full-screen aurora layers animate forever behind every
+   page. Static color is indistinguishable at their 6-10% opacity, and it
+   frees the compositor for what the student is actually doing (scrolling,
+   typing, flipping cards). */
+@media (hover: none) {
+  .aurora-mesh-bg,
+  .aurora-canvas-bg,
+  .aurora-canvas-bg::before,
+  .aurora-canvas-bg::after {
+    animation: none !important;
+  }
+}
+
+/* Long lists below the fold (curriculum modules, analytics widgets) skip
+   layout/paint until they are scrolled near — the dashboard's first frame
+   only pays for what is on screen. */
+.render-lazy {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+
+/* Pressed state for big touch rows (bottom-sheet menu, tool squares): instant
+   feedback without waiting for a hover state touch screens never have. */
+.press-feedback {
+  transition: transform 120ms ease-out, background-color 120ms ease-out;
+}
+.press-feedback:active {
+  transform: scale(0.98);
+}

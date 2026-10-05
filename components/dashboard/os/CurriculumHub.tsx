@@ -30,7 +30,7 @@ import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
-import { ModuleStatsModal } from "@/components/dashboard/ModuleStatsModal";
+import dynamic from "next/dynamic";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
 import { tCockpit } from "@/lib/translations/cockpit";
@@ -38,6 +38,10 @@ import { tDiscovery } from "@/lib/translations/discovery";
 import type { CurriculumModule, CurriculumYearData } from "@/types/academic";
 import type { DashboardModuleStats } from "@/types/dashboard-overview";
 import { Skeleton } from "./primitives";
+
+// Opened on demand from one card's menu: fetched on first open, and only the
+// open one is mounted — never one closed Dialog per module card in the grid.
+const ModuleStatsModal = dynamic(() => import("@/components/dashboard/ModuleStatsModal").then((m) => m.ModuleStatsModal), { ssr: false });
 
 type StatusFilter = "all" | "not-started" | "in-progress" | "mastered";
 type SortKey = "priority" | "progress" | "alpha" | "recent";
@@ -253,7 +257,7 @@ const ModuleCard = memo(function ModuleCard({
       </div>
 
       <div onClick={(e) => e.stopPropagation()}>
-        <ModuleStatsModal open={statsOpen} onOpenChange={setStatsOpen} moduleTitle={mod.title} moduleId={mod.id} />
+        {statsOpen && <ModuleStatsModal open={statsOpen} onOpenChange={setStatsOpen} moduleTitle={mod.title} moduleId={mod.id} />}
         <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
@@ -546,7 +550,7 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
         </motion.div>
       )}
 
-      {selectedUnit && (
+      {selectedUnit && unitStatsOpen && (
         <ModuleStatsModal open={unitStatsOpen} onOpenChange={setUnitStatsOpen} moduleTitle={selectedUnit.title} moduleIds={selectedUnitIds} />
       )}
     </div>

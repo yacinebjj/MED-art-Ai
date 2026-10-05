@@ -62,7 +62,7 @@ function copyFor(kind: InviteKind): InviteCopy {
         lead: "Le créateur de ce groupe a déjà payé toutes les places. Crée ton compte (ou connecte-toi) puis rejoins le groupe : tu n'as rien à payer.",
         points: [
           { icon: ShieldCheck, text: "Place déjà payée : aucun paiement ne te sera demandé." },
-          { icon: Sparkles, text: "Accès complet : Studio, examens, résumés de module, Audio → Smart Notes." },
+          { icon: Sparkles, text: "Accès complet : Studio, examens, résumés de module, Copilot IA." },
         ],
       };
     case "unknown":

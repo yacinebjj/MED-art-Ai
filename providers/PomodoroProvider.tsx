@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { fetchSyncNamespace, putSyncDoc, type SyncedValue } from "@/lib/user-sync";
 import { hydrateLocalActivityFromServer } from "@/lib/dashboard/local-activity";
 
@@ -83,6 +83,16 @@ const FOCUS_LOG_SYNC_KEY = "focus-log";
 /** While the timer runs, the focus log is merged with the server copy this often. */
 const FOCUS_LOG_SYNC_INTERVAL_MS = 60_000;
 
+/**
+ * While the timer runs, the per-second focus count accumulates in a ref and is
+ * published (React state + localStorage) only this often, on stop, and when
+ * the page is hidden. Publishing it every second re-rendered every focus-log
+ * reader (notifications, streak/focus widgets, study page) 60 times a minute
+ * and re-serialized the whole log to localStorage on each tick — for a number
+ * no widget displays to the second.
+ */
+const FOCUS_LOG_COMMIT_EVERY_S = 15;
+
 /** Per day, the larger count wins: time studied on two devices never erases itself, and re-merging is harmless. */
 function mergeFocusLogs(a: FocusLog, b: FocusLog): FocusLog {
   const merged: FocusLog = { ...a };
@@ -97,7 +107,9 @@ function sameFocusLog(a: FocusLog, b: FocusLog): boolean {
   return days.length === Object.keys(b).length && days.every((day) => a[day] === b[day]);
 }
 
-const PomodoroContext = createContext<PomodoroContextType | undefined>(undefined);
+const PomodoroContext = createContext<Omit<PomodoroContextType, "focusLog"> | undefined>(undefined);
+/** Separate from the ticking clock: readers of the focus log alone never re-render on each second. */
+const FocusLogContext = createContext<FocusLog | undefined>(undefined);
 
 // "anonymous" — the bucket used before a real user id is known (logged-out
 // visitor on a public page). Not a privacy concern on its own (nothing
@@ -129,6 +141,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const [currentCycle, setCurrentCycle] = useState(1);
   const [currentMode, setCurrentMode] = useState<PomodoroMode>("study");
   const [focusLog, setFocusLog] = useState<FocusLog>({});
+  // Authoritative in-memory focus log (see FOCUS_LOG_COMMIT_EVERY_S); `focusLog` state is its last published snapshot.
+  const focusLogRef = useRef<FocusLog>({});
   // Updated synchronously in setUserId (before any effect cleanup runs), so a
   // sync started for one account never writes into another one.
   const bucketRef = useRef(ANONYMOUS_BUCKET);
@@ -145,8 +159,20 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     setSeconds(savedSeconds ? parseInt(savedSeconds, 10) : 0);
     setIsActive(savedActive === "true");
     if (savedVisible !== null) setIsVisible(savedVisible === "true");
-    setFocusLog(readFocusLog(keys.focusLog));
+    focusLogRef.current = readFocusLog(keys.focusLog);
+    setFocusLog(focusLogRef.current);
   }, [bucket]);
+
+  /** Publishes the in-memory focus log to React state and localStorage. */
+  const commitFocusLog = useCallback(() => {
+    const log = focusLogRef.current;
+    try {
+      localStorage.setItem(keysFor(bucketRef.current).focusLog, JSON.stringify(log));
+    } catch {
+      // Storage full or blocked: the in-memory log still counts this session.
+    }
+    setFocusLog(log);
+  }, []);
 
   // Cross-device focus log: merged with the server copy (per-day max, written
   // back to both sides) once the account is known, every minute while the
@@ -160,24 +186,17 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     const doc = docs.find((d) => d.key === FOCUS_LOG_SYNC_KEY && !d.deleted);
     const remoteValue = doc && doc.data && typeof doc.data === "object" ? (doc.data as Partial<SyncedValue<unknown>>).value : null;
     const remote = remoteValue && typeof remoteValue === "object" ? mergeFocusLogs({}, remoteValue as FocusLog) : {};
-    const local = readFocusLog(keysFor(bucket).focusLog);
+    const local = focusLogRef.current;
     const merged = mergeFocusLogs(local, remote);
     if (!sameFocusLog(merged, local)) {
-      setFocusLog((prev) => {
-        const next = mergeFocusLogs(prev, remote);
-        try {
-          localStorage.setItem(keysFor(bucket).focusLog, JSON.stringify(next));
-        } catch {
-          // Storage full or blocked: the in-memory log still shows the merged time.
-        }
-        return next;
-      });
+      focusLogRef.current = mergeFocusLogs(focusLogRef.current, remote);
+      commitFocusLog();
     }
     if (!doc || !sameFocusLog(merged, remote)) {
       const upload: SyncedValue<FocusLog> = { value: merged, savedAt: Date.now() };
       putSyncDoc(FOCUS_LOG_SYNC_NS, FOCUS_LOG_SYNC_KEY, upload, true);
     }
-  }, [bucket]);
+  }, [bucket, commitFocusLog]);
 
   // Account known: merge the focus log, and reconcile the dashboard's own
   // synced values (lib/dashboard/local-activity.ts). This Provider is the one
@@ -202,86 +221,109 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
 
   // تشغيل العداد وتحديث التخزين المحلي في الخلفية بشكل متزامن
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isActive) {
-      interval = setInterval(() => {
-        setSeconds((prev) => {
-          const next = prev + 1;
+    if (!isActive) return;
+    let uncommitted = 0;
+    const interval = setInterval(() => {
+      setSeconds((prev) => {
+        const next = prev + 1;
+        try {
           localStorage.setItem(keysFor(bucket).seconds, next.toString());
-          return next;
-        });
-        setFocusLog((prev) => {
-          const day = localDayKey(new Date());
-          const next = pruneFocusLog({ ...prev, [day]: (prev[day] ?? 0) + 1 });
-          try {
-            localStorage.setItem(keysFor(bucket).focusLog, JSON.stringify(next));
-          } catch {
-            // Storage full or blocked: the in-memory log still counts this session.
-          }
-          return next;
-        });
-      }, 1000);
-    } else {
-      if (interval) clearInterval(interval);
+        } catch {
+          // Storage blocked: the running session still counts in memory.
+        }
+        return next;
+      });
+      const day = localDayKey(new Date());
+      const log = focusLogRef.current;
+      focusLogRef.current = pruneFocusLog({ ...log, [day]: (log[day] ?? 0) + 1 });
+      uncommitted += 1;
+      if (uncommitted >= FOCUS_LOG_COMMIT_EVERY_S) {
+        uncommitted = 0;
+        commitFocusLog();
+      }
+    }, 1000);
+    // A backgrounded / closed tab never loses the last few seconds.
+    function handleHide() {
+      if (document.visibilityState === "hidden") commitFocusLog();
     }
+    document.addEventListener("visibilitychange", handleHide);
+    window.addEventListener("pagehide", commitFocusLog);
     return () => {
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleHide);
+      window.removeEventListener("pagehide", commitFocusLog);
+      commitFocusLog();
     };
-  }, [isActive, bucket]);
+  }, [isActive, bucket, commitFocusLog]);
 
-  const toggleActive = () => {
-    const nextState = !isActive;
-    setIsActive(nextState);
-    localStorage.setItem(keysFor(bucket).active, nextState.toString());
-  };
+  const toggleActive = useCallback(() => {
+    setIsActive((prev) => {
+      const nextState = !prev;
+      localStorage.setItem(keysFor(bucketRef.current).active, nextState.toString());
+      return nextState;
+    });
+  }, []);
 
-  const toggleVisible = () => {
-    const nextState = !isVisible;
-    setIsVisible(nextState);
-    localStorage.setItem(keysFor(bucket).visible, nextState.toString());
-  };
+  const toggleVisible = useCallback(() => {
+    setIsVisible((prev) => {
+      const nextState = !prev;
+      localStorage.setItem(keysFor(bucketRef.current).visible, nextState.toString());
+      return nextState;
+    });
+  }, []);
 
-  const resetTimer = () => {
+  const resetTimer = useCallback(() => {
     setSeconds(0);
     setIsActive(false);
     setCurrentCycle(1);
     setCurrentMode("study");
-    const keys = keysFor(bucket);
+    const keys = keysFor(bucketRef.current);
     localStorage.setItem(keys.seconds, "0");
     localStorage.setItem(keys.active, "false");
-  };
+  }, []);
 
-  const setUserId = (userId: string | null) => {
+  const setUserId = useCallback((userId: string | null) => {
     bucketRef.current = userId ?? ANONYMOUS_BUCKET;
     setBucket(userId ?? ANONYMOUS_BUCKET);
-  };
+  }, []);
+
+  const clock = useMemo(
+    () => ({
+      seconds,
+      isActive,
+      isVisible,
+      toggleActive,
+      toggleVisible,
+      resetTimer,
+      setUserId,
+      currentCycle,
+      currentMode,
+      setCurrentCycle,
+      setCurrentMode,
+    }),
+    [seconds, isActive, isVisible, toggleActive, toggleVisible, resetTimer, setUserId, currentCycle, currentMode]
+  );
 
   return (
-    <PomodoroContext.Provider
-      value={{
-        seconds,
-        isActive,
-        isVisible,
-        toggleActive,
-        toggleVisible,
-        resetTimer,
-        setUserId,
-        currentCycle,
-        currentMode,
-        setCurrentCycle,
-        setCurrentMode,
-        focusLog,
-      }}
-    >
-      {children}
+    <PomodoroContext.Provider value={clock}>
+      <FocusLogContext.Provider value={focusLog}>{children}</FocusLogContext.Provider>
     </PomodoroContext.Provider>
   );
 }
 
-export function usePomodoro() {
+/** The timer + focus log. Re-renders every second while running — components that only read the log should use useFocusLog(). */
+export function usePomodoro(): PomodoroContextType {
   const context = useContext(PomodoroContext);
-  if (!context) {
+  const focusLog = useContext(FocusLogContext);
+  if (!context || !focusLog) {
     throw new Error("usePomodoro must be used within a PomodoroProvider");
   }
-  return context;
+  return { ...context, focusLog };
+}
+
+/** Focus log only (per-day seconds) — updates every few seconds, never on each tick. */
+export function useFocusLog(): FocusLog {
+  const focusLog = useContext(FocusLogContext);
+  if (!focusLog) throw new Error("useFocusLog must be used within a PomodoroProvider");
+  return focusLog;
 }

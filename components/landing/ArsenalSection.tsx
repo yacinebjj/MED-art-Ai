@@ -70,8 +70,8 @@ export function ArsenalSection() {
         <BentoTile
           icon={AudioLines}
           tint="from-orange-400 to-amber-600"
-          title={fr ? "Podcast & Smart Notes" : "Podcast & Smart Notes"}
-          pitch={fr ? "Révise en marchant : ton cours en podcast, ou l'amphi enregistré transformé en notes." : "Revise on the go: your course as a podcast, or the recorded lecture turned into notes."}
+          title={fr ? "Podcast du cours" : "Course podcast"}
+          pitch={fr ? "Révise en marchant : ton cours transformé en podcast, en français ou en anglais." : "Revise on the go: your course turned into a podcast, in French or English."}
           delay={0.08}
         >
           <AudioDemo language={language} />

@@ -100,6 +100,8 @@ export const COCKPIT_TRANSLATIONS = {
 
   // ---- Analytics hub
   analyticsHeading: { fr: "Analytics & productivité", en: "Analytics & productivity" },
+  statsShowAll: { fr: "Voir toutes mes stats", en: "Show all my stats" },
+  statsShowLess: { fr: "Moins de stats", en: "Fewer stats" },
   analyticsSub: { fr: "Tes vrais chiffres : séries, QCMs, flashcards, focus et examens.", en: "Your real numbers: streaks, MCQs, flashcards, focus and exams." },
   retry: { fr: "Réessayer", en: "Retry" },
   streakTitle: { fr: "Série de révision", en: "Study streak" },

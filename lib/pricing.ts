@@ -26,6 +26,7 @@
  * longer sold.
  */
 import type { Language } from "@/providers/LanguageProvider";
+import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 
 export type PricingTierId = "individual" | "group" | "promo";
 export type BillingCycle = "monthly" | "quad" | "annual";
@@ -118,7 +119,8 @@ const PAID_FEATURES = [
   `${PAID_LIMITS.examsPerMonth} examens de module par mois`,
   `${PAID_LIMITS.synthesesPerMonth} résumés de module par mois`,
   `${PAID_LIMITS.premiumMessagesPerDay} messages/jour avec l'IA premium, puis illimité`,
-  `Audio → Smart Notes : ${PAID_LIMITS.audioPerDay}/jour (${PAID_LIMITS.audioPerMonth}/mois)`,
+  // Listed again once Audio Smart Notes ships (lib/feature-flags.ts).
+  ...(AUDIO_SMART_NOTES_ENABLED ? [`Audio → Smart Notes : ${PAID_LIMITS.audioPerDay}/jour (${PAID_LIMITS.audioPerMonth}/mois)`] : []),
   "Flashcards, To-Do et Notes illimités",
 ];
 

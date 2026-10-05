@@ -14,6 +14,7 @@ import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit, type CockpitKey } from "@/lib/translations/cockpit";
 import type { LabToolId } from "@/lib/workspace-lab";
 import type { DashboardLabItem } from "@/types/dashboard-overview";
+import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 import { CARD_ENTRANCE, Skeleton } from "./primitives";
 
 function relativeTime(iso: string, language: Language): string {
@@ -47,7 +48,10 @@ const TILES: LaunchTile[] = [
   { id: "case", icon: Stethoscope, titleKey: "lab_case-simulator", subtitleKey: "tileCaseSub", gradient: "from-rose-500 to-pink-500", glow: "hover:shadow-rose-500/20", tool: "case-simulator" },
   { id: "matrix", icon: Table2, titleKey: "lab_matrix", subtitleKey: "tileMatrixSub", gradient: "from-violet-500 to-indigo-500", glow: "hover:shadow-violet-500/20", tool: "matrix" },
   { id: "mindmap", icon: Network, titleKey: "lab_mindmap", subtitleKey: "tileMindmapSub", gradient: "from-cyan-500 to-sky-500", glow: "hover:shadow-cyan-500/20", tool: "mindmap" },
-  { id: "audio", icon: Mic, titleKey: "navAudio", subtitleKey: "tileAudioSub", gradient: "from-orange-500 to-amber-500", glow: "hover:shadow-orange-500/20", href: "/dashboard/audio-workspace" },
+  // Held back for V2 (lib/feature-flags.ts).
+  ...(AUDIO_SMART_NOTES_ENABLED
+    ? [{ id: "audio", icon: Mic, titleKey: "navAudio", subtitleKey: "tileAudioSub", gradient: "from-orange-500 to-amber-500", glow: "hover:shadow-orange-500/20", href: AUDIO_SMART_NOTES_PAGE } satisfies LaunchTile]
+    : []),
 ];
 
 function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label: string; href: string; when: string } | null; language: Language }) {
@@ -56,19 +60,19 @@ function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label:
   const body = (
     <>
       <div aria-hidden className={cn("pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br opacity-20 blur-2xl transition-opacity duration-500 group-hover:opacity-40", tile.gradient)} />
-      <span className={cn("relative flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg transition-transform duration-300 group-hover:rotate-[-6deg] group-hover:scale-110", tile.gradient)}>
-        <Icon className="h-5 w-5" />
+      <span className={cn("relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg transition-transform duration-300 group-hover:rotate-[-6deg] group-hover:scale-110 sm:h-11 sm:w-11", tile.gradient)}>
+        <Icon className="h-6 w-6 sm:h-5 sm:w-5" />
       </span>
-      <p className="relative mt-3 text-sm font-bold text-foreground">{tCockpit(tile.titleKey, language)}</p>
-      <p className="relative mt-0.5 line-clamp-2 text-xs text-muted-foreground">{tCockpit(tile.subtitleKey, language)}</p>
-      <span className="relative mt-3 inline-flex items-center gap-1 text-xs font-bold text-foreground/80 transition-colors group-hover:text-primary-600 dark:group-hover:text-primary-400">
+      <p className="relative mt-2.5 text-[13px] font-bold leading-tight text-foreground sm:mt-3 sm:text-sm">{tCockpit(tile.titleKey, language)}</p>
+      <p className="relative mt-0.5 line-clamp-2 text-xs text-muted-foreground max-sm:hidden">{tCockpit(tile.subtitleKey, language)}</p>
+      <span className="relative mt-3 hidden items-center gap-1 text-xs font-bold text-foreground/80 transition-colors group-hover:text-primary-600 dark:group-hover:text-primary-400 sm:inline-flex">
         {tCockpit("launch", language)}
         <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
       </span>
     </>
   );
   const cardClass = cn(
-    "group relative flex h-full flex-col overflow-hidden rounded-3xl border border-white/30 p-4 text-left shadow-glass transition-all duration-300 hover:-translate-y-1 hover:shadow-xl dark:border-white/[0.06] dark:shadow-glass-dark glass-card",
+    "group relative flex h-full min-h-[7.5rem] flex-col items-center overflow-hidden rounded-3xl border border-white/30 p-3 text-center shadow-glass transition-all duration-300 hover:-translate-y-1 hover:shadow-xl active:scale-[0.97] dark:border-white/[0.06] dark:shadow-glass-dark glass-card sm:min-h-0 sm:items-start sm:p-4 sm:text-left",
     tile.glow
   );
 
@@ -86,7 +90,7 @@ function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label:
       {last && (
         <Link
           href={last.href}
-          className="flex items-center gap-1.5 truncate rounded-xl px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-white/40 hover:text-foreground dark:hover:bg-white/5"
+          className="hidden items-center gap-1.5 truncate rounded-xl px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-white/40 hover:text-foreground dark:hover:bg-white/5 sm:flex"
           title={last.label}
         >
           <History className="h-3 w-3 shrink-0" />
@@ -137,7 +141,7 @@ function ResumeCard() {
     );
   }
 
-  const audio = overview.lectureNotes[0] ?? null;
+  const audio = AUDIO_SMART_NOTES_ENABLED ? (overview.lectureNotes[0] ?? null) : null;
 
   return (
     <motion.div
@@ -171,7 +175,7 @@ function ResumeCard() {
             )}
             <Link
               href={`/dashboard/module/${course.moduleId}?course=${course.id}`}
-              className="relative mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-primary-700 shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl active:scale-95"
+              className="relative mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 text-[15px] font-bold text-primary-700 shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl active:scale-[0.98] sm:inline-flex sm:h-auto sm:w-auto sm:rounded-xl sm:py-2.5 sm:text-sm"
             >
               <BookOpen className="h-4 w-4" />
               {tCockpit("resumeCta", language)}
@@ -183,7 +187,7 @@ function ResumeCard() {
             <p className="relative mt-1 max-w-sm text-xs text-white/80">{tCockpit("resumeEmptyBody", language)}</p>
             <a
               href="#curriculum"
-              className="relative mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-primary-700 shadow-lg transition-all hover:-translate-y-0.5"
+              className="relative mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 text-[15px] font-bold text-primary-700 shadow-lg transition-all hover:-translate-y-0.5 active:scale-[0.98] sm:inline-flex sm:h-auto sm:w-auto sm:rounded-xl sm:py-2.5 sm:text-sm"
             >
               <Sparkles className="h-4 w-4" />
               {tCockpit("resumeEmptyCta", language)}
@@ -200,7 +204,7 @@ function ResumeCard() {
               </Link>
             )}
             {audio && (
-              <Link href={`/dashboard/audio-workspace?jobId=${audio.id}`} className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-white/15 px-2.5 py-1.5 text-[11px] font-semibold backdrop-blur transition-colors hover:bg-white/25">
+              <Link href={`${AUDIO_SMART_NOTES_PAGE}?jobId=${audio.id}`} className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-white/15 px-2.5 py-1.5 text-[11px] font-semibold backdrop-blur transition-colors hover:bg-white/25">
                 <Mic className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{audio.title}</span>
               </Link>
@@ -212,7 +216,11 @@ function ResumeCard() {
   );
 }
 
-/** Quick-Launch Hub: the MedArt Lab tools + Audio Smart Notes, each with the student's last use of it, and the Resume card. */
+/**
+ * Quick-Launch Hub: the Resume card (THE one primary action of the home) and
+ * the MedArt Lab tools, each with the student's last use of it. On phones the
+ * tools collapse to a single row of big icon squares — no copy to read.
+ */
 export function QuickLaunchHub() {
   const { language } = useLanguage();
   const overview = useCockpitStore((state) => state.overview);
@@ -228,8 +236,8 @@ export function QuickLaunchHub() {
         when: relativeTime(item.lastOpenedAt, language),
       });
     }
-    const audio = overview?.lectureNotes[0];
-    if (audio) map.set("audio", { label: audio.title, href: `/dashboard/audio-workspace?jobId=${audio.id}`, when: relativeTime(audio.updatedAt, language) });
+    const audio = AUDIO_SMART_NOTES_ENABLED ? overview?.lectureNotes[0] : undefined;
+    if (audio) map.set("audio", { label: audio.title, href: `${AUDIO_SMART_NOTES_PAGE}?jobId=${audio.id}`, when: relativeTime(audio.updatedAt, language) });
     return map;
   }, [overview, language]);
 
@@ -239,7 +247,7 @@ export function QuickLaunchHub() {
         <h2 id="quicklaunch-heading" className="text-base font-bold tracking-tight text-foreground sm:text-lg">
           {tCockpit("quickLaunchHeading", language)}
         </h2>
-        <p className="text-xs text-muted-foreground">{tCockpit("quickLaunchSub", language)}</p>
+        <p className="hidden text-xs text-muted-foreground sm:block">{tCockpit("quickLaunchSub", language)}</p>
       </div>
       <motion.div
         initial="hidden"
@@ -248,7 +256,7 @@ export function QuickLaunchHub() {
         className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,2fr)]"
       >
         <ResumeCard />
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4">
+        <div className={cn("grid gap-2.5 sm:gap-4", TILES.length === 4 ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4" : "grid-cols-3")}>
           {TILES.map((tile) => (
             <LaunchCard key={tile.id} tile={tile} last={lastByTool.get(tile.tool ?? tile.id) ?? null} language={language} />
           ))}
