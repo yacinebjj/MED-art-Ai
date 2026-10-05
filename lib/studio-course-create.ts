@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { refundCourseCreation, reserveCourseCreation, type GateBlocked } from "@/lib/subscription";
 import { sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { indexStudioCourseChunksForChat } from "@/lib/studio-explication-delta";
 import type { StudioCourseSummary } from "@/types/studio-course";
@@ -62,6 +63,13 @@ async function findRecentDuplicate(
   return match ?? null;
 }
 
+/** Thrown when the student's course quota is used (free trial or 40 / month). Callers answer with quotaBlockedResponse(error.gate). */
+export class CourseQuotaError extends Error {
+  constructor(readonly gate: GateBlocked) {
+    super(gate.reason);
+  }
+}
+
 export async function createStudioCourse(params: {
   userId: string;
   moduleId: number;
@@ -81,6 +89,10 @@ export async function createStudioCourse(params: {
   });
   if (duplicate) return toSummary(duplicate);
 
+  // One course unit per course CREATED (a deleted course never gives it back).
+  const gate = await reserveCourseCreation({ id: params.userId });
+  if (!gate.allowed) throw new CourseQuotaError(gate);
+
   const { data, error } = await supabase
     .from("studio_courses")
     .insert({
@@ -94,6 +106,7 @@ export async function createStudioCourse(params: {
     .single();
 
   if (error || !data) {
+    await refundCourseCreation(params.userId);
     throw new Error(error ? `Création échouée : ${error.message}` : "Création échouée.");
   }
 

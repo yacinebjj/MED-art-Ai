@@ -114,7 +114,7 @@ export function LoginForm() {
 
       <p className="pt-2 text-center text-sm text-slate-400">
         Pas encore de compte ?{" "}
-        <Link href="/register" className="font-semibold text-cyan-300 hover:underline">
+        <Link href={searchParams.get("next") ? `/register?next=${encodeURIComponent(sanitizeRedirectPath(searchParams.get("next")))}` : "/register"} className="font-semibold text-cyan-300 hover:underline">
           Inscris-toi
         </Link>
       </p>

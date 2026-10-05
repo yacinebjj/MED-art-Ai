@@ -2,6 +2,7 @@ import { AuthProvider } from "@/providers/AuthProvider";
 import { PomodoroAuthSync } from "@/providers/PomodoroAuthSync";
 import { LanguageStoreHydrator } from "@/components/course/workspace/AiLanguageSelect";
 import { ChunkErrorRecovery } from "@/components/pwa/ChunkErrorRecovery";
+import { PaywallProvider } from "@/components/billing/PaywallProvider";
 
 /**
  * Root layout for everything under /dashboard/**. Deliberately minimal —
@@ -19,7 +20,7 @@ export default function DashboardLayout({
       <PomodoroAuthSync />
       <LanguageStoreHydrator />
       <ChunkErrorRecovery />
-      {children}
+      <PaywallProvider>{children}</PaywallProvider>
     </AuthProvider>
   );
 }

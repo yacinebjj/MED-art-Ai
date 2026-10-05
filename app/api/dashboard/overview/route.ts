@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getSubscription, isSubscriptionActive, resolveEffectivePlan } from "@/lib/subscription";
-import { getProfile, getTrialDaysRemaining, isTrialActive } from "@/lib/trial";
+import { getSubscription, getUsageSnapshot, isSubscriptionActive, resolveEffectivePlan } from "@/lib/subscription";
 import { PLANS } from "@/lib/pricing";
 import type { DashboardOverview } from "@/types/dashboard-overview";
 
@@ -68,7 +67,7 @@ export async function GET() {
     lectureRes,
     flashcardProfileRes,
     sub,
-    profile,
+    usage,
   ] = await Promise.all([
     supabase
       .from("studio_courses")
@@ -104,7 +103,7 @@ export async function GET() {
     supabase.from("lecture_notes_jobs").select("id, title, status, updated_at").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(50),
     supabase.from("profiles").select("flashcard_active_module_ids").eq("id", user.id).maybeSingle<{ flashcard_active_module_ids: number[] | null }>(),
     getSubscription(user.id),
-    getProfile(user.id),
+    getUsageSnapshot(user.id),
   ]);
 
   for (const [label, res] of [
@@ -201,7 +200,6 @@ export async function GET() {
     });
 
   // ---- Plan / quota.
-  const trialing = isTrialActive(profile, user.created_at);
   const effectivePlanId = resolveEffectivePlan(sub);
   const effectivePlan = PLANS[effectivePlanId];
 
@@ -253,13 +251,15 @@ export async function GET() {
       id: effectivePlanId,
       label: effectivePlan.label,
       paidActive: isSubscriptionActive(sub),
-      trialActive: trialing,
-      trialDaysRemaining: getTrialDaysRemaining(profile, user.created_at),
-      unlimitedThisPeriod: trialing,
-      generationsUsed: sub?.generations_used ?? 0,
-      generationsCap: effectivePlan.courseCap,
-      chatUsed: sub?.chat_messages_used ?? 0,
-      chatCap: effectivePlan.chatMessageCap,
+      // Monetization v2: no more 7-day unlimited trial. The quota widget shows
+      // the two limits students plan around: courses and assistant messages.
+      trialActive: false,
+      trialDaysRemaining: 0,
+      unlimitedThisPeriod: false,
+      generationsUsed: usage?.courses.used ?? 0,
+      generationsCap: usage?.courses.cap ?? effectivePlan.coursesPerMonth,
+      chatUsed: usage?.messages.used ?? 0,
+      chatCap: usage?.messages.cap ?? effectivePlan.premiumMessagesPerDay,
     },
   };
 

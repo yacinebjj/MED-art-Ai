@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createChargilyCheckout } from "@/lib/chargily";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { isPaidPlanId, isPlanId, PLANS } from "@/lib/pricing";
+import { GROUP_SIZE, groupLeaderTotalDZD, isPaidPlanId, isPlanId, PLANS } from "@/lib/pricing";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { billingPoolsAvailable } from "@/lib/billing-pools";
 
 export const runtime = "nodejs";
 
@@ -29,6 +30,8 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null);
   const plan = typeof body?.plan === "string" ? body.plan : "";
+  // Groupe bought by a leader for the 5 seats at once (monetization v2).
+  const asGroupLeader = body?.mode === "leader";
 
   if (!isPlanId(plan)) {
     return NextResponse.json({ error: "Formule invalide." }, { status: 400 });
@@ -39,18 +42,29 @@ export async function POST(request: NextRequest) {
   }
 
   const planDetails = PLANS[plan];
+  // Direct checkout sells: Individuel (any cycle), or Groupe as a leader
+  // paying the 5 seats. A pooled Promo / Groupe share goes through
+  // /api/billing/pools/[code] (seat hold + gauge). Legacy plans are not sold.
+  if (!planDetails.purchasable || planDetails.tier === "promo" || (planDetails.tier === "group" && !asGroupLeader)) {
+    return NextResponse.json({ error: "Cette formule se paie depuis la page de ton groupe (lien d'invitation)." }, { status: 400 });
+  }
+  if (asGroupLeader && !(await billingPoolsAvailable())) {
+    return NextResponse.json({ error: "La formule Groupe arrive dans quelques instants — réessaie un peu plus tard." }, { status: 503 });
+  }
+  const amount = asGroupLeader ? groupLeaderTotalDZD(planDetails) : planDetails.priceDZD;
+  const kind = asGroupLeader ? "group_leader" : "individual";
   const appUrl = process.env.APP_URL || request.nextUrl.origin;
 
   try {
     const checkout = await createChargilyCheckout({
-      amount: planDetails.priceDZD,
+      amount,
       currency: "dzd",
       successUrl: `${appUrl}/dashboard/billing?status=success`,
       failureUrl: `${appUrl}/dashboard/billing?status=failure`,
       webhookEndpoint: `${appUrl}/api/chargily/webhook`,
-      description: `Med Art AI — ${planDetails.label}`,
+      description: asGroupLeader ? `Med Art AI — ${planDetails.label} (${GROUP_SIZE} places)` : `Med Art AI — ${planDetails.label}`,
       locale: "fr",
-      metadata: { userId: user.id, plan, email: user.email ?? "" },
+      metadata: { userId: user.id, plan, email: user.email ?? "", kind },
     });
 
     // Best-effort audit row — a Supabase hiccup here must never block a
@@ -61,7 +75,7 @@ export async function POST(request: NextRequest) {
         const { error } = await supabase.from("payments").insert({
           user_id: user.id,
           plan,
-          amount: planDetails.priceDZD,
+          amount,
           currency: "dzd",
           chargily_checkout_id: checkout.id,
           status: "pending",

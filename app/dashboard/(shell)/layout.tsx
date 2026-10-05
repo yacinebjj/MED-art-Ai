@@ -51,6 +51,8 @@ const ROUTE_TITLE_KEYS: Record<string, Parameters<typeof t>[0]> = {
 function resolvePageTitleKey(pathname: string): Parameters<typeof t>[0] | null {
   if (ROUTE_TITLE_KEYS[pathname]) return ROUTE_TITLE_KEYS[pathname];
   if (pathname.startsWith("/dashboard/groups/")) return "groups";
+  // Promo / Groupe tracker and the refunds admin live under billing.
+  if (pathname.startsWith("/dashboard/billing/") || pathname.startsWith("/dashboard/admin/")) return "billing";
   return null;
 }
 

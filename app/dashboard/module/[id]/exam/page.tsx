@@ -58,6 +58,10 @@ import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
 import { ExamConfigurator } from "@/components/course/workspace/exam/ExamConfigurator";
 import { type ExamTimerMode } from "@/components/course/workspace/exam/ExamTimer";
+import { GenerationConfirmDialog } from "@/components/billing/GenerationConfirmDialog";
+import { usePaywall } from "@/components/billing/PaywallProvider";
+import { notifyUsageChanged, remaining as remainingOf, useUsage } from "@/hooks/useUsage";
+import { PAID_LIMITS } from "@/lib/pricing";
 import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
 import { useStoredPreference } from "@/components/cyber/hooks";
 import { DEFAULT_EXAM_PREFERENCES, EXAM_DIFFICULTIES, EXAM_EXPLANATION_DEPTHS, EXAM_QUESTION_FOCUS, type ExamPreferences } from "@/lib/exam-preferences";
@@ -137,6 +141,10 @@ export default function ExamGeneratorPage() {
   const moduleId = Number(params.id);
   const { toast } = useToast();
   const { language } = useLanguage();
+  const { usage } = useUsage();
+  const { openPaywall } = usePaywall();
+  // Generate / regenerate waits behind the "Attention" dialog (exams are a limited monthly quota).
+  const [pendingGeneration, setPendingGeneration] = useState<{ courseIds: number[]; variation: boolean } | null>(null);
 
   const [courses, setCourses] = useState<StudioCourseSummary[] | null>(null);
   const [coursesError, setCoursesError] = useState(false);
@@ -414,12 +422,28 @@ export default function ExamGeneratorPage() {
     } finally {
       setIsGenerating(false);
       setGenerationProgress(null);
+      notifyUsageChanged();
     }
+  }
+
+  const examsRemaining = usage?.enforced ? remainingOf(usage.exams) : null;
+
+  /** Exams are a paid, monthly-capped feature: trial → paywall, empty quota → limit screen, otherwise confirm first. */
+  function requestGeneration(courseIds: number[], variation: boolean) {
+    if (usage?.enforced && usage.isTrial) {
+      openPaywall("trial_feature");
+      return;
+    }
+    if (examsRemaining !== null && examsRemaining <= 0) {
+      openPaywall("quota_exams");
+      return;
+    }
+    setPendingGeneration({ courseIds, variation });
   }
 
   function handleGenerate() {
     if (selectedCourseIds.size === 0) return;
-    void generateExam([...selectedCourseIds], false);
+    requestGeneration([...selectedCourseIds], false);
   }
 
   function handleRegenerate() {
@@ -427,7 +451,7 @@ export default function ExamGeneratorPage() {
     // No optimistic local decrement anymore — `attempts` is synced from the
     // server's authoritative regenerationsRemaining once generateExam's
     // response comes back (success or 403 cap-reached alike).
-    void generateExam(
+    requestGeneration(
       activeExam.selectedCourses.map((c) => c.id),
       true
     );
@@ -1410,6 +1434,22 @@ export default function ExamGeneratorPage() {
           </LocalErrorBoundary>
         </div>
       </FullscreenViewerModal>
+
+      <GenerationConfirmDialog
+        open={pendingGeneration !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingGeneration(null);
+        }}
+        onConfirm={() => {
+          if (pendingGeneration) void generateExam(pendingGeneration.courseIds, pendingGeneration.variation);
+        }}
+        message="Assure-toi d’avoir importé et préparé TOUS tes cours avant de générer l’examen global."
+        remaining={examsRemaining}
+        cap={usage?.exams.cap ?? PAID_LIMITS.examsPerMonth}
+        unitLabel="générations"
+        tip="Ne te précipite pas : importe et prépare tous les cours du module d’abord, puis génère un examen complet."
+        confirmLabel={pendingGeneration?.variation ? "Oui, régénérer" : "Oui, générer l’examen"}
+      />
     </div>
   );
 }

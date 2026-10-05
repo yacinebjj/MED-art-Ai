@@ -19,7 +19,8 @@ Si l'image est illisible ou insuffisante, dis-le clairement plutôt que d'invent
 type VisionPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
-import { reserveChatMessageDaily } from "@/lib/subscription";
+import { reserveAssistantTurn } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { isAssistantMode, isAssistantStyle } from "@/lib/assistant-modes";
 import { buildAssistantSystemPrompt } from "@/lib/ai/assistant-prompts";
@@ -168,7 +169,11 @@ export async function POST(request: NextRequest) {
   // independently of) reserveFreeTierCapacity below: a message served by
   // DeepSeek touches the free tier's external ceiling not at all, so it must
   // never be blocked by that unrelated circuit breaker being saturated.
-  const dailyGate = await reserveChatMessageDaily(user);
+  // Monetization v2: free trial = 20 messages for life (then paywall);
+  // paid = 20 premium messages a day, then the free model, silently.
+  const turn = await reserveAssistantTurn(user);
+  if (!turn.allowed) return quotaBlockedResponse(turn);
+  const dailyGate = { allowed: turn.premium };
 
   const systemPrompt = buildAssistantSystemPrompt(SYSTEM_PROMPT, {
     mode: isAssistantMode(mode) ? mode : undefined,

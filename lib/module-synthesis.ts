@@ -40,7 +40,7 @@ import {
   type KeywordCategories,
 } from "@/lib/course-workspace-cache";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
-import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { reserveSynthesis, refundSynthesis, type PaywallReason } from "@/lib/subscription";
 
 export type ModuleSynthesisType = "global_summary" | "keywords_table" | "medical_dictionary";
 
@@ -209,7 +209,7 @@ export interface ModuleSynthesisResult {
 
 export type ModuleSynthesisOutcome =
   | { ok: true; result: ModuleSynthesisResult }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; paywall?: PaywallReason };
 
 /**
  * Recovers a usable chunks map from a response that parsed as valid JSON
@@ -447,7 +447,7 @@ export async function planModuleSynthesis(
   moduleId: number,
   courseIds: number[],
   type: ModuleSynthesisType
-): Promise<{ ok: true; missingCourseIds: number[]; total: number; reserved: boolean } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; missingCourseIds: number[]; total: number; reserved: boolean } | { ok: false; status: number; error: string; paywall?: PaywallReason }> {
   const loaded = await loadEligibleCourses(user.id, moduleId, courseIds);
   if (!loaded.ok) return loaded;
   if (loaded.courses.length < MIN_COURSES_REQUIRED) {
@@ -457,8 +457,8 @@ export async function planModuleSynthesis(
   const missingCourseIds = loaded.courses.filter((c) => !cached.has(resolveContentHash(c))).map((c) => c.id);
   const needsWork = missingCourseIds.length > 0 || (type !== "medical_dictionary" && loaded.courses.length > 1);
   if (needsWork) {
-    const quotaGate = await reserveGeneration(user);
-    if (!quotaGate.allowed) return { ok: false, status: 403, error: quotaGate.reason ?? "Quota atteint." };
+    const quotaGate = await reserveSynthesis(user);
+    if (!quotaGate.allowed) return { ok: false, status: 403, error: quotaGate.reason, paywall: quotaGate.paywall };
   }
   return { ok: true, missingCourseIds, total: loaded.courses.length, reserved: needsWork };
 }
@@ -475,7 +475,7 @@ export async function prepareModuleSynthesisBatch(
   moduleId: number,
   courseIds: number[],
   type: ModuleSynthesisType
-): Promise<{ ok: true; generated: number; fromCache: number } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; generated: number; fromCache: number } | { ok: false; status: number; error: string; paywall?: PaywallReason }> {
   const loaded = await loadEligibleCourses(user.id, moduleId, courseIds);
   if (!loaded.ok) return loaded;
   const cacheType = CACHE_GENERATION_TYPE[type];
@@ -557,9 +557,9 @@ export async function runModuleSynthesis(
   const needsReservation = !prereserved && (missingCourses.length > 0 || needsCrossCourseSynthesis);
 
   if (needsReservation) {
-    const quotaGate = await reserveGeneration(user);
+    const quotaGate = await reserveSynthesis(user);
     if (!quotaGate.allowed) {
-      return { ok: false, status: 403, error: quotaGate.reason ?? "Quota atteint." };
+      return { ok: false, status: 403, error: quotaGate.reason, paywall: quotaGate.paywall };
     }
   }
 
@@ -636,7 +636,7 @@ export async function runModuleSynthesis(
       crossCourseSection = await buildCrossCourseSynthesis(eligibleCourses, cachedByHash);
     }
   } catch (error) {
-    if (needsReservation || prereserved) await refundGeneration(user.id);
+    if (needsReservation || prereserved) await refundSynthesis(user.id);
     if (error instanceof OpenRouterError) {
       return { ok: false, status: error.status, error: error.message };
     }

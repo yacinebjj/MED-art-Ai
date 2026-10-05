@@ -4,7 +4,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { callOpenRouter, OpenRouterError, HAIKU_MODEL } from "@/lib/ai/openrouter";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { reserveHighlightMessage, refundHighlightMessage } from "@/lib/subscription";
+import { reserveHighlightMessage, refundHighlightPool } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     return NextResponse.json({ success: true, suggestions: result.data.suggestions.slice(0, 4) });
   } catch (error) {
-    if (reserved) await refundHighlightMessage(user.id);
+    if (reserved) await refundHighlightPool(user.id);
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }

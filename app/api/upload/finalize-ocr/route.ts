@@ -3,7 +3,9 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { SOURCE_FILES_BUCKET } from "@/lib/course-source-storage";
-import { createStudioCourse } from "@/lib/studio-course-create";
+import { CourseQuotaError, createStudioCourse } from "@/lib/studio-course-create";
+import { peekCourseCreation } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { extractPdfTextViaOcr, OpenRouterError } from "@/lib/ai/openrouter";
 
@@ -60,6 +62,11 @@ export async function POST(request: NextRequest) {
   if (moduleId !== undefined && (typeof moduleId !== "number" || !Number.isFinite(moduleId))) {
     return NextResponse.json({ success: false, error: "'moduleId' doit être un nombre." }, { status: 400 });
   }
+  // Course quota checked BEFORE the extraction work (reserved for real in createStudioCourse).
+  if (typeof moduleId === "number") {
+    const peek = await peekCourseCreation(user.id);
+    if (!peek.allowed) return quotaBlockedResponse(peek);
+  }
   if (!path.startsWith(`${user.id}/`)) {
     return NextResponse.json({ success: false, error: "Chemin de fichier invalide." }, { status: 403 });
   }
@@ -107,6 +114,7 @@ export async function POST(request: NextRequest) {
       const course = await createStudioCourse({ userId: user.id, moduleId, title: fileName, rawText: text, sourceFileUrl: fileUrl });
       return NextResponse.json({ success: true, course, text, fileName, fileUrl });
     } catch (error) {
+      if (error instanceof CourseQuotaError) return quotaBlockedResponse(error.gate);
       console.error("[upload/finalize-ocr] Échec création du cours:", error);
       return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }

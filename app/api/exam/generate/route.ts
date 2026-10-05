@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requirePaidPlan } from "@/lib/subscription";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { OpenRouterError } from "@/lib/ai/openrouter";
@@ -6,7 +7,8 @@ import { buildExamStaticSystemPrompt, buildExamStyleAdaptedSystemPrompt } from "
 import { ExamGenerationSchema, ExamStyleProfileSchema, type ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
-import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { reserveExam, refundExam } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { ExamPreferencesSchema, buildExamPreferenceDirective, isDefaultExamPreferences, type ExamPreferences } from "@/lib/exam-preferences";
 
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
@@ -128,6 +130,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
   }
+  const paidGate = await requirePaidPlan(user.id);
+  if (!paidGate.allowed) return quotaBlockedResponse(paidGate);
 
   const rl = rateLimit(`exam-generate:${user.id}`, RATE_LIMITS.ai);
   if (!rl.allowed) {
@@ -321,9 +325,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // cache hit).
   let reservedGeneration = false;
   if (!cachedContent && !servedFromVariationPool) {
-    const quotaGate = await reserveGeneration(user);
+    const quotaGate = await reserveExam(user);
     if (!quotaGate.allowed) {
-      return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+      await refundModuleExamRegenerateIfNeeded();
+      return quotaBlockedResponse(quotaGate);
     }
     reservedGeneration = true;
 
@@ -529,7 +534,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         validated = result.data;
       }
     } catch (error) {
-      await refundGeneration(user.id);
+      await refundExam(user.id);
       await refundModuleExamRegenerateIfNeeded();
       if (error instanceof OpenRouterError) {
         return NextResponse.json({ success: false, error: friendlyOpenRouterErrorMessage(error) }, { status: error.status });
@@ -576,7 +581,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // atomic generate-then-save policy. Guarded on reservedGeneration: a
     // cache hit or variation-pool hit never reserved courseCap in the first
     // place, so there is nothing to refund on that path.
-    if (reservedGeneration) await refundGeneration(user.id);
+    if (reservedGeneration) await refundExam(user.id);
     await refundModuleExamRegenerateIfNeeded();
     console.error("[exam/generate] Échec sauvegarde:", insertError);
     return NextResponse.json({ success: false, error: "L'examen a été généré mais n'a pas pu être sauvegardé. Réessaie." }, { status: 500 });

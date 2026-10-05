@@ -26,6 +26,10 @@ import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { NeonRing, SegmentedControl } from "@/components/cyber/primitives";
 import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
 import { useStoredPreference } from "@/components/cyber/hooks";
+import { GenerationConfirmDialog } from "@/components/billing/GenerationConfirmDialog";
+import { usePaywall } from "@/components/billing/PaywallProvider";
+import { notifyUsageChanged, remaining as remainingOf, useUsage } from "@/hooks/useUsage";
+import { PAID_LIMITS } from "@/lib/pricing";
 import { SUMMARY_DEPTHS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type SummaryDepth, type SynthesisOptions } from "@/lib/synthesis-options";
 
 /**
@@ -138,6 +142,10 @@ export default function ModuleWorkspacePage() {
   const { resolvedTheme } = useTheme();
   const { toast } = useToast();
   const { language } = useLanguage();
+  const { usage } = useUsage();
+  const { openPaywall } = usePaywall();
+  // Résumé / Mots-clés / Dictionnaire each cost 1 of the 5 monthly module summaries: confirmed first.
+  const [pendingType, setPendingType] = useState<WorkspaceGenerationType | null>(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const isDark = mounted && resolvedTheme === "dark";
@@ -537,12 +545,32 @@ export default function ModuleWorkspacePage() {
     } finally {
       setLoading(false);
       setSynthesisProgress(null);
+      notifyUsageChanged();
     }
   }
 
-  const handleGenerateGlobalSummary = () => generate("global_summary");
-  const handleGenerateKeywordTable = () => generate("keywords_table");
-  const handleGenerateMedicalDictionary = () => generate("medical_dictionary");
+  const synthesesRemaining = usage?.enforced ? remainingOf(usage.syntheses) : null;
+
+  /** Paid, monthly-capped: trial → paywall, empty quota → limit screen, otherwise the "Attention" dialog. */
+  function requestGenerate(type: WorkspaceGenerationType) {
+    if (selectedIds.size < MIN_COURSES_REQUIRED) {
+      void generate(type); // shows the existing "select more courses" toast, no request sent
+      return;
+    }
+    if (usage?.enforced && usage.isTrial) {
+      openPaywall("trial_feature");
+      return;
+    }
+    if (synthesesRemaining !== null && synthesesRemaining <= 0) {
+      openPaywall("quota_syntheses");
+      return;
+    }
+    setPendingType(type);
+  }
+
+  const handleGenerateGlobalSummary = () => requestGenerate("global_summary");
+  const handleGenerateKeywordTable = () => requestGenerate("keywords_table");
+  const handleGenerateMedicalDictionary = () => requestGenerate("medical_dictionary");
 
   /** Instant, no network call — just swaps which already-fetched result is on screen. */
   function viewHistoryEntry(entry: HistoryEntry) {
@@ -1041,6 +1069,22 @@ export default function ModuleWorkspacePage() {
       <FullscreenViewerModal open={isOutputFullscreen} onClose={() => setIsOutputFullscreen(false)} title={outputTitle}>
         <div className="px-4 pt-4 sm:px-6 md:px-10">{outputBody}</div>
       </FullscreenViewerModal>
+
+      <GenerationConfirmDialog
+        open={pendingType !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingType(null);
+        }}
+        onConfirm={() => {
+          if (pendingType) void generate(pendingType);
+        }}
+        message="Assure-toi que ton module est complet (tous tes cours importés) avant de générer."
+        remaining={synthesesRemaining}
+        cap={usage?.syntheses.cap ?? PAID_LIMITS.synthesesPerMonth}
+        unitLabel="résumés"
+        detail={`Chaque génération — Résumé, Mots-clés ou Dictionnaire — utilise 1 des ${usage?.syntheses.cap ?? PAID_LIMITS.synthesesPerMonth}.`}
+        confirmLabel={pendingType === "keywords_table" ? "Oui, générer les mots-clés" : pendingType === "medical_dictionary" ? "Oui, générer le dictionnaire" : "Oui, générer le résumé"}
+      />
     </div>
   );
 }

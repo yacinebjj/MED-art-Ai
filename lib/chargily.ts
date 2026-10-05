@@ -29,6 +29,15 @@ export interface ChargilyCheckoutMetadata {
   userId: string;
   plan: string;
   email: string;
+  /**
+   * What this payment buys (monetization v2). Absent on checkouts created
+   * before v2 = "individual".
+   *  - "individual": the payer's own plan.
+   *  - "group_leader": the payer buys the 5 Groupe seats at once.
+   *  - "pool_member": the payer's share of a pooled Promo / Groupe (poolId).
+   */
+  kind?: "individual" | "group_leader" | "pool_member";
+  poolId?: string;
 }
 
 export interface ChargilyCheckout {

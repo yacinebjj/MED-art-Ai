@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { claimAudioSession } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import {
   LECTURE_RECORDINGS_BUCKET,
   MAX_CHUNK_INDEX,
@@ -50,6 +52,10 @@ export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
   }
+
+  // Audio → Smart Notes quota (1 / day, 30 / month): one unit per lecture, claimed on its first chunk.
+  const audioGate = await claimAudioSession(user, uploadId);
+  if (!audioGate.allowed) return quotaBlockedResponse(audioGate);
 
   try {
     const supabase = getSupabaseAdmin();

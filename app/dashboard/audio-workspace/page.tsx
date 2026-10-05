@@ -65,6 +65,9 @@ import {
 import { formatClock, stripTimestamps } from "@/lib/lecture-transcript";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
+import { AudioQuotaNotice } from "@/components/billing/UsageNotices";
+import { usePaywall } from "@/components/billing/PaywallProvider";
+import { notifyUsageChanged, useUsage } from "@/hooks/useUsage";
 
 const ACCEPTED = ".mp3,.wav,.m4a,.ogg,.oga,.webm,.flac,.aac,.mp4,audio/*";
 const FORMAT_BADGES = ["MP3", "WAV", "M4A", "OGG", "WEBM", "FLAC"];
@@ -158,6 +161,8 @@ function AudioWorkspaceContent() {
   const searchParams = useSearchParams();
   const viewJobId = searchParams.get("jobId");
   const { toast } = useToast();
+  const { usage } = useUsage();
+  const { openPaywall } = usePaywall();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<StudioAudioPlayerHandle>(null);
   const printRef = useRef<HTMLDivElement>(null);
@@ -415,6 +420,12 @@ function AudioWorkspaceContent() {
   // ── Generation ───────────────────────────────────────────────────────
   async function handleGenerate() {
     if (!file) return;
+    // Paid, capped feature: say so before uploading/transcribing a long recording for nothing.
+    if (usage?.enforced) {
+      if (usage.isTrial) return openPaywall("trial_feature");
+      if (usage.audio.usedThisMonth >= usage.audio.capPerMonth) return openPaywall("quota_audio_monthly");
+      if (usage.audio.usedToday >= usage.audio.capPerDay) return openPaywall("quota_audio_daily");
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     setPhase("running");
@@ -435,6 +446,7 @@ function AudioWorkspaceContent() {
       setJobId(job.jobId);
       setSavedTitle(title.trim() || "Cours enregistré");
       refreshRecentJobs();
+      notifyUsageChanged();
       await pollJob(job.jobId);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -574,6 +586,7 @@ function AudioWorkspaceContent() {
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-black tracking-tight text-foreground">Audio to Smart Notes</h1>
           <p className="truncate text-xs text-muted-foreground">Cours jusqu&apos;à 2 h et plus · transcription Whisper · notes médicales fidèles</p>
+          <AudioQuotaNotice className="mt-1" />
         </div>
         {hasNotes && (
           <span className="hidden items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-700 sm:flex dark:text-emerald-300">

@@ -10,10 +10,11 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import {
   reserveChatMessage,
   refundChatMessage,
-  reserveChatMessageDaily,
+  reserveAssistantTurn,
   reserveHighlightMessage,
   refundHighlightMessage,
 } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
 import {
   CHAT_SYSTEM_PROMPT_BASE,
@@ -365,6 +366,9 @@ export async function POST(request: NextRequest) {
   // Plan quota gate — highlight mode's own pool (chatMessageCap, the
   // free-form pool below, is checked separately further down).
   if (isHighlightMode) {
+    // A selection question is a message too: it uses the free trial's 20.
+    const turn = await reserveAssistantTurn(user);
+    if (!turn.allowed) return quotaBlockedResponse(turn);
     const gate = await reserveHighlightMessage(user);
     if (!gate.allowed) {
       return NextResponse.json({ error: gate.reason }, { status: 403 });
@@ -550,10 +554,13 @@ export async function POST(request: NextRequest) {
   // concurrently would let a later gate's RPC fire — and increment its own
   // counter — even when an earlier gate had already rejected the request,
   // over-charging a student's quota for a message that never actually sent.
+  // Monetization v2: free trial = 20 messages for life (then paywall);
+  // paid = 20 premium-model messages a day, then the free model, silently.
   let useDeepSeekTier = false;
   if (!isHighlightMode) {
-    const dailyGate = await reserveChatMessageDaily(user);
-    useDeepSeekTier = dailyGate.allowed;
+    const turn = await reserveAssistantTurn(user);
+    if (!turn.allowed) return quotaBlockedResponse(turn);
+    useDeepSeekTier = turn.premium;
   }
 
   // Semantic caching REMOVED (product direction) — every chat message now

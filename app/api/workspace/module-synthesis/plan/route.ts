@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requirePaidPlan } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -21,6 +23,8 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser();
     if (!user) return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
+    const paidGate = await requirePaidPlan(user.id);
+    if (!paidGate.allowed) return quotaBlockedResponse(paidGate);
 
     const rl = rateLimit(`workspace-module-synthesis:${user.id}`, RATE_LIMITS.ai);
     if (!rl.allowed) {
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     const synthesisType = type as ModuleSynthesisType;
     const outcome = await planModuleSynthesis(user, moduleId, courseIds as number[], synthesisType);
-    if (!outcome.ok) return NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status });
+    if (!outcome.ok) return ("paywall" in outcome && outcome.paywall ? quotaBlockedResponse({ reason: outcome.error, paywall: outcome.paywall }, outcome.status) : NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status }));
 
     const runToken = outcome.reserved ? createSynthesisRunToken(user.id, moduleId, synthesisType) : null;
     return NextResponse.json({ success: true, missingCourseIds: outcome.missingCourseIds, total: outcome.total, runToken });

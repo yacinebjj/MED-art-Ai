@@ -12,6 +12,7 @@ import { AuthSubmitButton } from "./AuthSubmitButton";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
+import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
 import type { AcademicYear, Specialty } from "@/types/academic";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -144,12 +145,16 @@ export function RegisterForm() {
     const specialtyName = specialties.find((s) => s.id === specialtyId)?.name ?? "";
     const yearName = years.find((y) => y.id === academicYearId)?.name ?? "";
 
+    // Where to land after signing up (e.g. a Promo / Groupe invite link:
+    // /register?next=/dashboard/billing/pool/<code>). Sanitized: never an open redirect.
+    const next = sanitizeRedirectPath(new URLSearchParams(window.location.search).get("next"));
+
     const supabase = createClient();
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: form.email,
       password: form.password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
         data: {
           full_name: form.fullName,
           university: form.university,
@@ -181,7 +186,7 @@ export function RegisterForm() {
         body: JSON.stringify({ specialtyId, academicYearId }),
       });
       setIsLoading(false);
-      router.push("/dashboard");
+      router.push(next);
       router.refresh();
     } else {
       // Confirmation email sent — no session until they click the link, so

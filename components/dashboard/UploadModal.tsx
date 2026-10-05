@@ -15,6 +15,8 @@ import { DriveBrowser } from "@/components/dashboard/DriveBrowser";
 import { useToast } from "@/components/ui/Toast";
 import { OcrSuggestedError } from "@/lib/upload-client";
 import { useCyberTilt } from "@/components/cyber/hooks";
+import { CourseCreditLine } from "@/components/billing/UsageNotices";
+import { notifyUsageChanged } from "@/hooks/useUsage";
 
 // Must match the server-side MAX_FILE_BYTES in app/api/generate-course/route.ts
 // AND app/api/upload/route.ts. Checked here so an oversized file is rejected
@@ -132,6 +134,8 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   // Preload Google's scripts as soon as the modal opens (popup must follow the tap synchronously on mobile).
   useEffect(() => {
     if (open) preloadGoogleDriveScripts();
+    // Fresh course counter every time the modal opens.
+    if (open) notifyUsageChanged();
   }, [open]);
 
   function reset() {
@@ -220,9 +224,11 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     const failed = pending.length - succeeded;
     if (failed === 0) {
       toast({ variant: "success", title: succeeded > 1 ? `${succeeded} sources importées` : "Source importée" });
+      notifyUsageChanged();
       handleOpenChange(false);
     } else if (succeeded > 0) {
       toast({ variant: "info", title: `${succeeded} importée(s), ${failed} en échec`, description: "Les fichiers en échec restent dans la liste." });
+      notifyUsageChanged();
     } else {
       toast({ variant: "error", title: "Le téléversement a échoué", description: "Vérifie les fichiers en rouge." });
     }
@@ -252,6 +258,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
       const result = await (onSubmitText ?? defaultSubmitText)(content, courseTitle);
       onUploaded(result);
       toast({ variant: "success", title: "Source importée" });
+      notifyUsageChanged();
       handleOpenChange(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "L'import a échoué.";
@@ -314,6 +321,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
       const result = await (onSubmitText ?? defaultSubmitText)(data.text, picked.name);
       onUploaded(result);
       toast({ variant: "success", title: "Source importée depuis Drive" });
+      notifyUsageChanged();
       handleOpenChange(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "L'import depuis Google Drive a échoué.";
@@ -340,6 +348,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
               <DialogDescription>{description ?? "Importe un document, connecte Google Drive, colle du texte ou un lien pour créer un espace de travail."}</DialogDescription>
             </div>
           </div>
+          <CourseCreditLine className="mt-3" />
         </DialogHeader>
 
         <div className="relative mt-2 grid grid-cols-4 gap-2 sm:gap-3">

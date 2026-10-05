@@ -1,14 +1,40 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { BookOpenText, CalendarClock, CheckCircle2, CreditCard, Download, FileQuestion, Gauge, MessageSquare, Receipt, ShieldCheck, Sparkles, Stethoscope, XCircle } from "lucide-react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  ArrowRight,
+  AudioLines,
+  BookOpenText,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  Copy,
+  CreditCard,
+  Download,
+  FileQuestion,
+  Gauge,
+  Infinity as InfinityIcon,
+  Layers,
+  Lock,
+  MessageSquare,
+  Receipt,
+  RotateCcw,
+  ShieldCheck,
+  Undo2,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
-import { PricingTierCard } from "@/components/pricing/PricingTierCard";
+import { PromoMonthlyOnlyCard } from "@/components/pricing/PricingTierCard";
+import { PlanCard, planActionKey, type PlanAction } from "@/components/billing/PlanCard";
 import { CyberHeader, CyberPanel, CyberStage, NeonRing } from "@/components/cyber/primitives";
-import { PLANS, getPlansForCycle, formatDZD, type PlanId, type BillingCycle } from "@/lib/pricing";
+import { FREE_TRIAL, PLANS, REFUND_DELAY_LABEL, getPlansForCycle, formatDZD, type PlanId, type BillingCycle } from "@/lib/pricing";
+import type { UsageSnapshot } from "@/lib/subscription";
+import type { PoolView } from "@/lib/billing-pools";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tSettings } from "@/lib/translations/settings";
@@ -23,23 +49,13 @@ interface SubscriptionInfo {
   periodStart?: string | null;
   effectivePlan: PlanId;
   effectivePlanLabel: string;
-  unlimitedThisPeriod: boolean;
-  coursesUsed: number;
-  courseCap: number;
-  highlightMessagesUsed: number;
-  highlightMessageCap: number;
-  chatMessagesUsed?: number;
-  chatMessageCap?: number;
-  remediationUsed?: number;
-  remediationCap?: number;
-  examRegenerationsUsed?: number;
-  examRegenerationCap?: number;
 }
 
-interface TrialInfo {
-  active: boolean;
-  daysRemaining: number;
-  endsAt: string | null;
+interface SubscriptionResponse {
+  subscription?: SubscriptionInfo | null;
+  freeTrial?: { courses: number; messages: number };
+  usage?: UsageSnapshot | null;
+  isAdmin?: boolean;
 }
 
 interface Invoice {
@@ -68,6 +84,11 @@ function formatBillingCycle(durationMonths: number): string {
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+}
+
+async function readError(res: Response, fallback: string): Promise<string> {
+  const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+  return typeof data?.error === "string" && data.error ? data.error : fallback;
 }
 
 /** Builds a printable receipt (HTML file, "Imprimer → PDF") from a real paid payment row. */
@@ -114,25 +135,256 @@ function PaymentMethodChips() {
   );
 }
 
-function UsageGauge({ icon: Icon, label, used, cap, unlimited }: { icon: typeof Gauge; label: string; used: number; cap: number; unlimited: boolean }) {
-  const ratio = unlimited || cap <= 0 ? 0 : Math.min(1, used / cap);
-  const tone = ratio >= 0.9 ? "#fb7185" : ratio >= 0.7 ? "#fbbf24" : "#22d3ee";
+// ─── « Ta consommation » ─────────────────────────────────────────────────
+
+function UsageBar({
+  icon: Icon,
+  label,
+  used,
+  cap,
+  caption,
+  hint,
+  lockedText,
+}: {
+  icon: typeof Gauge;
+  label: string;
+  used: number;
+  cap: number;
+  caption: string;
+  hint?: string;
+  /** Shown instead of the bar when the feature is not part of the current plan (cap 0). */
+  lockedText?: string;
+}) {
+  const locked = cap <= 0;
+  const ratio = locked ? 0 : Math.min(1, used / cap);
+  const remaining = Math.max(0, cap - used);
+  const tone = ratio >= 1 ? "bg-rose-400" : ratio >= 0.8 ? "bg-amber-400" : "bg-gradient-to-r from-cyan-400 to-violet-500";
+
   return (
-    <CyberPanel className="flex items-center gap-4 p-4">
-      <NeonRing value={ratio} size={64} stroke={6} from={tone} to="#8b5cf6" glow={ratio > 0} aria-label={`${label} : ${used} / ${unlimited ? "illimité" : cap}`}>
-        <Icon className="h-5 w-5 text-cyan-300" />
-      </NeonRing>
-      <div className="min-w-0">
-        <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</p>
-        <p className="mt-1 text-xl font-black tabular-nums text-white">
-          {used}
-          <span className="text-sm font-semibold text-slate-500"> / {unlimited ? "∞" : cap}</span>
+    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="flex min-w-0 items-center gap-2 text-sm font-bold text-white">
+          <Icon className="h-4 w-4 shrink-0 text-cyan-300" />
+          <span className="truncate">{label}</span>
         </p>
-        <p className="text-[11px] text-slate-500">{unlimited ? "Illimité pendant l'essai" : cap > 0 ? `${Math.max(0, cap - used)} restant${cap - used > 1 ? "s" : ""}` : "Non inclus"}</p>
+        {locked ? (
+          <Lock className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+        ) : (
+          <p className="shrink-0 text-sm font-black tabular-nums text-white">
+            {used}
+            <span className="text-xs font-semibold text-slate-500"> / {cap}</span>
+          </p>
+        )}
       </div>
-    </CyberPanel>
+      {locked ? (
+        <p className="mt-3 text-xs text-slate-400">{lockedText ?? "Non inclus dans ta formule"}</p>
+      ) : (
+        <>
+          <div
+            className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10"
+            role="progressbar"
+            aria-label={label}
+            aria-valuemin={0}
+            aria-valuemax={cap}
+            aria-valuenow={Math.min(used, cap)}
+          >
+            <div className={cn("h-full rounded-full transition-[width] duration-500", tone)} style={{ width: `${Math.round(ratio * 100)}%` }} />
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">
+            {remaining > 0 ? `${remaining} restant${remaining > 1 ? "s" : ""}` : "Limite atteinte"} · {caption}
+          </p>
+        </>
+      )}
+      {hint && <p className="mt-1 text-[11px] leading-snug text-slate-500">{hint}</p>}
+    </div>
   );
 }
+
+function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: boolean }) {
+  if (!loaded) {
+    return (
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-24 animate-pulse rounded-2xl bg-white/[0.04]" />
+        ))}
+      </div>
+    );
+  }
+  if (!usage) {
+    return <p className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-slate-400">Ta consommation n&apos;est pas disponible pour le moment. Réessaie dans un instant.</p>;
+  }
+
+  const trial = usage.isTrial;
+  const lockedPaid = "Inclus dans les formules payantes";
+
+  return (
+    <>
+      <div className="mt-3 flex flex-col gap-1 text-xs text-slate-400">
+        {trial ? (
+          <p className="flex items-center gap-1.5">
+            <CalendarClock className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+            Essai unique : {FREE_TRIAL.courses} cours + {FREE_TRIAL.messages} messages offerts. Ces compteurs ne se renouvellent pas.
+          </p>
+        ) : (
+          <>
+            {usage.monthResetsAt && (
+              <p className="flex items-center gap-1.5">
+                <RotateCcw className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+                Compteurs du mois remis à zéro le <b className="text-slate-200">{formatFrenchDate(usage.monthResetsAt)}</b>
+              </p>
+            )}
+            <p className="flex items-center gap-1.5">
+              <RotateCcw className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+              Messages premium et Audio : remis à zéro chaque jour
+            </p>
+            {usage.periodEnd && (
+              <p className="flex items-center gap-1.5">
+                <CalendarClock className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+                Fin de ta période : <b className="text-slate-200">{formatFrenchDate(usage.periodEnd)}</b>
+              </p>
+            )}
+          </>
+        )}
+        {!usage.enforced && <p className="text-slate-500">Les compteurs sont en cours d&apos;activation : les limites ne sont pas encore appliquées.</p>}
+      </div>
+
+      {trial && usage.trialExhausted && (
+        <div className="mt-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          Ton essai gratuit est terminé. Choisis une formule ci-dessus pour continuer — dès 700 DA par personne avec la Promo Cohorte.
+        </div>
+      )}
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <UsageBar
+          icon={BookOpenText}
+          label="Cours créés"
+          used={usage.courses.used}
+          cap={usage.courses.cap}
+          caption={usage.courses.lifetime ? "essai, à vie" : "ce mois-ci"}
+          hint="Un cours supprimé ne rend pas le crédit."
+        />
+        <UsageBar
+          icon={MessageSquare}
+          label={usage.messages.perDay ? "Messages IA premium" : "Messages Assistant / Copilot"}
+          used={usage.messages.used}
+          cap={usage.messages.cap}
+          caption={usage.messages.perDay ? "aujourd'hui" : "essai, à vie"}
+          hint={usage.messages.perDay ? "Au-delà, bascule automatique sur le modèle standard — tu n'es jamais bloqué(e)." : undefined}
+        />
+        <UsageBar icon={FileQuestion} label="Examens de module" used={usage.exams.used} cap={usage.exams.cap} caption="ce mois-ci" lockedText={trial ? lockedPaid : undefined} />
+        <UsageBar
+          icon={Layers}
+          label="Résumés de module"
+          used={usage.syntheses.used}
+          cap={usage.syntheses.cap}
+          caption="ce mois-ci"
+          hint="Chaque génération Résumé, Mots-clés ou Dictionnaire compte pour 1 ; les résultats déjà en cache sont gratuits."
+          lockedText={trial ? lockedPaid : undefined}
+        />
+        <UsageBar
+          icon={AudioLines}
+          label="Audio → Smart Notes (jour)"
+          used={usage.audio.usedToday}
+          cap={usage.audio.capPerDay}
+          caption="aujourd'hui"
+          lockedText={trial ? lockedPaid : undefined}
+        />
+        <UsageBar
+          icon={AudioLines}
+          label="Audio → Smart Notes (mois)"
+          used={usage.audio.usedThisMonth}
+          cap={usage.audio.capPerMonth}
+          caption="ce mois-ci"
+          lockedText={trial ? lockedPaid : undefined}
+        />
+      </div>
+      <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-400">
+        <InfinityIcon className="h-4 w-4 shrink-0 text-emerald-300" />
+        Flashcards, To-Do et Notes : illimités.
+      </p>
+    </>
+  );
+}
+
+// ─── « Tes groupes » ─────────────────────────────────────────────────────
+
+function poolStatusBadge(pool: PoolView): { label: string; variant: "success" | "primary" | "danger" | "warning" | "outline" } {
+  if (pool.me.refund?.status === "pending") return { label: "Remboursement en cours", variant: "warning" };
+  if (pool.me.refund?.status === "refunded") return { label: "Remboursé", variant: "outline" };
+  if (pool.status === "complete") return { label: "Actif", variant: "success" };
+  if (pool.status === "expired") return { label: "Expiré", variant: "danger" };
+  return { label: pool.mode === "leader" ? "Places à distribuer" : "En attente des membres", variant: "primary" };
+}
+
+function PoolItem({ pool, copied, onCopy }: { pool: PoolView; copied: boolean; onCopy: (code: string) => void }) {
+  const badge = poolStatusBadge(pool);
+  const ratio = pool.size > 0 ? Math.min(1, pool.confirmed / pool.size) : 0;
+  const kindLabel = pool.kind === "promo" ? "Promo Cohorte" : "Groupe";
+  const modeLabel = pool.mode === "leader" ? "payé en une fois" : "chacun paie sa part";
+
+  return (
+    <li className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm font-bold text-white">
+            <Users className="h-4 w-4 shrink-0 text-cyan-300" />
+            {kindLabel}
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {pool.planLabel} · {modeLabel} · {formatDZD(pool.pricePerMember)} / pers.
+          </p>
+        </div>
+        <Badge variant={badge.variant}>{badge.label}</Badge>
+      </div>
+
+      <div className="mt-3 flex items-center gap-3">
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-label={`${kindLabel} : ${pool.confirmed} sur ${pool.size}`} aria-valuemin={0} aria-valuemax={pool.size} aria-valuenow={pool.confirmed}>
+          <div
+            className={cn("h-full rounded-full transition-[width] duration-500", pool.status === "complete" ? "bg-emerald-400" : "bg-gradient-to-r from-cyan-400 to-violet-500")}
+            style={{ width: `${Math.round(ratio * 100)}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-sm font-black tabular-nums text-white">
+          {pool.confirmed}/{pool.size}
+        </span>
+      </div>
+
+      <p className="mt-2 text-[11px] text-slate-400">
+        {pool.status === "open" && pool.mode === "pooled" && `L'abonnement démarre pour tous à ${pool.size}/${pool.size}. Date limite : ${formatFrenchDate(pool.expiresAt)}.`}
+        {pool.status === "open" && pool.mode === "leader" && `Tes amis activent leur place avec ton code.`}
+        {pool.status === "complete" && (pool.periodEnd ? `Actif jusqu'au ${formatFrenchDate(pool.periodEnd)}.` : "Actif pour tous les membres.")}
+        {pool.status === "expired" && "Le groupe n'a pas été complété à temps."}
+      </p>
+      {pool.me.refund && (
+        <p className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-200">
+          <Undo2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {pool.me.refund.status === "pending"
+            ? `Remboursement de ${formatDZD(pool.me.refund.amount)} déclenché automatiquement, reçu sous ${REFUND_DELAY_LABEL}.`
+            : `Remboursement de ${formatDZD(pool.me.refund.amount)} envoyé${pool.me.refund.refundedAt ? ` le ${formatFrenchDate(pool.me.refund.refundedAt)}` : ""}.`}
+        </p>
+      )}
+
+      {pool.mode === "leader" && pool.isCreator && (
+        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="min-w-0 text-xs text-slate-400">
+            Code d&apos;invitation : <span className="break-all font-mono text-sm font-bold tracking-wider text-white">{pool.code}</span>
+          </p>
+          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => onCopy(pool.code)}>
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? "Lien copié" : "Copier le lien d'invitation"}
+          </Button>
+        </div>
+      )}
+
+      <Link href={`/dashboard/billing/pool/${encodeURIComponent(pool.code)}`} className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-cyan-300 hover:text-cyan-200">
+        Suivre ce groupe
+        <ArrowRight className="h-3.5 w-3.5" />
+      </Link>
+    </li>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────
 
 export default function BillingPage() {
   return (
@@ -143,123 +395,175 @@ export default function BillingPage() {
 }
 
 function BillingPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const status = searchParams.get("status");
   const { user } = useAuth();
   const { language } = useLanguage();
 
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
-  const [trial, setTrial] = useState<TrialInfo | null>(null);
+  const [usage, setUsage] = useState<UsageSnapshot | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
-  const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
+  const [pools, setPools] = useState<PoolView[] | null>(null);
+  const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [plansOpen, setPlansOpen] = useState(false);
-  const [cycle, setCycle] = useState<BillingCycle>("annual");
+  const [plansOpenOverride, setPlansOpenOverride] = useState<boolean | null>(null);
+  const [cycle, setCycle] = useState<BillingCycle>("monthly");
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     fetch("/api/subscription")
-      .then((res) => res.json())
+      .then((res) => res.json() as Promise<SubscriptionResponse>)
       .then((data) => {
         if (cancelled) return;
         setSubscription(data.subscription ?? null);
-        setTrial(data.trial ?? null);
+        setUsage(data.usage ?? null);
+        setIsAdmin(data.isAdmin === true);
       })
       .catch(() => undefined)
       .finally(() => !cancelled && setLoaded(true));
     fetch("/api/billing/invoices")
       .then((res) => res.json())
-      .then((data) => !cancelled && setInvoices(Array.isArray(data?.invoices) ? data.invoices : []))
+      .then((data: { invoices?: unknown }) => !cancelled && setInvoices(Array.isArray(data?.invoices) ? (data.invoices as Invoice[]) : []))
       .catch(() => !cancelled && setInvoices([]));
+    fetch("/api/billing/pools")
+      .then((res) => res.json())
+      .then((data: { success?: boolean; pools?: unknown }) => !cancelled && setPools(data?.success && Array.isArray(data.pools) ? (data.pools as PoolView[]) : []))
+      .catch(() => !cancelled && setPools([]));
     return () => {
       cancelled = true;
     };
   }, [user]);
 
-  async function handleSubscribe(plan: PlanId) {
-    if (!user) return;
+  async function handleAction(action: PlanAction) {
+    if (!user || loadingKey) return;
     setError(null);
-    setLoadingPlan(plan);
+    setLoadingKey(planActionKey(action));
     try {
+      if (action.type === "pool") {
+        const res = await fetch("/api/billing/pools", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: action.kind, cycle: action.cycle }),
+        });
+        if (!res.ok) throw new Error(await readError(res, "Impossible de créer le groupe pour le moment."));
+        const data = (await res.json()) as { success?: boolean; code?: unknown; error?: unknown };
+        if (!data.success || typeof data.code !== "string") throw new Error(typeof data.error === "string" ? data.error : "Impossible de créer le groupe pour le moment.");
+        router.push(`/dashboard/billing/pool/${encodeURIComponent(data.code)}`);
+        return;
+      }
       const res = await fetch("/api/chargily/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify(action.type === "leader" ? { plan: action.plan, mode: "leader" } : { plan: action.plan }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Impossible de créer le paiement.");
+      if (!res.ok) throw new Error(await readError(res, "Impossible de créer le paiement."));
+      const data = (await res.json()) as { checkoutUrl?: unknown };
+      if (typeof data.checkoutUrl !== "string") throw new Error("Impossible de créer le paiement.");
       window.location.href = data.checkoutUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Impossible de créer le paiement.");
-      setLoadingPlan(null);
+      setLoadingKey(null);
+    }
+  }
+
+  async function copyInvite(code: string) {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/join/${encodeURIComponent(code)}`);
+      setCopiedCode(code);
+      window.setTimeout(() => setCopiedCode((current) => (current === code ? null : current)), 1800);
+    } catch {
+      setError("Copie impossible sur cet appareil — recopie le code affiché.");
     }
   }
 
   const currentPlanId = subscription?.effectivePlan ?? "freemium";
   const currentPlan = PLANS[currentPlanId];
   const isPaidActive = Boolean(subscription?.active && subscription.effectivePlan === subscription.plan && subscription.periodEnd);
-  const unlimited = Boolean(subscription?.unlimitedThisPeriod || trial?.active);
+  const isExpired = Boolean(subscription && subscription.effectivePlan !== subscription.plan);
+  const plansOpen = plansOpenOverride ?? (loaded && !isPaidActive);
+  const trialMessagesLeft = usage?.isTrial ? Math.max(0, usage.messages.cap - usage.messages.used) : null;
 
-  // Countdown to renewal (paid) or to the end of the trial — real dates only.
   const countdown = useMemo(() => {
-    if (isPaidActive && subscription?.periodEnd) {
-      const end = new Date(subscription.periodEnd).getTime();
-      const start = subscription.periodStart ? new Date(subscription.periodStart).getTime() : end - currentPlan.durationMonths * 30 * DAY_MS;
-      const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / DAY_MS));
-      const ratio = end > start ? Math.min(1, Math.max(0, (end - Date.now()) / (end - start))) : 0;
-      return { daysLeft, ratio, label: `Renouvellement le ${formatFrenchDate(subscription.periodEnd)}` };
-    }
-    if (trial?.active) {
-      return { daysLeft: trial.daysRemaining, ratio: Math.min(1, trial.daysRemaining / 7), label: trial.endsAt ? `Essai jusqu'au ${formatFrenchDate(trial.endsAt)}` : "Essai en cours" };
-    }
-    return null;
-  }, [isPaidActive, subscription, trial, currentPlan.durationMonths]);
+    if (!isPaidActive || !subscription?.periodEnd) return null;
+    const end = new Date(subscription.periodEnd).getTime();
+    const start = subscription.periodStart ? new Date(subscription.periodStart).getTime() : end - currentPlan.durationMonths * 30 * DAY_MS;
+    const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / DAY_MS));
+    const ratio = end > start ? Math.min(1, Math.max(0, (end - Date.now()) / (end - start))) : 0;
+    return { daysLeft, ratio, label: `Fin de période le ${formatFrenchDate(subscription.periodEnd)}` };
+  }, [isPaidActive, subscription, currentPlan.durationMonths]);
 
   const statusBadge = isPaidActive
     ? { label: "Actif · payé", variant: "success" as const }
-    : trial?.active
-      ? { label: "Essai illimité", variant: "primary" as const }
-      : subscription && subscription.effectivePlan !== subscription.plan
-        ? { label: "Expiré", variant: "danger" as const }
-        : { label: "Gratuit", variant: "outline" as const };
+    : isExpired
+      ? { label: "Expiré", variant: "danger" as const }
+      : usage?.isTrial && usage.trialExhausted
+        ? { label: "Essai terminé", variant: "warning" as const }
+        : usage?.isTrial
+          ? { label: "Essai gratuit", variant: "primary" as const }
+          : { label: "Gratuit", variant: "outline" as const };
+
+  const ringValue = countdown ? countdown.ratio : trialMessagesLeft !== null && usage ? (usage.messages.cap > 0 ? trialMessagesLeft / usage.messages.cap : 0) : 0;
+  const plansForCycle = getPlansForCycle(cycle);
 
   return (
     <CyberStage className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">
       <CyberHeader
         icon={CreditCard}
-        kicker="Cockpit abonnement"
+        kicker="Ton abonnement"
         title={tSettings("subscriptionTitle", language)}
         subtitle="Paiement sécurisé en DZD via Edahabia (Algérie Poste) ou carte CIB, propulsé par Chargily Pay."
+        actions={
+          isAdmin ? (
+            <Link href="/dashboard/admin/refunds" className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-slate-300 hover:bg-white/10 hover:text-white">
+              <Undo2 className="h-3.5 w-3.5" />
+              Remboursements (admin)
+            </Link>
+          ) : undefined
+        }
       />
 
       <div className="mt-6 space-y-4">
         {status === "success" && (
-          <div className="flex items-center gap-3 rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            Paiement reçu ! Ton abonnement sera activé dans quelques instants (confirmation automatique).
+          <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Paiement reçu ! Ton abonnement sera activé dans quelques instants (confirmation automatique). Si tu as payé pour un Groupe, ton code
+              d&apos;invitation apparaît dans « Tes groupes ».
+            </span>
           </div>
         )}
         {status === "failure" && (
-          <div className="flex items-center gap-3 rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">
-            <XCircle className="h-4 w-4 shrink-0" />
+          <div className="flex items-start gap-3 rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
             Le paiement a échoué ou a été annulé. Aucun montant n&apos;a été débité.
           </div>
         )}
-        {error && <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
+        {error && !plansOpen && <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
       </div>
 
-      {/* ── Status + countdown ─────────────────────────────────────────── */}
+      {/* ── Status ─────────────────────────────────────────────────────── */}
       <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
         <CyberPanel laser="spin" accent={isPaidActive ? "emerald" : "cyan"} className="p-5 sm:p-6">
           {!loaded ? (
             <div className="h-40 animate-pulse rounded-2xl bg-white/[0.04]" />
           ) : (
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <NeonRing value={countdown?.ratio ?? 0} size={128} stroke={10} ticks={40} from={isPaidActive ? "#34d399" : "#22d3ee"} to="#8b5cf6" aria-label={countdown ? `${countdown.daysLeft} jours restants` : "Formule gratuite"}>
-                <span className="text-3xl font-black tabular-nums text-white">{countdown ? countdown.daysLeft : "—"}</span>
-                <span className="mt-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">{countdown ? "jours" : "sans échéance"}</span>
+              <NeonRing
+                value={ringValue}
+                size={128}
+                stroke={10}
+                ticks={40}
+                from={isPaidActive ? "#34d399" : "#22d3ee"}
+                to="#8b5cf6"
+                aria-label={countdown ? `${countdown.daysLeft} jours restants` : trialMessagesLeft !== null ? `${trialMessagesLeft} messages offerts restants` : "Formule gratuite"}
+              >
+                <span className="text-3xl font-black tabular-nums text-white">{countdown ? countdown.daysLeft : trialMessagesLeft ?? "—"}</span>
+                <span className="mt-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">{countdown ? "jours" : trialMessagesLeft !== null ? "messages" : "sans échéance"}</span>
               </NeonRing>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -268,18 +572,27 @@ function BillingPageContent() {
                 </div>
                 <p className="mt-2 text-2xl font-black text-white">{currentPlan.label}</p>
                 <p className="mt-1 text-sm text-slate-300">
-                  <b className="text-white">{formatDZD(currentPlan.priceDZD)}</b> / {formatBillingCycle(currentPlan.durationMonths)}
+                  {currentPlanId === "freemium" ? (
+                    <>
+                      {FREE_TRIAL.courses} cours + {FREE_TRIAL.messages} messages offerts, une seule fois
+                    </>
+                  ) : (
+                    <>
+                      <b className="text-white">{formatDZD(currentPlan.priceDZD)}</b>
+                      {currentPlan.seats > 1 ? " / personne" : ""} / {formatBillingCycle(currentPlan.durationMonths)}
+                    </>
+                  )}
                 </p>
                 <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
-                  <CalendarClock className="h-3.5 w-3.5 text-cyan-300" />
+                  <CalendarClock className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
                   {countdown
-                    ? countdown.label
-                    : subscription && subscription.effectivePlan !== subscription.plan
-                      ? `Ta formule « ${subscription.planLabel} » a expiré — tu es repassé(e) en Freemium`
-                      : "Formule gratuite — pas de renouvellement"}
+                    ? `${countdown.label} — sans renouvellement automatique`
+                    : isExpired && subscription
+                      ? `Ta formule « ${subscription.planLabel} » a expiré`
+                      : "Aucun paiement enregistré, aucun prélèvement automatique"}
                 </p>
-                <Button variant="outline" size="sm" className="mt-4 w-full sm:w-auto" onClick={() => setPlansOpen((v) => !v)}>
-                  {plansOpen ? tSettings("hidePlans", language) : tSettings("changeSubscription", language)}
+                <Button variant="outline" size="sm" className="mt-4 w-full sm:w-auto" onClick={() => setPlansOpenOverride(!plansOpen)}>
+                  {plansOpen ? tSettings("hidePlans", language) : isPaidActive ? tSettings("changeSubscription", language) : "Voir les formules"}
                 </Button>
               </div>
             </div>
@@ -298,66 +611,61 @@ function BillingPageContent() {
         </CyberPanel>
       </div>
 
+      {/* ── Plan picker ────────────────────────────────────────────────── */}
       {plansOpen && (
-        <div className="mt-6">
-          <div className="flex justify-center">
+        <section className="mt-8" aria-labelledby="billing-plans-title">
+          <h2 id="billing-plans-title" className="text-center text-lg font-black text-white">
+            Choisis ta formule
+          </h2>
+          <div className="mt-4 flex justify-center">
             <BillingCycleToggle value={cycle} onChange={setCycle} />
           </div>
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
-            {getPlansForCycle(cycle).map((plan) => {
-              const isCurrentPlan = subscription?.effectivePlan === plan.id;
-              return (
-                <PricingTierCard
-                  key={plan.id}
-                  plan={plan}
-                  ctaSlot={
-                    <Button
-                      size="lg"
-                      variant={isCurrentPlan ? "outline" : plan.featured ? "primary" : "outline"}
-                      className="mt-6 w-full"
-                      onClick={() => handleSubscribe(plan.id)}
-                      isLoading={loadingPlan === plan.id}
-                      disabled={loadingPlan !== null}
-                    >
-                      {isCurrentPlan ? "Renouveler" : "Souscrire"}
-                    </Button>
-                  }
-                >
-                  {plan.tier === "promo" && (
-                    <p className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                      Tarif réservé aux cohortes universitaires — une vérification de ton éligibilité pourra t&apos;être demandée.
-                    </p>
-                  )}
-                </PricingTierCard>
-              );
-            })}
+          {error && <div className="mt-4 rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
+          <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
+            {plansForCycle.map((plan) => (
+              <PlanCard key={plan.id} plan={plan} isCurrentPlan={isPaidActive && subscription?.effectivePlan === plan.id} loadingKey={loadingKey} onAction={handleAction} />
+            ))}
+            {!plansForCycle.some((plan) => plan.tier === "promo") && <PromoMonthlyOnlyCard onShowMonthly={() => setCycle("monthly")} />}
           </div>
-        </div>
+          <p className="mt-4 text-center text-[11px] text-slate-500">Aucun renouvellement automatique : tu paies une fois pour la durée choisie, puis tu décides.</p>
+        </section>
       )}
 
-      {/* ── Real quota gauges ──────────────────────────────────────────── */}
-      <div className="mt-8">
+      {/* ── Ta consommation ────────────────────────────────────────────── */}
+      <CyberPanel className="mt-8 p-5 sm:p-6">
         <h2 className="flex items-center gap-2 text-lg font-black text-white">
           <Gauge className="h-5 w-5 text-cyan-300" />
-          {tSettings("usageStatsTitle", language)}
+          Ta consommation
         </h2>
-        <p className="mt-1 text-xs text-slate-400">Compteurs réels de ta période en cours (remis à zéro chaque mois).</p>
-        {!loaded ? (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="h-24 animate-pulse rounded-3xl bg-white/[0.04]" />
+        <UsagePanel usage={usage} loaded={loaded} />
+      </CyberPanel>
+
+      {/* ── Tes groupes ────────────────────────────────────────────────── */}
+      <CyberPanel className="mt-8 p-5 sm:p-6">
+        <h2 className="flex items-center gap-2 text-lg font-black text-white">
+          <Users className="h-5 w-5 text-cyan-300" />
+          Tes groupes
+        </h2>
+        <p className="mt-1 text-xs text-slate-400">Tes formules Groupe et Promo Cohorte, et où en est chaque jauge.</p>
+        {pools === null ? (
+          <div className="mt-4 space-y-2">
+            {[0, 1].map((i) => (
+              <div key={i} className="h-24 animate-pulse rounded-2xl bg-white/[0.04]" />
             ))}
           </div>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <UsageGauge icon={BookOpenText} label="Cours générés" used={subscription?.coursesUsed ?? 0} cap={subscription?.courseCap ?? currentPlan.courseCap} unlimited={unlimited} />
-            <UsageGauge icon={Sparkles} label="Questions sur sélection" used={subscription?.highlightMessagesUsed ?? 0} cap={subscription?.highlightMessageCap ?? currentPlan.highlightMessageCap} unlimited={unlimited} />
-            <UsageGauge icon={MessageSquare} label="Messages assistant" used={subscription?.chatMessagesUsed ?? 0} cap={subscription?.chatMessageCap ?? currentPlan.chatMessageCap} unlimited={unlimited} />
-            <UsageGauge icon={Stethoscope} label="Plans de remédiation" used={subscription?.remediationUsed ?? 0} cap={subscription?.remediationCap ?? currentPlan.remediationCap} unlimited={unlimited} />
-            <UsageGauge icon={FileQuestion} label="Régénérations d'examen" used={subscription?.examRegenerationsUsed ?? 0} cap={subscription?.examRegenerationCap ?? 5} unlimited={false} />
+        ) : pools.length === 0 ? (
+          <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center">
+            <Users className="h-7 w-7 text-slate-500" />
+            <p className="text-sm text-slate-400">Aucun groupe pour l&apos;instant. Choisis Groupe ou Promo Cohorte pour réviser à plusieurs, moins cher.</p>
           </div>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {pools.map((pool) => (
+              <PoolItem key={pool.code} pool={pool} copied={copiedCode === pool.code} onCopy={copyInvite} />
+            ))}
+          </ul>
         )}
-      </div>
+      </CyberPanel>
 
       {/* ── Invoices (real Chargily payments) ──────────────────────────── */}
       <CyberPanel className="mt-8 p-5 sm:p-6">

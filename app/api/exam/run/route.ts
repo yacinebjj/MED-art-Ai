@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { requirePaidPlan } from "@/lib/subscription";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -7,7 +8,8 @@ import { buildExamStaticSystemPrompt, buildExamStyleAdaptedSystemPrompt, type Ex
 import { ExamGenerationSchema, ExamQuestionSchema, ExamStyleProfileSchema, type ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
-import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { reserveExam, refundExam } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { ExamPreferencesSchema, buildExamPreferenceDirective, isDefaultExamPreferences, type ExamPreferences } from "@/lib/exam-preferences";
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
 import { lookupExamVariations, insertExamVariation, recordExamVariationHit } from "@/lib/exam-content-variations";
@@ -267,6 +269,8 @@ function toExamContent(questions: ExamQuestion[]): unknown {
 // ─── plan ────────────────────────────────────────────────────────────────
 
 async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<typeof getAuthenticatedUser>>>, params: RunParams): Promise<NextResponse> {
+  const paidGate = await requirePaidPlan(user.id);
+  if (!paidGate.allowed) return quotaBlockedResponse(paidGate);
   const rl = rateLimit(`exam-generate:${userId}`, RATE_LIMITS.ai);
   if (!rl.allowed) {
     return NextResponse.json({ success: false, error: "Trop de requêtes — réessaie dans quelques minutes." }, { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rl)) } });
@@ -333,10 +337,10 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     }
   }
 
-  const quota = await reserveGeneration(user);
+  const quota = await reserveExam(user);
   if (!quota.allowed) {
     await undoRegeneration();
-    return bad(quota.reason ?? "Quota de générations atteint.", 403);
+    return quotaBlockedResponse(quota);
   }
 
   try {
@@ -387,7 +391,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
       },
     });
   } catch (error) {
-    await refundGeneration(userId);
+    await refundExam(userId);
     await undoRegeneration();
     console.error("[exam/run] Échec du plan:", error);
     return bad(errorMessage(error), 500);
@@ -514,7 +518,7 @@ async function handleAssemble(userId: string, params: RunParams, runToken: strin
 
 async function handleRefund(userId: string, params: RunParams, runToken: string): Promise<NextResponse> {
   if (!markRun(runToken, "refunded")) return NextResponse.json({ success: true, refunded: false });
-  await refundGeneration(userId);
+  await refundExam(userId);
   if (params.isVariation) await refundRegeneration(getSupabaseAdmin(), userId);
   const regenerationsRemaining = params.isVariation ? await regenerationsRemainingFor(getSupabaseAdmin(), userId) : undefined;
   return NextResponse.json({ success: true, refunded: true, ...(regenerationsRemaining !== undefined ? { regenerationsRemaining } : {}) });

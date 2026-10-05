@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requirePaidPlan } from "@/lib/subscription";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -79,6 +81,8 @@ async function handlePost(request: NextRequest, { params }: { params: { id: stri
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
   }
+  const paidGate = await requirePaidPlan(user.id);
+  if (!paidGate.allowed) return quotaBlockedResponse(paidGate);
 
   const rl = rateLimit(`modules-global-summary:${user.id}`, RATE_LIMITS.ai);
   if (!rl.allowed) {
@@ -117,7 +121,7 @@ async function handlePost(request: NextRequest, { params }: { params: { id: stri
 
   const outcome = await runModuleSynthesis(user, moduleId, courseIds, "global_summary");
   if (!outcome.ok) {
-    return NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status });
+    return ("paywall" in outcome && outcome.paywall ? quotaBlockedResponse({ reason: outcome.error, paywall: outcome.paywall }, outcome.status) : NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status }));
   }
 
   const generatedAt = new Date().toISOString();

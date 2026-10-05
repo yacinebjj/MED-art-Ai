@@ -3,6 +3,7 @@ import { verifyChargilySignature, type ChargilyCheckout } from "@/lib/chargily";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { activateSubscription } from "@/lib/subscription";
 import { isPlanId } from "@/lib/pricing";
+import { createLeaderSeats, recordPoolPayment } from "@/lib/billing-pools";
 
 export const runtime = "nodejs";
 
@@ -179,12 +180,20 @@ export async function POST(request: NextRequest) {
         const plan = metadata.plan;
 
         if (userId && isPlanId(plan)) {
-          await activateSubscription({
-            userId,
-            email: metadata.email || undefined,
-            plan,
-            chargilyCheckoutId: checkout.id,
-          });
+          if (metadata.kind === "pool_member" && metadata.poolId) {
+            // A share of a pooled Promo / Groupe: counted on the gauge; the
+            // payment that fills the last seat activates every member.
+            await recordPoolPayment(metadata.poolId, userId, checkout.id, checkout.amount);
+          } else if (metadata.kind === "group_leader") {
+            await createLeaderSeats(userId, plan, checkout.id, metadata.email || undefined);
+          } else {
+            await activateSubscription({
+              userId,
+              email: metadata.email || undefined,
+              plan,
+              chargilyCheckoutId: checkout.id,
+            });
+          }
         } else {
           console.error("checkout.paid webhook missing userId/plan metadata", checkout.id);
         }
@@ -204,6 +213,11 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error("Chargily webhook processing failed", error);
+    // The claim above already marked the payment "paid": release it so
+    // Chargily's retry of this event is processed instead of skipped as a duplicate.
+    if (eventType === "checkout.paid" && checkout?.id && isSupabaseConfigured()) {
+      await getSupabaseAdmin().from("payments").update({ status: "pending", updated_at: new Date().toISOString() }).eq("chargily_checkout_id", checkout.id);
+    }
     return NextResponse.json({ error: "Traitement du webhook échoué." }, { status: 500 });
   }
 

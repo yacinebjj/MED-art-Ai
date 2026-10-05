@@ -5,9 +5,9 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Check, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getPlansForCycle, PLANS, type BillingCycle } from "@/lib/pricing";
+import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, REFUND_DELAY_LABEL, formatDZD, getPlansForCycle, type BillingCycle } from "@/lib/pricing";
 import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
-import { PricingTierCard } from "@/components/pricing/PricingTierCard";
+import { PricingTierCard, PromoMonthlyOnlyCard } from "@/components/pricing/PricingTierCard";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { GradientText, MagneticLink, ParticleField, Reveal, SectionHeading } from "./primitives";
 
@@ -15,7 +15,7 @@ export function PricingSection() {
   const { language } = useLanguage();
   const fr = language === "fr";
   const [cycle, setCycle] = useState<BillingCycle>("monthly");
-  const freemium = PLANS.freemium;
+  const plans = getPlansForCycle(cycle);
   return (
     <section id="tarifs" className="relative scroll-mt-24 px-4 py-24 sm:px-6 lg:px-8">
       <SectionHeading
@@ -33,15 +33,20 @@ export function PricingSection() {
         }
         subtitle={
           fr
-            ? "Seul, en groupe ou avec toute ta promo. Commence par 7 jours d'essai illimité, puis choisis ton rythme — plus vous êtes nombreux, moins c'est cher."
-            : "Alone, as a group or with your whole class. Start with a 7-day unlimited trial, then pick your pace — the more of you, the cheaper it gets."
+            ? `Seul, à ${GROUP_SIZE} amis ou à ${PROMO_SIZE} avec ta promo. Commence avec ${FREE_TRIAL.courses} cours + ${FREE_TRIAL.messages} messages offerts, une seule fois — plus vous êtes nombreux, moins c'est cher par personne.`
+            : `Alone, with ${GROUP_SIZE} friends or ${PROMO_SIZE} from your class. Start with ${FREE_TRIAL.courses} course + ${FREE_TRIAL.messages} free messages, one time only — the more of you, the cheaper it is per person.`
         }
       />
       <Reveal delay={0.1} className="mt-10 flex justify-center">
         <BillingCycleToggle value={cycle} onChange={setCycle} />
       </Reveal>
       <div className="mx-auto mt-12 grid max-w-6xl grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
-        {getPlansForCycle(cycle).map((plan, index) => (
+        {!plans.some((plan) => plan.tier === "promo") && (
+          <Reveal delay={0.2} className="relative order-last h-full">
+            <PromoMonthlyOnlyCard onShowMonthly={() => setCycle("monthly")} />
+          </Reveal>
+        )}
+        {plans.map((plan, index) => (
           <Reveal key={plan.tier} delay={index * 0.1} className={cn("relative h-full", plan.featured && "lg:-translate-y-4")}>
             {plan.featured && (
               <motion.div
@@ -77,8 +82,10 @@ export function PricingSection() {
       <Reveal delay={0.2} className="mx-auto mt-10 max-w-3xl">
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 text-sm text-slate-300 sm:flex-row sm:justify-between">
           <p>
-            <span className="font-bold text-white">{freemium.label}</span> — {fr ? "gratuit pour toujours" : "free forever"} :{" "}
-            {freemium.features.join(" · ")}
+            <span className="font-bold text-white">{fr ? "Essai gratuit" : "Free trial"}</span> —{" "}
+            {fr
+              ? `${FREE_TRIAL.courses} cours avec le Studio complet + ${FREE_TRIAL.messages} messages Assistant / Copilot, une seule fois, sans carte bancaire.`
+              : `${FREE_TRIAL.courses} course with the full Studio + ${FREE_TRIAL.messages} Assistant / Copilot messages, one time only, no card needed.`}
           </p>
           <Link href="/register" className="shrink-0 font-semibold text-cyan-300 hover:underline">
             {fr ? "Créer mon compte" : "Create my account"}
@@ -91,8 +98,24 @@ export function PricingSection() {
 
 const FAQ = [
   {
-    fr: { q: "Est-ce vraiment gratuit pour commencer ?", a: "Oui. Chaque compte démarre avec 7 jours d'essai illimité, sans carte bancaire. Ensuite, le Freemium reste gratuit pour toujours (1 cours généré par mois), et les forfaits payants débloquent 30 cours par mois." },
-    en: { q: "Is it really free to start?", a: "Yes. Every account starts with a 7-day unlimited trial, no card needed. After that, Freemium stays free forever (1 generated course a month), and paid plans unlock 30 courses a month." },
+    fr: {
+      q: "Est-ce vraiment gratuit pour commencer ?",
+      a: `Oui. Chaque compte reçoit, une seule fois et sans carte bancaire, ${FREE_TRIAL.courses} cours avec le Studio complet + ${FREE_TRIAL.messages} messages avec l'Assistant / Copilot. Ensuite, les formules payantes donnent ${PAID_LIMITS.coursesPerMonth} cours, ${PAID_LIMITS.examsPerMonth} examens et ${PAID_LIMITS.synthesesPerMonth} résumés de module par mois, ${PAID_LIMITS.premiumMessagesPerDay} messages/jour avec l'IA premium (puis le modèle standard, jamais bloqué), Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/jour, et Flashcards / To-Do / Notes illimités.`,
+    },
+    en: {
+      q: "Is it really free to start?",
+      a: `Yes. Every account gets, one time only and with no card, ${FREE_TRIAL.courses} course with the full Studio + ${FREE_TRIAL.messages} Assistant / Copilot messages. Paid plans then give ${PAID_LIMITS.coursesPerMonth} courses, ${PAID_LIMITS.examsPerMonth} exams and ${PAID_LIMITS.synthesesPerMonth} module summaries a month, ${PAID_LIMITS.premiumMessagesPerDay} premium-AI messages a day (then the standard model, never blocked), Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/day, and unlimited Flashcards / To-Do / Notes.`,
+    },
+  },
+  {
+    fr: {
+      q: "Comment marchent les formules Groupe et Promo Cohorte ?",
+      a: `Groupe : exactement ${GROUP_SIZE} personnes à ${formatDZD(PLANS.group_monthly.priceDZD)} par personne et par mois. Une personne peut payer les ${GROUP_SIZE} places d'un coup (activation immédiate), ou chacun paie sa part et l'abonnement démarre dès ${GROUP_SIZE}/${GROUP_SIZE}. Promo Cohorte : exactement ${PROMO_SIZE} étudiants de la même promo, ${formatDZD(PLANS.promo_monthly.priceDZD)} par personne pour 1 mois. Si la jauge n'est pas pleine en ${POOL_DEADLINE_DAYS} jours, le remboursement est déclenché automatiquement et reçu sous ${REFUND_DELAY_LABEL}.`,
+    },
+    en: {
+      q: "How do the Group and Cohort plans work?",
+      a: `Group: exactly ${GROUP_SIZE} people at ${formatDZD(PLANS.group_monthly.priceDZD)} per person per month. One person can pay all ${GROUP_SIZE} seats at once (active right away), or everyone pays their share and the plan starts at ${GROUP_SIZE}/${GROUP_SIZE}. Cohort: exactly ${PROMO_SIZE} students from the same class, ${formatDZD(PLANS.promo_monthly.priceDZD)} per person for 1 month. If the gauge is not full within ${POOL_DEADLINE_DAYS} days, a refund is requested automatically and received within 5 business days.`,
+    },
   },
   {
     fr: { q: "Quels documents puis-je importer ?", a: "PDF, Word, PowerPoint, images de cours (lues par OCR) et fichiers Google Drive. Tu les ranges dans les modules de ton programme officiel." },
@@ -107,8 +130,14 @@ const FAQ = [
     en: { q: "How do study groups work?", a: "Create a group, share its code or link: the admin approves every request. Real-time messages, polls, documents, voice notes, mentions and reactions — in a private space." },
   },
   {
-    fr: { q: "Comment payer ?", a: "En dinars, par carte Edahabia ou CIB via Chargily. Forfaits sur 1, 4 ou 12 mois ; les formules Groupe et Promo Cohorte sont moins chères par personne." },
-    en: { q: "How do I pay?", a: "In dinars, by Edahabia or CIB card through Chargily. Plans for 1, 4 or 12 months; Group and Cohort plans cost less per person." },
+    fr: {
+      q: "Comment payer ?",
+      a: `En dinars, par carte Edahabia ou CIB via Chargily, en une fois pour la durée choisie (aucun prélèvement automatique). Individuel : ${formatDZD(PLANS.individual_monthly.priceDZD)}/mois, ${formatDZD(PLANS.individual_quad.priceDZD)} les 4 mois, ${formatDZD(PLANS.individual_annual.priceDZD)} l'année. Groupe : ${formatDZD(PLANS.group_monthly.priceDZD)} par personne et par mois. Promo Cohorte : ${formatDZD(PLANS.promo_monthly.priceDZD)} par personne, 1 mois uniquement.`,
+    },
+    en: {
+      q: "How do I pay?",
+      a: `In dinars, by Edahabia or CIB card through Chargily, once for the length you pick (no automatic charges). Individual: ${formatDZD(PLANS.individual_monthly.priceDZD)}/month, ${formatDZD(PLANS.individual_quad.priceDZD)} for 4 months, ${formatDZD(PLANS.individual_annual.priceDZD)} a year. Group: ${formatDZD(PLANS.group_monthly.priceDZD)} per person per month. Cohort: ${formatDZD(PLANS.promo_monthly.priceDZD)} per person, 1 month only.`,
+    },
   },
   {
     fr: { q: "Ça marche sur mon téléphone ?", a: "Oui : MedArt AI s'installe comme une application sur Android, iPhone et PC directement depuis le navigateur, et toute l'interface est pensée pour le mobile." },
@@ -181,7 +210,10 @@ export function FinalCta() {
             </MagneticLink>
           </div>
           <ul className="relative mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-300">
-            {(fr ? ["7 jours d'essai illimité", "Sans carte bancaire", "Paiement Edahabia / CIB"] : ["7-day unlimited trial", "No card required", "Edahabia / CIB payment"]).map((item) => (
+            {(fr
+              ? [`${FREE_TRIAL.courses} cours + ${FREE_TRIAL.messages} messages offerts, une seule fois`, "Sans carte bancaire", "Paiement Edahabia / CIB"]
+              : [`${FREE_TRIAL.courses} course + ${FREE_TRIAL.messages} messages free, one time only`, "No card required", "Edahabia / CIB payment"]
+            ).map((item) => (
               <li key={item} className="flex items-center gap-1.5">
                 <Check className="h-3.5 w-3.5 text-emerald-300" />
                 {item}

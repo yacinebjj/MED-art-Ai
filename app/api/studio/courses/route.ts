@@ -3,7 +3,8 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { createStudioCourse } from "@/lib/studio-course-create";
+import { CourseQuotaError, createStudioCourse } from "@/lib/studio-course-create";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import type { StudioCourseSummary } from "@/types/studio-course";
 
 export const runtime = "nodejs";
@@ -113,6 +114,7 @@ export async function POST(request: NextRequest) {
     const course = await createStudioCourse({ userId: user.id, moduleId, title, rawText, sourceFileUrl: sourceFileUrl ?? null });
     return NextResponse.json({ success: true, course });
   } catch (error) {
+    if (error instanceof CourseQuotaError) return quotaBlockedResponse(error.gate);
     console.error("[studio/courses:create] Échec:", error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 });
   }

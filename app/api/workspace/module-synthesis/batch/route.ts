@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { quotaBlockedResponse } from "@/lib/quota-response";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { prepareModuleSynthesisBatch, type ModuleSynthesisType } from "@/lib/module-synthesis";
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     if (!isSupabaseConfigured()) return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
 
     const outcome = await prepareModuleSynthesisBatch(user, moduleId, courseIds as number[], type as ModuleSynthesisType);
-    if (!outcome.ok) return NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status });
+    if (!outcome.ok) return ("paywall" in outcome && outcome.paywall ? quotaBlockedResponse({ reason: outcome.error, paywall: outcome.paywall }, outcome.status) : NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status }));
     return NextResponse.json({ success: true, generated: outcome.generated, fromCache: outcome.fromCache });
   } catch (error) {
     console.error("[workspace/module-synthesis/batch] Exception:", error);
