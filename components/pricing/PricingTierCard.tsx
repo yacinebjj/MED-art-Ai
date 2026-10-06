@@ -2,12 +2,11 @@
 
 import type { ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarDays, Check, Sparkles, Users } from "lucide-react";
+import { Check, Sparkles, Users } from "lucide-react";
 import { MotionCard } from "@/components/ui/MotionCard";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
-import { formatDZD, groupLeaderTotalDZD, PAID_LIMITS, PLANS, PROMO_SIZE, type Plan } from "@/lib/pricing";
+import { computeSavingsPercent, formatDZD, groupLeaderTotalDZD, PAID_LIMITS, poolTotalDZD, type Plan } from "@/lib/pricing";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 
@@ -21,8 +20,8 @@ export const PAID_LIMIT_LINES: { text: Record<Language, string>; hint?: Record<L
   {
     text: { fr: `${PAID_LIMITS.synthesesPerMonth} résumés de module par mois`, en: `${PAID_LIMITS.synthesesPerMonth} module summaries a month` },
     hint: {
-      fr: "Résumé, Mots-clés ou Dictionnaire : 1 chacun — déjà en cache = gratuit",
-      en: "Summary, Keywords or Dictionary: 1 each — already cached = free",
+      fr: "Résumé, Mots-clés ou Dictionnaire : 1 chacun",
+      en: "Summary, Keywords or Dictionary: 1 each",
     },
   },
   {
@@ -70,7 +69,8 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
   const fr = language === "fr";
   const perPerson = plan.seats > 1;
   const monthly = Math.round(plan.priceDZD / Math.max(1, plan.durationMonths));
-  // Individuel's own feature list IS the limits list — only Groupe / Promo add tier-specific lines.
+  // Individuel's own feature list IS the limits list — only Groupe / Cohorte add tier-specific lines.
+  const savings = plan.tier && plan.cycle ? computeSavingsPercent(plan.tier, plan.cycle) : null;
   const highlights = plan.tier === "individual" ? [] : plan.features;
 
   return (
@@ -121,6 +121,12 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
             {plan.durationMonths > 1 && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {fr ? `soit ${formatDZD(monthly)} par mois${perPerson ? " et par personne" : ""}` : `that is ${formatDZD(monthly)} a month${perPerson ? " per person" : ""}`}
+                {savings ? <span className="ml-1.5 font-semibold text-emerald-600 dark:text-emerald-400">−{savings} %</span> : null}
+              </p>
+            )}
+            {plan.tier === "promo" && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {fr ? `soit ${formatDZD(poolTotalDZD(plan))} pour les ${plan.seats} étudiants` : `that is ${formatDZD(poolTotalDZD(plan))} for all ${plan.seats} students`}
               </p>
             )}
             {plan.tier === "group" && (
@@ -166,38 +172,6 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
 
       <div className="flex-1" />
       {ctaSlot}
-    </MotionCard>
-  );
-}
-
-/**
- * Stand-in for the Promo Cohorte card on 4-month / 1-year cycles: the Promo
- * is sold for 1 month only, so instead of silently dropping the card we say
- * so and offer to switch back.
- */
-export function PromoMonthlyOnlyCard({ onShowMonthly }: { onShowMonthly: () => void }) {
-  const { language } = useLanguage();
-  const fr = language === "fr";
-  const promo = PLANS.promo_monthly;
-
-  return (
-    <MotionCard lift={false} className="flex h-full flex-col border-dashed p-5 sm:p-7">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-lg font-bold text-foreground">{promo.label}</h3>
-        <Badge variant="warning" className="gap-1">
-          <CalendarDays className="h-3 w-3" />
-          {fr ? "1 mois uniquement" : "1 month only"}
-        </Badge>
-      </div>
-      <p className="mt-3 text-sm text-muted-foreground">
-        {fr
-          ? `La Promo Cohorte réunit exactement ${PROMO_SIZE} étudiants pour 1 mois, à ${formatDZD(promo.priceDZD)} par personne. Elle n'existe pas sur 4 mois ni sur 1 an : vous pouvez la reprendre ensemble chaque mois.`
-          : `The Cohort plan brings exactly ${PROMO_SIZE} students together for 1 month, at ${formatDZD(promo.priceDZD)} per person. It is not sold for 4 months or 1 year: you can simply start it again together each month.`}
-      </p>
-      <div className="flex-1" />
-      <Button type="button" variant="outline" size="lg" className="mt-6 w-full" onClick={onShowMonthly}>
-        {fr ? "Voir la Promo sur 1 mois" : "See the 1-month Cohort plan"}
-      </Button>
     </MotionCard>
   );
 }

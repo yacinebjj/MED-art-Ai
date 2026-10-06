@@ -36,12 +36,12 @@ const HOLD_MINUTES = SEAT_HOLD_MINUTES;
 const CONFIRM_POLL_MS = 4000;
 const CONFIRM_POLL_MAX_MS = 2 * 60 * 1000;
 const LIVE_REFRESH_MS = 20000;
-/** Above this many seats the seat dots shrink (Promo: 15 → 3 rows of 5). */
+/** Above this many seats the seat dots shrink (Cohorte: 40 seats). */
 const GRID_BREAK = 5;
 
-const CYCLE_MONTHS: Record<BillingCycle, number> = { monthly: 1, quad: 4, annual: 12 };
-const CYCLE_DURATION: Record<BillingCycle, string> = { monthly: "1 mois", quad: "4 mois", annual: "1 an" };
-const CYCLE_SUFFIX: Record<BillingCycle, string> = { monthly: "", quad: " (4 mois)", annual: " (1 an)" };
+const CYCLE_MONTHS: Record<BillingCycle, number> = { monthly: 1, quad: 4, annual: 8 };
+const CYCLE_DURATION: Record<BillingCycle, string> = { monthly: "1 mois", quad: "4 mois", annual: "8 mois (l'année d'études)" };
+const CYCLE_SUFFIX: Record<BillingCycle, string> = { monthly: "", quad: " (4 mois)", annual: " (année, 8 mois)" };
 
 type MemberStatus = PoolView["me"]["status"];
 
@@ -645,7 +645,7 @@ function PoolTracker() {
     readyPool.confirmed < readyPool.size &&
     (readyPool.mode === "leader" ? readyPool.isCreator : currentPhase !== "refund_pending" && currentPhase !== "refunded");
   const accessEnd = accessEndIso(readyPool);
-  const kindLabel = readyPool.kind === "promo" ? `Promo · ${readyPool.size} étudiants` : `Groupe · ${readyPool.size} personnes`;
+  const kindLabel = readyPool.kind === "promo" ? `Cohorte · ${readyPool.size} étudiants` : `Groupe · ${readyPool.size} personnes`;
 
   return (
     <CyberStage accent={currentPhase === "celebrate" ? "emerald" : "cyan"} className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">

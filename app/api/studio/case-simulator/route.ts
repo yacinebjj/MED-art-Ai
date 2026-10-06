@@ -7,7 +7,7 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterChain } from "@/lib/ai/call-resilient";
 import { LAB_CHAIN_DEADLINE_MS, labAttempts } from "@/lib/ai/lab-generation";
-import { labContentHash, labToolTypeFor, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
+import { labContentHash, labToolTypeFor, lookupLabCache, ownsLabResult, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
 import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
@@ -600,14 +600,26 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
   }
 
   // Platform-wide cache FIRST (see lib/lab-course-cache.ts), one case per
-  // (course source text, difficulty). A hit costs 0 tokens and 0 credits and
-  // is checked BEFORE the quota gate. Only the case itself is shared: the
+  // (course source text, difficulty). A hit costs 0 tokens (our bill; the
+  // student's unit was charged above, like any request). Only the case itself is shared: the
   // sealed token below is minted per student request (bound to this user,
   // course and time), so the hidden answer key still never reaches a client
   // and one student's token is useless to another.
   const contentHash = labContentHash(courseText);
   // Language-scoped cache key: an English case is never served to a French request, nor the reverse.
   const toolType = labToolTypeFor(`case:${body.difficulty}`, body.language);
+  // BILLING RULE: every NEW request for this result consumes the student's
+  // standard unit, even when it is then served from the platform-wide cache
+  // (that cache only cuts OUR model bill). The one exception is a re-open of
+  // a result this same student already obtained (their own Lab history) —
+  // not a new request. Refunded below only if nothing could be delivered.
+  const charged = !(await ownsLabResult(user.id, contentHash, toolType));
+  if (charged) {
+    const gate = await reserveGeneration(user);
+    if (!gate.allowed) {
+      return jsonError(gate.reason, 403);
+    }
+  }
   const cachedCase = parseStoredCase(await lookupLabCache(contentHash, toolType));
   if (cachedCase) {
     await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: cachedCase.publicCase.title });
@@ -626,11 +638,6 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
     return NextResponse.json({ success: true, case: cachedCase.publicCase, token, cached: true });
   }
 
-  const gate = await reserveGeneration(user);
-  if (!gate.allowed) {
-    return jsonError(gate.reason, 403);
-  }
-
   const userPrompt = [
     DIFFICULTY_INSTRUCTIONS[body.difficulty],
     `Cours : "${course.title}"`,
@@ -645,6 +652,9 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
       ],
       {
         label: LOG_PREFIX,
+        // Concurrent identical requests (double tap, two tabs) generate once;
+        // a request that didn't pay gets its course credit back.
+        ledger: { namespace: "lab:case", peerWaitMs: 30_000, leaseMs: LAB_CHAIN_DEADLINE_MS + 10_000 },
         attempts: labAttempts(),
         deadlineMs: LAB_CHAIN_DEADLINE_MS,
         maxTokens: 3500,
@@ -684,7 +694,7 @@ async function handleStart(user: { id: string; created_at?: string | null }, bod
     );
     return NextResponse.json({ success: true, case: publicCase, token });
   } catch (error) {
-    await refundGeneration(user.id);
+    if (charged) await refundGeneration(user.id);
     const status = error instanceof OpenRouterError ? upstreamStatusForClient(error.status) : 502;
     console.error(`${LOG_PREFIX} Échec de la génération du cas:`, error);
     return jsonError(errorMessage(error), status);

@@ -3544,3 +3544,68 @@ create index if not exists user_lab_history_user_hash_idx on user_lab_history (u
 alter table user_lab_history enable row level security;
 drop policy if exists "Users read own lab history" on user_lab_history;
 create policy "Users read own lab history" on user_lab_history for select using (auth.uid() = user_id);
+
+-- ============================================================================
+-- AI generation ledger — see supabase/migrations/20261008_ai_generation_ledger.sql
+-- (the runnable source of truth; copied here so this file stays the full map).
+-- ============================================================================
+create table if not exists public.ai_generation_ledger (
+  key text primary key check (char_length(key) = 64),
+  namespace text not null check (char_length(namespace) between 1 and 80),
+  status text not null default 'pending' check (status in ('pending', 'ready')),
+  value jsonb,
+  lease_until timestamptz,
+  output_chars integer,
+  hits integer not null default 0,
+  last_hit_at timestamptz,
+  expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists ai_generation_ledger_expires_idx on public.ai_generation_ledger (expires_at);
+create index if not exists ai_generation_ledger_namespace_idx on public.ai_generation_ledger (namespace, created_at desc);
+
+alter table public.ai_generation_ledger enable row level security;
+
+-- Hit counter (observability: which namespaces actually save money).
+create or replace function public.ai_ledger_record_hit(p_key text)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.ai_generation_ledger
+     set hits = hits + 1, last_hit_at = now()
+   where key = p_key;
+$$;
+
+revoke all on function public.ai_ledger_record_hit(text) from public, anon, authenticated;
+
+-- Savings report, one row per feature:
+--   select * from public.ai_generation_ledger_stats;
+create or replace view public.ai_generation_ledger_stats as
+select
+  namespace,
+  count(*) filter (where status = 'ready') as stored_outputs,
+  coalesce(sum(hits), 0) as calls_served_free,
+  coalesce(sum(hits::bigint * coalesce(output_chars, 0)), 0) as output_chars_not_regenerated,
+  max(last_hit_at) as last_hit_at
+from public.ai_generation_ledger
+group by namespace
+order by calls_served_free desc;
+
+revoke all on public.ai_generation_ledger_stats from public, anon, authenticated;
+
+notify pgrst, 'reload schema';
+
+-- ============================================================================
+-- exam_harvested_qcms.content_hash — see supabase/migrations/20261009_exam_harvest_content_hash.sql
+-- ============================================================================
+alter table public.exam_harvested_qcms add column if not exists content_hash text;
+
+create index if not exists exam_harvested_qcms_content_hash_idx
+  on public.exam_harvested_qcms (content_hash)
+  where content_hash is not null;
+
+notify pgrst, 'reload schema';

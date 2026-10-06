@@ -17,20 +17,27 @@ interface ExamCourseForHash {
 }
 
 /**
- * Sorted by course id (defensively — callers already order by id, but the
- * hash must never depend on request/array order) and joined with an
- * unambiguous separator, so this is stable across students who select the
- * exact same set of courses regardless of the order they clicked them in.
- * Uses each course's full explication/raw_text (not the per-call
- * MAX_PER_COURSE_CHARS-capped slice fed to the model) so this hash never
- * shifts if that cap is retuned later.
+ * Content-addressed ONLY. Each course contributes the sha256 of its full
+ * normalized explication/raw_text (not the per-call MAX_PER_COURSE_CHARS-capped
+ * slice fed to the model, so this hash never shifts if that cap is retuned);
+ * the per-course digests are SORTED, so selection/click order never matters.
+ *
+ * This used to prefix every course with its `studio_courses.id` — but that id
+ * is per student upload (each student's copy of the same polycopié is its own
+ * row), so the "cross-student" cache could only ever match the SAME student
+ * again: two students selecting identical course material always paid for
+ * their own 30-60 question exam (up to 16k-token batches). Exam content holds
+ * questions only (no course ids — see toExamContent in app/api/exam/run), so a
+ * hit is valid for anyone whose selected material is identical, exactly like
+ * every other content-hash cache in this app (lab_course_cache,
+ * studio_content_cache, flashcards_content_cache). The "c2:" prefix keeps new
+ * keys disjoint from the old per-student ones.
  */
 export function computeExamContentHash(courses: ExamCourseForHash[]): string {
-  const normalized = [...courses]
-    .sort((a, b) => a.id - b.id)
-    .map((course) => `${course.id}::${normalizeText(course.explication ?? course.raw_text)}`)
-    .join("\n---\n");
-  return createHash("sha256").update(normalized, "utf8").digest("hex");
+  const digests = courses
+    .map((course) => createHash("sha256").update(normalizeText(course.explication ?? course.raw_text), "utf8").digest("hex"))
+    .sort();
+  return createHash("sha256").update(`c2:${digests.join("|")}`, "utf8").digest("hex");
 }
 
 /** Checked before generating (skipped entirely for variation:true requests — see the route). Returns `null` on any Supabase error or misconfiguration — a lookup failure must never block generation, only skip the optimization. */

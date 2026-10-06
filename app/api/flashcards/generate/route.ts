@@ -2,7 +2,8 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { CHEAP_MODEL, FLASHCARD_MODEL, callOpenRouter, type OpenRouterResponseFormat } from "@/lib/ai/openrouter";
+import { CHEAP_MODEL, FLASHCARD_MODEL, callOpenRouter, type ChatMessageInput, type OpenRouterResponseFormat } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { callOpenRouterResilient } from "@/lib/ai/call-resilient";
 import { buildDefinitiveFlashcardSetPrompt, buildFlashcardExtensionPrompt } from "@/lib/ai/flashcard-prompts";
 import { FlashcardGenerationSchema } from "@/lib/ai/flashcard-schemas";
@@ -314,6 +315,27 @@ export async function POST(request: NextRequest) {
   let generated: "definitive" | "extension" | null = null;
   let quotaReached = false;
 
+  // BILLING RULE: the platform-wide flashcard cache cuts OUR model bill, never
+  // the student's quota. A course whose set this student has never drawn from
+  // (no card served to them yet in this language) is a set they would
+  // otherwise have had to generate — so entering it consumes the standard
+  // generation unit, exactly like the definitive generation below would. A
+  // course they already draw from costs nothing more (same as before). If the
+  // quota is exhausted, that course's cached cards are withheld, not served.
+  const chargedForEntry = new Set<number>();
+  for (const course of eligibleCourses) {
+    if (!cachedSetFor(course)) continue;
+    const drawnBefore = (course.flashcard_queue ?? []).some((card) => (card.lang ?? "fr") === language);
+    if (drawnBefore) continue;
+    const entryGate = await reserveGeneration(user);
+    if (entryGate.allowed) {
+      chargedForEntry.add(course.id);
+    } else {
+      quotaReached = true;
+      unseenByCourse.set(course.id, []);
+    }
+  }
+
   // ---- 2. DATABASE FIRST. When the stored, unseen cards of the selection
   // already make a full batch, NO model call and NO credit — the batch is
   // served straight from Supabase. Only when they don't does ONE small,
@@ -328,7 +350,10 @@ export async function POST(request: NextRequest) {
     const key = cacheKeys.get(target.id)!;
     const existingSet = cachedSetFor(target) ?? [];
 
-    const gate = await reserveGeneration(user);
+    // Already charged for entering this course's set in this same request:
+    // its first extension is covered by that unit, never billed twice.
+    const reservedHere = !chargedForEntry.has(target.id);
+    const gate = reservedHere ? await reserveGeneration(user) : { allowed: true as const, reason: undefined };
     if (!gate.allowed) {
       quotaReached = true;
       if (totalUnseen() === 0) {
@@ -345,10 +370,35 @@ export async function POST(request: NextRequest) {
                 existingSet.slice(-MAX_EXISTING_QUESTIONS_IN_PROMPT).map((card) => card.question),
                 EXTENSION_SIZE
               )) + buildLanguageDirective(language);
-        const cards = await generateCards([
+        const messages: ChatMessageInput[] = [
           { role: "system", content: systemPrompt },
           { role: "user", content: mode === "definitive" ? "Génère l'ensemble définitif de flashcards demandé." : "Génère les nouvelles flashcards demandées." },
-        ]);
+        ];
+        const knownQuestions = new Set(existingSet.map((card) => questionKey(card.question)));
+        // Generation ledger (our bill only — the unit was reserved above): two
+        // students entering the same brand-new course at once used to generate
+        // TWO definitive sets, the second silently overwriting the first
+        // (last-writer-wins upsert) while both were billed. Identical requests
+        // now generate once and every caller stores/serves the same set. An
+        // extension's prompt embeds the existing questions, so each new state
+        // of the set is its own key; a reply with nothing genuinely new is
+        // rejected INSIDE the producer, so it can never be memorized.
+        // peerWaitMs: 120s route − (40s + 55s chain + quick retry) leaves ~8s.
+        const cards = await runThroughLedger(
+          {
+            namespace: `flashcards:${mode}`,
+            key: modelCallKey(messages, { model: `${FLASHCARD_MODEL}>${CHEAP_MODEL}`, maxTokens: GENERATION_MAX_TOKENS, temperature: 0.3 }),
+            peerWaitMs: 8_000,
+            leaseMs: 110_000,
+          },
+          async () => {
+            const generatedCards = await generateCards(messages);
+            if (mode === "extension" && !generatedCards.some((card) => !knownQuestions.has(questionKey(card.question)))) {
+              throw new Error("L'IA n'a produit aucune flashcard réellement nouvelle. Réessaie.");
+            }
+            return generatedCards;
+          }
+        );
 
         if (mode === "definitive") {
           await storeFlashcardsCache(key, cards);
@@ -369,7 +419,7 @@ export async function POST(request: NextRequest) {
         unseenByCourse.set(target.id, unseenCards(target, cachedByKey.get(key)!, language));
         generated = mode;
       } catch (error) {
-        await refundGeneration(user.id);
+        if (reservedHere) await refundGeneration(user.id);
         console.error(`[flashcards/generate] Échec génération (${mode}, cours ${target.id}):`, error);
         // Graceful fallback: a failed or timed-out generation never blocks the
         // session — whatever unseen cards exist are served below. Only when

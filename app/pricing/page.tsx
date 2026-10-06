@@ -8,10 +8,10 @@ import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/Button";
 import { RevealSection } from "@/components/ui/RevealSection";
 import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
-import { PricingTierCard, PromoMonthlyOnlyCard } from "@/components/pricing/PricingTierCard";
+import { PricingTierCard } from "@/components/pricing/PricingTierCard";
 import { GroupInviteFlow } from "@/components/pricing/GroupInviteFlow";
 import { CohortVerificationFlow } from "@/components/pricing/CohortVerificationFlow";
-import { FREE_TRIAL, getPlansForCycle, type BillingCycle } from "@/lib/pricing";
+import { FREE_TRIAL, GROUP_SIZE, PROMO_SIZE, getPlansForCycle, type BillingCycle } from "@/lib/pricing";
 import { useLanguage } from "@/providers/LanguageProvider";
 
 /**
@@ -44,8 +44,8 @@ export default function PricingPage() {
               </h1>
               <p className="mt-4 text-base text-slate-600 dark:text-slate-300 sm:text-lg">
                 {fr
-                  ? "Seul, à 5 amis, ou à 15 avec ta promo — paie en Dinars, par carte Edahabia ou CIB, en toute sécurité."
-                  : "Alone, with 5 friends, or 15 from your class — pay in Dinars, by Edahabia or CIB card, securely."}
+                  ? `Seul, à ${GROUP_SIZE} amis, ou à ${PROMO_SIZE} avec ta promo — paie en Dinars, par carte Edahabia ou CIB, en toute sécurité.`
+                  : `Alone, with ${GROUP_SIZE} friends, or ${PROMO_SIZE} from your class — pay in Dinars, by Edahabia or CIB card, securely.`}
               </p>
               <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-1.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-300 sm:text-sm">
                 <Gift className="h-4 w-4 shrink-0" />
@@ -78,7 +78,7 @@ export default function PricingPage() {
                             : "Create my account and group"
                           : plan.tier === "promo"
                             ? fr
-                              ? "Créer mon compte et ma Promo"
+                              ? "Créer mon compte et ma Cohorte"
                               : "Create my account and Cohort"
                             : fr
                               ? "Créer mon compte"
@@ -92,11 +92,6 @@ export default function PricingPage() {
                 </PricingTierCard>
               </RevealSection>
             ))}
-            {!plans.some((plan) => plan.tier === "promo") && (
-              <RevealSection delay={0.2} className="h-full">
-                <PromoMonthlyOnlyCard onShowMonthly={() => setCycle("monthly")} />
-              </RevealSection>
-            )}
           </div>
           <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted-foreground">
             {fr

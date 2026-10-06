@@ -220,12 +220,12 @@ async function openMembershipOf(userId: string): Promise<PoolRow | null> {
   return open[0] ?? null;
 }
 
-/** Creates a pooled Promo (1 month) or Groupe (any cycle) and returns its invite code. */
+/** Creates a pooled Cohorte (tier id "promo", 40 seats) or Groupe (5 seats), any cycle, and returns its invite code. */
 export async function createPooledPurchase(userId: string, kind: PoolKind, cycle: BillingCycle): Promise<string> {
   if (!(await billingPoolsAvailable())) throw new PoolError("Les formules Groupe et Promo arrivent dans quelques instants — réessaie un peu plus tard.", 503);
   await expireOverduePools();
   await assertNoActivePaidPlan(userId);
-  if (kind === "promo" && cycle !== "monthly") throw new PoolError("La formule Promo existe uniquement pour 1 mois.", 400);
+  // Cohorte (tier id "promo") is sold for every duration since pricing v3.
   const existing = await openMembershipOf(userId);
   if (existing) {
     if (existing.kind === kind && existing.cycle === cycle) return existing.invite_code;

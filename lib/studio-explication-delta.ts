@@ -89,7 +89,8 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
-import { callOpenRouter, EXPLICATION_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, EXPLICATION_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { parseJsonResponse, MAX_SOURCE_CHARS, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
@@ -1146,53 +1147,72 @@ export async function generateExplicationPart(
       ? `\n\n---\nCe cours source est traité en ${totalParts} parties consécutives (contrainte technique de plateforme, invisible pour l'étudiant qui verra un seul document continu). Tu rédiges ICI la PARTIE ${partNumber}/${totalParts} — les extraits numérotés ci-dessous couvrent UNIQUEMENT cette partie, dans l'ordre du cours. Continue directement le contenu, structuré en chapitres Markdown ("## Titre du chapitre") comme d'habitude. N'écris NI introduction générale du cours NI conclusion récapitulative dans cette partie — seulement le corps des chapitres qu'elle couvre ; les autres parties seront concaténées à la suite.\n\nRepère de longueur pour cette partie : environ ${lengthBudget.target} mots, plafond absolu ${lengthBudget.ceiling} mots. Le document final sera long parce qu'il y a ${totalParts} parties, pas parce que chaque partie est illimitée.${continuityInstruction}`
       : `\n\n---\nRepère de longueur pour ce cours : environ ${lengthBudget.target} mots, plafond absolu ${lengthBudget.ceiling} mots.`;
 
-  const raw = await callOpenRouter(
-    [
-      { role: "system", content: partInstruction + "\n\n---\n\n" + explicationSystemPrompt },
-      {
-        role: "user",
-        content: `Voici le contenu source${totalParts > 1 ? ` (partie ${partNumber}/${totalParts})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
-      },
-    ],
+  const messages: ChatMessageInput[] = [
+    { role: "system", content: partInstruction + "\n\n---\n\n" + explicationSystemPrompt },
     {
-      model: EXPLICATION_MODEL,
-      maxTokens: EXPLICATION_PART_MAX_TOKENS,
-      bypassMock: true,
-      // Reasoning OFF, not "low" — see this file's MODEL POLICY header for
-      // why `effort: "low"` was switching DeepSeek V3.2's thinking mode ON
-      // and causing the 180s part timeouts.
-      reasoning: { enabled: false },
-      timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
-      // Fastest-decoding provider of the 13 serving deepseek-v3.2: a part's
-      // wall-clock is bounded by decode speed (up to 12,000 tokens), so this
-      // is what directly shortens every part and avoids timeouts.
-      providerSort: "throughput",
+      role: "user",
+      content: `Voici le contenu source${totalParts > 1 ? ` (partie ${partNumber}/${totalParts})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
+    },
+  ];
+  const callOptions = {
+    model: EXPLICATION_MODEL,
+    maxTokens: EXPLICATION_PART_MAX_TOKENS,
+    bypassMock: true,
+    // Reasoning OFF, not "low" — see this file's MODEL POLICY header for
+    // why `effort: "low"` was switching DeepSeek V3.2's thinking mode ON
+    // and causing the 180s part timeouts.
+    reasoning: { enabled: false },
+    timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
+    // Fastest-decoding provider of the 13 serving deepseek-v3.2: a part's
+    // wall-clock is bounded by decode speed (up to 12,000 tokens), so this
+    // is what directly shortens every part and avoids timeouts.
+    providerSort: "throughput" as const,
+  };
+
+  // Generation ledger (lib/ai/generation-ledger.ts): this exact part — same
+  // slice, same system prompt (language / custom instruction included), same
+  // continuity tail — is paid for once. A second tab, a client retry after a
+  // dropped connection, or another student with the same polycopié replays
+  // the validated markdown for 0 tokens; and because part N's input includes
+  // part N-1's OUTPUT, an identical course chains hits through every part.
+  // peerWaitMs: 280s route budget − 230s part timeout leaves ~45s; 35s keeps
+  // a margin so a follower that gives up waiting can still generate itself.
+  return runThroughLedger(
+    {
+      namespace: "explication-part",
+      key: modelCallKey(messages, callOptions),
+      peerWaitMs: 35_000,
+      leaseMs: EXPLICATION_PART_TIMEOUT_MS + 15_000,
+      isValid: (value) => typeof value === "string" && value.trim().length >= 50,
+    },
+    async () => {
+      const raw = await callOpenRouter(messages, callOptions);
+
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = parseJsonResponse(raw);
+      } catch (error) {
+        const recovered = recoverExplicationOnly(raw);
+        if (!recovered) throw error;
+        console.warn(
+          `[studio-explication-delta] JSON invalide/tronqué pour la partie ${partNumber}/${totalParts}, mais 'explication' récupérée isolément:`,
+          error instanceof Error ? error.message : error
+        );
+        parsed = { explication: recovered };
+      }
+      const partMarkdown = (typeof parsed.explication === "string" ? parsed.explication : "").trim();
+      // 50-char floor mirrors the old single-shot path's StudioTextSchema
+      // (z.string().min(50)) — a trivially short but non-empty response (e.g.
+      // `{"explication":"ok"}`) used to be caught by that Zod validation; this
+      // per-part pipeline has no equivalent schema step downstream (parts are
+      // joined and persisted as plain markdown), so this function is now the
+      // only place that would ever catch it.
+      if (partMarkdown.length < 50) {
+        throw new Error(`La réponse de l'IA pour la partie ${partNumber}/${totalParts} ne contient pas de champ 'explication' exploitable.`);
+      }
+      return partMarkdown;
     }
   );
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = parseJsonResponse(raw);
-  } catch (error) {
-    const recovered = recoverExplicationOnly(raw);
-    if (!recovered) throw error;
-    console.warn(
-      `[studio-explication-delta] JSON invalide/tronqué pour la partie ${partNumber}/${totalParts}, mais 'explication' récupérée isolément:`,
-      error instanceof Error ? error.message : error
-    );
-    parsed = { explication: recovered };
-  }
-  const partMarkdown = (typeof parsed.explication === "string" ? parsed.explication : "").trim();
-  // 50-char floor mirrors the old single-shot path's StudioTextSchema
-  // (z.string().min(50)) — a trivially short but non-empty response (e.g.
-  // `{"explication":"ok"}`) used to be caught by that Zod validation; this
-  // per-part pipeline has no equivalent schema step downstream (parts are
-  // joined and persisted as plain markdown), so this function is now the
-  // only place that would ever catch it.
-  if (partMarkdown.length < 50) {
-    throw new Error(`La réponse de l'IA pour la partie ${partNumber}/${totalParts} ne contient pas de champ 'explication' exploitable.`);
-  }
-  return partMarkdown;
 }
 
 /**

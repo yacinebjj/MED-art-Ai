@@ -1,6 +1,7 @@
 import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import {
   STUDIO_BYPASS_MOCK,
   STUDIO_PROMPT_CONFIG,
@@ -87,9 +88,11 @@ function isValidActionType(value: unknown): value is JsonSectionId {
  *  - Miss: generates normally and stores the validated result for the next
  *    student.
  *
- * PLAN QUOTA: reserveGeneration()/refundGeneration() (lib/subscription.ts)
- * atomically reserve (and, on failure, refund) only the fuzzy/miss branch
- * above — an exact hit costs nothing and must never consume courseCap.
+ * PLAN QUOTA (billing rule): reserveGeneration() (lib/subscription.ts)
+ * atomically reserves the student's standard unit on EVERY request, before
+ * any cache — exact hit, ledger hit, fuzzy or miss alike. Caches only lower
+ * OUR model bill. refundGeneration() undoes it only when the section could
+ * not be delivered (generation or save failure).
  */
 async function handlePost(request: NextRequest): Promise<NextResponse> {
   const user = await getAuthenticatedUser();
@@ -241,6 +244,18 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   let cacheRowId: string | undefined;
   let cacheMode: "exact" | "delta" | "cross-university-delta" | "miss" = "miss";
 
+  // BILLING RULE — Plan quota RESERVATION before ANY cache: the student's
+  // standard unit is consumed on every generation request, whether the
+  // section is then served from studio_content_cache, the generation ledger,
+  // or a real model call. The caches cut OUR OpenRouter bill, never the
+  // student's quota. Atomic check-and-increment (see reserveGeneration's own
+  // comment — closes a real TOCTOU race); refunded only if this request
+  // fails to deliver the section.
+  const quotaGate = await reserveGeneration(user);
+  if (!quotaGate.allowed) {
+    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+  }
+
   const cacheResult: StudioCacheLookupResult = isPersonalizedVariant
     ? { hit: false }
     : await lookupStudioContentCache(actionType, truncatedContext);
@@ -259,136 +274,119 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     const isFuzzyHit = cacheResult.hit && cacheResult.matchType === "fuzzy";
     cacheMode = isFuzzyHit ? "delta" : "miss";
 
-    // Plan quota RESERVATION — deliberately AFTER the exact-hit check above
-    // (a fuzzy hit or true miss is the only path that spends real OpenRouter
-    // tokens, so it's the only path that should ever consume courseCap), and
-    // deliberately BEFORE the OpenRouter call below: this atomically checks
-    // AND increments in one step (see reserveGeneration's own comment for
-    // why — closes a real TOCTOU race the previous check-then-record split
-    // had). If the call below then fails, refundGeneration() undoes it.
-    const quotaGate = await reserveGeneration(user);
-    if (!quotaGate.allowed) {
-      return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
-    }
+    // GENERIC PATH (fuzzy-hit delta-adaptation of any type, or a true miss
+    // for resume/cas_clinique/qcm/exemples_analogies). The prompt is built
+    // BEFORE the quota reservation now (pure string work, no side effect) so
+    // the generation ledger can be consulted first — see ledgerSpec below.
+    //
+    // Fuzzy-hit (delta adaptation) still builds a single plain-string prompt
+    // — that path's newSourceText differs every call anyway (a different
+    // student's own upload), so there's no shared prefix across calls to
+    // cache. The full-generation path below DOES have one: see
+    // buildStudioSystemMessage's own comment for why the course-content
+    // block must be split out and marked cache_control on its own.
+    // isFuzzyHit can never be true here when isPersonalizedVariant is —
+    // the cache lookup itself was skipped for a personalized request (see
+    // cacheResult above), so this always resolves to the fresh-generation
+    // branch for language/custom-prompt/study-year requests, carrying the
+    // extra instructions appended to (or, for cas_clinique, swapped for
+    // the year-appropriate variant of) the section's own base prompt —
+    // never blindly REPLACING it for language/customPrompt — Explication's
+    // "SURCHARGE OBLIGATOIRE" quality mandates stay intact via the append
+    // pattern, while cas_clinique's year-1/year-2 variants are complete,
+    // self-contained prompts in their own right (see
+    // resolveCasCliniqueSystemPrompt's own comment for why they can't
+    // just be appended on top of the standard 3-case mandate).
+    const casCliniqueOverride = actionType === "cas_clinique" ? resolveCasCliniqueSystemPrompt(studyYear) : null;
+    const overrideBasePrompt =
+      casCliniqueOverride ??
+      (isPersonalizedVariant ? `${STUDIO_PROMPT_CONFIG[actionType].systemPrompt}${languageInstruction}` : undefined);
+    const systemContent: string | ReturnType<typeof buildStudioSystemMessage> = isFuzzyHit
+      ? buildStudioDeltaAdaptationPrompt(actionType, JSON.stringify(cacheResult.data), truncatedContext)
+      : buildStudioSystemMessage(actionType, truncatedContext, overrideBasePrompt);
+    const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
+    const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
-    // Platform-wide circuit breaker (lib/platform-spend-guard.ts) — a
-    // Studio section is one of the most expensive single calls in this app
-    // (real completion caps up to 32,000 tokens), so this is exactly the
-    // route where an unbounded daily total across many students matters most.
-    const platformCapacity = await reservePlatformCapacity();
-    if (!platformCapacity.allowed) {
-      return NextResponse.json({ success: false, error: platformCapacity.reason }, { status: 503 });
-    }
+    // MODEL POLICY: every Studio section reaching this generic path runs
+    // on ECONOMY_MODEL (Gemini 3.7 Flash) — Explication Ultra-Détaillée
+    // (CHEAP_MODEL/DeepSeek V3.2) never reaches here anymore, see the
+    // actionType === "explication" guard near the top of this handler.
+    // Résumé/cas_clinique/qcm/exemples_analogies keep the ECONOMY_MODEL
+    // policy exactly as tested (each was independently tested against its
+    // exact prompt+schema on a real course — Hémolyse — with a full
+    // structural re-validation and a manual medical-accuracy read finding
+    // no errors). There is no Sonnet fallback anywhere in this route.
+    const generationModel = ECONOMY_MODEL;
 
-    // `raw` used to be pre-filled here for actionType "explication" (a
-    // dedicated cross-university-delta / chunked-generation path) — that
-    // whole branch moved to app/api/studio/generate/explication-part +
-    // explication-finalize (see the guard at the top of this handler and
-    // lib/studio-explication-delta.ts's ARCHITECTURE comment). Every
-    // actionType reaching this point now always falls through to the
-    // generic path below.
-    const raw: string | null = null;
+    // reasoning: { effort: "low" } — confirmed production root cause of
+    // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
+    // tokens are billed as OUTPUT tokens but are NOT a separate budget
+    // from the visible completion (see callOpenRouter's own doc comment)
+    // — on google/gemini-3.7-flash specifically, an uncapped reasoning
+    // effort can silently burn most of `effectiveMaxTokens` on hidden
+    // "thinking" before the model writes a single character of the
+    // actual JSON, truncating it mid-structure regardless of how high
+    // the ceiling is set. `streamOpenRouter` (the chat path) already caps
+    // this for the exact same model — every ECONOMY_MODEL Studio call
+    // gets the identical cap.
+    const reasoningOption = { effort: "low" } as const;
+    const firstAttemptMessages: ChatMessageInput[] = [
+      { role: "system", content: systemContent },
+      { role: "user", content: baseUserPrompt },
+    ];
 
-    if (raw !== null) {
-      // Single-shot path (cross-university-delta or fresh-tagging) — both
-      // explication-only, whose schema (StudioTextSchema = z.string().min(50))
-      // essentially never fails validation, so no retry loop is needed here.
-      const outcome = parseAndValidateStudioSection(raw, actionType, sectionKey, studyYear);
-      if (!outcome.success) {
-        await refundGeneration(user.id);
-        console.error(`[studio/generate:${actionType}] Parsing/validation échoué (${cacheMode}):`, outcome.correctiveNote);
-        return NextResponse.json(
-          { success: false, error: `La réponse de l'IA pour "${actionType}" ne respecte pas le schéma attendu.` },
-          { status: 502 }
-        );
-      }
-      finalData = outcome.data;
-    } else {
-      // GENERIC PATH (fuzzy-hit delta-adaptation of any type, or a true miss
-      // for resume/cas_clinique/qcm/exemples_analogies) — self-correcting
-      // retry (max 2 attempts total), same pattern as the lazy Résumé branch
-      // above: a validation failure feeds Zod's exact fieldErrors back to
-      // the model in a corrective re-prompt instead of failing the whole
-      // request on the first miss. Added after resume/cas_clinique's recent
-      // prompt-compression rewrite (denser bullets, 3-consolidated-case
-      // mandate) started occasionally causing the model to drop a required
-      // structural key — this closes that failure mode by giving the model
-      // one concrete, targeted chance to self-repair, exactly like the lazy
-      // path already did for the same underlying risk.
-      //
-      // Fuzzy-hit (delta adaptation) still builds a single plain-string prompt
-      // — that path's newSourceText differs every call anyway (a different
-      // student's own upload), so there's no shared prefix across calls to
-      // cache. The full-generation path below DOES have one: see
-      // buildStudioSystemMessage's own comment for why the course-content
-      // block must be split out and marked cache_control on its own.
-      // isFuzzyHit can never be true here when isPersonalizedVariant is —
-      // the cache lookup itself was skipped for a personalized request (see
-      // cacheResult above), so this always resolves to the fresh-generation
-      // branch for language/custom-prompt/study-year requests, carrying the
-      // extra instructions appended to (or, for cas_clinique, swapped for
-      // the year-appropriate variant of) the section's own base prompt —
-      // never blindly REPLACING it for language/customPrompt — Explication's
-      // "SURCHARGE OBLIGATOIRE" quality mandates stay intact via the append
-      // pattern, while cas_clinique's year-1/year-2 variants are complete,
-      // self-contained prompts in their own right (see
-      // resolveCasCliniqueSystemPrompt's own comment for why they can't
-      // just be appended on top of the standard 3-case mandate).
-      const casCliniqueOverride = actionType === "cas_clinique" ? resolveCasCliniqueSystemPrompt(studyYear) : null;
-      const overrideBasePrompt =
-        casCliniqueOverride ??
-        (isPersonalizedVariant ? `${STUDIO_PROMPT_CONFIG[actionType].systemPrompt}${languageInstruction}` : undefined);
-      const systemContent: string | ReturnType<typeof buildStudioSystemMessage> = isFuzzyHit
-        ? buildStudioDeltaAdaptationPrompt(actionType, JSON.stringify(cacheResult.data), truncatedContext)
-        : buildStudioSystemMessage(actionType, truncatedContext, overrideBasePrompt);
-      const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
-      const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
+    // GENERATION LEDGER (lib/ai/generation-ledger.ts). Keyed on the exact
+    // first-attempt request (system prompt incl. course text + language /
+    // study-year variant, model, budget, reasoning cap) and storing only the
+    // FINAL validated section. This is what finally covers what
+    // studio_content_cache structurally can't: English and année-1/2
+    // variants are shared between every student who uploads the same
+    // polycopié in that same variant, and two concurrent identical requests
+    // (double tap, two tabs, two students on a brand-new course) generate
+    // once. It only ever lowers OUR model bill: the student's unit was
+    // already reserved above, whatever this resolves to.
+    const ledgerSpec = {
+      namespace: `studio-section:${actionType}`,
+      key: modelCallKey(firstAttemptMessages, { model: generationModel, maxTokens: effectiveMaxTokens, reasoning: reasoningOption }),
+      // 300s route budget; three validated attempts rarely exceed ~150s.
+      peerWaitMs: 60_000,
+      leaseMs: 4 * 60_000,
+      isValid: (value: unknown) => value !== null && value !== undefined,
+    };
 
-      // MODEL POLICY: every Studio section reaching this generic path runs
-      // on ECONOMY_MODEL (Gemini 3.7 Flash) — Explication Ultra-Détaillée
-      // (CHEAP_MODEL/DeepSeek V3.2) never reaches here anymore, see the
-      // actionType === "explication" guard near the top of this handler.
-      // Résumé/cas_clinique/qcm/exemples_analogies keep the ECONOMY_MODEL
-      // policy exactly as tested (each was independently tested against its
-      // exact prompt+schema on a real course — Hémolyse — with a full
-      // structural re-validation and a manual medical-accuracy read finding
-      // no errors). There is no Sonnet fallback anywhere in this route.
-      const generationModel = ECONOMY_MODEL;
+    // Self-correcting retry (max 3 attempts total): a validation failure
+    // feeds Zod's exact fieldErrors back to the model in a corrective
+    // re-prompt instead of failing the whole request on the first miss.
+    //
+    // RAISED 2 -> 3 after a real, reported production symptom: an
+    // occasional "ne respecte pas le schéma attendu" failure on Résumé
+    // specifically, which then generated CLEANLY the very next time the
+    // student manually retried (a brand new, independent call). That
+    // pattern — fails once or twice in a row, then a fresh attempt
+    // succeeds — points at stochastic model variance, not a systematic
+    // token-budget or prompt problem: StudioResumeSchema requires EVERY
+    // one of its 6 modes to carry every structural field (hero, sections,
+    // ddx_table, pieges, cards, steps, quotes, perles, items — see
+    // lib/ai/studio-schemas.ts), even the placeholder-empty ones a given
+    // mode doesn't conceptually use, which is a lot of required surface
+    // area for the model to occasionally drop one field on. The existing
+    // corrective re-prompt (feeding Zod's exact fieldErrors back to the
+    // model) already works — it just didn't get enough chances before
+    // this route gave up and surfaced a failure the student's own next
+    // click would have resolved anyway.
+    const MAX_GENERIC_ATTEMPTS = 3;
+    const generateValidatedSection = async (): Promise<unknown> => {
+      // Platform-wide circuit breaker (lib/platform-spend-guard.ts) — a
+      // Studio section is one of the most expensive single calls in this app
+      // (real completion caps up to 32,000 tokens), so this is exactly the
+      // route where an unbounded daily total across many students matters
+      // most. Checked here, inside the ledger producer, so it only ever
+      // counts requests that really reach the model.
+      const platformCapacity = await reservePlatformCapacity();
+      if (!platformCapacity.allowed) throw new StudioGenerationFailure(platformCapacity.reason ?? "MedArt Neural Engine est momentanément saturé. Réessaie un peu plus tard.", 503);
 
-      // reasoning: { effort: "low" } — confirmed production root cause of
-      // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
-      // tokens are billed as OUTPUT tokens but are NOT a separate budget
-      // from the visible completion (see callOpenRouter's own doc comment)
-      // — on google/gemini-3.7-flash specifically, an uncapped reasoning
-      // effort can silently burn most of `effectiveMaxTokens` on hidden
-      // "thinking" before the model writes a single character of the
-      // actual JSON, truncating it mid-structure regardless of how high
-      // the ceiling is set. `streamOpenRouter` (the chat path) already caps
-      // this for the exact same model — every ECONOMY_MODEL Studio call
-      // gets the identical cap.
-      const reasoningOption = { effort: "low" } as const;
-
-      // RAISED 2 -> 3 after a real, reported production symptom: an
-      // occasional "ne respecte pas le schéma attendu" failure on Résumé
-      // specifically, which then generated CLEANLY the very next time the
-      // student manually retried (a brand new, independent call). That
-      // pattern — fails once or twice in a row, then a fresh attempt
-      // succeeds — points at stochastic model variance, not a systematic
-      // token-budget or prompt problem: StudioResumeSchema requires EVERY
-      // one of its 6 modes to carry every structural field (hero, sections,
-      // ddx_table, pieges, cards, steps, quotes, perles, items — see
-      // lib/ai/studio-schemas.ts), even the placeholder-empty ones a given
-      // mode doesn't conceptually use, which is a lot of required surface
-      // area for the model to occasionally drop one field on. The existing
-      // corrective re-prompt (feeding Zod's exact fieldErrors back to the
-      // model) already works — it just didn't get enough chances before
-      // this route gave up and surfaced a failure the student's own next
-      // click would have resolved anyway.
-      const MAX_GENERIC_ATTEMPTS = 3;
       let correctiveNote: string | null = null;
-      let succeeded = false;
-
-      for (let attempt = 1; attempt <= MAX_GENERIC_ATTEMPTS && !succeeded; attempt++) {
+      for (let attempt = 1; attempt <= MAX_GENERIC_ATTEMPTS; attempt++) {
         const userPrompt = correctiveNote
           ? `Ta réponse précédente a été REJETÉE par la validation : ${correctiveNote} Régénère un JSON COMPLET et VALIDE respectant strictement TOUTES les clés du schéma ci-dessus, sans en omettre aucune.`
           : baseUserPrompt;
@@ -406,31 +404,32 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
             { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: reasoningOption, providerSort: "throughput" }
           );
         } catch (error) {
-          await refundGeneration(user.id);
-          if (error instanceof OpenRouterError) {
-            return NextResponse.json({ success: false, error: error.message }, { status: error.status });
-          }
+          if (error instanceof OpenRouterError) throw new StudioGenerationFailure(error.message, error.status);
           console.error(`[studio/generate:${actionType}] Échec appel IA (${cacheMode}, tentative ${attempt}):`, error);
-          return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
+          throw new StudioGenerationFailure(errorMessage(error), 502);
         }
 
         const outcome = parseAndValidateStudioSection(attemptRaw, actionType, sectionKey, studyYear);
-        if (outcome.success) {
-          finalData = outcome.data;
-          succeeded = true;
-          break;
-        }
+        if (outcome.success) return outcome.data;
 
         console.error(`[studio/generate:${actionType}] Parsing/validation échoué (${cacheMode}, tentative ${attempt}/${MAX_GENERIC_ATTEMPTS}):`, outcome.correctiveNote);
-        if (attempt === MAX_GENERIC_ATTEMPTS) {
-          await refundGeneration(user.id);
-          return NextResponse.json(
-            { success: false, error: `La réponse de l'IA pour "${actionType}" ne respecte pas le schéma attendu, même après ${MAX_GENERIC_ATTEMPTS - 1} nouvelles tentatives.` },
-            { status: 502 }
-          );
-        }
         correctiveNote = outcome.correctiveNote;
       }
+      throw new StudioGenerationFailure(
+        `La réponse de l'IA pour "${actionType}" ne respecte pas le schéma attendu, même après ${MAX_GENERIC_ATTEMPTS - 1} nouvelles tentatives.`,
+        502
+      );
+    };
+
+    try {
+      finalData = await runThroughLedger(ledgerSpec, generateValidatedSection);
+    } catch (error) {
+      await refundGeneration(user.id);
+      if (error instanceof StudioGenerationFailure) {
+        return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+      }
+      console.error(`[studio/generate:${actionType}] Échec génération (${cacheMode}):`, error);
+      return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
     }
 
     // Fresh (or delta-adapted) validated content — store it under THIS
@@ -442,7 +441,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // atomically, before this call even ran. Skipped for a personalized
     // (non-default language / custom prompt) request — see
     // isPersonalizedVariant's own comment above for why this must never
-    // enter the shared cross-student cache.
+    // enter the shared cross-student cache (the generation ledger above is
+    // what shares those variants, keyed on the variant's own exact prompt).
     if (!isPersonalizedVariant) {
       await storeStudioContentCache(actionType, truncatedContext, finalData);
     }
@@ -471,9 +471,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 
     if (saveError) {
       console.error(`[studio/generate:${actionType}] Échec sauvegarde Supabase:`, saveError);
+      await refundGeneration(user.id); // nothing was delivered
       return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${saveError.message}` }, { status: 500 });
     }
     if (count === 0) {
+      await refundGeneration(user.id);
       return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
     }
   }
@@ -502,6 +504,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({ success: true, actionType, data: finalData, cached: servedFromCache, cacheMode });
+}
+
+/** A generation failure that already carries the student-facing message and HTTP status (thrown out of the ledger producer). */
+class StudioGenerationFailure extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
 }
 
 /**

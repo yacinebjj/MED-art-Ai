@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, CHEAP_MODEL, OpenRouterError, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 
 export const runtime = "nodejs";
@@ -107,20 +108,29 @@ export async function POST(request: NextRequest) {
       : "Aucun autre cours dans ce module pour l'instant.",
   ].join("\n\n");
 
-  try {
-    const raw = await callOpenRouter(
-      [
-        { role: "system", content: CONNECTIONS_SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
-      ],
-      { model: CHEAP_MODEL, maxTokens: 500, timeoutMs: 75_000 }
-    );
+  const messages: ChatMessageInput[] = [
+    { role: "system", content: CONNECTIONS_SYSTEM_PROMPT },
+    { role: "user", content: userPrompt },
+  ];
+  const callOptions = { model: CHEAP_MODEL, maxTokens: 500, timeoutMs: 75_000 };
 
-    const parsed = parseJsonResponse(raw);
-    const connections = (parsed as { connections?: unknown }).connections;
-    if (!Array.isArray(connections) || connections.length === 0 || !connections.every((c) => typeof c === "string")) {
-      throw new Error("Réponse IA invalide.");
-    }
+  try {
+    // Generation ledger: the same course (same excerpt, same sibling titles)
+    // clicked again — later, or by another student with the same module
+    // layout — replays the validated connections instead of a new call.
+    // Adding a course to the module changes the sibling list, hence the key.
+    const connections = await runThroughLedger(
+      { namespace: "clinical-connections", key: modelCallKey(messages, callOptions), ttlDays: 60, peerWaitMs: 20_000, leaseMs: 90_000 },
+      async () => {
+        const raw = await callOpenRouter(messages, callOptions);
+        const parsed = parseJsonResponse(raw);
+        const value = (parsed as { connections?: unknown }).connections;
+        if (!Array.isArray(value) || value.length === 0 || !value.every((c) => typeof c === "string")) {
+          throw new Error("Réponse IA invalide.");
+        }
+        return value as string[];
+      }
+    );
 
     return NextResponse.json({ success: true, connections: connections.slice(0, 4) });
   } catch (error) {

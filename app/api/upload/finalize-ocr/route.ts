@@ -7,7 +7,9 @@ import { CourseQuotaError, createStudioCourse } from "@/lib/studio-course-create
 import { peekCourseCreation } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { extractPdfTextViaOcr, OpenRouterError } from "@/lib/ai/openrouter";
+import { CHEAP_VISION_MODEL, extractPdfTextViaOcr, OpenRouterError } from "@/lib/ai/openrouter";
+import { runThroughLedger } from "@/lib/ai/generation-ledger";
+import { sha256Hex } from "@/lib/hash";
 
 export const runtime = "nodejs";
 // Generous but bounded — OCR processing time is OpenRouter's own
@@ -87,10 +89,30 @@ export async function POST(request: NextRequest) {
   const { data: publicUrlData } = supabase.storage.from(SOURCE_FILES_BUCKET).getPublicUrl(path);
   const fileUrl = publicUrlData.publicUrl;
 
+  // Content address of the PDF itself: the same polycopié (byte-identical
+  // file) OCR'd for one student is not paid for again by the next — nor by a
+  // retry of the same upload. Null on any download error: OCR runs as before.
+  const fileDigest = await digestStoredFile(supabase, path);
+  const runOcr = async () => (await extractPdfTextViaOcr(fileUrl, fileName)).text;
+
   let text: string;
   try {
-    const result = await extractPdfTextViaOcr(fileUrl, fileName);
-    text = sanitizeForPostgres(result.text);
+    const rawText = fileDigest
+      ? await runThroughLedger(
+          {
+            namespace: "pdf-ocr",
+            // Engine + model in the key: switching either re-OCRs instead of serving the old output.
+            // CHEAP_VISION_MODEL is the value OCR_MODEL resolves to in lib/ai/openrouter.ts (read only, never changed here).
+            key: { fileSha256: fileDigest, model: CHEAP_VISION_MODEL, engine: "mistral-ocr" },
+            // 280s route budget, OCR call up to 240s: only a short wait for a peer is affordable.
+            peerWaitMs: 25_000,
+            leaseMs: 250_000,
+            isValid: (value) => typeof value === "string" && value.trim().length >= 50,
+          },
+          runOcr
+        )
+      : await runOcr();
+    text = sanitizeForPostgres(rawText);
   } catch (error) {
     if (error instanceof OpenRouterError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
@@ -121,4 +143,15 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ success: true, text, fileName, fileUrl });
+}
+
+async function digestStoredFile(supabase: ReturnType<typeof getSupabaseAdmin>, path: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.storage.from(SOURCE_FILES_BUCKET).download(path);
+    if (error || !data) return null;
+    return sha256Hex(Buffer.from(await data.arrayBuffer()));
+  } catch (error) {
+    console.error("[upload/finalize-ocr] Empreinte du PDF impossible (OCR sans ledger):", errorMessage(error));
+    return null;
+  }
 }

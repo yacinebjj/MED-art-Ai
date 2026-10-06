@@ -29,7 +29,6 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
-import { PromoMonthlyOnlyCard } from "@/components/pricing/PricingTierCard";
 import { PlanCard, planActionKey, type PlanAction } from "@/components/billing/PlanCard";
 import { CyberHeader, CyberPanel, CyberStage, NeonRing } from "@/components/cyber/primitives";
 import { FREE_TRIAL, PLANS, REFUND_DELAY_LABEL, getPlansForCycle, formatDZD, type PlanId, type BillingCycle } from "@/lib/pricing";
@@ -251,7 +250,7 @@ function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: bo
 
       {trial && usage.trialExhausted && (
         <div className="mt-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          Ton essai gratuit est terminé. Choisis une formule ci-dessus pour continuer — dès 700 DA par personne avec la Promo Cohorte.
+          Ton essai gratuit est terminé. Choisis une formule ci-dessus pour continuer — dès {formatDZD(PLANS.promo_monthly.priceDZD)} par personne et par mois avec la Cohorte.
         </div>
       )}
 
@@ -279,7 +278,7 @@ function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: bo
           used={usage.syntheses.used}
           cap={usage.syntheses.cap}
           caption="ce mois-ci"
-          hint="Chaque génération Résumé, Mots-clés ou Dictionnaire compte pour 1 ; les résultats déjà en cache sont gratuits."
+          hint="Chaque génération Résumé, Mots-clés ou Dictionnaire compte pour 1."
           lockedText={trial ? lockedPaid : undefined}
         />
         {AUDIO_SMART_NOTES_ENABLED && (
@@ -324,7 +323,7 @@ function poolStatusBadge(pool: PoolView): { label: string; variant: "success" | 
 function PoolItem({ pool, copied, onCopy }: { pool: PoolView; copied: boolean; onCopy: (code: string) => void }) {
   const badge = poolStatusBadge(pool);
   const ratio = pool.size > 0 ? Math.min(1, pool.confirmed / pool.size) : 0;
-  const kindLabel = pool.kind === "promo" ? "Promo Cohorte" : "Groupe";
+  const kindLabel = pool.kind === "promo" ? "Cohorte" : "Groupe";
   const modeLabel = pool.mode === "leader" ? "payé en une fois" : "chacun paie sa part";
 
   return (
@@ -630,7 +629,6 @@ function BillingPageContent() {
             {plansForCycle.map((plan) => (
               <PlanCard key={plan.id} plan={plan} isCurrentPlan={isPaidActive && subscription?.effectivePlan === plan.id} loadingKey={loadingKey} onAction={handleAction} />
             ))}
-            {!plansForCycle.some((plan) => plan.tier === "promo") && <PromoMonthlyOnlyCard onShowMonthly={() => setCycle("monthly")} />}
           </div>
           <p className="mt-4 text-center text-[11px] text-slate-500">Aucun renouvellement automatique : tu paies une fois pour la durée choisie, puis tu décides.</p>
         </section>
@@ -651,7 +649,7 @@ function BillingPageContent() {
           <Users className="h-5 w-5 text-cyan-300" />
           Tes groupes
         </h2>
-        <p className="mt-1 text-xs text-slate-400">Tes formules Groupe et Promo Cohorte, et où en est chaque jauge.</p>
+        <p className="mt-1 text-xs text-slate-400">Tes formules Groupe et Cohorte, et où en est chaque jauge.</p>
         {pools === null ? (
           <div className="mt-4 space-y-2">
             {[0, 1].map((i) => (
@@ -661,7 +659,7 @@ function BillingPageContent() {
         ) : pools.length === 0 ? (
           <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center">
             <Users className="h-7 w-7 text-slate-500" />
-            <p className="text-sm text-slate-400">Aucun groupe pour l&apos;instant. Choisis Groupe ou Promo Cohorte pour réviser à plusieurs, moins cher.</p>
+            <p className="text-sm text-slate-400">Aucun groupe pour l&apos;instant. Choisis Groupe ou Cohorte pour réviser à plusieurs, moins cher.</p>
           </div>
         ) : (
           <ul className="mt-4 space-y-3">

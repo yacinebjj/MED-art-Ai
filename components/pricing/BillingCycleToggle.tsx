@@ -9,18 +9,18 @@ import { useLanguage } from "@/providers/LanguageProvider";
 interface BillingCycleToggleProps {
   value: BillingCycle;
   onChange: (cycle: BillingCycle) => void;
-  /** Show the honest one-liner under the toggle (same monthly price whatever the duration, Promo is 1 month only). */
+  /** Show the one-liner under the toggle (the duration discounts). */
   showNote?: boolean;
   className?: string;
 }
 
 /**
- * 3-way segmented control (1 Mois / 4 Mois / 1 An). The active pill glides
+ * 3-way segmented control (1 Mois / 4 Mois / Année). The active pill glides
  * between slots through a shared `layoutId` — scoped with useId() so two
  * toggles on the same page never fight over the same pill.
  *
- * v2 prices are exactly monthly × months (no invented discount), and Promo
- * Cohorte only exists on 1 month: the optional note says both, plainly.
+ * v3 prices: 4 months = −20 %, the year (8 study months) = −45 %, for every
+ * tier (lib/pricing.ts) — the optional note says so, plainly.
  */
 export function BillingCycleToggle({ value, onChange, showNote = true, className }: BillingCycleToggleProps) {
   const { language } = useLanguage();
@@ -63,8 +63,8 @@ export function BillingCycleToggle({ value, onChange, showNote = true, className
       {showNote && (
         <p className="max-w-xs text-center text-[11px] leading-snug text-muted-foreground">
           {fr
-            ? "Même prix par mois quelle que soit la durée. Promo Cohorte : 1 mois uniquement."
-            : "Same price per month whatever the length. Cohort plan: 1 month only."}
+            ? "4 mois : −20 %. Année (8 mois d'études) : −45 %."
+            : "4 months: −20%. Year (8 study months): −45%."}
         </p>
       )}
     </div>

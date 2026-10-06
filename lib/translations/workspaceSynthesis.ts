@@ -55,16 +55,6 @@ export const WORKSPACE_SYNTHESIS_TRANSLATIONS = {
   },
 
   // Generation result toasts
-  fullyCachedTitle: { fr: "Entièrement en cache", en: "Fully cached" },
-  fullyCachedDescription: {
-    fr: "Résultat instantané, aucun coût de génération.",
-    en: "Instant result, no generation cost.",
-  },
-  partialGenerationTitle: { fr: "Génération partielle", en: "Partial generation" },
-  partialGenerationDescription: {
-    fr: "{cached} cours déjà en cache, {generated} générés à l'instant.",
-    en: "{cached} courses already cached, {generated} generated just now.",
-  },
   generationFailedTitle: { fr: "Échec de la génération", en: "Generation failed" },
   generationFailedRetryDescription: { fr: "Réessaie.", en: "Try again." },
   generationFailedServerDescription: {

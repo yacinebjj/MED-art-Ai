@@ -6,7 +6,7 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterChain } from "@/lib/ai/call-resilient";
 import { LAB_CHAIN_DEADLINE_MS, labAttempts } from "@/lib/ai/lab-generation";
-import { labContentHash, labToolTypeFor, lookupLabCache, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
+import { labContentHash, labToolTypeFor, lookupLabCache, ownsLabResult, recordLabHistory, storeLabCache } from "@/lib/lab-course-cache";
 import { buildLanguageDirective, parseContentLanguage } from "@/lib/ai/language-directive";
 import { errorMessage, parseJsonResponse, upstreamStatusForClient } from "@/lib/course-generation-shared";
 import { refundGeneration, reserveGeneration } from "@/lib/subscription";
@@ -270,17 +270,24 @@ export async function POST(request: NextRequest) {
   }
 
   // Platform-wide cache FIRST (see lib/lab-course-cache.ts): a hit returns the
-  // stored map for 0 tokens and 0 credits — before the quota gate.
+  // stored map for 0 tokens (our bill) — the student's unit was charged above.
   const contentHash = labContentHash(course.raw_text?.trim() ? course.raw_text : sourceText);
+  // BILLING RULE: every NEW request for this result consumes the student's
+  // standard unit, even when it is then served from the platform-wide cache
+  // (that cache only cuts OUR model bill). The one exception is a re-open of
+  // a result this same student already obtained (their own Lab history) —
+  // not a new request. Refunded below only if nothing could be delivered.
+  const charged = !(await ownsLabResult(user.id, contentHash, toolType));
+  if (charged) {
+    const gate = await reserveGeneration(user);
+    if (!gate.allowed) {
+      return NextResponse.json({ success: false, error: gate.reason }, { status: 403 });
+    }
+  }
   const cached = await lookupLabCache(contentHash, toolType);
   if (isStoredMindMap(cached)) {
     await recordLabHistory({ userId: user.id, contentHash, toolType, courseId: course.id, title: cached.title });
     return NextResponse.json({ success: true, mindmap: cached, cached: true });
-  }
-
-  const gate = await reserveGeneration(user);
-  if (!gate.allowed) {
-    return NextResponse.json({ success: false, error: gate.reason }, { status: 403 });
   }
 
   try {
@@ -294,6 +301,9 @@ export async function POST(request: NextRequest) {
       ],
       {
         label: "[studio:mindmap]",
+        // Concurrent identical requests (double tap, two tabs) generate once;
+        // a request that didn't pay gets its course credit back.
+        ledger: { namespace: "lab:mindmap", peerWaitMs: 30_000, leaseMs: LAB_CHAIN_DEADLINE_MS + 10_000 },
         attempts: labAttempts(),
         deadlineMs: LAB_CHAIN_DEADLINE_MS,
         maxTokens: 5000,
@@ -329,7 +339,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, mindmap, cached: false });
   } catch (error) {
-    await refundGeneration(user.id);
+    if (charged) await refundGeneration(user.id);
     const status = error instanceof OpenRouterError ? upstreamStatusForClient(error.status) : 502;
     console.error(`[studio:mindmap] Échec (cours ${course.id}):`, error);
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });

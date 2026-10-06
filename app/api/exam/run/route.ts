@@ -316,6 +316,24 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     return bad("Aucun cours sélectionné trouvé dans ce module.");
   }
 
+  // BILLING RULE: the exam unit is consumed on every generation request —
+  // including one served from the shared cache or the variation pool below.
+  // The caches cut OUR model bill, never the student's quota.
+  const quota = await reserveExam(user);
+  if (!quota.allowed) {
+    await undoRegeneration();
+    return quotaBlockedResponse(quota);
+  }
+  const saveServedExam = async (content: unknown, meta: Parameters<typeof saveExam>[5]) => {
+    const saved = await saveExam(supabase, userId, params, courses, content, meta);
+    // Nothing was delivered: the unit goes back, exactly like a failed generation.
+    if (saved.status >= 500) {
+      await refundExam(userId);
+      await undoRegeneration();
+    }
+    return saved;
+  };
+
   // Shared cache / variation pool — identical rules to the one-shot route.
   const contentHash = computeExamContentHash(courses);
   let existingVariationCount = 0;
@@ -324,7 +342,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
       const cached = await lookupExamCache(contentHash);
       if (cached) {
         void recordExamCacheHit(contentHash);
-        return saveExam(supabase, userId, params, courses, cached, { cached: true, fromVariationPool: false, contentHash, variationIndex: 0 });
+        return saveServedExam(cached, { cached: true, fromVariationPool: false, contentHash, variationIndex: 0 });
       }
     } else {
       const { existing } = await lookupExamVariations(contentHash);
@@ -332,15 +350,9 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
       if (existing.length >= MAX_EXAM_VARIATIONS) {
         const picked = existing[Math.floor(Math.random() * existing.length)];
         void recordExamVariationHit(picked.id);
-        return saveExam(supabase, userId, params, courses, picked.content, { cached: false, fromVariationPool: true, contentHash, variationIndex: 0 });
+        return saveServedExam(picked.content, { cached: false, fromVariationPool: true, contentHash, variationIndex: 0 });
       }
     }
-  }
-
-  const quota = await reserveExam(user);
-  if (!quota.allowed) {
-    await undoRegeneration();
-    return quotaBlockedResponse(quota);
   }
 
   try {
@@ -351,7 +363,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     if (params.isPersonalized) {
       needs = distribute(ids, target, new Map());
     } else {
-      const harvested = await lookupHarvestedQcms(ids);
+      const harvested = await lookupHarvestedQcms(courses);
       const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / courses.length));
       const pooling = poolExamQuestions(
         courses.map((c) => ({ id: c.id, title: c.title, qcms: c.qcms, harvestedQcms: harvested.get(c.id) })),
@@ -443,7 +455,7 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
     const questions = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt);
     // Single-course, canonical questions feed that course's reusable pool.
     if (!params.isPersonalized && courses.length === 1) {
-      for (const question of questions) void storeHarvestedQcm(courses[0].id, sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
+      for (const question of questions) void storeHarvestedQcm(courses[0], sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
     }
     return NextResponse.json({ success: true, questions, seal: sealRunPayload(runToken, JSON.stringify(questions)) });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { callOpenRouter, HAIKU_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { callOpenRouter, HAIKU_MODEL, OpenRouterError, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { buildExplicationSeamStitchPrompt } from "@/lib/prompts/public-course-sections";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -63,18 +64,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "'tail' et 'head' sont requis (chaînes non vides)." }, { status: 400 });
   }
 
+  const messages: ChatMessageInput[] = [
+    { role: "system", content: buildExplicationSeamStitchPrompt() },
+    { role: "user", content: `avant:\n"""\n${tail}\n"""\n\naprès:\n"""\n${head}\n"""\n\nGénère le JSON demandé.` },
+  ];
+  const callOptions = { model: HAIKU_MODEL, maxTokens: SEAM_STITCH_MAX_TOKENS, bypassMock: true, timeoutMs: SEAM_STITCH_TIMEOUT_MS, temperature: 0.2 };
+
   try {
-    const raw = await callOpenRouter(
-      [
-        { role: "system", content: buildExplicationSeamStitchPrompt() },
-        { role: "user", content: `avant:\n"""\n${tail}\n"""\n\naprès:\n"""\n${head}\n"""\n\nGénère le JSON demandé.` },
-      ],
-      { model: HAIKU_MODEL, maxTokens: SEAM_STITCH_MAX_TOKENS, bypassMock: true, timeoutMs: SEAM_STITCH_TIMEOUT_MS, temperature: 0.2 }
+    // Generation ledger: the same seam (same two parts — which the ledger
+    // already replays for an identical course) is stitched once, not once
+    // per student, tab or retry.
+    const stitched = await runThroughLedger(
+      { namespace: "explication-stitch", key: modelCallKey(messages, callOptions), peerWaitMs: 8_000, leaseMs: SEAM_STITCH_TIMEOUT_MS + 10_000 },
+      async () => {
+        const raw = await callOpenRouter(messages, callOptions);
+        const parsed = parseJsonResponse(raw);
+        return {
+          tail: typeof parsed.tail === "string" && parsed.tail.trim() ? parsed.tail : tail,
+          head: typeof parsed.head === "string" && parsed.head.trim() ? parsed.head : head,
+        };
+      }
     );
-    const parsed = parseJsonResponse(raw);
-    const fixedTail = typeof parsed.tail === "string" && parsed.tail.trim() ? parsed.tail : tail;
-    const fixedHead = typeof parsed.head === "string" && parsed.head.trim() ? parsed.head : head;
-    return NextResponse.json({ success: true, tail: fixedTail, head: fixedHead });
+    return NextResponse.json({ success: true, tail: stitched.tail, head: stitched.head });
   } catch (error) {
     const status = error instanceof OpenRouterError ? error.status : 502;
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });

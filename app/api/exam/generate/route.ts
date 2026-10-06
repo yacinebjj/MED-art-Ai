@@ -289,6 +289,17 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // own separate, bounded variation pool instead (exam_content_variations,
   // just below), so a LATER student's "Régénérer" on this same course set
   // can still land on $0 once that pool fills up.
+  // BILLING RULE: the student's exam unit is consumed on EVERY generation
+  // request, including one served from the shared cache or the variation
+  // pool below. The caches exist to cut OUR model bill, never the student's
+  // quota. Refunded only when the request fails (see refundExam below).
+  const quotaGate = await reserveExam(user);
+  if (!quotaGate.allowed) {
+    await refundModuleExamRegenerateIfNeeded();
+    return quotaBlockedResponse(quotaGate);
+  }
+  const reservedGeneration = true;
+
   const contentHash = computeExamContentHash(eligibleCourses);
   let cachedContent: unknown | null = null;
   // A style-mimicry exam is inherently per-student (it clones THEIR uploaded
@@ -317,21 +328,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   const servedFromVariationPool = variationContent !== null;
 
   let validated: ReturnType<typeof ExamGenerationSchema.parse> | null = null;
-  // Quota reserved only right before the one branch that actually makes a
-  // real OpenRouter call — a cache hit or a variation-pool hit above never
-  // reaches this line, so neither ever consumes courseCap (same "cache hits
-  // don't count" rule as everywhere else in this app; previously this
-  // reservation ran unconditionally, even on what turned out to be a free
-  // cache hit).
-  let reservedGeneration = false;
+  // The exam unit was already reserved above (billing rule): only the model
+  // call itself is skipped on a cache or variation-pool hit.
   if (!cachedContent && !servedFromVariationPool) {
-    const quotaGate = await reserveExam(user);
-    if (!quotaGate.allowed) {
-      await refundModuleExamRegenerateIfNeeded();
-      return quotaBlockedResponse(quotaGate);
-    }
-    reservedGeneration = true;
-
     const generationDeadline = Date.now() + EXAM_GENERATION_BUDGET_MS;
     try {
       if (isPersonalizedExam) {
@@ -368,7 +367,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // combined with this time. Fetched once for every selected course;
         // fail-open (a lookup error just yields an empty map, same as no
         // harvested supply existing yet).
-        const harvestedByCourseId = await lookupHarvestedQcms(eligibleCourses.map((c) => c.id));
+        const harvestedByCourseId = await lookupHarvestedQcms(eligibleCourses);
 
         // SMART AGGREGATION (see lib/exam-pooling.ts's own header comment for
         // the exact compatibility rules) — pool each course's own already-
@@ -468,7 +467,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
               // this jsonb insert silently (caught by storeHarvestedQcm's own
               // fail-open catch), permanently losing an already-paid-for
               // generation that should have become poolable.
-              void storeHarvestedQcm(shortfall.id, sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
+              void storeHarvestedQcm(unit.courses[0], sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
             }
             return courseQuestions;
           } catch (error) {

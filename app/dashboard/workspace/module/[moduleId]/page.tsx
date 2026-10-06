@@ -517,25 +517,9 @@ export default function ModuleWorkspacePage() {
       if (Array.isArray(body.coursesFailedToGenerate) && body.coursesFailedToGenerate.length > 0) {
         setDictionaryFailedNotice(body.coursesFailedToGenerate as string[]);
       }
-      // Per-course cache reporting (course_workspace_cache) — a request
-      // almost never used to be a clean "all cached" vs "all generated"
-      // before the modular-chunk pivot; now it's normal for most requests
-      // to be a mix, which is exactly the point.
-      if (body.fullyCached) {
-        toast({
-          variant: "success",
-          title: tWorkspaceSynthesis("fullyCachedTitle", language),
-          description: tWorkspaceSynthesis("fullyCachedDescription", language),
-        });
-      } else if (typeof body.coursesFromCache === "number" && body.coursesFromCache > 0) {
-        toast({
-          variant: "success",
-          title: tWorkspaceSynthesis("partialGenerationTitle", language),
-          description: tWorkspaceSynthesis("partialGenerationDescription", language)
-            .replace("{cached}", String(body.coursesFromCache))
-            .replace("{generated}", String(body.coursesGenerated)),
-        });
-      }
+      // No "cached / partially cached" toast: how a synthesis was assembled
+      // (shared per-course chunks vs fresh generation) is an internal cost
+      // detail, never something the student is told.
     } catch {
       toast({
         variant: "error",
@@ -825,7 +809,7 @@ export default function ModuleWorkspacePage() {
           <span>
             {dictionaryFailedNotice.length} cours n&apos;ont pas pu être ajoutés au dictionnaire (erreur temporaire) et sont
             absents du résultat ci-dessous : <strong>{dictionaryFailedNotice.join(", ")}</strong>. Relance une génération pour
-            réessayer — les cours déjà réussis resteront en cache.
+            réessayer — les cours déjà réussis restent acquis.
           </span>
         </motion.div>
       )}
@@ -850,7 +834,7 @@ export default function ModuleWorkspacePage() {
               }
               steps={
                 isGeneratingSummary
-                  ? ["Lecture des cours sélectionnés", "Réutilisation des chapitres déjà générés", "Rédaction des chapitres manquants", summaryPersonalized ? "Mise au format choisi" : "Assemblage de la fiche complète"]
+                  ? ["Lecture des cours sélectionnés", "Analyse de chaque chapitre", "Rédaction de la synthèse", summaryPersonalized ? "Mise au format choisi" : "Assemblage de la fiche complète"]
                   : isGeneratingKeywords
                     ? ["Lecture des cours sélectionnés", "Repérage des notions clés", "Classement par catégorie", "Assemblage du tableau"]
                     : ["Lecture des cours sélectionnés", "Sélection des termes techniques", "Rédaction des explications FR / عربي", "Assemblage du dictionnaire"]

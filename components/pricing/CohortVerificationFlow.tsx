@@ -24,14 +24,14 @@ export function CohortVerificationFlow({ href = "/register" }: CohortVerificatio
 
   const steps = fr
     ? [
-        { icon: UserPlus, title: "Une personne lance la Promo", text: `Elle paie sa part (${price}) et reçoit un lien d'invitation.` },
-        { icon: Share2, title: "La promo rejoint via le lien", text: `Chacun paie ${price} ; la jauge avance de 1/${PROMO_SIZE} à ${PROMO_SIZE}/${PROMO_SIZE}.` },
-        { icon: Gauge, title: `À ${PROMO_SIZE}/${PROMO_SIZE}, c'est parti`, text: `L'abonnement d'1 mois démarre en même temps pour les ${PROMO_SIZE}.` },
+        { icon: UserPlus, title: "Une personne lance la Cohorte", text: `Elle paie sa part (dès ${price}/mois) et reçoit un lien d'invitation.` },
+        { icon: Share2, title: "La promo rejoint via le lien", text: `Chacun paie la même part ; la jauge avance de 1/${PROMO_SIZE} à ${PROMO_SIZE}/${PROMO_SIZE}.` },
+        { icon: Gauge, title: `À ${PROMO_SIZE}/${PROMO_SIZE}, c'est parti`, text: `L'abonnement démarre en même temps pour les ${PROMO_SIZE}, pour la durée choisie.` },
       ]
     : [
-        { icon: UserPlus, title: "One person starts the Cohort", text: `They pay their share (${price}) and get an invite link.` },
-        { icon: Share2, title: "The class joins via the link", text: `Everyone pays ${price}; the gauge goes from 1/${PROMO_SIZE} to ${PROMO_SIZE}/${PROMO_SIZE}.` },
-        { icon: Gauge, title: `At ${PROMO_SIZE}/${PROMO_SIZE}, you're in`, text: `The 1-month plan starts at the same time for all ${PROMO_SIZE}.` },
+        { icon: UserPlus, title: "One person starts the Cohort", text: `They pay their share (from ${price}/month) and get an invite link.` },
+        { icon: Share2, title: "The class joins via the link", text: `Everyone pays the same share; the gauge goes from 1/${PROMO_SIZE} to ${PROMO_SIZE}/${PROMO_SIZE}.` },
+        { icon: Gauge, title: `At ${PROMO_SIZE}/${PROMO_SIZE}, you're in`, text: `The plan starts at the same time for all ${PROMO_SIZE}, for the chosen length.` },
       ];
 
   return (

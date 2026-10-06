@@ -179,6 +179,17 @@ export async function POST(request: NextRequest) {
   const truncatedContext = resolvedSourceText.slice(0, MAX_SOURCE_CHARS);
   const contentHash = sha256(normalizeText(truncatedContext));
 
+  // BILLING RULE — the ONLY reservation point of the whole Explication
+  // pipeline, now BEFORE the cache: the student's standard unit is consumed
+  // on every Explication request, including one served from
+  // studio_content_cache below (that cache only cuts OUR model bill). This
+  // route is called exactly once (never retried) by the client, so this runs
+  // at most once per request. Refunded only when nothing is delivered.
+  const quotaGate = await reserveGeneration(user);
+  if (!quotaGate.allowed) {
+    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+  }
+
   // exactOnly=true — this route never consumes a fuzzy match (see this
   // file's top-of-file comment), so skip that tier's extra ~500-row query +
   // in-process MinHash scan entirely; pure wasted latency here otherwise,
@@ -191,6 +202,7 @@ export async function POST(request: NextRequest) {
     const markdown = cacheResult.data as string;
     const persisted = await persistExplicationResult(supabase, courseId, user.id, markdown, contentHash, false);
     if (persisted.error) {
+      await refundGeneration(user.id); // nothing delivered
       return NextResponse.json({ success: false, error: persisted.error }, { status: 500 });
     }
     if (cacheResult.cacheRowId) await recordStudioCacheHit(cacheResult.cacheRowId);
@@ -204,15 +216,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // From here on, a generation of some kind is genuinely needed — reserve
-  // quota. This is the ONLY reservation point in the whole pipeline, and
-  // this route is called exactly once (never retried) by the client, so
-  // this line runs at most once per real generation attempt.
-  const quotaGate = await reserveGeneration(user);
-  if (!quotaGate.allowed) {
-    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
-  }
-
+  // From here on, a generation is genuinely needed (quota already reserved above).
   const platformCapacity = await reservePlatformCapacity();
   if (!platformCapacity.allowed) {
     await refundGeneration(user.id); // self-refunds — the client never saw `reserved: true`, so it must not (and per its own contract, will not) call explication-abandon for this response.

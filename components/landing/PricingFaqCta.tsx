@@ -7,7 +7,7 @@ import { ArrowRight, Check, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, REFUND_DELAY_LABEL, formatDZD, getPlansForCycle, type BillingCycle } from "@/lib/pricing";
 import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
-import { PricingTierCard, PromoMonthlyOnlyCard } from "@/components/pricing/PricingTierCard";
+import { PricingTierCard } from "@/components/pricing/PricingTierCard";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 import { GradientText, MagneticLink, ParticleField, Reveal, SectionHeading } from "./primitives";
@@ -42,11 +42,6 @@ export function PricingSection() {
         <BillingCycleToggle value={cycle} onChange={setCycle} />
       </Reveal>
       <div className="mx-auto mt-12 grid max-w-6xl grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
-        {!plans.some((plan) => plan.tier === "promo") && (
-          <Reveal delay={0.2} className="relative order-last h-full">
-            <PromoMonthlyOnlyCard onShowMonthly={() => setCycle("monthly")} />
-          </Reveal>
-        )}
         {plans.map((plan, index) => (
           <Reveal key={plan.tier} delay={index * 0.1} className={cn("relative h-full", plan.featured && "lg:-translate-y-4")}>
             {plan.featured && (
@@ -110,12 +105,12 @@ const FAQ = [
   },
   {
     fr: {
-      q: "Comment marchent les formules Groupe et Promo Cohorte ?",
-      a: `Groupe : exactement ${GROUP_SIZE} personnes à ${formatDZD(PLANS.group_monthly.priceDZD)} par personne et par mois. Une personne peut payer les ${GROUP_SIZE} places d'un coup (activation immédiate), ou chacun paie sa part et l'abonnement démarre dès ${GROUP_SIZE}/${GROUP_SIZE}. Promo Cohorte : exactement ${PROMO_SIZE} étudiants de la même promo, ${formatDZD(PLANS.promo_monthly.priceDZD)} par personne pour 1 mois. Si la jauge n'est pas pleine en ${POOL_DEADLINE_DAYS} jours, le remboursement est déclenché automatiquement et reçu sous ${REFUND_DELAY_LABEL}.`,
+      q: "Comment marchent les formules Groupe et Cohorte ?",
+      a: `Groupe : exactement ${GROUP_SIZE} personnes à ${formatDZD(PLANS.group_monthly.priceDZD)} par personne et par mois. Une personne peut payer les ${GROUP_SIZE} places d'un coup (activation immédiate), ou chacun paie sa part et l'abonnement démarre dès ${GROUP_SIZE}/${GROUP_SIZE}. Cohorte : exactement ${PROMO_SIZE} étudiants de la même promo, dès ${formatDZD(PLANS.promo_monthly.priceDZD)} par personne et par mois (1 mois, 4 mois ou l'année). Si la jauge n'est pas pleine en ${POOL_DEADLINE_DAYS} jours, le remboursement est déclenché automatiquement et reçu sous ${REFUND_DELAY_LABEL}.`,
     },
     en: {
       q: "How do the Group and Cohort plans work?",
-      a: `Group: exactly ${GROUP_SIZE} people at ${formatDZD(PLANS.group_monthly.priceDZD)} per person per month. One person can pay all ${GROUP_SIZE} seats at once (active right away), or everyone pays their share and the plan starts at ${GROUP_SIZE}/${GROUP_SIZE}. Cohort: exactly ${PROMO_SIZE} students from the same class, ${formatDZD(PLANS.promo_monthly.priceDZD)} per person for 1 month. If the gauge is not full within ${POOL_DEADLINE_DAYS} days, a refund is requested automatically and received within 5 business days.`,
+      a: `Group: exactly ${GROUP_SIZE} people at ${formatDZD(PLANS.group_monthly.priceDZD)} per person per month. One person can pay all ${GROUP_SIZE} seats at once (active right away), or everyone pays their share and the plan starts at ${GROUP_SIZE}/${GROUP_SIZE}. Cohort: exactly ${PROMO_SIZE} students from the same class, from ${formatDZD(PLANS.promo_monthly.priceDZD)} per person per month (1 month, 4 months or the year). If the gauge is not full within ${POOL_DEADLINE_DAYS} days, a refund is requested automatically and received within 5 business days.`,
     },
   },
   {
@@ -133,11 +128,11 @@ const FAQ = [
   {
     fr: {
       q: "Comment payer ?",
-      a: `En dinars, par carte Edahabia ou CIB via Chargily, en une fois pour la durée choisie (aucun prélèvement automatique). Individuel : ${formatDZD(PLANS.individual_monthly.priceDZD)}/mois, ${formatDZD(PLANS.individual_quad.priceDZD)} les 4 mois, ${formatDZD(PLANS.individual_annual.priceDZD)} l'année. Groupe : ${formatDZD(PLANS.group_monthly.priceDZD)} par personne et par mois. Promo Cohorte : ${formatDZD(PLANS.promo_monthly.priceDZD)} par personne, 1 mois uniquement.`,
+      a: `En dinars, par carte Edahabia ou CIB via Chargily, en une fois pour la durée choisie (aucun prélèvement automatique). Individuel : ${formatDZD(PLANS.individual_monthly.priceDZD)}/mois, ${formatDZD(PLANS.individual_quad.priceDZD)} les 4 mois (−20 %), ${formatDZD(PLANS.individual_annual.priceDZD)} l'année de 8 mois d'études (−45 %). Groupe : ${formatDZD(PLANS.group_monthly.priceDZD)}, ${formatDZD(PLANS.group_quad.priceDZD)} ou ${formatDZD(PLANS.group_annual.priceDZD)} par personne. Cohorte : ${formatDZD(PLANS.promo_monthly.priceDZD)}, ${formatDZD(PLANS.promo_quad.priceDZD)} ou ${formatDZD(PLANS.promo_annual.priceDZD)} par personne.`,
     },
     en: {
       q: "How do I pay?",
-      a: `In dinars, by Edahabia or CIB card through Chargily, once for the length you pick (no automatic charges). Individual: ${formatDZD(PLANS.individual_monthly.priceDZD)}/month, ${formatDZD(PLANS.individual_quad.priceDZD)} for 4 months, ${formatDZD(PLANS.individual_annual.priceDZD)} a year. Group: ${formatDZD(PLANS.group_monthly.priceDZD)} per person per month. Cohort: ${formatDZD(PLANS.promo_monthly.priceDZD)} per person, 1 month only.`,
+      a: `In dinars, by Edahabia or CIB card through Chargily, once for the length you pick (no automatic charges). Individual: ${formatDZD(PLANS.individual_monthly.priceDZD)}/month, ${formatDZD(PLANS.individual_quad.priceDZD)} for 4 months (−20%), ${formatDZD(PLANS.individual_annual.priceDZD)} for the 8-month study year (−45%). Group: ${formatDZD(PLANS.group_monthly.priceDZD)}, ${formatDZD(PLANS.group_quad.priceDZD)} or ${formatDZD(PLANS.group_annual.priceDZD)} per person. Cohort: ${formatDZD(PLANS.promo_monthly.priceDZD)}, ${formatDZD(PLANS.promo_quad.priceDZD)} or ${formatDZD(PLANS.promo_annual.priceDZD)} per person.`,
     },
   },
   {

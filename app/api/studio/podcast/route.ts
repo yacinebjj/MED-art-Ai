@@ -20,6 +20,8 @@ import {
 import { encodePcm16ToMp3 } from "@/lib/audio/mp3-encoder";
 import { lookupStudioPodcastCache, recordStudioPodcastCacheHit, storeStudioPodcastCache } from "@/lib/studio-podcast-cache";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { findStoredObjectUrl } from "@/lib/storage-variant-lookup";
+import { LedgerBusyError, runThroughLedger } from "@/lib/ai/generation-ledger";
 
 export const runtime = "nodejs";
 // 300s — the last value confirmed to actually deploy on this account (a
@@ -324,6 +326,14 @@ export async function POST(request: NextRequest) {
   // version column.
   const contentHash = sha256(`${normalizeText(sourceText)}|${PODCAST_PROMPT_VERSION}`);
 
+  // BILLING RULE: the student's standard unit is consumed on every podcast
+  // request, including one served from the shared cache / a stored variant
+  // file below — those only cut OUR model bill. Refunded only on failure.
+  const quotaGate = await reserveGeneration(user);
+  if (!quotaGate.allowed) {
+    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+  }
+
   if (isDefaultVariant) {
     const cachedUrl = await lookupStudioPodcastCache(contentHash);
     if (cachedUrl) {
@@ -335,11 +345,17 @@ export async function POST(request: NextRequest) {
       await persistAudioUrl(supabase, courseId, user.id, cachedUrl);
       return NextResponse.json({ success: true, audioUrl: cachedUrl, cached: true });
     }
-  }
-
-  const quotaGate = await reserveGeneration(user);
-  if (!quotaGate.allowed) {
-    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+  } else {
+    // Non-default dialect: the file this exact content+dialect would be
+    // uploaded to (see `path` below) is its own cache — if another student
+    // already generated it, reuse it for 0 tokens instead of re-billing the
+    // script + narration and overwriting an identical mp3.
+    const storedUrl = await findStoredObjectUrl(supabase, PODCAST_BUCKET, `${contentHash}-${dialect}.mp3`);
+    if (storedUrl) {
+      await ensurePodcastBucket(supabase).catch((error) => console.error("[studio/podcast] ensurePodcastBucket (variant hit) a échoué:", error));
+      await persistAudioUrl(supabase, courseId, user.id, storedUrl);
+      return NextResponse.json({ success: true, audioUrl: storedUrl, cached: true });
+    }
   }
 
   const encoder = new TextEncoder();
@@ -359,6 +375,25 @@ export async function POST(request: NextRequest) {
       }, 15_000);
 
       (async () => {
+        // Single-flight on the deterministic output file (generation ledger,
+        // our bill only — the student's unit was reserved above): a second
+        // identical request (same content, same dialect, same prompt version)
+        // arriving while the first is still narrating WAITS for that mp3
+        // instead of paying for a second script + narration. This route has
+        // no time left to generate after such a wait, so if the first one
+        // hasn't finished in time it answers a retryable "already in
+        // progress" (onPeerTimeout: "fail") — never a duplicate bill.
+        const outputPath = isDefaultVariant ? `${contentHash}.mp3` : `${contentHash}-${dialect}.mp3`;
+        const audioUrl = await runThroughLedger(
+          {
+            namespace: "podcast-audio",
+            key: { outputPath, version: PODCAST_PROMPT_VERSION },
+            peerWaitMs: 270_000,
+            leaseMs: 290_000,
+            onPeerTimeout: "fail",
+            isValid: (value) => typeof value === "string" && value.startsWith("http"),
+          },
+          async () => {
         const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_PODCAST);
         const script = await planPodcastScript(course.title, excerpt, dialect);
 
@@ -384,14 +419,14 @@ export async function POST(request: NextRequest) {
         // overwrite the shared default-variant file at `${contentHash}.mp3`,
         // and never collide with each other (a student generating "en" then
         // "en-darija" for the same course must get 2 distinct files).
-        const path = isDefaultVariant ? `${contentHash}.mp3` : `${contentHash}-${dialect}.mp3`;
+        const path = outputPath;
         const { error: uploadError } = await supabase.storage
           .from(PODCAST_BUCKET)
           .upload(path, mp3Buffer, { contentType: "audio/mpeg", upsert: true });
         if (uploadError) throw uploadError;
 
         const { data: publicUrlData } = supabase.storage.from(PODCAST_BUCKET).getPublicUrl(path);
-        const audioUrl = publicUrlData.publicUrl;
+        const generatedUrl = publicUrlData.publicUrl;
 
         // Store BEFORE returning — the next student to hit this content_hash
         // benefits immediately. Fail-open: storeStudioPodcastCache logs its
@@ -400,8 +435,11 @@ export async function POST(request: NextRequest) {
         // ever written to the shared cross-student cache — see this route's
         // own comment on `isDefaultVariant` above.
         if (isDefaultVariant) {
-          await storeStudioPodcastCache(contentHash, audioUrl);
+          await storeStudioPodcastCache(contentHash, generatedUrl);
         }
+        return generatedUrl;
+          }
+        );
 
         // Persist onto this student's own course row — the deterministic,
         // per-course, every-variant source of truth the reload path reads.
@@ -414,9 +452,9 @@ export async function POST(request: NextRequest) {
         })
         .catch(async (error) => {
           await refundGeneration(user.id);
-          const status = error instanceof OpenRouterError ? error.status : 502;
+          const status = error instanceof OpenRouterError ? error.status : error instanceof LedgerBusyError ? 409 : 502;
           const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
-          if (!(error instanceof OpenRouterError)) {
+          if (!(error instanceof OpenRouterError) && !(error instanceof LedgerBusyError)) {
             console.error("[studio/podcast] Échec génération/upload:", error);
           }
           controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", success: false, error: message, status })}\n`));

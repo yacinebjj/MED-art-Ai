@@ -2,10 +2,11 @@
  * Platform-wide cache for the MedArt Lab's course-level tools (Patient
  * virtuel, Matrice pharmaco / Diagnostic différentiel, Carte mentale).
  *
- * Contract (see each route): the cache is consulted BEFORE the plan-quota
- * reservation and BEFORE any model call. A hit returns the stored content
- * for 0 tokens and 0 credits; a miss generates once, validates, and stores,
- * so a given course is paid for ONCE across the whole platform.
+ * Contract (see each route): the student's plan unit is reserved FIRST, on
+ * every new request (billing rule — see ownsLabResult for the re-open case),
+ * then the cache is consulted BEFORE any model call. A hit returns the stored
+ * content for 0 tokens on OUR bill; a miss generates once, validates, and
+ * stores, so a given course is paid to the model provider ONCE platform-wide.
  *
  * Keyed by (content_hash, tool_type), where content_hash is the SAME
  * sha256(normalizeText(raw source text)) the other cross-student caches use
@@ -119,6 +120,34 @@ export async function storeLabCache(params: {
  * lab_course_cache and is joined back by GET /api/studio/lab-history.
  * Fail-open: a history failure is logged and never blocks the result.
  */
+/**
+ * BILLING RULE support: true when THIS student already obtained this exact
+ * result (same content + tool + language) — i.e. the request is a re-open of
+ * something they already paid for, not a new generation request. Every other
+ * request is charged the standard unit, even when the content then comes from
+ * the platform-wide cache. Fails CLOSED for the student's quota (an error =
+ * not owned = charged), never open.
+ */
+export async function ownsLabResult(userId: string, contentHash: string, toolType: LabToolType): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  try {
+    const { data, error } = await getSupabaseAdmin()
+      .from("user_lab_history")
+      .select("tool_type")
+      .eq("user_id", userId)
+      .eq("content_hash", contentHash)
+      .eq("tool_type", toolType)
+      .maybeSingle();
+    if (error) {
+      console.error(`[lab-history:owns] ${toolType} — lecture impossible (facturé normalement) :`, error.message);
+      return false;
+    }
+    return data !== null;
+  } catch {
+    return false;
+  }
+}
+
 export async function recordLabHistory(params: {
   userId: string;
   contentHash: string;

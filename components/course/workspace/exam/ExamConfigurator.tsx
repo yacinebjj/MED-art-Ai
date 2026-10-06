@@ -123,7 +123,7 @@ export function ExamConfigurator({
         <TelemetryChip icon={Hourglass}>
           ≈ {minutes(MIN_QUESTIONS)}–{minutes(MAX_QUESTIONS)} min
         </TelemetryChip>
-        <TelemetryChip icon={Zap}>{personalized ? "Personnalisé · généré sur mesure" : "Standard · instantané si déjà généré"}</TelemetryChip>
+        <TelemetryChip icon={Zap}>{personalized ? "Personnalisé · généré sur mesure" : "Standard · basé sur tes cours"}</TelemetryChip>
       </div>
     </div>
   );

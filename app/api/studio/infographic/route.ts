@@ -21,6 +21,8 @@ import {
   storeStudioInfographicCache,
 } from "@/lib/studio-infographic-cache";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
+import { findStoredObjectUrl } from "@/lib/storage-variant-lookup";
+import { LedgerBusyError, runThroughLedger } from "@/lib/ai/generation-ledger";
 
 export const runtime = "nodejs";
 // Real test generation took ~10.4s — 300s (same class as /api/studio/generate)
@@ -166,6 +168,15 @@ export async function POST(request: NextRequest) {
 
   const contentHash = sha256(normalizeText(sourceText));
 
+  // BILLING RULE: the student's standard unit is consumed on every
+  // infographic request, including one served from the shared cache / a
+  // stored variant file below — those only cut OUR model bill. Refunded only
+  // when generation fails.
+  const quotaGate = await reserveGeneration(user);
+  if (!quotaGate.allowed) {
+    return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+  }
+
   try {
     if (isDefaultVariant) {
       const cachedUrl = await lookupStudioInfographicCache(contentHash);
@@ -177,48 +188,71 @@ export async function POST(request: NextRequest) {
         await persistInfographicUrl(supabase, courseId, user.id, cachedUrl);
         return NextResponse.json({ success: true, imageUrl: cachedUrl, cached: true });
       }
-    }
-
-    const quotaGate = await reserveGeneration(user);
-    if (!quotaGate.allowed) {
-      return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
+    } else {
+      // Non-default language/model: the deterministic file this variant is
+      // uploaded to (see `path` below; extension unknown until generated, so
+      // matched by prefix) is its own cache — reuse it for 0 tokens.
+      const storedUrl = await findStoredObjectUrl(supabase, INFOGRAPHIC_BUCKET, `${contentHash}-${language}-${modelKey}.`, "prefix");
+      if (storedUrl) {
+        await persistInfographicUrl(supabase, courseId, user.id, storedUrl);
+        return NextResponse.json({ success: true, imageUrl: storedUrl, cached: true });
+      }
     }
 
     try {
-      const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_INFOGRAPHIC);
-      const { imageDataUrl } = await generateOpenRouterImage(
-        [
-          { role: "system", content: buildInfographicSystemPrompt(language) },
-          { role: "user", content: buildInfographicUserMessage(course.title, excerpt) },
-        ],
-        { model: INFOGRAPHIC_MODEL_OPTIONS[modelKey].id }
+      // Single-flight per output variant (generation ledger, our bill only —
+      // the student's unit was reserved above): a second identical request
+      // arriving while the image is still being generated waits for it
+      // instead of paying for a second image; if it isn't ready in time, a
+      // retryable "already in progress" answer (onPeerTimeout: "fail"), never
+      // a duplicate bill.
+      const imageUrl = await runThroughLedger(
+        {
+          namespace: "infographic-image",
+          key: { contentHash, language, modelKey, isDefaultVariant },
+          peerWaitMs: 200_000,
+          leaseMs: 260_000,
+          onPeerTimeout: "fail",
+          isValid: (value) => typeof value === "string" && value.startsWith("http"),
+        },
+        async () => {
+          const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_INFOGRAPHIC);
+          const { imageDataUrl } = await generateOpenRouterImage(
+            [
+              { role: "system", content: buildInfographicSystemPrompt(language) },
+              { role: "user", content: buildInfographicUserMessage(course.title, excerpt) },
+            ],
+            { model: INFOGRAPHIC_MODEL_OPTIONS[modelKey].id }
+          );
+
+          const { buffer, contentType } = decodeImageDataUrl(imageDataUrl);
+
+          await ensureInfographicBucket(supabase);
+          const extension = contentType.split("/")[1] ?? "png";
+          // Non-default variants get their own path (language+model suffix) —
+          // never overwrite the shared default-variant file, never collide with
+          // each other across variants of the same course.
+          const path = isDefaultVariant ? `${contentHash}.${extension}` : `${contentHash}-${language}-${modelKey}.${extension}`;
+          const { error: uploadError } = await supabase.storage
+            .from(INFOGRAPHIC_BUCKET)
+            .upload(path, buffer, { contentType, upsert: true });
+          if (uploadError) throw uploadError;
+
+          const { data: publicUrlData } = supabase.storage.from(INFOGRAPHIC_BUCKET).getPublicUrl(path);
+          const generatedUrl = publicUrlData.publicUrl;
+
+          // Store BEFORE returning — the next student to hit this content_hash
+          // benefits immediately. Fail-open: storeStudioInfographicCache logs
+          // its own errors and never throws, so a caching hiccup can't block
+          // this student's own successful generation. Only the default variant
+          // is ever written to the shared cross-student cache — see this
+          // route's own comment on `isDefaultVariant` above.
+          if (isDefaultVariant) {
+            await storeStudioInfographicCache(contentHash, generatedUrl);
+          }
+          return generatedUrl;
+        }
       );
-
-      const { buffer, contentType } = decodeImageDataUrl(imageDataUrl);
-
-      await ensureInfographicBucket(supabase);
-      const extension = contentType.split("/")[1] ?? "png";
-      // Non-default variants get their own path (language+model suffix) —
-      // never overwrite the shared default-variant file, never collide with
-      // each other across variants of the same course.
-      const path = isDefaultVariant ? `${contentHash}.${extension}` : `${contentHash}-${language}-${modelKey}.${extension}`;
-      const { error: uploadError } = await supabase.storage
-        .from(INFOGRAPHIC_BUCKET)
-        .upload(path, buffer, { contentType, upsert: true });
-      if (uploadError) throw uploadError;
-
-      const { data: publicUrlData } = supabase.storage.from(INFOGRAPHIC_BUCKET).getPublicUrl(path);
-      const imageUrl = publicUrlData.publicUrl;
-
-      // Store BEFORE returning — the next student to hit this content_hash
-      // benefits immediately. Fail-open: storeStudioInfographicCache logs
-      // its own errors and never throws, so a caching hiccup can't block
-      // this student's own successful generation. Only the default variant
-      // is ever written to the shared cross-student cache — see this
-      // route's own comment on `isDefaultVariant` above.
-      if (isDefaultVariant) {
-        await storeStudioInfographicCache(contentHash, imageUrl);
-      }
 
       // Persist onto this student's own course row — the deterministic,
       // per-course, every-variant source of truth the reload path reads.
@@ -229,6 +263,9 @@ export async function POST(request: NextRequest) {
       await refundGeneration(user.id);
       if (error instanceof OpenRouterError) {
         return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+      }
+      if (error instanceof LedgerBusyError) {
+        return NextResponse.json({ success: false, error: error.message }, { status: 409 });
       }
       console.error("[studio/infographic] Échec génération/upload:", error);
       return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });

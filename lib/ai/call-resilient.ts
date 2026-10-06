@@ -16,6 +16,7 @@
  */
 
 import { callOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger, type LedgerSpec } from "@/lib/ai/generation-ledger";
 
 type CallOptions = NonNullable<Parameters<typeof callOpenRouter>[1]>;
 
@@ -57,6 +58,16 @@ export interface ChainOptions<T> extends Omit<CallOptions, "model" | "timeoutMs"
   validate: (raw: string) => T;
   /** Log prefix, e.g. "[studio:mindmap]". */
   label: string;
+  /**
+   * Opt-in generation ledger (lib/ai/generation-ledger.ts): the VALIDATED
+   * result of this exact chain (same messages, same model ladder, same
+   * output options) is produced once and replayed for identical requests —
+   * concurrent duplicates included. Time spent waiting for a peer is taken
+   * out of `deadlineMs`, so the route's own budget is never exceeded. Only
+   * for requests where an identical input must give the same answer; the
+   * value returned by `validate` must be JSON-serializable.
+   */
+  ledger?: Omit<LedgerSpec, "key">;
 }
 
 /** Below this, a new attempt cannot realistically produce a full answer — fail now instead of burning the rest of the budget. */
@@ -73,8 +84,32 @@ const MIN_ATTEMPT_MS = 12_000;
  * every model failed or the deadline is spent.
  */
 export async function callOpenRouterChain<T>(messages: Parameters<typeof callOpenRouter>[0], options: ChainOptions<T>): Promise<{ value: T; model: string }> {
+  const { ledger, ...chainOptions } = options;
+  if (!ledger) return runChain(messages, chainOptions, Date.now());
+  const outerStartedAt = Date.now();
+  return runThroughLedger(
+    {
+      ...ledger,
+      key: {
+        call: modelCallKey(messages, {
+          model: chainOptions.attempts.map((attempt) => `${attempt.model}@${attempt.maxTokens ?? chainOptions.maxTokens}`).join(">"),
+          maxTokens: chainOptions.maxTokens,
+          temperature: chainOptions.temperature,
+          reasoning: chainOptions.reasoning,
+          responseFormat: chainOptions.responseFormat,
+        }),
+      },
+    },
+    () => runChain(messages, chainOptions, outerStartedAt)
+  );
+}
+
+async function runChain<T>(
+  messages: Parameters<typeof callOpenRouter>[0],
+  options: Omit<ChainOptions<T>, "ledger">,
+  startedAt: number
+): Promise<{ value: T; model: string }> {
   const { attempts, deadlineMs, validate, label, maxTokens, ...base } = options;
-  const startedAt = Date.now();
   let lastError: unknown = new Error("Aucun modèle disponible.");
 
   for (const [index, attempt] of attempts.entries()) {

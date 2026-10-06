@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePaidPlan } from "@/lib/subscription";
+import { refundSynthesis, requirePaidPlan } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
@@ -45,6 +45,10 @@ export async function POST(request: NextRequest) {
     if (!outcome.ok) return ("paywall" in outcome && outcome.paywall ? quotaBlockedResponse({ reason: outcome.error, paywall: outcome.paywall }, outcome.status) : NextResponse.json({ success: false, error: outcome.error }, { status: outcome.status }));
 
     const runToken = outcome.reserved ? createSynthesisRunToken(user.id, moduleId, synthesisType) : null;
+    // No signing secret configured → no run token → the client falls back to
+    // the one-shot route, which reserves its own unit: give this one back so
+    // the student is charged exactly once per synthesis, never twice.
+    if (outcome.reserved && !runToken) await refundSynthesis(user.id);
     return NextResponse.json({ success: true, missingCourseIds: outcome.missingCourseIds, total: outcome.total, runToken });
   } catch (error) {
     console.error("[workspace/module-synthesis/plan] Exception:", error);

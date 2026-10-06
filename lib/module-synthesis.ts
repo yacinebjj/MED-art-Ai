@@ -22,7 +22,8 @@
 
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, CHEAP_MODEL, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import {
   buildSummaryChunkPrompt,
   buildKeywordRowPrompt,
@@ -162,31 +163,40 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
     })
   );
   const prompt = buildCrossCourseSynthesisPrompt(chunksByCourseTitle);
+  const messages: ChatMessageInput[] = [
+    { role: "system", content: prompt },
+    { role: "user", content: "Génère la synthèse transversale demandée." },
+  ];
+  const callOptions = { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, timeoutMs: 110_000, providerSort: "throughput" as const };
 
-  const raw = await callOpenRouter(
-    [
-      { role: "system", content: prompt },
-      { role: "user", content: "Génère la synthèse transversale demandée." },
-    ],
-    // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
-    // This is the PERSONALIZED, per-student, uncached cross-course
-    // combination step (never the cross-student-cached per-course chunk
-    // generation just above, which now runs on ECONOMY_MODEL — see that
-    // call's own comment; there is no Sonnet fallback anywhere in this
-    // file, or anywhere in the Studio pipeline it borrows from).
-    // Tested with one real call: clean schema, medically accurate and
-    // genuinely additive cross-course synthesis — a knowingly-accepted
-    // tradeoff on a small sample, per the product owner's own explicit
-    // "runway over accuracy margin" decision.
-    { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, timeoutMs: 110_000, providerSort: "throughput" }
-  );
+  // Generation ledger (lib/ai/generation-ledger.ts): every input of this call
+  // (the per-course chunks, themselves cached platform-wide, and the course
+  // titles) is already settled, yet it used to be re-billed on EVERY
+  // multi-course request — reopening the same module summary, a retry, a
+  // second tab. Same chunks + same titles now replay the validated synthesis.
+  return runThroughLedger({ namespace: "module-synthesis:cross-course", key: modelCallKey(messages, callOptions), peerWaitMs: 60_000, leaseMs: 150_000 }, async () => {
+    const raw = await callOpenRouter(
+      messages,
+      // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
+      // This is the PERSONALIZED, per-student, uncached cross-course
+      // combination step (never the cross-student-cached per-course chunk
+      // generation just above, which now runs on ECONOMY_MODEL — see that
+      // call's own comment; there is no Sonnet fallback anywhere in this
+      // file, or anywhere in the Studio pipeline it borrows from).
+      // Tested with one real call: clean schema, medically accurate and
+      // genuinely additive cross-course synthesis — a knowingly-accepted
+      // tradeoff on a small sample, per the product owner's own explicit
+      // "runway over accuracy margin" decision.
+      callOptions
+    );
 
-  const parsed = parseJsonResponse(raw);
-  const content = typeof parsed.content === "string" ? sanitizeForPostgres(parsed.content) : "";
-  if (!content.trim()) {
-    throw new Error("La réponse de l'IA ne contient pas de synthèse transversale exploitable.");
-  }
-  return content;
+    const parsed = parseJsonResponse(raw);
+    const content = typeof parsed.content === "string" ? sanitizeForPostgres(parsed.content) : "";
+    if (!content.trim()) {
+      throw new Error("La réponse de l'IA ne contient pas de synthèse transversale exploitable.");
+    }
+    return content;
+  });
 }
 
 export interface ModuleSynthesisResult {
@@ -378,11 +388,11 @@ async function generateAndStoreSynthesisChunks(
   // top_provider.max_completion_tokens (16,384, confirmed live).
   const medicalDictionaryMaxTokens = Math.min(16384, Math.max(16000, batchInputs.length * MEDICAL_DICTIONARY_TOKENS_PER_COURSE));
 
-  const raw = await callOpenRouter(
-    [
-      { role: "system", content: prompt },
-      { role: "user", content: userPrompt },
-    ],
+  const chunkMessages: ChatMessageInput[] = [
+    { role: "system", content: prompt },
+    { role: "user", content: userPrompt },
+  ];
+  const chunkCallOptions =
     type === "medical_dictionary"
       ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true, providerSort: "throughput" as const }
       // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
@@ -390,21 +400,34 @@ async function generateAndStoreSynthesisChunks(
       // reasoning cap: without it, this model's hidden reasoning tokens can
       // silently consume the completion budget before writing any of the
       // actual JSON, truncating it (see callOpenRouter's own doc comment).
-      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" as const }, providerSort: "throughput" as const }
-  );
+      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" as const }, providerSort: "throughput" as const };
 
-  const parsed = parseJsonResponse(raw);
-  const chunks = recoverChunksMap(parsed, batchInputs.map((input) => input.contentHash));
-  if (!chunks) {
-    throw new Error("La réponse de l'IA ne contient pas de chunks exploitables.");
-  }
+  // Generation ledger: course_workspace_cache below already shares each
+  // course's chunk platform-wide once STORED — but two requests missing the
+  // same batch at the same time (two students on a new module, a retry while
+  // the first call is still running) both paid. Now they generate once. The
+  // completeness check runs inside, so only a full, usable map is memorized.
+  const chunks = await runThroughLedger(
+    { namespace: `module-synthesis:${type}`, key: modelCallKey(chunkMessages, chunkCallOptions), peerWaitMs: 20_000, leaseMs: 250_000 },
+    async () => {
+      const raw = await callOpenRouter(chunkMessages, chunkCallOptions);
+      const parsed = parseJsonResponse(raw);
+      const recovered = recoverChunksMap(parsed, batchInputs.map((input) => input.contentHash));
+      if (!recovered) {
+        throw new Error("La réponse de l'IA ne contient pas de chunks exploitables.");
+      }
+      for (const input of batchInputs) {
+        if (recovered[input.contentHash] === undefined || recovered[input.contentHash] === null) {
+          throw new Error(`La réponse de l'IA ne contient pas de chunk pour le cours "${input.title}".`);
+        }
+      }
+      return recovered;
+    }
+  );
 
   const newChunks: { courseContentHash: string; content: unknown }[] = [];
   for (const input of batchInputs) {
     const chunk = chunks[input.contentHash];
-    if (chunk === undefined || chunk === null) {
-      throw new Error(`La réponse de l'IA ne contient pas de chunk pour le cours "${input.title}".`);
-    }
     // keywords_table alone stores structured categories; global_summary and
     // medical_dictionary are both a self-contained Markdown string per
     // course.
@@ -455,12 +478,12 @@ export async function planModuleSynthesis(
   }
   const cached = await lookupCourseWorkspaceChunks(loaded.courses.map(resolveContentHash), CACHE_GENERATION_TYPE[type]);
   const missingCourseIds = loaded.courses.filter((c) => !cached.has(resolveContentHash(c))).map((c) => c.id);
-  const needsWork = missingCourseIds.length > 0 || (type !== "medical_dictionary" && loaded.courses.length > 1);
-  if (needsWork) {
-    const quotaGate = await reserveSynthesis(user);
-    if (!quotaGate.allowed) return { ok: false, status: 403, error: quotaGate.reason, paywall: quotaGate.paywall };
-  }
-  return { ok: true, missingCourseIds, total: loaded.courses.length, reserved: needsWork };
+  // BILLING RULE: one synthesis unit per request, ALWAYS — even when every
+  // course chunk is already in the platform-wide cache (that cache only cuts
+  // OUR model bill, never the student's quota). Refunded on failure only.
+  const quotaGate = await reserveSynthesis(user);
+  if (!quotaGate.allowed) return { ok: false, status: 403, error: quotaGate.reason, paywall: quotaGate.paywall };
+  return { ok: true, missingCourseIds, total: loaded.courses.length, reserved: true };
 }
 
 /**
@@ -554,7 +577,9 @@ export async function runModuleSynthesis(
   // own comment).
   let dictionaryFailedCourses: string[] = [];
 
-  const needsReservation = !prereserved && (missingCourses.length > 0 || needsCrossCourseSynthesis);
+  // BILLING RULE: reserved on every request (unless the plan step already
+  // did), whether or not anything is left to generate — see planModuleSynthesis.
+  const needsReservation = !prereserved;
 
   if (needsReservation) {
     const quotaGate = await reserveSynthesis(user);
