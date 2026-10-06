@@ -129,6 +129,10 @@ const GastriteCasCliniqueStudio = dynamic(
   { ssr: false }
 );
 /** 1ère année's replacement for the cas_clinique tile — a motivational essay, never a fabricated patient. See its own file for why it's a separate component from GastriteCasCliniqueStudio above. */
+const AnalogyCanvas = dynamic(() => import("@/components/course/workspace/analogies/AnalogyCanvas").then((m) => m.AnalogyCanvas), {
+  ssr: false,
+  loading: () => <StudioTileSkeleton />,
+});
 const ClinicalRelevanceStudio = dynamic(
   () => import("@/components/course/workspace/ClinicalRelevanceStudio").then((m) => m.ClinicalRelevanceStudio),
   { ssr: false }
@@ -2561,11 +2565,21 @@ export default function ModuleWorkspacePage() {
             />
           )}
           {openedSection === "exemples_analogies" && (
-            <article dir="auto" className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none")}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
-                {normalizeCallouts(activeCourse.exemplesAnalogies!)}
-              </ReactMarkdown>
-            </article>
+            // Structured "analogy canvas" (story ↔ clinical split cards, bidi-safe
+            // French terms, focus/table views). Falls back to the previous plain
+            // Markdown article whenever no section structure is detected.
+            <AnalogyCanvas
+              key={activeCourse.id}
+              courseId={activeCourse.id}
+              markdown={activeCourse.exemplesAnalogies!}
+              fallback={
+                <article dir="auto" className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none")}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
+                    {normalizeCallouts(activeCourse.exemplesAnalogies!)}
+                  </ReactMarkdown>
+                </article>
+              }
+            />
           )}
           {/*
             key={activeCourse.id} on every stateful tile below: without it,
