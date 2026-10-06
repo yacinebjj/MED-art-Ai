@@ -214,7 +214,7 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
         {TABS.map((tab) => {
           const isActive = tab.isActive(pathname);
           return (
-            <TabButton key={tab.href} icon={tab.icon} label={TAB_LABELS[tab.key][language]} active={isActive} href={tab.href} />
+            <TabButton key={tab.href} icon={tab.icon} label={TAB_LABELS[tab.key][language]} active={isActive} href={tab.href} tourTarget={tab.key === "assistant" ? "chat" : undefined} />
           );
         })}
         <TabButton
@@ -238,12 +238,15 @@ function TabButton({
   active,
   href,
   onClick,
+  tourTarget,
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
   href?: string;
   onClick?: () => void;
+  /** Onboarding tour anchor (data-tour) on phones. */
+  tourTarget?: string;
 }) {
   const className =
     "relative flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-3xl py-2 text-[11px] font-medium transition-transform duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
@@ -262,7 +265,7 @@ function TabButton({
   );
   if (href) {
     return (
-      <Link href={href} prefetch aria-current={active ? "page" : undefined} onClick={() => haptic(6)} className={className}>
+      <Link href={href} prefetch aria-current={active ? "page" : undefined} onClick={() => haptic(6)} data-tour={tourTarget} className={className}>
         {inner}
       </Link>
     );

@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BellRing, Bot, Brain, Check, Clock, Cpu, Globe2, Laptop, Loader2, LogOut, Monitor, MoonStar, ShieldAlert, Smartphone, Sparkles, Sun, Moon, Trash2 } from "lucide-react";
+import { BellRing, Bot, Brain, Check, Clock, Compass, Cpu, Globe2, Laptop, Loader2, LogOut, Monitor, MoonStar, ShieldAlert, Smartphone, Sparkles, Sun, Moon, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
@@ -27,6 +27,7 @@ import { useThemeMode, THEME_MODE_LABELS, type ThemeMode } from "@/components/la
 import { CyberPanel, SegmentedControl } from "@/components/cyber/primitives";
 import { createClient } from "@/lib/supabase/client";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { useOptionalOnboarding } from "@/lib/onboarding/onboarding-context";
 import { FLASHCARD_PUSH_INTERVALS, type FlashcardPushInterval } from "@/lib/push/cadence";
 import type { CurriculumYearData } from "@/types/academic";
 
@@ -297,6 +298,7 @@ const THEME_CARDS: { mode: ThemeMode; icon: typeof Sun; preview: string }[] = [
 
 export function AppearanceSection() {
   const { language } = useLanguage();
+  const onboarding = useOptionalOnboarding();
   const fr = language === "fr";
   const { current, select } = useThemeMode();
   const [mounted, setMounted] = useState(false);
@@ -340,6 +342,20 @@ export function AppearanceSection() {
         <SectionTitle icon={Globe2} title={fr ? "Langue de l'interface" : "Interface language"} />
         <UnifiedLanguageSwitch />
       </CyberPanel>
+
+      {onboarding && (
+        <CyberPanel className="p-5 sm:p-6">
+          <SectionTitle
+            icon={Compass}
+            title={fr ? "Visite guidée" : "Guided tour"}
+            subtitle={fr ? "Les 5 outils de MedArt AI en une minute, sur ton tableau de bord." : "MedArt AI's 5 tools in one minute, on your dashboard."}
+          />
+          <Button type="button" variant="outline" onClick={onboarding.start} className="gap-2">
+            <Compass className="h-4 w-4" />
+            {fr ? "Revoir le guide" : "Replay the tour"}
+          </Button>
+        </CyberPanel>
+      )}
     </div>
   );
 }

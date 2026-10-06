@@ -133,7 +133,7 @@ function ResumeCard() {
 
   if (!overview || lastOpened === undefined) {
     return (
-      <div className="glass-card rounded-3xl p-5">
+      <div data-tour="explication" className="glass-card rounded-3xl p-5">
         <Skeleton className="mb-3 h-4 w-40" />
         <Skeleton className="h-14 w-full" />
         <Skeleton className="mt-3 h-9 w-36" />
@@ -146,6 +146,7 @@ function ResumeCard() {
   return (
     <motion.div
       variants={CARD_ENTRANCE}
+      data-tour="explication"
       className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary-600 via-teal-600 to-violet-700 p-[1.5px] shadow-xl shadow-primary-500/20"
     >
       <div className="relative h-full overflow-hidden rounded-[calc(1.5rem-1.5px)] bg-gradient-to-br from-primary-600/95 via-teal-700/95 to-violet-800/95 p-5 text-white">
@@ -256,7 +257,7 @@ export function QuickLaunchHub() {
         className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,2fr)]"
       >
         <ResumeCard />
-        <div className={cn("grid gap-2.5 sm:gap-4", TILES.length === 4 ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4" : "grid-cols-3")}>
+        <div data-tour="lab" className={cn("grid gap-2.5 sm:gap-4", TILES.length === 4 ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4" : "grid-cols-3")}>
           {TILES.map((tile) => (
             <LaunchCard key={tile.id} tile={tile} last={lastByTool.get(tile.tool ?? tile.id) ?? null} language={language} />
           ))}

@@ -186,6 +186,9 @@ const HUES = {
 
 type HueName = keyof typeof HUES;
 
+/** Onboarding tour anchors (components/onboarding/OnboardingTour.tsx) on desktop. */
+const TOUR_TARGETS: Record<string, string | undefined> = { evaluation: "exam", assistant: "chat" };
+
 /** Lab tools get their sidebar identity here (LAB_TOOLS' own tints serve the Studio cards). */
 const LAB_HUES: Record<string, HueName> = { "case-simulator": "lime", matrix: "emerald", mindmap: "purple" };
 
@@ -336,11 +339,11 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
 
   const control =
     "href" in entry ? (
-      <Link href={entry.href} prefetch aria-current={isActive ? "page" : undefined} aria-label={collapsed ? label : undefined} className={className}>
+      <Link href={entry.href} prefetch aria-current={isActive ? "page" : undefined} aria-label={collapsed ? label : undefined} data-tour={TOUR_TARGETS[entry.id]} className={className}>
         {inner}
       </Link>
     ) : (
-      <button type="button" onClick={() => openLauncher(entry.launch)} aria-label={collapsed ? label : undefined} className={className}>
+      <button type="button" onClick={() => openLauncher(entry.launch)} aria-label={collapsed ? label : undefined} data-tour={TOUR_TARGETS[entry.id]} className={className}>
         {inner}
       </button>
     );

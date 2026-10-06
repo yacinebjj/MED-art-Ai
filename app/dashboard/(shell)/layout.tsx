@@ -14,8 +14,12 @@ import { useCockpitSync } from "@/store/useCockpitStore";
 import { Spotlight } from "@/components/layout/cockpit/Spotlight";
 import { LabLauncher } from "@/components/layout/cockpit/LabLauncher";
 import { NightModeOverlay } from "@/components/layout/cockpit/ThemeModeSwitcher";
+import { useOnboarding } from "@/lib/onboarding/onboarding-context";
 import { t } from "@/lib/translations";
 import { cn } from "@/lib/utils";
+
+// First-run tour: only downloaded once a tour actually runs.
+const OnboardingTour = dynamic(() => import("@/components/onboarding/OnboardingTour").then((mod) => mod.OnboardingTour), { ssr: false });
 
 // R3F/WebGL needs a real DOM canvas — dynamically imported with ssr:false so
 // Next.js never tries to render it on the server.
@@ -131,6 +135,7 @@ export default function DashboardShellLayout({
   const { user } = useAuth();
   // One shared /api/dashboard/overview for Topbar, Sidebar and the dashboard page.
   useCockpitSync(user?.id ?? null);
+  const onboarding = useOnboarding();
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
   const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname) || isGroupChatRoomRoute(pathname);
   const isChromelessOnMobile = CHROMELESS_MOBILE_ROUTES.includes(pathname);
@@ -246,12 +251,14 @@ export default function DashboardShellLayout({
           </main>
         </div>
 
-        <MobileBottomNav hidden={navHidden || isChromelessOnMobile} />
+        {/* Kept on screen during the tour: its Copilot tab is one of the spotlighted targets. */}
+        <MobileBottomNav hidden={(navHidden && !onboarding.active) || isChromelessOnMobile} />
       </div>
       {/* Medical OS overlays — rendered once for the whole shell, opened from Topbar / Sidebar / dashboard / Ctrl+K. */}
       <Spotlight />
       <LabLauncher />
       <NightModeOverlay />
+      {onboarding.active && <OnboardingTour />}
     </SidebarProvider>
   );
 }

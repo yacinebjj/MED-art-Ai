@@ -97,6 +97,7 @@ export default function DashboardPage() {
 
       <motion.section
         id="curriculum"
+        data-tour="studio"
         aria-labelledby="curriculum-heading"
         className="scroll-mt-4"
         initial={{ opacity: 0, y: 20 }}
