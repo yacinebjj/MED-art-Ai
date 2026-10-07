@@ -353,6 +353,15 @@ export const STUDIO_MODEL = LAB_FALLBACK_MODEL;
 // the Explication seams and the module Résumé's cross-course synthesis.
 export const STREAMLAKE_FIRST = ["StreamLake"];
 
+// CHAT MODEL, 2026-10-07 — paid tier of the copilot (dashboard assistant),
+// the course chat and the "Ask MedArt" / translate selection actions. Was
+// CHEAP_MODEL (qwen-2.5-72b), which this file's own Lab/exam measurements put
+// at 14-42 tok/s: a long answer took one to two minutes to stream, the
+// reported slowness. qwen3-30b-a3b-instruct-2507 measured 154 tok/s here, is
+// cheaper on both input and output, non-thinking, and a newer generation.
+// Not yet validated on real student chat traffic.
+export const CHAT_MODEL = FLASHCARD_MODEL;
+
 /**
  * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
  * decoding to the schema (structured outputs); `json_object` only guarantees

@@ -34,8 +34,39 @@ export function getSupabaseAdmin(): SupabaseClient<any, any, any> {
     // cached and keep serving stale nulls after generation actually succeeds
     // (reproduced live: DB had the data, this admin client kept returning
     // null until the cache was forced to bypass).
-    global: { fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }) },
+    global: { fetch: fetchWithStaleSocketRetry },
   });
 
   return client;
+}
+
+// Socket-level failures where the request never reached Postgres: a
+// kept-alive connection the far end dropped while this serverless instance
+// was frozen (the same failure class documented on lib/ai/openrouter.ts's
+// createOpenRouterDispatcher), or a connect that never completed.
+const STALE_SOCKET_CODES = new Set(["UND_ERR_SOCKET", "UND_ERR_CLOSED", "ECONNRESET", "EPIPE", "UND_ERR_CONNECT_TIMEOUT", "ECONNREFUSED"]);
+
+function isStaleSocketError(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === "AbortError") return false;
+  const code = (error as NodeJS.ErrnoException).code ?? (error.cause as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === "string" && STALE_SOCKET_CODES.has(code);
+}
+
+/**
+ * The first query after an idle instance thaws can land on a dead pooled
+ * socket and fail with "fetch failed" — supabase-js then returns an error,
+ * which the quota gates surfaced as "Impossible de vérifier ton quota",
+ * while the student's manual retry (a fresh socket) always worked. One
+ * immediate retry does what that manual retry did. Limited to socket errors
+ * where the request was never processed, so a write is never applied twice.
+ */
+async function fetchWithStaleSocketRetry(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const noStoreInit = { ...init, cache: "no-store" as const };
+  try {
+    return await fetch(input, noStoreInit);
+  } catch (error) {
+    if (!isStaleSocketError(error) || init?.signal?.aborted) throw error;
+    console.warn("[supabase] Connexion réutilisée morte — nouvel essai immédiat:", (error as Error).message);
+    return fetch(input, noStoreInit);
+  }
 }

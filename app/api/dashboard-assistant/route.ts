@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 
 // ── Vision (images in the assistant) ────────────────────────────────────
 // Images go to ECONOMY_MODEL (multimodal) — the free text chain can't see
@@ -234,14 +234,16 @@ export async function POST(request: NextRequest) {
 
   if (dailyGate.allowed) {
     try {
-      const stream = await streamOpenRouter(messages, { model: CHEAP_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5, providerSort: "latency" });
+      // CHAT_MODEL (Qwen3-30B-2507) since 2026-10-07, was CHEAP_MODEL
+      // (qwen-2.5-72b, measured 14-42 tok/s — the copilot's slowness).
+      const stream = await streamOpenRouter(messages, { model: CHAT_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5, providerSort: "latency" });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
       });
     } catch (error) {
       lastError = error;
-      console.error("[dashboard-assistant] CHEAP_MODEL (DeepSeek) indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
+      console.error("[dashboard-assistant] CHAT_MODEL indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
     }
   }
 

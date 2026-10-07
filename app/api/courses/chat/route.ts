@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHEAP_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { waitUntil } from "@vercel/functions";
 import { retrieveRelevantContext, retrieveRelevantContextForStudioCourses } from "@/lib/chat-context-retrieval";
@@ -365,10 +365,17 @@ export async function POST(request: NextRequest) {
 
   // Plan quota gate — highlight mode's own pool (chatMessageCap, the
   // free-form pool below, is checked separately further down).
+  // Whether this message gets CHAT_MODEL (paid tier) before the free chain —
+  // set from reserveAssistantTurn, which already counted it against the
+  // student's premium allowance either way.
+  let usePaidTier = false;
   if (isHighlightMode) {
     // A selection question is a message too: it uses the free trial's 20.
     const turn = await reserveAssistantTurn(user);
     if (!turn.allowed) return quotaBlockedResponse(turn);
+    // Was always the free chain, even though this turn was already counted
+    // as premium — the slow, flaky "Ask MedArt" answers.
+    usePaidTier = turn.premium;
     const gate = await reserveHighlightMessage(user);
     if (!gate.allowed) {
       return NextResponse.json({ error: gate.reason }, { status: 403 });
@@ -535,7 +542,7 @@ export async function POST(request: NextRequest) {
   //
   // REPURPOSED (product direction) — this gate no longer BLOCKS the
   // request on `!allowed`. It now decides which model TIER this message
-  // gets: the first DAILY_CHAT_LIMIT (20) messages/day route to CHEAP_MODEL
+  // gets: the first DAILY_CHAT_LIMIT (20) messages/day route to CHAT_MODEL
   // (DeepSeek, paid but cheap and fast); every message after that silently
   // falls back to FREE_MODEL_CHAIN — same zero-alert, zero-error-message
   // transition the free-model fallback loop below already does for a
@@ -556,11 +563,10 @@ export async function POST(request: NextRequest) {
   // over-charging a student's quota for a message that never actually sent.
   // Monetization v2: free trial = 20 messages for life (then paywall);
   // paid = 20 premium-model messages a day, then the free model, silently.
-  let useDeepSeekTier = false;
   if (!isHighlightMode) {
     const turn = await reserveAssistantTurn(user);
     if (!turn.allowed) return quotaBlockedResponse(turn);
-    useDeepSeekTier = turn.premium;
+    usePaidTier = turn.premium;
   }
 
   // Semantic caching REMOVED (product direction) — every chat message now
@@ -608,10 +614,10 @@ export async function POST(request: NextRequest) {
       ];
 
   // Try each candidate model in order — the first one that succeeds wins.
-  // `useDeepSeekTier` prepends CHEAP_MODEL (DeepSeek) when this message is
+  // `usePaidTier` prepends CHAT_MODEL (Qwen3-30B) when this message is
   // within the daily 20-message paid allowance (see the dailyGate comment
-  // above); every other case (highlight mode, or the daily cap already
-  // spent) uses FREE_MODEL_CHAIN exactly as before. Mirrors
+  // above, highlight mode included); past the daily cap it uses
+  // FREE_MODEL_CHAIN exactly as before. Mirrors
   // app/api/dashboard-assistant/route.ts's own fallback loop: a model
   // erroring (momentary saturation, a provider hiccup, a rate-limit blip) is
   // the EXPECTED, routine case here, not an exceptional one — this is also
@@ -625,18 +631,19 @@ export async function POST(request: NextRequest) {
   let lastError: unknown = null;
   const maxTokensForThisTurn = isHighlightMode ? MAX_OUTPUT_TOKENS_HIGHLIGHT : MAX_OUTPUT_TOKENS_NORMAL;
 
-  if (useDeepSeekTier) {
+  if (usePaidTier) {
     try {
+      // CHAT_MODEL (Qwen3-30B-2507) since 2026-10-07, was CHEAP_MODEL
+      // (qwen-2.5-72b, 14-42 tok/s — the reported chat slowness).
       responseStream = await streamOpenRouter(messages, {
-        model: CHEAP_MODEL,
+        model: CHAT_MODEL,
         temperature: 0.3,
         maxTokens: maxTokensForThisTurn,
-        reasoning: { effort: "low" },
         providerSort: "latency",
       });
     } catch (error) {
       lastError = error;
-      console.error("[courses/chat POST] CHEAP_MODEL (DeepSeek) indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
+      console.error("[courses/chat POST] CHAT_MODEL indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
     }
   }
 
