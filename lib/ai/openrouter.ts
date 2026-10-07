@@ -334,6 +334,25 @@ export const LAB_FALLBACK_MODEL = "qwen/qwen3-235b-a22b-2507";
 export const EXAM_MODEL = LAB_FALLBACK_MODEL;
 export const EXAM_FALLBACK_MODEL = FLASHCARD_MODEL;
 
+// STUDIO MODEL, 2026-10-07 — Studio sections (Résumé, Cas clinique, QCM,
+// Exemples & analogies), Studio "Régénérer", and the module Résumé global
+// (per-course chunks, keyword table, personalization pass). Was ECONOMY_MODEL
+// (gemini-3.7-flash, $0.75/M + $3.75/M); qwen3-235b-a22b-2507 is ~$0.09/M +
+// $0.55/M list (~85% cheaper output), non-thinking, 262K context, and already
+// proven on this app's exam QCMs (see EXAM_MODEL). Kept SEPARATE from
+// ECONOMY_MODEL because that one also serves image input (dashboard
+// assistant) and Qwen3-235B-2507 is text-only. Slower than Flash (~38-70
+// tok/s), so Studio generate bounds its retries by a deadline. NOT yet
+// validated on a real course for each Studio section — smoke-test before
+// trusting; revert this one constant to ECONOMY_MODEL if a section regresses.
+export const STUDIO_MODEL = LAB_FALLBACK_MODEL;
+
+// StreamLake is the cheapest provider of FLASHCARD_MODEL (qwen3-30b-a3b-
+// instruct-2507: $0.048/M + $0.193/M, 128K context, 32K max output — checked
+// live 2026-10-07). Tried first, with OpenRouter's normal fallbacks kept, for
+// the Explication seams and the module Résumé's cross-course synthesis.
+export const STREAMLAKE_FIRST = ["StreamLake"];
+
 /**
  * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
  * decoding to the schema (structured outputs); `json_object` only guarantees
@@ -712,6 +731,8 @@ export async function callOpenRouter(
      * token. Used by time-critical calls (Lab, podcast script).
      */
     providerSort?: "throughput" | "latency" | "price";
+    /** OpenRouter `provider.order`: providers tried first, in order; normal fallbacks still apply. */
+    providerOrder?: string[];
   }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
@@ -785,11 +806,12 @@ export async function callOpenRouter(
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
         ...(options?.responseFormat ? { response_format: options.responseFormat } : {}),
-        ...(options?.responseFormat || options?.providerSort
+        ...(options?.responseFormat || options?.providerSort || options?.providerOrder
           ? {
               provider: {
                 ...(options.responseFormat ? { require_parameters: true } : {}),
                 ...(options.providerSort ? { sort: options.providerSort } : {}),
+                ...(options.providerOrder ? { order: options.providerOrder } : {}),
               },
             }
           : {}),

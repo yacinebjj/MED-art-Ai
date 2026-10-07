@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { callOpenRouter, HAIKU_MODEL, OpenRouterError, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { callOpenRouter, FLASHCARD_MODEL, OpenRouterError, STREAMLAKE_FIRST, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { buildExplicationSeamStitchPrompt } from "@/lib/prompts/public-course-sections";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
@@ -16,6 +16,10 @@ export const maxDuration = 60;
 // budget.
 const SEAM_STITCH_MAX_TOKENS = 4_000;
 const SEAM_STITCH_TIMEOUT_MS = 45_000;
+// A legitimate repair only drops a duplicated title or a redundant intro
+// sentence. Losing more than this share of the combined excerpts means the
+// model condensed real content, so the original seam is kept instead.
+const SEAM_MIN_LENGTH_RATIO = 0.85;
 
 /**
  * Seam-repair step of the fully-concurrent Explication pipeline — see
@@ -32,11 +36,9 @@ const SEAM_STITCH_TIMEOUT_MS = 45_000;
  * non-2xx/malformed response as "leave this seam unstitched", never as a
  * reason to fail the whole Explication.
  *
- * Uses HAIKU_MODEL, not CHEAP_MODEL — this is a small, precise "does this
- * duplicate/restart, and if so fix only that" structural judgment call on a
- * tiny input, not the long-form exhaustive writing CHEAP_MODEL (DeepSeek
- * V3.2) was chosen for elsewhere in this pipeline (see lib/ai/openrouter.ts's
- * own comment on that choice).
+ * Uses Qwen3-30B (FLASHCARD_MODEL, StreamLake first) since 2026-10-07, was
+ * HAIKU_MODEL — a small structural judgment call on a tiny input, not
+ * long-form writing.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -68,7 +70,14 @@ export async function POST(request: NextRequest) {
     { role: "system", content: buildExplicationSeamStitchPrompt() },
     { role: "user", content: `avant:\n"""\n${tail}\n"""\n\naprès:\n"""\n${head}\n"""\n\nGénère le JSON demandé.` },
   ];
-  const callOptions = { model: HAIKU_MODEL, maxTokens: SEAM_STITCH_MAX_TOKENS, bypassMock: true, timeoutMs: SEAM_STITCH_TIMEOUT_MS, temperature: 0.2 };
+  const callOptions = {
+    model: FLASHCARD_MODEL,
+    providerOrder: STREAMLAKE_FIRST,
+    maxTokens: SEAM_STITCH_MAX_TOKENS,
+    bypassMock: true,
+    timeoutMs: SEAM_STITCH_TIMEOUT_MS,
+    temperature: 0.2,
+  };
 
   try {
     // Generation ledger: the same seam (same two parts — which the ledger
@@ -79,10 +88,13 @@ export async function POST(request: NextRequest) {
       async () => {
         const raw = await callOpenRouter(messages, callOptions);
         const parsed = parseJsonResponse(raw);
-        return {
-          tail: typeof parsed.tail === "string" && parsed.tail.trim() ? parsed.tail : tail,
-          head: typeof parsed.head === "string" && parsed.head.trim() ? parsed.head : head,
-        };
+        const fixedTail = typeof parsed.tail === "string" && parsed.tail.trim() ? parsed.tail : tail;
+        const fixedHead = typeof parsed.head === "string" && parsed.head.trim() ? parsed.head : head;
+        if (fixedTail.length + fixedHead.length < (tail.length + head.length) * SEAM_MIN_LENGTH_RATIO) {
+          console.warn("[explication-stitch] Jonction rejetée (contenu raccourci par le modèle) — extraits d'origine conservés.");
+          return { tail, head };
+        }
+        return { tail: fixedTail, head: fixedHead };
       }
     );
     return NextResponse.json({ success: true, tail: stitched.tail, head: stitched.head });

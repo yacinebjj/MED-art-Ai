@@ -7,7 +7,7 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { runModuleSynthesis, type ModuleSynthesisType } from "@/lib/module-synthesis";
 import { verifySynthesisRunToken } from "@/lib/synthesis-run-token";
-import { callOpenRouter, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, STUDIO_MODEL } from "@/lib/ai/openrouter";
 import { SynthesisOptionsSchema, buildSynthesisTransformPrompt, needsSynthesisTransform, type SynthesisOptions } from "@/lib/synthesis-options";
 
 /**
@@ -24,7 +24,9 @@ async function personalizeSummary(markdown: string, options: SynthesisOptions): 
         { role: "system", content: buildSynthesisTransformPrompt(options) },
         { role: "user", content: markdown },
       ],
-      { model: ECONOMY_MODEL, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" }, timeoutMs: 120_000 }
+      // STUDIO_MODEL (Qwen3-235B) since 2026-10-07; 180s because it decodes
+      // slower than Gemini Flash did — still well under maxDuration.
+      { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 180_000, providerSort: "throughput" }
     );
     const cleaned = raw.replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
     return cleaned.length > 40 ? { content: cleaned, personalized: true } : { content: markdown, personalized: false };

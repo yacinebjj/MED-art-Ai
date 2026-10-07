@@ -1,6 +1,6 @@
 import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, STUDIO_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import {
   STUDIO_BYPASS_MOCK,
@@ -32,6 +32,11 @@ export const runtime = "nodejs";
 // these off well before OpenRouter responds. No effect on `next dev` or
 // other hosts, which have no such cap.
 export const maxDuration = 300;
+
+/** Generation window for all validation attempts together, leaving time under maxDuration to save and answer. */
+const STUDIO_GENERATION_BUDGET_MS = 250_000;
+/** A corrective attempt with less time than this left would only be cut off mid-JSON. */
+const STUDIO_MIN_ATTEMPT_MS = 45_000;
 
 const VALID_ACTION_TYPES = Object.keys(STUDIO_PROMPT_CONFIG) as JsonSectionId[];
 
@@ -307,29 +312,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     const effectiveMaxTokens = isFuzzyHit ? studioDeltaMaxTokens(actionType) : maxTokens;
     const baseUserPrompt = isFuzzyHit ? "Génère le contenu adapté demandé." : "Génère le contenu demandé.";
 
-    // MODEL POLICY: every Studio section reaching this generic path runs
-    // on ECONOMY_MODEL (Gemini 3.7 Flash) — Explication Ultra-Détaillée
-    // (CHEAP_MODEL/DeepSeek V3.2) never reaches here anymore, see the
-    // actionType === "explication" guard near the top of this handler.
-    // Résumé/cas_clinique/qcm/exemples_analogies keep the ECONOMY_MODEL
-    // policy exactly as tested (each was independently tested against its
-    // exact prompt+schema on a real course — Hémolyse — with a full
-    // structural re-validation and a manual medical-accuracy read finding
-    // no errors). There is no Sonnet fallback anywhere in this route.
-    const generationModel = ECONOMY_MODEL;
-
-    // reasoning: { effort: "low" } — confirmed production root cause of
-    // "JSON.parse failed" on long courses: OpenRouter's `reasoning`
-    // tokens are billed as OUTPUT tokens but are NOT a separate budget
-    // from the visible completion (see callOpenRouter's own doc comment)
-    // — on google/gemini-3.7-flash specifically, an uncapped reasoning
-    // effort can silently burn most of `effectiveMaxTokens` on hidden
-    // "thinking" before the model writes a single character of the
-    // actual JSON, truncating it mid-structure regardless of how high
-    // the ceiling is set. `streamOpenRouter` (the chat path) already caps
-    // this for the exact same model — every ECONOMY_MODEL Studio call
-    // gets the identical cap.
-    const reasoningOption = { effort: "low" } as const;
+    // MODEL POLICY: every Studio section reaching this generic path runs on
+    // STUDIO_MODEL (Qwen3-235B-2507 since 2026-10-07, was Gemini 3.7 Flash —
+    // see lib/ai/openrouter.ts). Explication Ultra-Détaillée never reaches
+    // here, see the actionType === "explication" guard near the top of this
+    // handler. No `reasoning` cap: it existed for Gemini Flash's hidden
+    // thinking tokens; Qwen3-235B-2507 is non-thinking.
+    const generationModel = STUDIO_MODEL;
     const firstAttemptMessages: ChatMessageInput[] = [
       { role: "system", content: systemContent },
       { role: "user", content: baseUserPrompt },
@@ -347,7 +336,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // already reserved above, whatever this resolves to.
     const ledgerSpec = {
       namespace: `studio-section:${actionType}`,
-      key: modelCallKey(firstAttemptMessages, { model: generationModel, maxTokens: effectiveMaxTokens, reasoning: reasoningOption }),
+      key: modelCallKey(firstAttemptMessages, { model: generationModel, maxTokens: effectiveMaxTokens }),
       // 300s route budget; three validated attempts rarely exceed ~150s.
       peerWaitMs: 60_000,
       leaseMs: 4 * 60_000,
@@ -385,8 +374,20 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       const platformCapacity = await reservePlatformCapacity();
       if (!platformCapacity.allowed) throw new StudioGenerationFailure(platformCapacity.reason ?? "MedArt Neural Engine est momentanément saturé. Réessaie un peu plus tard.", 503);
 
+      // Qwen3-235B decodes slower than Flash did, so a corrective retry is
+      // only started when it can still finish inside the 300s route budget —
+      // otherwise the student gets a clean, refunded error instead of a
+      // platform kill mid-generation.
+      const deadlineAt = Date.now() + STUDIO_GENERATION_BUDGET_MS;
       let correctiveNote: string | null = null;
       for (let attempt = 1; attempt <= MAX_GENERIC_ATTEMPTS; attempt++) {
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs < STUDIO_MIN_ATTEMPT_MS) {
+          throw new StudioGenerationFailure(
+            `La génération de "${actionType}" a pris trop de temps (${attempt - 1} tentative(s) rejetée(s) par la validation). Réessaie — ta génération n'a pas été décomptée.`,
+            504
+          );
+        }
         const userPrompt = correctiveNote
           ? `Ta réponse précédente a été REJETÉE par la validation : ${correctiveNote} Régénère un JSON COMPLET et VALIDE respectant strictement TOUTES les clés du schéma ci-dessus, sans en omettre aucune.`
           : baseUserPrompt;
@@ -401,7 +402,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
               { role: "system", content: systemContent },
               { role: "user", content: userPrompt },
             ],
-            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: reasoningOption, providerSort: "throughput" }
+            { model: generationModel, maxTokens: effectiveMaxTokens, bypassMock: STUDIO_BYPASS_MOCK, providerSort: "throughput", timeoutMs: remainingMs }
           );
         } catch (error) {
           if (error instanceof OpenRouterError) throw new StudioGenerationFailure(error.message, error.status);

@@ -387,7 +387,9 @@ export default function ModuleWorkspacePage() {
     if (!planRes.ok || !plan.success) return { ok: false, body: plan };
 
     const missing = plan.missingCourseIds ?? [];
-    const batchSize = type === "medical_dictionary" ? 3 : 4;
+    // 2 courses per call for summary/keywords: they run on Qwen3-235B
+    // (~38-70 tok/s), so 4 courses' worth of output could near the 240s call timeout.
+    const batchSize = type === "medical_dictionary" ? 3 : 2;
     const batches: number[][] = [];
     for (let i = 0; i < missing.length; i += batchSize) batches.push(missing.slice(i, i + batchSize));
 

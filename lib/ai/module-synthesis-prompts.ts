@@ -19,6 +19,8 @@
  * chunk belongs to which course without any title-matching ambiguity.
  */
 
+import { QWEN_OUTPUT_RULES } from "@/lib/ai/studio-prompts";
+
 export interface ModuleSynthesisCourseInput {
   contentHash: string;
   title: string;
@@ -57,7 +59,7 @@ Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant n
 La clé racine "chunks" est OBLIGATOIRE, même s'il n'y a qu'un seul cours à traiter — ne mets JAMAIS les identifiants de cours directement à la racine du JSON, et n'utilise JAMAIS un autre nom de clé racine ("data", "result", "output", etc.).`;
 
 export function buildSummaryChunkPrompt(courses: ModuleSynthesisCourseInput[]): string {
-  return `${SUMMARY_CHUNK_SYSTEM_PROMPT}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
+  return `${SUMMARY_CHUNK_SYSTEM_PROMPT}\n\n${QWEN_OUTPUT_RULES}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
 }
 
 const MEDICAL_DICTIONARY_SYSTEM_PROMPT = `Tu es l'auteur d'un dictionnaire médical clinique de référence, dans l'esprit des dictionnaires médicaux utilisés en Algérie — pas un simple glossaire mot-à-mot, un vrai outil qui explique ce qu'un terme signifie réellement sur le terrain, en français ET en arabe.
@@ -130,7 +132,7 @@ Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant n
 La clé racine "chunks" est OBLIGATOIRE, même s'il n'y a qu'un seul cours à traiter — ne mets JAMAIS les identifiants de cours directement à la racine du JSON, et n'utilise JAMAIS un autre nom de clé racine ("data", "result", "output", etc.).`;
 
 export function buildKeywordRowPrompt(courses: ModuleSynthesisCourseInput[]): string {
-  return `${KEYWORD_ROW_SYSTEM_PROMPT}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
+  return `${KEYWORD_ROW_SYSTEM_PROMPT}\n\n${QWEN_OUTPUT_RULES}\n\nCours à traiter :\n\n${formatCoursesBlock(courses)}`;
 }
 
 /**
@@ -158,5 +160,5 @@ Réponds UNIQUEMENT avec un JSON de cette forme exacte, sans aucun texte avant n
 {"content": "### 🔗 Synthèse Transversale & Diagnostics Différentiels\\n\\n**Points communs :**\\n- ...\\n\\n**Différences clés :**\\n- ...\\n\\n**Diagnostics différentiels à considérer :**\\n- ..."}`;
 
 export function buildCrossCourseSynthesisPrompt(chunksByCourseTitle: Record<string, unknown>): string {
-  return `${CROSS_COURSE_SYNTHESIS_SYSTEM_PROMPT}\n\nFiches déjà générées :\n\n${JSON.stringify(chunksByCourseTitle, null, 2)}`;
+  return `${CROSS_COURSE_SYNTHESIS_SYSTEM_PROMPT}\n\n${QWEN_OUTPUT_RULES}\n\nFiches déjà générées :\n\n${JSON.stringify(chunksByCourseTitle, null, 2)}`;
 }

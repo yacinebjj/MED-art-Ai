@@ -19,6 +19,21 @@ const CONTROLS_IDLE_MS = 2500;
 const REFIT_DEBOUNCE_MS = 80;
 /** Horizontal travel (px) that counts as a swipe on touch screens. */
 const SWIPE_THRESHOLD_PX = 50;
+/**
+ * Zip-bomb guards sized to the app's real 100 MB upload cap. The library's
+ * RECOMMENDED_ZIP_LIMITS reject any single embedded file over 32 MB — routine
+ * in lecture decks with an embedded video or hi-res scans — which silently
+ * dropped those decks into the raw-text fallback (reproduced in a real
+ * browser: "media-1-1.mp4 is 41943040 bytes > maxEntryUncompressedBytes").
+ * Media is already compressed, so its uncompressed size tracks the file size.
+ */
+const PPTX_ZIP_LIMITS = {
+  maxEntries: 10_000,
+  maxEntryUncompressedBytes: 150 * 1024 * 1024,
+  maxTotalUncompressedBytes: 512 * 1024 * 1024,
+  maxMediaBytes: 400 * 1024 * 1024,
+  maxConcurrency: 8,
+};
 
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -175,14 +190,14 @@ export function PptxPresentationViewer({ fileUrl, title, fallback }: { fileUrl: 
         const res = await fetch(fileUrl, { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const bytes = await res.arrayBuffer();
-        const { PptxViewer: Viewer, RECOMMENDED_ZIP_LIMITS } = await import("@aiden0z/pptx-renderer");
+        const { PptxViewer: Viewer } = await import("@aiden0z/pptx-renderer");
         if (cancelled) return;
 
         const opened = await Viewer.open(bytes, box, {
           renderMode: "slide",
           fitMode: "contain",
           // Uploaded files are untrusted input — bound zip size/entries/media.
-          zipLimits: RECOMMENDED_ZIP_LIMITS,
+          zipLimits: PPTX_ZIP_LIMITS,
           // pdf.js only renders rare EMF-embedded PDF previews; disabled so this
           // never pulls in a second pdf.js next to react-pdf's (it degrades
           // gracefully without it).

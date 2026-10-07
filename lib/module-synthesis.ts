@@ -22,7 +22,7 @@
 
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, CHEAP_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHEAP_MODEL, FLASHCARD_MODEL, STREAMLAKE_FIRST, STUDIO_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import {
   buildSummaryChunkPrompt,
@@ -146,10 +146,11 @@ function stitchSummaryChunks(coursesInOrder: EligibleCourseRow[], chunksByHash: 
 
 /**
  * Total characters of course material the cross-course call may receive.
- * Its model (CHEAP_MODEL) has a 32,768-token window shared with the output:
- * with 50 courses the full per-course chunks (pretty-printed) reached
- * ~40-80k tokens and the call failed with a context error. Each course now
- * gets an equal share of this budget (compact JSON, truncated per course).
+ * Sized when this call ran on CHEAP_MODEL (32,768-token window shared with
+ * the output): with 50 courses the full per-course chunks reached ~40-80k
+ * tokens and the call failed with a context error. Each course gets an equal
+ * share of this budget (compact JSON, truncated per course). Kept as-is on
+ * FLASHCARD_MODEL (128K on StreamLake) — it also keeps the call fast.
  */
 const CROSS_COURSE_INPUT_CHARS = 45_000;
 
@@ -167,7 +168,7 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
     { role: "system", content: prompt },
     { role: "user", content: "Génère la synthèse transversale demandée." },
   ];
-  const callOptions = { model: CHEAP_MODEL, maxTokens: 1200, bypassMock: true, timeoutMs: 110_000, providerSort: "throughput" as const };
+  const callOptions = { model: FLASHCARD_MODEL, maxTokens: 1500, bypassMock: true, timeoutMs: 110_000, providerOrder: STREAMLAKE_FIRST };
 
   // Generation ledger (lib/ai/generation-ledger.ts): every input of this call
   // (the per-course chunks, themselves cached platform-wide, and the course
@@ -177,16 +178,9 @@ async function buildCrossCourseSynthesis(coursesInOrder: EligibleCourseRow[], ch
   return runThroughLedger({ namespace: "module-synthesis:cross-course", key: modelCallKey(messages, callOptions), peerWaitMs: 60_000, leaseMs: 150_000 }, async () => {
     const raw = await callOpenRouter(
       messages,
-      // CHEAP_MODEL — see its own extensive comment in lib/ai/openrouter.ts.
-      // This is the PERSONALIZED, per-student, uncached cross-course
-      // combination step (never the cross-student-cached per-course chunk
-      // generation just above, which now runs on ECONOMY_MODEL — see that
-      // call's own comment; there is no Sonnet fallback anywhere in this
-      // file, or anywhere in the Studio pipeline it borrows from).
-      // Tested with one real call: clean schema, medically accurate and
-      // genuinely additive cross-course synthesis — a knowingly-accepted
-      // tradeoff on a small sample, per the product owner's own explicit
-      // "runway over accuracy margin" decision.
+      // Qwen3-30B (FLASHCARD_MODEL), StreamLake first, since 2026-10-07 (was
+      // CHEAP_MODEL, qwen-2.5-72b): the input is already-distilled per-course
+      // chunks, so the small, fast tier is enough. Not yet validated live.
       callOptions
     );
 
@@ -369,16 +363,11 @@ async function generateAndStoreSynthesisChunks(
         ? "Génère les lignes de mots-clés demandées."
         : "Génère les entrées de dictionnaire médical demandées.";
 
-  // medical_dictionary is the ONE exception to the ECONOMY_MODEL policy
-  // below — explicit product request: use the cheapest available text model
-  // for this specific tab. CHEAP_MODEL (qwen/qwen-2.5-72b-instruct) is
-  // genuinely cheaper than ECONOMY_MODEL here (see lib/ai/openrouter.ts), at
-  // the accepted tradeoff already disclosed on every other CHEAP_MODEL call
-  // site in this codebase (a real, measured medical-accuracy risk on a
-  // different, comparably rigor-sensitive task — exam QCM generation; never
-  // independently re-measured for a term-dictionary task specifically). No
-  // `reasoning` option, matching every other CHEAP_MODEL call site.
-  const model = type === "medical_dictionary" ? CHEAP_MODEL : ECONOMY_MODEL;
+  // global_summary/keywords_table run on STUDIO_MODEL (Qwen3-235B-2507 since
+  // 2026-10-07, was ECONOMY_MODEL/Gemini 3.7 Flash). medical_dictionary keeps
+  // CHEAP_MODEL (qwen/qwen-2.5-72b-instruct) — explicit product request for
+  // the cheapest text model on that tab, unchanged here.
+  const model = type === "medical_dictionary" ? CHEAP_MODEL : STUDIO_MODEL;
 
   // Scales with THIS BATCH's own course count (bounded by
   // MAX_MEDICAL_DICTIONARY_COURSES_PER_CALL above, never the full
@@ -395,12 +384,8 @@ async function generateAndStoreSynthesisChunks(
   const chunkCallOptions =
     type === "medical_dictionary"
       ? { model, maxTokens: medicalDictionaryMaxTokens, bypassMock: true, providerSort: "throughput" as const }
-      // ECONOMY_MODEL (was STUDIO_MODEL / Sonnet — removed entirely, see
-      // lib/ai/studio-prompts.ts's own header comment) + the matching
-      // reasoning cap: without it, this model's hidden reasoning tokens can
-      // silently consume the completion budget before writing any of the
-      // actual JSON, truncating it (see callOpenRouter's own doc comment).
-      : { model, maxTokens: 8000, bypassMock: true, reasoning: { effort: "low" as const }, providerSort: "throughput" as const };
+      // No `reasoning` cap: Qwen3-235B-2507 is non-thinking (the cap existed for Gemini Flash).
+      : { model, maxTokens: 8000, bypassMock: true, providerSort: "throughput" as const };
 
   // Generation ledger: course_workspace_cache below already shares each
   // course's chunk platform-wide once STORED — but two requests missing the

@@ -29,7 +29,12 @@ logging — all of which exist because of production incidents.
 |---|---|---|
 | `MODEL` | `anthropic/claude-sonnet-5` | Default for high-stakes generation |
 | `HAIKU_MODEL` | `anthropic/claude-haiku-4.5` | Cheaper reasoning, vision |
-| `CHEAP_MODEL` | `qwen/qwen-2.5-72b-instruct` | **The entire Explication pipeline** |
+| `STUDIO_MODEL` | `qwen/qwen3-235b-a22b-2507` | Studio sections, Régénérer, module Résumé/keyword chunks (was Gemini 3.7 Flash until 2026-10-07) |
+| `EXAM_MODEL` | `qwen/qwen3-235b-a22b-2507` | Exam QCM batches (fallback `FLASHCARD_MODEL`) |
+| `FLASHCARD_MODEL` | `qwen/qwen3-30b-a3b-instruct-2507` | Flashcards, Lab primary, Explication seams + module cross-course synthesis (StreamLake first) |
+| `ECONOMY_MODEL` | `google/gemini-3.7-flash` | Remaining multimodal/vision uses (dashboard assistant images), Smart Notes |
+| `CHEAP_MODEL` | `qwen/qwen-2.5-72b-instruct` | Study planner, notes, medical dictionary |
+| `EXPLICATION_MODEL` | `deepseek/deepseek-v3.2` | Explication Ultra-Détaillée parts |
 | `IMAGE_MODEL` | `google/gemini-3.1-flash-image-preview` | Infographics |
 
 > **Model policy — do not change casually.** Model IDs were chosen after live

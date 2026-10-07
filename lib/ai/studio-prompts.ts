@@ -23,19 +23,24 @@ import {
  * which validates the model's JSON with zod (lib/ai/studio-schemas.ts) and
  * returns it straight to the frontend instead of persisting it.
  *
- * MODEL POLICY (explicit product decision, definitive): every Studio
- * section — Explication Ultra-Détaillée included, no exception — now runs
- * on ECONOMY_MODEL (google/gemini-3.7-flash, lib/ai/openrouter.ts). The
- * `STUDIO_MODEL` constant that used to point every Explication/fuzzy-hit
- * call at "anthropic/claude-sonnet-5" (a real, live model — never the
- * genuinely dead "anthropic/claude-3.5-sonnet", already gone from this
- * codebase) has been removed entirely: every call site that used to import
- * it (app/api/studio/generate/route.ts, lib/studio-explication-delta.ts,
- * lib/module-synthesis.ts) now imports ECONOMY_MODEL directly instead, with
- * `reasoning: { effort: "low" }` set on each call — the same cap that
- * already fixed this exact model's hidden-reasoning-tokens truncation bug
- * elsewhere in this app (see callOpenRouter's own doc comment).
+ * MODEL POLICY: every Studio section except Explication Ultra-Détaillée
+ * (EXPLICATION_MODEL) runs on STUDIO_MODEL — Qwen3-235B-2507 since
+ * 2026-10-07 (was google/gemini-3.7-flash), see lib/ai/openrouter.ts.
+ * QWEN_OUTPUT_RULES below is appended to every Studio instruction block for
+ * Qwen's known failure modes (drifting into Chinese mid-text, prose around
+ * the JSON).
  */
+
+/**
+ * Qwen-family output guard. Qwen models occasionally code-switch into
+ * Chinese (or English) inside long French text, and sometimes wrap the JSON
+ * in commentary — both would leak straight into what students read. Phrased
+ * against "the requested language" so English content variants still work.
+ */
+export const QWEN_OUTPUT_RULES = `RÈGLES DE SORTIE (impératives) :
+- Rédige EXCLUSIVEMENT dans la langue demandée (le français par défaut) : jamais de caractères chinois, jamais de phrases dans une autre langue (seuls les termes médicaux internationaux usuels, sigles et noms propres sont tolérés).
+- Respecte à la lettre la structure, les séparations de sections, les titres et la mise en forme Markdown demandés : phrases complètes, transitions claires, ton pédagogique, jamais de style télégraphique.
+- Ta réponse commence directement par « { » et se termine par « } » : aucun texte, commentaire ni balise de code autour du JSON.`;
 
 /**
  * Every Studio call MUST bypass lib/ai/mock-data.ts's marker matching (see
@@ -376,7 +381,7 @@ export function buildStudioSystemMessage(actionType: JsonSectionId, courseConten
     },
     {
       type: "text",
-      text: `${basePrompt}\n\nBasé strictement sur ce texte, génère le contenu demandé, au format JSON exact spécifié ci-dessus, sans jamais inventer d'information absente de ce texte.`,
+      text: `${basePrompt}\n\nBasé strictement sur ce texte, génère le contenu demandé, au format JSON exact spécifié ci-dessus, sans jamais inventer d'information absente de ce texte.\n\n${QWEN_OUTPUT_RULES}`,
     },
   ];
 }
@@ -413,7 +418,9 @@ ${newSourceText}
 
 INSTRUCTION D'ADAPTATION (delta uniquement — PAS une réécriture complète) : compare les deux et adapte le contenu ci-dessus UNIQUEMENT là où le nouveau texte source diffère réellement (titres, terminologie spécifique, informations supplémentaires présentes dans le nouveau texte mais absentes du contenu de référence, structure). Conserve strictement identique tout ce qui est déjà exact et commun aux deux — ne réinvente jamais une information déjà correcte. Si le nouveau texte source ne contient aucune information qui contredit ou complète le contenu de référence, renvoie-le tel quel.
 
-Réponds uniquement avec le JSON exact au format spécifié ci-dessus.`;
+Réponds uniquement avec le JSON exact au format spécifié ci-dessus.
+
+${QWEN_OUTPUT_RULES}`;
 }
 
 /**

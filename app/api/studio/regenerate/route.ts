@@ -1,6 +1,6 @@
 import { buildLanguageDirective, parseContentLanguage } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter, OpenRouterError, ECONOMY_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, STUDIO_MODEL } from "@/lib/ai/openrouter";
 import { STUDIO_BYPASS_MOCK, STUDIO_PROMPT_CONFIG, STUDIO_SECTION_KEYS, buildStudioSystemMessage } from "@/lib/ai/studio-prompts";
 import { parseAndValidateStudioSection } from "@/lib/ai/studio-section-validation";
 import { errorMessage, MAX_SOURCE_CHARS } from "@/lib/course-generation-shared";
@@ -24,6 +24,10 @@ const QCM_REGENERATE_CAP = 5;
 
 /** Same retry policy as /api/studio/generate's generic path: the corrective re-prompt usually fixes a dropped schema field on the next attempt. */
 const MAX_ATTEMPTS = 3;
+/** Window for all attempts together, leaving time under maxDuration to save and answer. */
+const GENERATION_BUDGET_MS = 250_000;
+/** A retry with less time than this left would only be cut off mid-JSON. */
+const MIN_ATTEMPT_MS = 45_000;
 
 /** How many existing question stems are quoted back to the model to avoid — all 15 fit comfortably; capped anyway so an unusually long set can't bloat the prompt. */
 const MAX_AVOID_QUESTIONS = 20;
@@ -189,7 +193,12 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   let finalData: unknown = null;
   let correctiveNote: string | null = null;
 
+  // Qwen3-235B decodes slower than Flash did: a retry only starts when it
+  // can still finish under the 300s route budget.
+  const deadlineAt = Date.now() + GENERATION_BUDGET_MS;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs < MIN_ATTEMPT_MS) break;
     const userPrompt = correctiveNote
       ? `Ta réponse précédente a été REJETÉE par la validation : ${correctiveNote} Régénère un JSON COMPLET et VALIDE respectant strictement TOUTES les clés du schéma ci-dessus, sans en omettre aucune.`
       : "Génère la nouvelle série de QCM demandée.";
@@ -201,11 +210,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
           { role: "system", content: systemContent },
           { role: "user", content: userPrompt },
         ],
-        // Same model + reasoning cap as the first QCM generation — see
-        // /api/studio/generate's MODEL POLICY and reasoningOption comments
-        // (Gemini Flash always reasons; `effort: "low"` keeps that thinking
-        // from eating the JSON's token budget).
-        { model: ECONOMY_MODEL, maxTokens: STUDIO_PROMPT_CONFIG.qcm.maxTokens, bypassMock: STUDIO_BYPASS_MOCK, reasoning: { effort: "low" }, providerSort: "throughput" }
+        // Same model as the first QCM generation — see /api/studio/generate's MODEL POLICY.
+        { model: STUDIO_MODEL, maxTokens: STUDIO_PROMPT_CONFIG.qcm.maxTokens, bypassMock: STUDIO_BYPASS_MOCK, providerSort: "throughput", timeoutMs: remainingMs }
       );
     } catch (error) {
       await refundAll();
