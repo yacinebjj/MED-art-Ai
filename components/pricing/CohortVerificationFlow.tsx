@@ -6,16 +6,15 @@ import { formatDZD, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, REFUND_DELAY_LABEL } 
 import { useLanguage } from "@/providers/LanguageProvider";
 
 interface CohortVerificationFlowProps {
-  /** Where the visitor goes to actually start a Promo: /register (public pages) or /dashboard/billing; null hides the link. */
+  /** Where the visitor goes to actually start a Groupe de 10: /register (public pages) or /dashboard/billing; null hides the link. */
   href?: string | null;
 }
 
 /**
- * "Comment ça marche" for the Promo Cohorte tier. The previous version
- * pretended to verify a faculty + delegate code client-side; there is no such
- * check, so this now explains the real mechanism (lib/billing-pools.ts): a
- * shared invite link, a 15/15 gauge, and an automatic refund request if the
- * gauge is not full in time. No fake verification, no fake link.
+ * "Comment ça marche" for the Groupe de 10 tier (tier id "promo", formerly
+ * the Cohorte). It explains the real mechanism (lib/billing-pools.ts): a
+ * shared invite link, a 10/10 gauge, and an automatic refund request if the
+ * gauge is not full in time.
  */
 export function CohortVerificationFlow({ href = "/register" }: CohortVerificationFlowProps) {
   const { language } = useLanguage();
@@ -24,13 +23,13 @@ export function CohortVerificationFlow({ href = "/register" }: CohortVerificatio
 
   const steps = fr
     ? [
-        { icon: UserPlus, title: "Une personne lance la Cohorte", text: `Elle paie sa part (dès ${price}/mois) et reçoit un lien d'invitation.` },
-        { icon: Share2, title: "La promo rejoint via le lien", text: `Chacun paie la même part ; la jauge avance de 1/${PROMO_SIZE} à ${PROMO_SIZE}/${PROMO_SIZE}.` },
+        { icon: UserPlus, title: "Une personne lance le groupe", text: `Elle paie sa part (dès ${price}/mois) et reçoit un lien d'invitation.` },
+        { icon: Share2, title: "Les amis rejoignent via le lien", text: `Chacun paie la même part ; la jauge avance de 1/${PROMO_SIZE} à ${PROMO_SIZE}/${PROMO_SIZE}.` },
         { icon: Gauge, title: `À ${PROMO_SIZE}/${PROMO_SIZE}, c'est parti`, text: `L'abonnement démarre en même temps pour les ${PROMO_SIZE}, pour la durée choisie.` },
       ]
     : [
-        { icon: UserPlus, title: "One person starts the Cohort", text: `They pay their share (from ${price}/month) and get an invite link.` },
-        { icon: Share2, title: "The class joins via the link", text: `Everyone pays the same share; the gauge goes from 1/${PROMO_SIZE} to ${PROMO_SIZE}/${PROMO_SIZE}.` },
+        { icon: UserPlus, title: "One person starts the group", text: `They pay their share (from ${price}/month) and get an invite link.` },
+        { icon: Share2, title: "Friends join via the link", text: `Everyone pays the same share; the gauge goes from 1/${PROMO_SIZE} to ${PROMO_SIZE}/${PROMO_SIZE}.` },
         { icon: Gauge, title: `At ${PROMO_SIZE}/${PROMO_SIZE}, you're in`, text: `The plan starts at the same time for all ${PROMO_SIZE}, for the chosen length.` },
       ];
 
@@ -56,13 +55,13 @@ export function CohortVerificationFlow({ href = "/register" }: CohortVerificatio
       <p className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] leading-snug text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-300">
         <RotateCcw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         {fr
-          ? `Pas ${PROMO_SIZE}/${PROMO_SIZE} en ${POOL_DEADLINE_DAYS} jours ? Remboursement déclenché automatiquement, reçu sous ${REFUND_DELAY_LABEL}. Partage le lien uniquement avec ta promo.`
-          : `Not ${PROMO_SIZE}/${PROMO_SIZE} within ${POOL_DEADLINE_DAYS} days? A refund is requested automatically and received within 5 business days. Share the link with your class only.`}
+          ? `Pas ${PROMO_SIZE}/${PROMO_SIZE} en ${POOL_DEADLINE_DAYS} jours ? Remboursement déclenché automatiquement, reçu sous ${REFUND_DELAY_LABEL}. Partage le lien uniquement avec tes amis.`
+          : `Not ${PROMO_SIZE}/${PROMO_SIZE} within ${POOL_DEADLINE_DAYS} days? A refund is requested automatically and received within 5 business days. Share the link with your friends only.`}
       </p>
 
       {href && (
         <Link href={href} className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary-700 hover:underline dark:text-primary-400">
-          {href.startsWith("/dashboard") ? (fr ? "Lancer la Promo depuis mon espace Abonnement" : "Start the Cohort from my Billing space") : fr ? "Créer mon compte pour lancer la Promo" : "Create my account to start the Cohort"}
+          {href.startsWith("/dashboard") ? (fr ? "Lancer le groupe depuis mon espace Abonnement" : "Start the group from my Billing space") : fr ? "Créer mon compte pour lancer le groupe" : "Create my account to start the group"}
           <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       )}

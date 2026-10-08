@@ -69,7 +69,7 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
   const fr = language === "fr";
   const perPerson = plan.seats > 1;
   const monthly = Math.round(plan.priceDZD / Math.max(1, plan.durationMonths));
-  // Individuel's own feature list IS the limits list — only Groupe / Cohorte add tier-specific lines.
+  // Individuel's own feature list IS the limits list — only the two Groupe tiers add tier-specific lines.
   const savings = plan.tier && plan.cycle ? computeSavingsPercent(plan.tier, plan.cycle) : null;
   const highlights = plan.tier === "individual" ? [] : plan.features;
 
@@ -126,7 +126,7 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
             )}
             {plan.tier === "promo" && (
               <p className="mt-1 text-xs text-muted-foreground">
-                {fr ? `soit ${formatDZD(poolTotalDZD(plan))} pour les ${plan.seats} étudiants` : `that is ${formatDZD(poolTotalDZD(plan))} for all ${plan.seats} students`}
+                {fr ? `soit ${formatDZD(poolTotalDZD(plan))} pour les ${plan.seats} personnes` : `that is ${formatDZD(poolTotalDZD(plan))} for all ${plan.seats} people`}
               </p>
             )}
             {plan.tier === "group" && (

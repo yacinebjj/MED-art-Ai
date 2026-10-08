@@ -43,9 +43,9 @@ function copyFor(kind: InviteKind): InviteCopy {
   switch (kind) {
     case "promo":
       return {
-        kicker: `Cohorte · ${PROMO_SIZE} étudiants`,
-        title: "Ta promo débloque MedArt AI ensemble",
-        lead: `Un camarade a lancé une Cohorte : à ${PROMO_SIZE}, chacun paie dès ${promo} par mois au lieu de ${solo}, pour un accès complet. L'accès démarre pour tout le monde dès que la jauge atteint ${PROMO_SIZE}/${PROMO_SIZE}.`,
+        kicker: `Groupe · ${PROMO_SIZE} personnes`,
+        title: "Ton groupe débloque MedArt AI ensemble",
+        lead: `Un ami a lancé un Groupe de ${PROMO_SIZE} : chacun paie dès ${promo} par mois au lieu de ${solo}, pour un accès complet. L'accès démarre pour tout le monde dès que la jauge atteint ${PROMO_SIZE}/${PROMO_SIZE}.`,
         points: [{ icon: Users, text: `Il faut être exactement ${PROMO_SIZE} : chaque inscription fait avancer la jauge en direct.` }, secure, refund],
       };
     case "group":
@@ -69,7 +69,7 @@ function copyFor(kind: InviteKind): InviteCopy {
       return {
         kicker: "Invitation",
         title: "On t'invite à débloquer MedArt AI ensemble",
-        lead: `En Cohorte (${PROMO_SIZE} étudiants, ${promo}/mois chacun) ou en Groupe (${GROUP_SIZE} personnes, ${group}/mois chacun), MedArt AI revient bien moins cher qu'en individuel (${solo}/mois).`,
+        lead: `En Groupe de ${PROMO_SIZE} (${promo}/mois chacun) ou en Groupe de ${GROUP_SIZE} (${group}/mois chacun), MedArt AI revient bien moins cher qu'en individuel (${solo}/mois).`,
         points: [secure, refund],
       };
   }

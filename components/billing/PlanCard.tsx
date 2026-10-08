@@ -46,7 +46,7 @@ const MODE_OPTIONS: { id: GroupPaymentMode; icon: typeof Zap; title: string }[] 
  * Billing-page card for one tier at one cycle (monetization v2), built on the
  * shared PricingTierCard. Individuel → Chargily checkout; Groupe → the
  * student picks « Je paie pour les 5 » (leader checkout) or « Chacun paie sa
- * part » (pooled purchase); Cohorte → pooled purchase, any duration.
+ * part » (pooled purchase); Groupe de 10 → pooled purchase, any duration.
  */
 export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction }: PlanCardProps) {
   const [groupMode, setGroupMode] = useState<GroupPaymentMode>("leader");
@@ -69,8 +69,8 @@ export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction }: PlanCard
     }
   } else if (plan.tier === "promo") {
     action = { type: "pool", kind: "promo", cycle };
-    ctaLabel = "Lancer la Cohorte";
-    ctaNote = `Tu paies ta part (${formatDZD(plan.priceDZD)}) à l'étape suivante, puis tu partages le lien à ta promo.`;
+    ctaLabel = `Lancer le ${plan.label}`;
+    ctaNote = `Tu paies ta part (${formatDZD(plan.priceDZD)}) à l'étape suivante, puis tu partages le lien à tes amis.`;
   } else {
     action = { type: "checkout", plan: plan.id };
     ctaLabel = isCurrentPlan ? "Renouveler" : `Payer ${formatDZD(plan.priceDZD)}`;

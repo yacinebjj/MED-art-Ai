@@ -250,7 +250,7 @@ function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: bo
 
       {trial && usage.trialExhausted && (
         <div className="mt-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          Ton essai gratuit est terminé. Choisis une formule ci-dessus pour continuer — dès {formatDZD(PLANS.promo_monthly.priceDZD)} par personne et par mois avec la Cohorte.
+          Ton essai gratuit est terminé. Choisis une formule ci-dessus pour continuer — dès {formatDZD(PLANS.promo_monthly.priceDZD)} par personne et par mois avec le {PLANS.promo_monthly.label}.
         </div>
       )}
 
@@ -323,7 +323,7 @@ function poolStatusBadge(pool: PoolView): { label: string; variant: "success" | 
 function PoolItem({ pool, copied, onCopy }: { pool: PoolView; copied: boolean; onCopy: (code: string) => void }) {
   const badge = poolStatusBadge(pool);
   const ratio = pool.size > 0 ? Math.min(1, pool.confirmed / pool.size) : 0;
-  const kindLabel = pool.kind === "promo" ? "Cohorte" : "Groupe";
+  const kindLabel = `Groupe de ${pool.size}`;
   const modeLabel = pool.mode === "leader" ? "payé en une fois" : "chacun paie sa part";
 
   return (
@@ -649,7 +649,7 @@ function BillingPageContent() {
           <Users className="h-5 w-5 text-cyan-300" />
           Tes groupes
         </h2>
-        <p className="mt-1 text-xs text-slate-400">Tes formules Groupe et Cohorte, et où en est chaque jauge.</p>
+        <p className="mt-1 text-xs text-slate-400">Tes formules {PLANS.group_monthly.label} et {PLANS.promo_monthly.label}, et où en est chaque jauge.</p>
         {pools === null ? (
           <div className="mt-4 space-y-2">
             {[0, 1].map((i) => (
@@ -659,7 +659,7 @@ function BillingPageContent() {
         ) : pools.length === 0 ? (
           <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center">
             <Users className="h-7 w-7 text-slate-500" />
-            <p className="text-sm text-slate-400">Aucun groupe pour l&apos;instant. Choisis Groupe ou Cohorte pour réviser à plusieurs, moins cher.</p>
+            <p className="text-sm text-slate-400">Aucun groupe pour l&apos;instant. Choisis un {PLANS.group_monthly.label} ou un {PLANS.promo_monthly.label} pour réviser à plusieurs, moins cher.</p>
           </div>
         ) : (
           <ul className="mt-4 space-y-3">

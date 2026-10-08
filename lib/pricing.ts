@@ -4,22 +4,24 @@
  * gates), lib/billing-pools.ts (Promo / Groupe pooled purchases), the
  * subscription API and every pricing UI.
  *
- * MONETIZATION v3 (2026-10-06) — product rules:
+ * MONETIZATION v4 (2026-10-08) — product rules:
  *  - FREE TRIAL, one-time (never renewed): 1 course with the full Studio,
  *    20 messages across MedArt Assistant + Copilot. Exams and module
  *    summaries are paid features. Then: paywall.
- *  - THREE TIERS, three durations each. 4 months = 4 × monthly − 20 %;
- *    the yearly plan covers the 8 study months of the academic year and is
- *    priced 8 × monthly − 45 % (access lasts 8 months).
- *      INDIVIDUEL (1):       1 200 / 3 840 / 5 280 DA
- *      GROUPE (exactly 5):   1 100 / 3 520 / 4 840 DA per person
- *                            (order total 5 500 / 17 600 / 24 200 DA)
- *      COHORTE (exactly 40): 900 / 2 880 / 3 960 DA per person
- *                            (order total 36 000 / 115 200 / 158 400 DA)
- *    Groupe: one leader pays the 5 seats at once (4 invite codes), or each
- *    member pays their share and the plan starts at 5/5. Cohorte: each
- *    student pays their share; starts for everyone at 40/40, refund
+ *  - THREE TIERS, three durations each (1 month, 4 months, and the 8 study
+ *    months of the academic year). Prices are set per tier and duration
+ *    (TIER_PRICES below), not derived from a discount formula:
+ *      INDIVIDUEL (1):          800 / 1 600 / 2 900 DA
+ *      GROUPE DE 5 (exactly 5): 650 / 1 300 / 2 500 DA per person
+ *                               (order total 3 250 / 6 500 / 12 500 DA)
+ *      GROUPE DE 10 (exactly 10): 500 / 1 000 / 1 700 DA per person
+ *                               (order total 5 000 / 10 000 / 17 000 DA)
+ *    Groupe de 5: one leader pays the 5 seats at once (4 invite codes), or
+ *    each member pays their share and the plan starts at 5/5. Groupe de 10:
+ *    each member pays their share; starts for everyone at 10/10, refund
  *    requested automatically if the gauge is not full after 7 days.
+ *    The Cohorte plans (20 and 40 seats) are no longer sold; pools opened
+ *    before v4 keep their own size and price until they complete or expire.
  *  - PAID LIMITS (every paid plan, identical): 40 courses / month (a deleted
  *    course is not given back), 10 exams / month, 5 module summaries / month
  *    (any of its 3 tools: Résumé, Mots-clés, Dictionnaire), course AI chat
@@ -28,9 +30,9 @@
  *  - Audio → Smart Notes is withdrawn until V2 (lib/feature-flags.ts): its
  *    limits stay defined for the gated code, never shown while it is off.
  *
- * Plan ids are "{tier}_{cycle}" (the "promo" tier id is the Cohorte —
- * kept for existing subscriptions, pools and DB rows). "annual" is the
- * 8-study-month plan.
+ * Plan ids are "{tier}_{cycle}" (the "promo" tier id is the Groupe de 10 —
+ * the former Cohorte's id, kept for existing subscriptions, pools and DB
+ * rows). "annual" is the 8-study-month plan.
  */
 import type { Language } from "@/providers/LanguageProvider";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
@@ -53,9 +55,9 @@ export type PlanId =
   | "promo_annual";
 
 export const GROUP_SIZE = 5;
-/** Cohorte seats (tier id "promo"). Pools created before v3 kept their own size (15). */
-export const PROMO_SIZE = 40;
-/** A pooled purchase (Promo, or Groupe paid member by member) must fill within this many days. */
+/** Groupe de 10 seats (tier id "promo"). Pools created earlier keep their own size (15 or 40). */
+export const PROMO_SIZE = 10;
+/** A pooled purchase (Groupe de 10, or Groupe de 5 paid member by member) must fill within this many days. */
 export const POOL_DEADLINE_DAYS = 7;
 /** A member about to pay holds their seat this long (so a pool never takes more payments than seats). */
 export const SEAT_HOLD_MINUTES = 30;
@@ -84,10 +86,10 @@ export interface Plan {
   tagline: string;
   /** Price PER PERSON for the whole cycle (Groupe / Promo are per person). */
   priceDZD: number;
-  /** Seats the plan is sold for: 1, exactly 5, or exactly 15. */
+  /** Seats the plan is sold for: 1, exactly 5, or exactly 10. */
   seats: number;
   durationMonths: number;
-  /** Still purchasable (false for legacy promo_quad / promo_annual). */
+  /** Still purchasable (the tier is sold at this duration). */
   purchasable: boolean;
   /** Courses created per month (paid). The free trial uses FREE_TRIAL.courses instead. */
   coursesPerMonth: number;
@@ -114,15 +116,11 @@ export interface Plan {
   featured?: boolean;
 }
 
-/**
- * Access length and price formula of each duration. Price per person =
- * monthly price × months × (100 − discountPct) / 100, computed in integers
- * so every displayed amount is exact (e.g. 1 200 × 8 × 55 / 100 = 5 280).
- */
-const CYCLE_TERMS: Record<BillingCycle, { months: number; discountPct: number }> = {
-  monthly: { months: 1, discountPct: 0 },
-  quad: { months: 4, discountPct: 20 },
-  annual: { months: 8, discountPct: 45 },
+/** Price per person for the whole duration, in DA (set per tier, not derived from a discount). */
+const TIER_PRICES: Record<PricingTierId, Record<BillingCycle, number>> = {
+  individual: { monthly: 800, quad: 1600, annual: 2900 },
+  group: { monthly: 650, quad: 1300, annual: 2500 },
+  promo: { monthly: 500, quad: 1000, annual: 1700 },
 };
 
 export const BILLING_CYCLES: { id: BillingCycle; months: number; label: Record<Language, string> }[] = [
@@ -162,7 +160,6 @@ interface TierMeta {
   name: string;
   tagline: string;
   seats: number;
-  monthlyPricePerPerson: number;
   cycles: BillingCycle[];
   features: string[];
   featured?: boolean;
@@ -174,34 +171,31 @@ const TIER_META: Record<PricingTierId, TierMeta> = {
     name: "Individuel",
     tagline: "Pour réviser à ton rythme",
     seats: 1,
-    monthlyPricePerPerson: 1200,
     cycles: ["monthly", "quad", "annual"],
     features: PAID_FEATURES,
   },
   group: {
     id: "group",
-    name: "Groupe",
+    name: `Groupe de ${GROUP_SIZE}`,
     tagline: `Exactement ${GROUP_SIZE} amis, prix par personne`,
     seats: GROUP_SIZE,
-    monthlyPricePerPerson: 1100,
     cycles: ["monthly", "quad", "annual"],
     features: [
-      "Tout Individuel, pour chacun des 5",
-      "Un chef paie les 5 places, ou chacun paie sa part",
-      "Activation dès que le groupe est complet (5/5)",
+      `Tout Individuel, pour chacun des ${GROUP_SIZE}`,
+      `Un chef paie les ${GROUP_SIZE} places, ou chacun paie sa part`,
+      `Activation dès que le groupe est complet (${GROUP_SIZE}/${GROUP_SIZE})`,
     ],
     featured: true,
   },
   promo: {
     id: "promo",
-    name: "Cohorte",
-    tagline: `Exactement ${PROMO_SIZE} étudiants de ta promo`,
+    name: `Groupe de ${PROMO_SIZE}`,
+    tagline: `Exactement ${PROMO_SIZE} amis, prix par personne`,
     seats: PROMO_SIZE,
-    monthlyPricePerPerson: 900,
     cycles: ["monthly", "quad", "annual"],
     features: [
       "Tout Individuel, au prix le plus bas",
-      `S'active pour les ${PROMO_SIZE} dès que la jauge est pleine`,
+      `Chacun paie sa part, activation pour les ${PROMO_SIZE} dès que la jauge est pleine`,
       `Pas ${PROMO_SIZE}/${PROMO_SIZE} en ${POOL_DEADLINE_DAYS} jours ? Remboursement déclenché automatiquement`,
     ],
   },
@@ -212,7 +206,7 @@ function buildPlan(tier: TierMeta, cycle: BillingCycle): Plan {
     id: `${tier.id}_${cycle}` as PlanId,
     label: tier.name,
     tagline: tier.tagline,
-    priceDZD: (tier.monthlyPricePerPerson * CYCLE_TERMS[cycle].months * (100 - CYCLE_TERMS[cycle].discountPct)) / 100,
+    priceDZD: TIER_PRICES[tier.id][cycle],
     seats: tier.seats,
     durationMonths: MONTHS[cycle],
     purchasable: tier.cycles.includes(cycle),
@@ -269,14 +263,20 @@ export function groupLeaderTotalDZD(plan: Plan): number {
   return plan.priceDZD * GROUP_SIZE;
 }
 
-/** Whole order of a pooled plan: price per person × seats (Groupe 5, Cohorte 40). */
+/** Whole order of a pooled plan: price per person × seats (Groupe de 5, Groupe de 10). */
 export function poolTotalDZD(plan: Plan): number {
   return plan.priceDZD * plan.seats;
 }
 
-/** The duration discount (20 % for 4 months, 45 % for the year), or null for 1 month. */
-export function computeSavingsPercent(_tier: PricingTierId, cycle: BillingCycle): number | null {
-  const pct = CYCLE_TERMS[cycle].discountPct;
+/**
+ * Saving of a longer duration against paying the tier's 1-month price every
+ * month (e.g. Individuel 4 months: 1 600 vs 4 × 800 → 50 %), rounded to the
+ * nearest percent; null for 1 month.
+ */
+export function computeSavingsPercent(tier: PricingTierId, cycle: BillingCycle): number | null {
+  if (cycle === "monthly") return null;
+  const monthlyEquivalent = TIER_PRICES[tier].monthly * MONTHS[cycle];
+  const pct = Math.round((1 - TIER_PRICES[tier][cycle] / monthlyEquivalent) * 100);
   return pct > 0 ? pct : null;
 }
 

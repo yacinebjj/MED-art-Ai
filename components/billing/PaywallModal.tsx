@@ -56,7 +56,7 @@ const TRIAL_PLANS = [
     name: PLANS.promo_monthly.label,
     price: formatDZD(PLANS.promo_monthly.priceDZD),
     unit: "/pers./mois",
-    detail: `Exactement ${PROMO_SIZE} étudiants de ta promo`,
+    detail: `Exactement ${PROMO_SIZE} amis`,
   },
 ] as const;
 

@@ -17,7 +17,7 @@ import { useLanguage } from "@/providers/LanguageProvider";
 /**
  * Public pricing page (anonymous visitors). Renders the real lib/pricing.ts
  * plans; every CTA routes to /register — the actual Chargily checkout and the
- * Groupe / Promo pooled purchases live on app/dashboard/(shell)/billing.
+ * Groupe de 5 / Groupe de 10 pooled purchases live on app/dashboard/(shell)/billing.
  */
 export default function PricingPage() {
   const { language } = useLanguage();
@@ -44,8 +44,8 @@ export default function PricingPage() {
               </h1>
               <p className="mt-4 text-base text-slate-600 dark:text-slate-300 sm:text-lg">
                 {fr
-                  ? `Seul, à ${GROUP_SIZE} amis, ou à ${PROMO_SIZE} avec ta promo — paie en Dinars, par carte Edahabia ou CIB, en toute sécurité.`
-                  : `Alone, with ${GROUP_SIZE} friends, or ${PROMO_SIZE} from your class — pay in Dinars, by Edahabia or CIB card, securely.`}
+                  ? `Seul, à ${GROUP_SIZE} ou à ${PROMO_SIZE} amis — paie en Dinars, par carte Edahabia ou CIB, en toute sécurité.`
+                  : `Alone, or with ${GROUP_SIZE} or ${PROMO_SIZE} friends — pay in Dinars, by Edahabia or CIB card, securely.`}
               </p>
               <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-1.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-300 sm:text-sm">
                 <Gift className="h-4 w-4 shrink-0" />
@@ -72,17 +72,13 @@ export default function PricingPage() {
                     <Button asChild size="lg" variant={plan.featured ? "primary" : "outline"} className="mt-6 w-full">
                       <Link href="/register">
                         <CreditCard className="h-4 w-4" />
-                        {plan.tier === "group"
+                        {plan.tier === "group" || plan.tier === "promo"
                           ? fr
                             ? "Créer mon compte et mon groupe"
                             : "Create my account and group"
-                          : plan.tier === "promo"
-                            ? fr
-                              ? "Créer mon compte et ma Cohorte"
-                              : "Create my account and Cohort"
-                            : fr
-                              ? "Créer mon compte"
-                              : "Create my account"}
+                          : fr
+                            ? "Créer mon compte"
+                            : "Create my account"}
                       </Link>
                     </Button>
                   }

@@ -3,8 +3,25 @@
 import { useId } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { BILLING_CYCLES, type BillingCycle } from "@/lib/pricing";
+import { BILLING_CYCLES, computeSavingsPercent, type BillingCycle, type PricingTierId } from "@/lib/pricing";
 import { useLanguage } from "@/providers/LanguageProvider";
+
+const TIERS: PricingTierId[] = ["individual", "group", "promo"];
+
+/** Savings of a duration across the tiers: one figure when equal, "jusqu'à" the best otherwise. */
+function savingsLabel(cycle: BillingCycle, fr: boolean): string {
+  const pcts = TIERS.map((tier) => computeSavingsPercent(tier, cycle) ?? 0);
+  const max = Math.max(...pcts);
+  const amount = fr ? `−${max} %` : `−${max}%`;
+  if (pcts.every((pct) => pct === max)) return amount;
+  return fr ? `jusqu'à ${amount}` : `up to ${amount}`;
+}
+
+function savingsNote(fr: boolean): string {
+  return fr
+    ? `4 mois : ${savingsLabel("quad", true)}. Année (8 mois d'études) : ${savingsLabel("annual", true)}.`
+    : `4 months: ${savingsLabel("quad", false)}. Year (8 study months): ${savingsLabel("annual", false)}.`;
+}
 
 interface BillingCycleToggleProps {
   value: BillingCycle;
@@ -19,8 +36,9 @@ interface BillingCycleToggleProps {
  * between slots through a shared `layoutId` — scoped with useId() so two
  * toggles on the same page never fight over the same pill.
  *
- * v3 prices: 4 months = −20 %, the year (8 study months) = −45 %, for every
- * tier (lib/pricing.ts) — the optional note says so, plainly.
+ * The optional note states the saving of each longer duration against the
+ * 1-month price, read from lib/pricing.ts (it differs per tier, so the year
+ * shows the best one: "jusqu'à").
  */
 export function BillingCycleToggle({ value, onChange, showNote = true, className }: BillingCycleToggleProps) {
   const { language } = useLanguage();
@@ -62,9 +80,7 @@ export function BillingCycleToggle({ value, onChange, showNote = true, className
       </div>
       {showNote && (
         <p className="max-w-xs text-center text-[11px] leading-snug text-muted-foreground">
-          {fr
-            ? "4 mois : −20 %. Année (8 mois d'études) : −45 %."
-            : "4 months: −20%. Year (8 study months): −45%."}
+          {fr ? savingsNote(true) : savingsNote(false)}
         </p>
       )}
     </div>

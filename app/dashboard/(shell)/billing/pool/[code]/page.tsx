@@ -36,7 +36,7 @@ const HOLD_MINUTES = SEAT_HOLD_MINUTES;
 const CONFIRM_POLL_MS = 4000;
 const CONFIRM_POLL_MAX_MS = 2 * 60 * 1000;
 const LIVE_REFRESH_MS = 20000;
-/** Above this many seats the seat dots shrink (Cohorte: 40 seats). */
+/** Above this many seats the seat dots shrink (Groupe de 10, and older 15/40-seat pools). */
 const GRID_BREAK = 5;
 
 const CYCLE_MONTHS: Record<BillingCycle, number> = { monthly: 1, quad: 4, annual: 8 };
@@ -130,7 +130,7 @@ function inviteMessage(pool: PoolView, url: string | null): string {
   }
   const price = `${formatDZD(pool.pricePerMember)}/personne${CYCLE_SUFFIX[pool.cycle]}`;
   const solo = formatDZD(soloPrice(pool.cycle));
-  const who = pool.kind === "promo" ? "pour toute la promo" : `à ${pool.size}`;
+  const who = `à ${pool.size}`;
   return `🎓 On débloque MedArt AI ${who} à ${price} au lieu de ${solo} ! Il faut être exactement ${pool.size} — rejoins-nous${link} (si on n'est pas ${pool.size} en ${POOL_DEADLINE_DAYS} jours, chacun est remboursé).`;
 }
 
@@ -307,7 +307,7 @@ function TrustList({ pool }: { pool: PoolView }) {
 
 function Reassurance({ pool, paid }: { pool: PoolView; paid: boolean }) {
   const remaining = Math.max(0, pool.size - pool.confirmed);
-  const group = pool.kind === "promo" ? "de ta promo" : "de ton groupe";
+  const group = "de ton groupe";
   const waiting = paid
     ? `${remaining} autre${remaining > 1 ? "s" : ""} étudiant${remaining > 1 ? "s" : ""} ${group}`
     : `${remaining} étudiant${remaining > 1 ? "s" : ""} ${group} (toi compris)`;
@@ -377,10 +377,10 @@ function InvitePanel({ pool }: { pool: PoolView }) {
       <h2 className="mt-1 text-lg font-black text-white">
         {pool.mode === "leader"
           ? `Encore ${remaining} place${remaining > 1 ? "s" : ""} à offrir`
-          : `Plus que ${remaining} ${pool.kind === "promo" ? "étudiant" : "membre"}${remaining > 1 ? "s" : ""} à convaincre`}
+          : `Plus que ${remaining} membre${remaining > 1 ? "s" : ""} à convaincre`}
       </h2>
       <p className="mt-1 text-sm text-slate-400">
-        Le plus rapide : partager le message dans le groupe {pool.kind === "promo" ? "de ta promo" : "de tes amis"}.
+        Le plus rapide : partager le message dans le groupe de tes amis.
       </p>
 
       <motion.button
@@ -645,7 +645,7 @@ function PoolTracker() {
     readyPool.confirmed < readyPool.size &&
     (readyPool.mode === "leader" ? readyPool.isCreator : currentPhase !== "refund_pending" && currentPhase !== "refunded");
   const accessEnd = accessEndIso(readyPool);
-  const kindLabel = readyPool.kind === "promo" ? `Cohorte · ${readyPool.size} étudiants` : `Groupe · ${readyPool.size} personnes`;
+  const kindLabel = `Groupe · ${readyPool.size} personnes`;
 
   return (
     <CyberStage accent={currentPhase === "celebrate" ? "emerald" : "cyan"} className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">

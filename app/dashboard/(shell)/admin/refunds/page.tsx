@@ -25,7 +25,7 @@ interface RefundsResponse {
 }
 
 const REASON_LABEL: Record<RefundRequestView["reason"], string> = {
-  pool_expired: "Promo/Groupe non complet à J+7",
+  pool_expired: "Groupe non complet à J+7",
   pool_overflow: "Paiement arrivé sur un groupe déjà complet",
 };
 
@@ -210,7 +210,7 @@ export default function AdminRefundsPage() {
         icon={Wallet}
         kicker="Administration"
         title="Remboursements"
-        subtitle="Promo / Groupe non complétés et paiements en trop"
+        subtitle="Groupes non complétés et paiements en trop"
         actions={
           <Button variant="outline" size="sm" onClick={() => void load(tab)} className="border-white/15 text-slate-200">
             <RefreshCw className="h-4 w-4" />
