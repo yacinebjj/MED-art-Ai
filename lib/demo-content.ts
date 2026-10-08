@@ -8,6 +8,7 @@ import {
   Headphones,
   type LucideIcon,
 } from "lucide-react";
+import { INFOGRAPHIC_ENABLED } from "@/lib/feature-flags";
 
 export type DemoSectionId =
   | "explication"
@@ -96,6 +97,11 @@ export function buildQuotedChatMessage(quotedText: string | null, typedText: str
 /** Whether `content` is a composer citation built by buildQuotedChatMessage above — used to recognize & re-exclude an "Ask MedArt" exchange loaded back from persisted history (course_chat_history has no separate flag column for this), since a fresh page load otherwise loses the live session's exclusion and reintroduces the same leak on the next message. */
 export function isQuotedChatMessage(content: string): boolean {
   return content.startsWith("> ") && content.includes("\n\n");
+}
+
+/** The Studio tiles students can open — DEMO_SECTIONS minus the features withdrawn by lib/feature-flags.ts. */
+export function visibleStudioSections(sections: DemoSection[] = DEMO_SECTIONS): DemoSection[] {
+  return INFOGRAPHIC_ENABLED ? sections : sections.filter((section) => section.id !== "infographic");
 }
 
 export const DEMO_SECTIONS: DemoSection[] = [

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { isSmallTalk } from "@/lib/chat-intent";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { waitUntil } from "@vercel/functions";
 import { retrieveRelevantContext, retrieveRelevantContextForStudioCourses } from "@/lib/chat-context-retrieval";
@@ -563,8 +564,10 @@ export async function POST(request: NextRequest) {
   // over-charging a student's quota for a message that never actually sent.
   // Monetization v2: free trial = 20 messages for life (then paywall);
   // paid = 20 premium-model messages a day, then the free model, silently.
+  // Small talk ("salut", "merci", "ça va ?") goes to the free chain and never
+  // spends a premium message — see lib/chat-intent.ts.
   if (!isHighlightMode) {
-    const turn = await reserveAssistantTurn(user);
+    const turn = await reserveAssistantTurn(user, { needsPremium: !isSmallTalk(message) });
     if (!turn.allowed) return quotaBlockedResponse(turn);
     usePaidTier = turn.premium;
   }

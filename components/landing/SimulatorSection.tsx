@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useInView, useReducedMotion } from "framer-motion";
 import { BookOpenText, Brain, Check, FileText, Headphones, ImageIcon, Lightbulb, ListChecks, RotateCcw, Sparkles, Stethoscope, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { INFOGRAPHIC_ENABLED } from "@/lib/feature-flags";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { GlassPanel, GradientText, Reveal, SectionHeading } from "./primitives";
 
@@ -15,7 +16,7 @@ const OUTPUTS = [
   { icon: Stethoscope, fr: "Cas clinique", en: "Clinical case", tint: "text-rose-300 border-rose-400/40 bg-rose-400/10" },
   { icon: Check, fr: "40+ QCM", en: "40+ MCQs", tint: "text-emerald-300 border-emerald-400/40 bg-emerald-400/10" },
   { icon: Lightbulb, fr: "Analogies", en: "Analogies", tint: "text-amber-300 border-amber-400/40 bg-amber-400/10" },
-  { icon: ImageIcon, fr: "Infographie", en: "Infographic", tint: "text-fuchsia-300 border-fuchsia-400/40 bg-fuchsia-400/10" },
+  ...(INFOGRAPHIC_ENABLED ? [{ icon: ImageIcon, fr: "Infographie", en: "Infographic", tint: "text-fuchsia-300 border-fuchsia-400/40 bg-fuchsia-400/10" }] : []),
   { icon: Headphones, fr: "Podcast", en: "Podcast", tint: "text-orange-300 border-orange-400/40 bg-orange-400/10" },
   { icon: Brain, fr: "Flashcards", en: "Flashcards", tint: "text-violet-300 border-violet-400/40 bg-violet-400/10" },
 ];

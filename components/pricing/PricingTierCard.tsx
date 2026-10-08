@@ -25,8 +25,8 @@ export const PAID_LIMIT_LINES: { text: Record<Language, string>; hint?: Record<L
     },
   },
   {
-    text: { fr: `${PAID_LIMITS.premiumMessagesPerDay} messages/jour avec l'IA premium`, en: `${PAID_LIMITS.premiumMessagesPerDay} premium-AI messages a day` },
-    hint: { fr: "Ensuite, modèle standard automatiquement — jamais bloqué", en: "Then the standard model automatically — never blocked" },
+    text: { fr: "Accès complet à l'IA MedArt", en: "Full access to MedArt AI" },
+    hint: { fr: "Assistance intelligente en continu", en: "Smart assistance, always on" },
   },
   // Held back for V2 (lib/feature-flags.ts).
   ...(AUDIO_SMART_NOTES_ENABLED

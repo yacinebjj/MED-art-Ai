@@ -91,7 +91,7 @@ import { useCourseChat } from "@/hooks/useCourseChat";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { MAX_LEITNER_BOX } from "@/lib/srs";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
-import { DEMO_SECTIONS, buildQuotedChatMessage, type DemoSectionId } from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildQuotedChatMessage, visibleStudioSections, type DemoSectionId } from "@/lib/demo-content";
 import { getInFlightGeneration, trackGeneration } from "@/lib/studio-generation-tracker";
 import { PodcastGeneratingLabel } from "@/components/course/workspace/PodcastGeneratingLabel";
 import { ExplicationGeneratingLabel, type ExplicationProgressView } from "@/components/course/workspace/ExplicationGeneratingLabel";
@@ -2284,7 +2284,7 @@ export default function ModuleWorkspacePage() {
       disabled: chatMessages.length === 0,
       run: () => void clearMessages(),
     },
-    ...DEMO_SECTIONS.map<CommandItem>((section) => ({
+    ...visibleStudioSections().map<CommandItem>((section) => ({
       id: `studio-${section.id}`,
       group: "Studio",
       label: getSectionLabel(section.id, language, studyYear),
@@ -2479,7 +2479,7 @@ export default function ModuleWorkspacePage() {
 
   const studioPanel = (
     <StudioPanel
-      sections={DEMO_SECTIONS}
+      sections={visibleStudioSections()}
       openedSection={openedSection}
       openedLabel={openedSectionLabel}
       studyYear={studyYear}
@@ -2795,7 +2795,7 @@ export default function ModuleWorkspacePage() {
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                   <div className="shrink-0">
                   <MobileStudioCards
-                    sections={DEMO_SECTIONS}
+                    sections={visibleStudioSections()}
                     getSectionStatus={getSectionStatus}
                     generatingSections={generatingSections}
                     regeneratingSections={regeneratingSections}

@@ -96,11 +96,11 @@ const FAQ = [
   {
     fr: {
       q: "Est-ce vraiment gratuit pour commencer ?",
-      a: `Oui. Chaque compte reçoit, une seule fois et sans carte bancaire, ${FREE_TRIAL.courses} cours avec le Studio complet + ${FREE_TRIAL.messages} messages avec l'Assistant / Copilot. Ensuite, les formules payantes donnent ${PAID_LIMITS.coursesPerMonth} cours, ${PAID_LIMITS.examsPerMonth} examens et ${PAID_LIMITS.synthesesPerMonth} résumés de module par mois, ${PAID_LIMITS.premiumMessagesPerDay} messages/jour avec l'IA premium (puis le modèle standard, jamais bloqué)${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/jour` : ""}, et Flashcards / To-Do / Notes illimités.`,
+      a: `Oui. Chaque compte reçoit, une seule fois et sans carte bancaire, ${FREE_TRIAL.courses} cours avec le Studio complet + ${FREE_TRIAL.messages} messages avec l'Assistant / Copilot. Ensuite, les formules payantes donnent ${PAID_LIMITS.coursesPerMonth} cours, ${PAID_LIMITS.examsPerMonth} examens et ${PAID_LIMITS.synthesesPerMonth} résumés de module par mois, un accès complet à l'IA MedArt avec une assistance intelligente en continu${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/jour` : ""}, et Flashcards / To-Do / Notes illimités.`,
     },
     en: {
       q: "Is it really free to start?",
-      a: `Yes. Every account gets, one time only and with no card, ${FREE_TRIAL.courses} course with the full Studio + ${FREE_TRIAL.messages} Assistant / Copilot messages. Paid plans then give ${PAID_LIMITS.coursesPerMonth} courses, ${PAID_LIMITS.examsPerMonth} exams and ${PAID_LIMITS.synthesesPerMonth} module summaries a month, ${PAID_LIMITS.premiumMessagesPerDay} premium-AI messages a day (then the standard model, never blocked)${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/day` : ""}, and unlimited Flashcards / To-Do / Notes.`,
+      a: `Yes. Every account gets, one time only and with no card, ${FREE_TRIAL.courses} course with the full Studio + ${FREE_TRIAL.messages} Assistant / Copilot messages. Paid plans then give ${PAID_LIMITS.coursesPerMonth} courses, ${PAID_LIMITS.examsPerMonth} exams and ${PAID_LIMITS.synthesesPerMonth} module summaries a month, full access to MedArt AI with smart assistance always on${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/day` : ""}, and unlimited Flashcards / To-Do / Notes.`,
     },
   },
   {

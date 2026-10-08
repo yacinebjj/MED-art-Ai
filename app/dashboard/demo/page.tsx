@@ -5,7 +5,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Dna, HeartPulse, Maximize2, Minimize2, Moon, Sun } from "lucide-react";
-import { DEMO_SECTIONS, buildDemoAskPrompt, buildDemoTranslatePrompt, type DemoSectionId } from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildDemoAskPrompt, buildDemoTranslatePrompt, visibleStudioSections, type DemoSectionId } from "@/lib/demo-content";
 import { cn } from "@/lib/utils";
 import {
   PROSE_CLASSES,
@@ -277,7 +277,7 @@ export default function DemoWorkspacePage() {
         </h2>
 
         <div className="relative z-10 flex flex-col gap-2">
-          {DEMO_SECTIONS.map(({ id, label, icon: Icon, accent }) => {
+          {visibleStudioSections().map(({ id, label, icon: Icon, accent }) => {
             const isActive = id === activeId;
             return (
               <button

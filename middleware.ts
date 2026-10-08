@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
-import { AUDIO_SMART_NOTES_API, AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
+import { AUDIO_SMART_NOTES_API, AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE, INFOGRAPHIC_API, INFOGRAPHIC_ENABLED } from "@/lib/feature-flags";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -9,6 +9,10 @@ export async function middleware(request: NextRequest) {
   // any Supabase call, so it never joins the refresh-token race described below.
   if (pathname.startsWith(AUDIO_SMART_NOTES_API)) {
     if (AUDIO_SMART_NOTES_ENABLED) return NextResponse.next();
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (pathname.startsWith(INFOGRAPHIC_API)) {
+    if (INFOGRAPHIC_ENABLED) return NextResponse.next();
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   if (!AUDIO_SMART_NOTES_ENABLED && pathname.startsWith(AUDIO_SMART_NOTES_PAGE)) {
@@ -43,5 +47,7 @@ export const config = {
     // Feature-flag gate only (see above) — never reaches updateSession.
     "/api/lecture-notes/:path*",
     "/api/lecture-notes",
+    "/api/studio/infographic/:path*",
+    "/api/studio/infographic",
   ],
 };

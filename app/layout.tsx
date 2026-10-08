@@ -8,6 +8,7 @@ import { ToastProvider } from "@/components/ui/Toast";
 import { PushClientFallbackProvider } from "@/providers/PushClientFallbackProvider";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { SecurityGuard } from "@/components/security/SecurityGuard";
+import { SplashScreen } from "@/components/layout/SplashScreen";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -64,6 +65,7 @@ export default function RootLayout({
             </PomodoroProvider>
           </LanguageProvider>
         </ThemeProvider>
+        <SplashScreen />
       </body>
     </html>
   );

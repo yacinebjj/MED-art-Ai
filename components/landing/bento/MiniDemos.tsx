@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { INFOGRAPHIC_ENABLED } from "@/lib/feature-flags";
 import type { Language } from "@/providers/LanguageProvider";
 
 // ---------------------------------------------------------------------------
@@ -34,7 +35,7 @@ const FORMATS = [
   { icon: Stethoscope, fr: "Cas clinique", en: "Clinical case" },
   { icon: Check, fr: "Examen QCMs", en: "MCQ exam" },
   { icon: Lightbulb, fr: "Exemples & analogies", en: "Examples & analogies" },
-  { icon: ImageIcon, fr: "Infographie", en: "Infographic" },
+  ...(INFOGRAPHIC_ENABLED ? [{ icon: ImageIcon, fr: "Infographie", en: "Infographic" }] : []),
   { icon: Headphones, fr: "Podcast audio", en: "Audio podcast" },
 ];
 

@@ -67,10 +67,13 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          // Only disables features this app genuinely never uses — leaves
-          // everything else (including the Screen Wake Lock API this app
-          // does use, lib/studio-explication-client.ts) untouched.
-          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          // Disables the features this app never uses. The microphone is
+          // allowed for this origin only: voice dictation, voice mode and
+          // group voice notes all call getUserMedia, and `microphone=()`
+          // made Chrome/Edge/Firefox on desktop refuse it before any
+          // permission prompt ("Micro inaccessible"). The Screen Wake Lock
+          // API (lib/studio-explication-client.ts) stays untouched.
+          { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
         ],
       },
     ];

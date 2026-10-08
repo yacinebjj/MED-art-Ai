@@ -233,10 +233,12 @@ function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: bo
                 Compteurs du mois remis à zéro le <b className="text-slate-200">{formatFrenchDate(usage.monthResetsAt)}</b>
               </p>
             )}
-            <p className="flex items-center gap-1.5">
-              <RotateCcw className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
-              Messages premium et Audio : remis à zéro chaque jour
-            </p>
+            {AUDIO_SMART_NOTES_ENABLED && (
+              <p className="flex items-center gap-1.5">
+                <RotateCcw className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+                Audio : remis à zéro chaque jour
+              </p>
+            )}
             {usage.periodEnd && (
               <p className="flex items-center gap-1.5">
                 <CalendarClock className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
@@ -263,14 +265,10 @@ function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: bo
           caption={usage.courses.lifetime ? "essai, à vie" : "ce mois-ci"}
           hint="Un cours supprimé ne rend pas le crédit."
         />
-        <UsageBar
-          icon={MessageSquare}
-          label={usage.messages.perDay ? "Messages IA premium" : "Messages Assistant / Copilot"}
-          used={usage.messages.used}
-          cap={usage.messages.cap}
-          caption={usage.messages.perDay ? "aujourd'hui" : "essai, à vie"}
-          hint={usage.messages.perDay ? "Au-delà, bascule automatique sur le modèle standard — tu n'es jamais bloqué(e)." : undefined}
-        />
+        {/* Paid plans: no message gauge — the assistant is never blocked. Only the free trial's lifetime allowance is shown. */}
+        {!usage.messages.perDay && (
+          <UsageBar icon={MessageSquare} label="Messages Assistant / Copilot" used={usage.messages.used} cap={usage.messages.cap} caption="essai, à vie" />
+        )}
         <UsageBar icon={FileQuestion} label="Examens de module" used={usage.exams.used} cap={usage.exams.cap} caption="ce mois-ci" lockedText={trial ? lockedPaid : undefined} />
         <UsageBar
           icon={Layers}

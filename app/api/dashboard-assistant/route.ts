@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { isSmallTalk } from "@/lib/chat-intent";
 
 // ── Vision (images in the assistant) ────────────────────────────────────
 // Images go to ECONOMY_MODEL (multimodal) — the free text chain can't see
@@ -171,7 +172,10 @@ export async function POST(request: NextRequest) {
   // never be blocked by that unrelated circuit breaker being saturated.
   // Monetization v2: free trial = 20 messages for life (then paywall);
   // paid = 20 premium messages a day, then the free model, silently.
-  const turn = await reserveAssistantTurn(user);
+  // Small talk ("salut", "merci", "ça va ?") goes to the free chain and never
+  // spends a premium message — see lib/chat-intent.ts. An image always needs
+  // the vision model, whatever the caption says.
+  const turn = await reserveAssistantTurn(user, { needsPremium: Boolean(imageDataUrl) || !isSmallTalk(message) });
   if (!turn.allowed) return quotaBlockedResponse(turn);
   const dailyGate = { allowed: turn.premium };
 

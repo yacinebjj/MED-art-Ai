@@ -413,11 +413,16 @@ export type AssistantTurnGate = { allowed: true; premium: boolean } | GateBlocke
  *  - Free trial: 20 messages for the life of the account, then paywall.
  *  - Paid: 20 per day on the premium model; past that the reply is still
  *    served, silently, by the free model (`premium: false`) — never blocked.
+ *  - `needsPremium: false` (small talk, see lib/chat-intent.ts): served by
+ *    the free model and never spends one of a paid student's daily premium
+ *    messages. A trial message still counts — the trial is a message
+ *    allowance, whatever model answers.
  */
-export async function reserveAssistantTurn(user: GateUser): Promise<AssistantTurnGate> {
+export async function reserveAssistantTurn(user: GateUser, options: { needsPremium?: boolean } = {}): Promise<AssistantTurnGate> {
+  const needsPremium = options.needsPremium ?? true;
   const loaded = await loadForGate(user);
   if ("fail" in loaded) return loaded.fail;
-  if (devBypass()) return { allowed: true, premium: true };
+  if (devBypass()) return { allowed: true, premium: needsPremium };
   let sub = loaded.sub;
   const planId = resolveEffectivePlan(sub);
   if (planId === "freemium" && isV2(sub)) {
@@ -426,8 +431,9 @@ export async function reserveAssistantTurn(user: GateUser): Promise<AssistantTur
     if (r === false) {
       return { allowed: false, paywall: "trial_messages", reason: `Tes ${FREE_TRIAL.messages} messages gratuits sont utilisés. Choisis ta formule pour continuer à discuter avec MedArt.` };
     }
-    return { allowed: true, premium: true };
+    return { allowed: true, premium: needsPremium };
   }
+  if (!needsPremium) return { allowed: true, premium: false };
   sub = await ensureFreshDay(user.id, sub, "daily_chat_messages_used", "daily_chat_reset_at");
   const { data, error } = await getSupabaseAdmin().rpc("reserve_daily_chat_messages_used", { p_user_id: user.id, p_cap: DAILY_PREMIUM_MESSAGES });
   if (error) {
