@@ -996,8 +996,8 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
           artist: "MedArt AI",
           album: "Podcast MedArt AI",
           artwork: [
-            { src: `${window.location.origin}/icon-192.png`, sizes: "192x192", type: "image/png" },
-            { src: `${window.location.origin}/icon-512.png`, sizes: "512x512", type: "image/png" },
+            { src: `${window.location.origin}/icons/maskable-192.png`, sizes: "192x192", type: "image/png" },
+            { src: `${window.location.origin}/icons/maskable-512.png`, sizes: "512x512", type: "image/png" },
           ],
         });
       }

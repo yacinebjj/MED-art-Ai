@@ -18,12 +18,20 @@ export const metadata: Metadata = {
   description:
     "Transforme tes cours de Médecine, Pharmacie et Chirurgie Dentaire en explications détaillées, résumés, pièges, mnémotechniques, cas cliniques et QCMs grâce à l'IA.",
   manifest: "/manifest.json",
-  // iOS Safari never reads the web manifest's `icons` for "Add to Home
-  // Screen" — it only ever looks for an explicit <link rel="apple-touch-icon">,
-  // which this `icons.apple` field renders. Without it, iOS installs with a
-  // blank/default icon regardless of what's in manifest.json.
+  // Generated from public/logo.png's emblem (the wordmark is unreadable at
+  // icon sizes):
+  //  - favicon.ico (16/32/48) + a 192px PNG: transparent, square, multiples
+  //    of 48px at stable crawlable URLs — what Google Search requires to show
+  //    the favicon instead of the generic globe.
+  //  - apple-touch-icon: iOS ignores the manifest and fills transparency
+  //    with black, so it gets its own opaque, full-bleed 180px icon.
+  // The previous icon-192/512.png had a solid white square baked in.
   icons: {
-    apple: "/icon-192.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
+      { url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", type: "image/png", sizes: "180x180" }],
   },
 };
 
