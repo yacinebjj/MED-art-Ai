@@ -6,6 +6,9 @@ export interface TextSelectionState {
   text: string;
   top: number;
   left: number;
+  /** Viewport-relative top/bottom edges of the selected range — lets a taller toolbar place itself above or below the selection without covering it. */
+  rectTop: number;
+  rectBottom: number;
 }
 
 interface UseTextSelectionResult {
@@ -108,7 +111,9 @@ export function useTextSelection(): UseTextSelectionResult {
       // Same text at the same spot keeps the same object: a new one re-renders
       // the toolbar and resets its open color picker / note draft.
       setSelection((prev) =>
-        prev && prev.text === text && Math.abs(prev.top - top) < 1 && Math.abs(prev.left - left) < 1 ? prev : { text, top, left }
+        prev && prev.text === text && Math.abs(prev.top - top) < 1 && Math.abs(prev.left - left) < 1
+          ? prev
+          : { text, top, left, rectTop: rect.top, rectBottom: rect.bottom }
       );
     }
 
