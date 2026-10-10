@@ -128,6 +128,9 @@ export function useTextSelection(): UseTextSelectionResult {
     }
 
     function handleTouchStart(event: TouchEvent) {
+      // A second finger is a pinch-zoom, not a fresh tap: leave the
+      // selection (and the reader, which this would re-render) alone.
+      if (event.touches.length > 1) return;
       const touch = event.touches[0];
       if (!touch) return;
       dismissOnFreshInteraction(touch.target as Node);

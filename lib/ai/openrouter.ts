@@ -742,6 +742,14 @@ export async function callOpenRouter(
     providerSort?: "throughput" | "latency" | "price";
     /** OpenRouter `provider.order`: providers tried first, in order; normal fallbacks still apply. */
     providerOrder?: string[];
+    /** OpenRouter `provider.ignore`: providers never used for this call (e.g. a degraded fp4 deployment). */
+    providerIgnore?: string[];
+    /**
+     * OpenRouter `provider.require_parameters`: only route to providers that
+     * honor every parameter sent — without it, a provider that ignores
+     * `reasoning: { enabled: false }` can write its thinking into `content`.
+     */
+    requireParameters?: boolean;
   }
 ): Promise<string> {
   // detectMockPayload matches by loose substring against the SYSTEM PROMPT
@@ -815,12 +823,13 @@ export async function callOpenRouter(
         ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
         ...(options?.responseFormat ? { response_format: options.responseFormat } : {}),
-        ...(options?.responseFormat || options?.providerSort || options?.providerOrder
+        ...(options?.responseFormat || options?.requireParameters || options?.providerSort || options?.providerOrder || options?.providerIgnore
           ? {
               provider: {
-                ...(options.responseFormat ? { require_parameters: true } : {}),
+                ...(options.responseFormat || options.requireParameters ? { require_parameters: true } : {}),
                 ...(options.providerSort ? { sort: options.providerSort } : {}),
                 ...(options.providerOrder ? { order: options.providerOrder } : {}),
+                ...(options.providerIgnore ? { ignore: options.providerIgnore } : {}),
               },
             }
           : {}),

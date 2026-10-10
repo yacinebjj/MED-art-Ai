@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { User } from "@supabase/supabase-js";
+import { checkDevice } from "@/lib/devices";
 
 interface CookieToSet {
   name: string;
@@ -61,6 +62,29 @@ function createSessionClient() {
  */
 const inFlightByCookieFingerprint = new Map<string, Promise<User | null>>();
 
+/**
+ * Successful checks are remembered briefly, per exact cookie value. On
+ * app open the browser fires ~10 API calls within a few seconds; a warm
+ * instance now answers the later ones without another Supabase Auth round
+ * trip. Same isolation as the coalescing above (keyed by the raw cookie, so
+ * a refreshed or different session never matches), only successes are
+ * cached, and the TTL is far below the access token's own lifetime.
+ */
+const VERIFIED_TTL_MS = 30_000;
+const VERIFIED_MAX_ENTRIES = 500;
+const verifiedByCookieFingerprint = new Map<string, { user: User; expiresAt: number }>();
+
+function rememberVerified(fingerprint: string, user: User): void {
+  if (verifiedByCookieFingerprint.size >= VERIFIED_MAX_ENTRIES) {
+    const now = Date.now();
+    verifiedByCookieFingerprint.forEach((entry, key) => {
+      if (entry.expiresAt <= now) verifiedByCookieFingerprint.delete(key);
+    });
+    if (verifiedByCookieFingerprint.size >= VERIFIED_MAX_ENTRIES) verifiedByCookieFingerprint.clear();
+  }
+  verifiedByCookieFingerprint.set(fingerprint, { user, expiresAt: Date.now() + VERIFIED_TTL_MS });
+}
+
 function authCookieFingerprint(cookieStore: ReturnType<typeof cookies>): string | null {
   const authCookies = cookieStore.getAll().filter((c) => c.name.startsWith("sb-"));
   if (authCookies.length === 0) return null;
@@ -70,7 +94,25 @@ function authCookieFingerprint(cookieStore: ReturnType<typeof cookies>): string 
     .join("&");
 }
 
+/**
+ * The signed-in user, or null — what every /api/** route calls. Also
+ * enforces the 2-device limit (lib/devices.ts): a device beyond it is
+ * treated as signed out (401) by every route, and DeviceGuard shows it the
+ * device-limit screen. Use getSessionUser() only for the routes that must
+ * work from such a device (listing / replacing devices, signing out).
+ */
 export async function getAuthenticatedUser(): Promise<User | null> {
+  const user = await getSessionUser();
+  if (!user) return null;
+  if ((await checkDevice(user.id)) === "limit") {
+    console.warn(`[auth] Limite d'appareils atteinte pour ${user.id} — requête refusée.`);
+    return null;
+  }
+  return user;
+}
+
+/** Session check only, WITHOUT the device limit — see getAuthenticatedUser. */
+export async function getSessionUser(): Promise<User | null> {
   const fingerprint = authCookieFingerprint(cookies());
   if (!fingerprint) {
     console.log("[auth] Aucun cookie sb- présent sur la requête — pas de session à vérifier.");
@@ -78,6 +120,8 @@ export async function getAuthenticatedUser(): Promise<User | null> {
   }
 
   const shortId = fingerprint.slice(0, 24);
+  const cached = verifiedByCookieFingerprint.get(fingerprint);
+  if (cached && cached.expiresAt > Date.now()) return cached.user;
   const existing = inFlightByCookieFingerprint.get(fingerprint);
   if (existing) {
     console.log(`[auth] Requête concurrente détectée pour le cookie ${shortId}... — réutilisation de la vérification déjà en cours (pas de second appel Supabase).`);
@@ -103,7 +147,9 @@ export async function getAuthenticatedUser(): Promise<User | null> {
 
   inFlightByCookieFingerprint.set(fingerprint, check);
   try {
-    return await check;
+    const user = await check;
+    if (user) rememberVerified(fingerprint, user);
+    return user;
   } finally {
     inFlightByCookieFingerprint.delete(fingerprint);
   }

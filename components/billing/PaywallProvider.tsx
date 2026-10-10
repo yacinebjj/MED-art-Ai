@@ -6,6 +6,8 @@ import type { PaywallReason } from "@/lib/subscription";
 import { useAuth } from "@/providers/AuthProvider";
 import { notifyUsageChanged, useUsage } from "@/hooks/useUsage";
 import { PaywallModal, type PaywallView } from "@/components/billing/PaywallModal";
+import { QUOTA_CHECK_FAILED_MESSAGE } from "@/lib/quota-messages";
+import { AUTH_REJECTED_EVENT } from "@/components/security/DeviceGuard";
 
 /** Mirrors PAYWALL_HEADER in lib/quota-response.ts (server-only module, not importable here). */
 const PAYWALL_HEADER = "x-medart-paywall";
@@ -42,18 +44,57 @@ function isSameOrigin(input: RequestInfo | URL): boolean {
   }
 }
 
+const QUOTA_RETRY_DELAYS_MS = [600, 1500];
+
+/** A request is replayable when its body can be sent again as-is (not a one-shot stream). */
+function isReplayable(input: RequestInfo | URL, init?: RequestInit): boolean {
+  if (input instanceof Request && input.body !== null) return false;
+  const body = init?.body;
+  return body === undefined || body === null || typeof body === "string" || body instanceof FormData || body instanceof URLSearchParams || body instanceof Blob;
+}
+
 /**
- * One global fetch wrapper for the whole app: any same-origin response
- * carrying the paywall header opens the paywall. Only headers are read —
- * the body is never consumed or cloned, so callers see the exact same
- * Response. Guarded so React re-mounts / Fast Refresh never wrap it twice.
+ * True when a quota gate answered "could not verify" (lib/subscription.ts's
+ * CHECK_FAILED): the database was briefly unreachable and nothing was
+ * reserved, so replaying the same request is safe. Only small JSON error
+ * responses are inspected, on a clone — the caller still gets an unread body.
+ */
+async function isQuotaCheckFailure(response: Response): Promise<boolean> {
+  if (response.ok || response.status < 403 || !(response.headers.get("content-type") ?? "").includes("application/json")) return false;
+  try {
+    const data = (await response.clone().json()) as { error?: unknown } | null;
+    return data?.error === QUOTA_CHECK_FAILED_MESSAGE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One global fetch wrapper for the whole app:
+ *  - any same-origin response carrying the paywall header opens the paywall
+ *    (only headers are read for that);
+ *  - a transient "Impossible de vérifier ton quota" answer is replayed
+ *    silently, up to twice, instead of reaching the student — what their
+ *    manual "Réessayer" used to do, without them seeing an error first.
+ * Guarded so React re-mounts / Fast Refresh never wrap it twice.
  */
 function installPaywallFetch() {
   if (typeof window === "undefined" || window.__medartPaywallFetchInstalled) return;
   window.__medartPaywallFetchInstalled = true;
   const originalFetch = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const response = await originalFetch(input, init);
+    let response = await originalFetch(input, init);
+    if (isSameOrigin(input) && isReplayable(input, init)) {
+      for (const delayMs of QUOTA_RETRY_DELAYS_MS) {
+        if (init?.signal?.aborted || !(await isQuotaCheckFailure(response))) break;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        if (init?.signal?.aborted) break;
+        response = await originalFetch(input, init);
+      }
+    }
+    // A 401 can mean "this device is over the 2-device limit": DeviceGuard
+    // re-checks (throttled on its side) and shows the device screen if so.
+    if (response.status === 401 && isSameOrigin(input)) window.dispatchEvent(new Event(AUTH_REJECTED_EVENT));
     try {
       const reason = response.headers.get(PAYWALL_HEADER);
       if (reason && isPaywallReason(reason) && isSameOrigin(input)) {

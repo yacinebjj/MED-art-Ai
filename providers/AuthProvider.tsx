@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { fetchSubscriptionPayload } from "@/hooks/useUsage";
 import { profileFromUser } from "@/lib/auth";
 import type { StudentProfile } from "@/lib/types";
 import type { StudentCurriculumProfile } from "@/types/academic";
@@ -44,6 +45,25 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const PROFILE_CACHE_PREFIX = "medart:curriculum-profile:";
+
+function readCachedProfile(userId: string): StudentCurriculumProfile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_PREFIX + userId);
+    return raw ? (JSON.parse(raw) as StudentCurriculumProfile) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedProfile(userId: string, profile: StudentCurriculumProfile): void {
+  try {
+    localStorage.setItem(PROFILE_CACHE_PREFIX + userId, JSON.stringify(profile));
+  } catch {
+    // Storage full / blocked: the cache is only a speed-up.
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createClient(), []);
   const [user, setUser] = useState<User | null>(null);
@@ -54,8 +74,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
+    // getSession() reads the session cookie locally — no network. It used to
+    // be getUser(), a round trip to Supabase Auth that every user-dependent
+    // fetch of the app (profile, curriculum, subscription, overview…) waited
+    // behind on each cold open. Trusting the local session for the UI is
+    // safe: every /api/** route verifies the user itself server-side.
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
       setLoading(false);
     });
 
@@ -76,9 +101,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    fetch("/api/subscription")
-      .then((res) => res.json())
-      .then((data) => {
+    // Shared with useUsage (PaywallProvider): one /api/subscription call at startup instead of two.
+    fetchSubscriptionPayload()
+      .then((body) => {
+        const data = (body ?? {}) as { trial?: { active: boolean; daysRemaining: number }; subscription?: { active?: boolean } };
         setTrial(data.trial ? { active: data.trial.active, daysRemaining: data.trial.daysRemaining } : null);
         setIsSubscribed(Boolean(data.subscription?.active));
       })
@@ -92,12 +118,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user?.id]);
 
   async function fetchCurriculumProfile() {
+    const userId = user?.id;
     try {
       const res = await fetch("/api/profile");
       const data = await res.json().catch(() => ({}));
-      setCurriculumProfile(res.ok && data.profile ? data.profile : EMPTY_CURRICULUM_PROFILE);
+      const profile = res.ok && data.profile ? data.profile : EMPTY_CURRICULUM_PROFILE;
+      setCurriculumProfile(profile);
+      if (res.ok && data.profile && userId) writeCachedProfile(userId, data.profile);
     } catch {
-      setCurriculumProfile(EMPTY_CURRICULUM_PROFILE);
+      // Offline / flaky network: keep the last known profile if one was shown.
+      setCurriculumProfile((current) => current ?? EMPTY_CURRICULUM_PROFILE);
     }
   }
 
@@ -126,12 +156,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAvatarUrl(null);
       return;
     }
+    // Last known profile first: the dashboard can start loading the modules
+    // immediately instead of waiting for /api/profile on every open.
+    const cachedProfile = readCachedProfile(user.id);
+    if (cachedProfile) setCurriculumProfile(cachedProfile);
     fetchCurriculumProfile();
     fetchAvatarUrl();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   async function signOut() {
+    // Frees this device's slot (2-device limit, lib/devices.ts) while the
+    // session cookie still exists to authenticate the call. Best effort.
+    await fetch("/api/devices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "release" }) }).catch(() => {});
     await supabase.auth.signOut();
     setUser(null);
   }

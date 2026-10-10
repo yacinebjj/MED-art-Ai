@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { isEditableFocused, isPinchZoomed } from "@/lib/viewport";
 
 export interface VisualViewportBox {
   /** window.visualViewport.offsetTop — how far iOS has scrolled the visible area down inside the layout viewport. */
@@ -61,6 +62,14 @@ export function useVisualViewportBox(enabled: boolean): VisualViewportBox | null
       // Checked BEFORE the baseline update so a bad reading can't poison it.
       if (!Number.isFinite(vv.height) || !Number.isFinite(vv.offsetTop) || vv.height < MIN_PLAUSIBLE_HEIGHT_PX || vv.offsetTop < 0) return;
 
+      // Pinch-zoomed: the shrunken viewport is the zoom, not a keyboard.
+      // Release the pin (callers fall back to their CSS layout) and leave the
+      // baseline untouched, so zooming back out restores the page exactly.
+      if (isPinchZoomed(vv)) {
+        setBox(null);
+        return;
+      }
+
       const baseline = baselineRef.current;
       // A different width means a rotation or a window resize: start the
       // "tallest height seen" baseline over for the new orientation.
@@ -73,7 +82,7 @@ export function useVisualViewportBox(enabled: boolean): VisualViewportBox | null
       const next: VisualViewportBox = {
         top: Math.round(vv.offsetTop),
         height: Math.round(vv.height),
-        keyboardOpen: baseline.height - vv.height > KEYBOARD_MIN_SHRINK_PX,
+        keyboardOpen: baseline.height - vv.height > KEYBOARD_MIN_SHRINK_PX && isEditableFocused(),
       };
       setBox((prev) =>
         prev && prev.top === next.top && prev.height === next.height && prev.keyboardOpen === next.keyboardOpen ? prev : next
@@ -88,10 +97,12 @@ export function useVisualViewportBox(enabled: boolean): VisualViewportBox | null
     vv.addEventListener("resize", schedule);
     vv.addEventListener("scroll", schedule);
     window.addEventListener("orientationchange", schedule);
+    window.addEventListener("focusout", schedule);
     return () => {
       vv.removeEventListener("resize", schedule);
       vv.removeEventListener("scroll", schedule);
       window.removeEventListener("orientationchange", schedule);
+      window.removeEventListener("focusout", schedule);
       if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [enabled]);

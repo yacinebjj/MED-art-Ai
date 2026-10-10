@@ -42,21 +42,41 @@ function isUsageSnapshot(value: unknown): value is UsageSnapshot {
   return typeof v.planId === "string" && typeof v.isTrial === "boolean" && typeof v.courses === "object" && v.courses !== null;
 }
 
+/** Body of the in-flight / last /api/subscription call, shared with AuthProvider so app start makes ONE request, not two. */
+let lastBody: Promise<unknown> | null = null;
+let lastBodyStartedAt = 0;
+const BODY_REUSE_MS = 5_000;
+
+/** Full /api/subscription payload (trial, subscription, usage), coalesced with useUsage's own refresh. null on failure. */
+export function fetchSubscriptionPayload(): Promise<unknown> {
+  const fresh = lastBody !== null && (inFlight !== null || Date.now() - lastBodyStartedAt < BODY_REUSE_MS);
+  if (!fresh) void refreshUsage();
+  return lastBody ?? Promise.resolve(null);
+}
+
 function refreshUsage(): Promise<void> {
   if (inFlight) return inFlight;
   setState({ ...state, loading: true });
+  let resolveBody: (body: unknown) => void = () => undefined;
+  lastBodyStartedAt = Date.now();
+  lastBody = new Promise((resolve) => {
+    resolveBody = resolve;
+  });
   inFlight = (async () => {
     try {
       const res = await fetch("/api/subscription", { cache: "no-store" });
       if (!res.ok) {
+        resolveBody(null);
         // 401 (signed out) → no usage; any other failure keeps the last known snapshot.
         setState({ usage: res.status === 401 ? null : state.usage, loading: false, loaded: true });
         return;
       }
       const body: unknown = await res.json();
+      resolveBody(body);
       const usage = body && typeof body === "object" && "usage" in body ? (body as { usage: unknown }).usage : null;
       setState({ usage: isUsageSnapshot(usage) ? usage : null, loading: false, loaded: true });
     } catch {
+      resolveBody(null);
       setState({ ...state, loading: false, loaded: true });
     } finally {
       inFlight = null;

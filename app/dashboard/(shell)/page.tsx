@@ -57,7 +57,18 @@ export default function DashboardPage() {
     }
 
     let cancelled = false;
-    setCurriculumLoading(true);
+    const cacheKey = `medart:curriculum:${curriculumSpecialtyName}:${curriculumLevel}`;
+    // Stale-while-revalidate: the modules from the last visit render at once
+    // (no skeleton), the network answer replaces them when it arrives.
+    let cached: CurriculumYearData | null = null;
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      cached = raw ? (JSON.parse(raw) as CurriculumYearData) : null;
+    } catch {
+      cached = null;
+    }
+    setCurriculumData(cached);
+    setCurriculumLoading(!cached);
     setCurriculumError(null);
 
     fetch(`/api/curriculum?specialty=${encodeURIComponent(curriculumSpecialtyName)}&level=${curriculumLevel}`)
@@ -67,10 +78,16 @@ export default function DashboardPage() {
         return body as CurriculumYearData;
       })
       .then((body) => {
-        if (!cancelled) setCurriculumData(body);
+        if (cancelled) return;
+        setCurriculumData(body);
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(body));
+        } catch {
+          // Storage full / blocked: the cache is only a speed-up.
+        }
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (!cancelled && !cached) {
           setCurriculumError(err instanceof Error ? err.message : tDashboard("curriculumLoadError", language));
           setCurriculumData(null);
         }

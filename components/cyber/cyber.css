@@ -178,13 +178,18 @@
 }
 
 /* ── Desktop 3D micro-tilt (driven by CSS vars from useCyberTilt) ────── */
-.cyber-tilt {
-  transform: perspective(1100px) rotateX(var(--cyber-rx, 0deg)) rotateY(var(--cyber-ry, 0deg));
-  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-}
+/* Fine pointers only: on touch screens the tilt never runs, but a permanent
+   3D transform still turned the card text into a texture — blurry once
+   zoomed and hard to long-press select. */
+@media (hover: hover) and (pointer: fine) {
+  .cyber-tilt {
+    transform: perspective(1100px) rotateX(var(--cyber-rx, 0deg)) rotateY(var(--cyber-ry, 0deg));
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
 
-.cyber-tilt[data-tilting="true"] {
-  transition: transform 0.08s linear;
+  .cyber-tilt[data-tilting="true"] {
+    transition: transform 0.08s linear;
+  }
 }
 
 /* Interactive light reflection that follows the cursor. */

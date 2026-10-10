@@ -81,6 +81,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
+  // No session cookie: nobody to verify. Public pages (landing, login,
+  // register) answer immediately instead of waiting on a Supabase round
+  // trip that can only answer "no user".
+  if (!hasAuthCookie(request)) {
+    if (isProtected) return redirectToLogin(request, pathname);
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -130,7 +138,12 @@ export async function updateSession(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/dashboard";
     redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+    // Carry over any session cookies getUser() just refreshed: dropping
+    // them made the /dashboard load right after this redirect refresh
+    // again with the already-consumed refresh token.
+    const redirect = NextResponse.redirect(redirectUrl);
+    supabaseResponse.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+    return redirect;
   }
 
   return supabaseResponse;

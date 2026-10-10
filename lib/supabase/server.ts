@@ -44,7 +44,19 @@ export function getSupabaseAdmin(): SupabaseClient<any, any, any> {
 // kept-alive connection the far end dropped while this serverless instance
 // was frozen (the same failure class documented on lib/ai/openrouter.ts's
 // createOpenRouterDispatcher), or a connect that never completed.
-const STALE_SOCKET_CODES = new Set(["UND_ERR_SOCKET", "UND_ERR_CLOSED", "ECONNRESET", "EPIPE", "UND_ERR_CONNECT_TIMEOUT", "ECONNREFUSED"]);
+// DNS / connect failures (EAI_AGAIN, ENOTFOUND, ETIMEDOUT) belong to the same
+// class: the request never left this instance.
+const STALE_SOCKET_CODES = new Set([
+  "UND_ERR_SOCKET",
+  "UND_ERR_CLOSED",
+  "ECONNRESET",
+  "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "ENOTFOUND",
+]);
 
 function isStaleSocketError(error: unknown): boolean {
   if (!(error instanceof Error) || error.name === "AbortError") return false;
@@ -53,20 +65,49 @@ function isStaleSocketError(error: unknown): boolean {
 }
 
 /**
+ * Gateway answers meaning Supabase's API layer could not reach Postgres, so
+ * nothing was executed: 502/503 for every method (a cold or restarting
+ * project answers 503 "PGRST002 — could not query the schema cache" for a
+ * few seconds). 504 only for reads — a write may have run before the
+ * gateway gave up waiting.
+ */
+function isRetryableGatewayStatus(status: number, method: string): boolean {
+  if (status === 502 || status === 503) return true;
+  return status === 504 && (method === "GET" || method === "HEAD");
+}
+
+const RETRY_DELAYS_MS = [0, 400, 1200];
+
+/**
  * The first query after an idle instance thaws can land on a dead pooled
- * socket and fail with "fetch failed" — supabase-js then returns an error,
- * which the quota gates surfaced as "Impossible de vérifier ton quota",
- * while the student's manual retry (a fresh socket) always worked. One
- * immediate retry does what that manual retry did. Limited to socket errors
- * where the request was never processed, so a write is never applied twice.
+ * socket and fail with "fetch failed", and a project waking up answers 503
+ * for its first requests — supabase-js then returns an error, which the
+ * quota gates surfaced as "Impossible de vérifier ton quota", while the
+ * student's manual retry a second later always worked. These retries do
+ * what that manual retry did. Limited to failures where the request was
+ * never processed, so a write is never applied twice.
  */
 async function fetchWithStaleSocketRetry(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const noStoreInit = { ...init, cache: "no-store" as const };
-  try {
-    return await fetch(input, noStoreInit);
-  } catch (error) {
-    if (!isStaleSocketError(error) || init?.signal?.aborted) throw error;
-    console.warn("[supabase] Connexion réutilisée morte — nouvel essai immédiat:", (error as Error).message);
-    return fetch(input, noStoreInit);
+  const method = (init?.method ?? "GET").toUpperCase();
+  for (let attempt = 0; ; attempt++) {
+    const canRetry = attempt < RETRY_DELAYS_MS.length - 1 && !init?.signal?.aborted;
+    let response: Response;
+    try {
+      response = await fetch(input, noStoreInit);
+    } catch (error) {
+      if (!isStaleSocketError(error) || !canRetry) throw error;
+      console.warn(`[supabase] Connexion morte (${(error as Error).message}) — nouvel essai ${attempt + 1}`);
+      await sleep(RETRY_DELAYS_MS[attempt + 1]);
+      continue;
+    }
+    if (!isRetryableGatewayStatus(response.status, method) || !canRetry) return response;
+    console.warn(`[supabase] HTTP ${response.status} de la passerelle — nouvel essai ${attempt + 1}`);
+    await response.body?.cancel().catch(() => {});
+    await sleep(RETRY_DELAYS_MS[attempt + 1]);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

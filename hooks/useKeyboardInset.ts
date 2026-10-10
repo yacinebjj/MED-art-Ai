@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isEditableFocused, isPinchZoomed } from "@/lib/viewport";
 
 /**
  * How much of the viewport's bottom the on-screen keyboard is currently
@@ -31,6 +32,13 @@ export function useKeyboardInset(): number {
 
     function update() {
       if (!vv) return;
+      // A pinch-zoom shrinks the visual viewport like a keyboard does —
+      // without these two checks a zoom padded the page by hundreds of
+      // pixels, and the padding could stick after zooming back out.
+      if (isPinchZoomed(vv) || !isEditableFocused()) {
+        setInset(0);
+        return;
+      }
       const covered = window.innerHeight - vv.height - vv.offsetTop;
       setInset(Math.max(0, Math.round(covered)));
     }
@@ -38,9 +46,13 @@ export function useKeyboardInset(): number {
     update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
+    window.addEventListener("focusin", update);
+    window.addEventListener("focusout", update);
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
+      window.removeEventListener("focusin", update);
+      window.removeEventListener("focusout", update);
     };
   }, []);
 

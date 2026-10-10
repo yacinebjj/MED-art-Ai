@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { AUDIO_SMART_NOTES_API, AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE, INFOGRAPHIC_API, INFOGRAPHIC_ENABLED } from "@/lib/feature-flags";
+import { DEVICE_COOKIE, DEVICE_COOKIE_OPTIONS, DEVICE_ID_RE } from "@/lib/device-cookie";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -22,7 +23,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return await updateSession(request);
+  const response = await updateSession(request);
+  return withDeviceCookie(request, response);
+}
+
+/**
+ * Every browser gets its device id on its first page load (lib/devices.ts,
+ * 2-device limit) — BEFORE the app fires its parallel startup API calls,
+ * so they all carry the same id instead of each minting their own.
+ */
+function withDeviceCookie(request: NextRequest, response: NextResponse): NextResponse {
+  const existing = request.cookies.get(DEVICE_COOKIE)?.value;
+  if (existing && DEVICE_ID_RE.test(existing)) return response;
+  response.cookies.set(DEVICE_COOKIE, crypto.randomUUID(), DEVICE_COOKIE_OPTIONS);
+  return response;
 }
 
 export const config = {

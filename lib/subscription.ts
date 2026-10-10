@@ -1,5 +1,6 @@
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { FREE_TRIAL, PLANS, type PlanId } from "@/lib/pricing";
+import { QUOTA_CHECK_FAILED_MESSAGE } from "@/lib/quota-messages";
 
 /**
  * QUOTA ENGINE (monetization v2 — see lib/pricing.ts for the product rules).
@@ -54,7 +55,8 @@ export type PaywallReason =
   | "quota_audio_daily"
   | "quota_audio_monthly";
 
-export type GateBlocked = { allowed: false; reason: string; paywall?: PaywallReason };
+/** `retryable`: the gate could not reach the database — nothing was reserved, the same request can simply be replayed. */
+export type GateBlocked = { allowed: false; reason: string; paywall?: PaywallReason; retryable?: boolean };
 export type GateResult = { allowed: true } | GateBlocked;
 
 const V1_COLUMNS =
@@ -71,6 +73,40 @@ function isV2(sub: SubscriptionRow): boolean {
   return typeof sub.free_messages_used === "number";
 }
 
+/**
+ * Failures where retrying is safe and likely to succeed: PostgREST could not
+ * reach Postgres (PGRST000-003, e.g. a cold project rebuilding its schema
+ * cache), the connection was dropped / the server restarted (08xxx, 57P0x),
+ * a lock or statement timeout, or the HTTP request itself never completed.
+ * A PostgREST error RESPONSE means the transaction rolled back, so replaying
+ * a reserve_* RPC after one of these never counts a unit twice.
+ */
+function isTransientDbError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const code = error.code ?? "";
+  if (/^PGRST00[0-3]$/.test(code) || code.startsWith("08") || /^57P0[1-3]$/.test(code)) return true;
+  if (code === "57014" || code === "55P03" || code === "40001" || code === "40P01") return true;
+  return !code && /fetch failed|network|timed? ?out|socket|ECONN|EPIPE|terminated|upstream|50[234]|gateway/i.test(error.message ?? "");
+}
+
+const DB_RETRY_DELAYS_MS = [250, 700, 1500];
+
+/** Runs a Supabase call, retrying transient failures (see isTransientDbError) with a short backoff. */
+async function withDbRetry<T extends { error: { code?: string; message?: string } | null }>(label: string, run: () => PromiseLike<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    let result: T;
+    try {
+      result = await run();
+    } catch (error) {
+      // supabase-js normally returns errors; a throw is a network-level failure.
+      result = { data: null, error: { message: error instanceof Error ? error.message : String(error) } } as unknown as T;
+    }
+    if (!isTransientDbError(result.error) || attempt >= DB_RETRY_DELAYS_MS.length) return result;
+    console.warn(`[subscription] ${label}: erreur transitoire (${result.error?.code || result.error?.message}), nouvel essai ${attempt + 1}/${DB_RETRY_DELAYS_MS.length}`);
+    await new Promise((resolve) => setTimeout(resolve, DB_RETRY_DELAYS_MS[attempt]));
+  }
+}
+
 /** Local dev skips quota counting unless MEDART_ENFORCE_QUOTAS_IN_DEV=1 (to test the paywall locally). */
 function devBypass(): boolean {
   return process.env.NODE_ENV === "development" && process.env.MEDART_ENFORCE_QUOTAS_IN_DEV !== "1";
@@ -80,13 +116,13 @@ export async function getSubscription(userId: string): Promise<SubscriptionRow |
   if (!userId || !isSupabaseConfigured()) return null;
   try {
     const supabase = getSupabaseAdmin();
-    const v2 = await supabase.from("subscriptions").select(V2_COLUMNS).eq("user_id", userId).maybeSingle();
+    const v2 = await withDbRetry("subscriptions lookup", () => supabase.from("subscriptions").select(V2_COLUMNS).eq("user_id", userId).maybeSingle());
     if (!v2.error) return (v2.data as SubscriptionRow | null) ?? null;
     if (!isMissingSchema(v2.error)) {
       console.error("Supabase subscriptions lookup failed", v2.error);
       return null;
     }
-    const v1 = await supabase.from("subscriptions").select(V1_COLUMNS).eq("user_id", userId).maybeSingle();
+    const v1 = await withDbRetry("subscriptions lookup (v1)", () => supabase.from("subscriptions").select(V1_COLUMNS).eq("user_id", userId).maybeSingle());
     if (v1.error) {
       console.error("Supabase subscriptions lookup failed", v1.error);
       return null;
@@ -172,7 +208,7 @@ interface GateUser {
 
 const NOT_CONFIGURED: GateBlocked = { allowed: false, reason: "La vérification d'abonnement n'est pas configurée sur le serveur." };
 const NO_ACCOUNT: GateBlocked = { allowed: false, reason: "Compte introuvable. Reconnecte-toi puis réessaie." };
-const CHECK_FAILED: GateBlocked = { allowed: false, reason: "Impossible de vérifier ton quota pour le moment. Réessaie dans un instant." };
+const CHECK_FAILED: GateBlocked = { allowed: false, reason: QUOTA_CHECK_FAILED_MESSAGE, retryable: true };
 
 /** Loads (or repairs) the row and rolls the month over. null = blocked with `fail`. */
 async function loadForGate(user: GateUser): Promise<{ sub: SubscriptionRow } | { fail: GateBlocked }> {
@@ -187,7 +223,7 @@ type Counter = "courses_created_used" | "exams_used" | "syntheses_used" | "free_
 
 /** Atomic reserve on a v2 counter: true = reserved, false = cap reached, "legacy" = migration not run. */
 async function reserveCounter(userId: string, counter: Counter, cap: number): Promise<boolean | "legacy" | "error"> {
-  const { data, error } = await getSupabaseAdmin().rpc("reserve_usage_counter", { p_user_id: userId, p_column: counter, p_cap: cap });
+  const { data, error } = await withDbRetry(`reserve_usage_counter(${counter})`, () => getSupabaseAdmin().rpc("reserve_usage_counter", { p_user_id: userId, p_column: counter, p_cap: cap }));
   if (error) {
     if (isMissingSchema(error)) return "legacy";
     console.error(`[subscription] reserve_usage_counter(${counter}) failed:`, error.message);
@@ -207,12 +243,19 @@ async function reserveLegacy(
   userId: string,
   rpc: "reserve_generations_used" | "reserve_highlight_messages_used" | "reserve_chat_messages_used" | "reserve_remediation_used",
   cap: number,
-  exceeded: string
+  exceeded: string,
+  /**
+   * Fair-use pools only (Studio generations, selection questions): their caps
+   * are anti-abuse ceilings, not product limits, so a counter the database
+   * still cannot reach after the retries lets the request through rather
+   * than blocking a student over our own infrastructure hiccup.
+   */
+  failOpen = false
 ): Promise<GateResult> {
-  const { data, error } = await getSupabaseAdmin().rpc(rpc, { p_user_id: userId, p_cap: cap });
+  const { data, error } = await withDbRetry(rpc, () => getSupabaseAdmin().rpc(rpc, { p_user_id: userId, p_cap: cap }));
   if (error) {
-    console.error(`[subscription] ${rpc} failed:`, error.message);
-    return CHECK_FAILED;
+    console.error(`[subscription] ${rpc} failed${failOpen ? " (fair use — laissé passer)" : ""}:`, error.message);
+    return failOpen ? { allowed: true } : CHECK_FAILED;
   }
   return data === null ? { allowed: false, reason: exceeded } : { allowed: true };
 }
@@ -238,7 +281,7 @@ export async function reserveGeneration(user: GateUser): Promise<GateResult> {
   if ("fail" in loaded) return loaded.fail;
   if (devBypass()) return { allowed: true };
   const plan = PLANS[resolveEffectivePlan(loaded.sub)];
-  return reserveLegacy(user.id, "reserve_generations_used", plan.courseCap, "Tu as atteint la limite d'utilisation du Studio pour ce mois-ci. Elle se recharge au début de ton prochain mois d'abonnement.");
+  return reserveLegacy(user.id, "reserve_generations_used", plan.courseCap, "Tu as atteint la limite d'utilisation du Studio pour ce mois-ci. Elle se recharge au début de ton prochain mois d'abonnement.", true);
 }
 
 export async function refundGeneration(userId: string): Promise<void> {
@@ -363,7 +406,7 @@ export async function reserveAudioSession(user: GateUser): Promise<GateResult> {
   if (planId === "freemium") return { allowed: false, paywall: "trial_feature", reason: TRIAL_FEATURE_REASON };
   sub = await ensureFreshDay(user.id, sub, "audio_daily_used", "audio_daily_reset_at");
   const plan = PLANS[planId];
-  const { data, error } = await getSupabaseAdmin().rpc("reserve_audio_session", { p_user_id: user.id, p_daily_cap: plan.audioPerDay, p_monthly_cap: plan.audioPerMonth });
+  const { data, error } = await withDbRetry("reserve_audio_session", () => getSupabaseAdmin().rpc("reserve_audio_session", { p_user_id: user.id, p_daily_cap: plan.audioPerDay, p_monthly_cap: plan.audioPerMonth }));
   if (error) {
     if (isMissingSchema(error)) return { allowed: true };
     console.error("[subscription] reserve_audio_session failed:", error.message);
@@ -435,7 +478,7 @@ export async function reserveAssistantTurn(user: GateUser, options: { needsPremi
   }
   if (!needsPremium) return { allowed: true, premium: false };
   sub = await ensureFreshDay(user.id, sub, "daily_chat_messages_used", "daily_chat_reset_at");
-  const { data, error } = await getSupabaseAdmin().rpc("reserve_daily_chat_messages_used", { p_user_id: user.id, p_cap: DAILY_PREMIUM_MESSAGES });
+  const { data, error } = await withDbRetry("reserve_daily_chat_messages_used", () => getSupabaseAdmin().rpc("reserve_daily_chat_messages_used", { p_user_id: user.id, p_cap: DAILY_PREMIUM_MESSAGES }));
   if (error) {
     console.error("[subscription] reserve_daily_chat_messages_used failed:", error.message);
     // Paid account: never block a message over a counter hiccup — just use the free model.
@@ -457,7 +500,7 @@ export async function reserveHighlightMessage(user: GateUser): Promise<GateResul
   if ("fail" in loaded) return loaded.fail;
   if (devBypass()) return { allowed: true };
   const plan = PLANS[resolveEffectivePlan(loaded.sub)];
-  return reserveLegacy(user.id, "reserve_highlight_messages_used", plan.highlightMessageCap, "Tu as atteint la limite de messages « sélection » de ce mois-ci.");
+  return reserveLegacy(user.id, "reserve_highlight_messages_used", plan.highlightMessageCap, "Tu as atteint la limite de messages « sélection » de ce mois-ci.", true);
 }
 
 /** Selection pool only — for callers that did not reserve an assistant message (To-Do sub-task suggestions). */

@@ -68,6 +68,10 @@ export function useSecurityGuard() {
     let blurTimeout: ReturnType<typeof setTimeout> | null = null;
 
     function scheduleBlur() {
+      // Never on phones/tablets: a long-press selection can open an OS menu
+      // that briefly takes focus, and the full-screen blur overlay then made
+      // the very text being selected go fuzzy. Desktop keeps the deterrent.
+      if ("ontouchstart" in window || navigator.maxTouchPoints > 0) return;
       if (blurTimeout !== null) return; // already pending — a second blur before the first resolves shouldn't reset the clock.
       blurTimeout = setTimeout(() => {
         blurTimeout = null;

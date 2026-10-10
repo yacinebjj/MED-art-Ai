@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 
 interface ResizeHandleProps {
@@ -24,6 +24,17 @@ interface ResizeHandleProps {
 export function ResizeHandle({ onResize, onReset, label, valueNow, valueMin, valueMax, keyboardDirection }: ResizeHandleProps) {
   const lastXRef = useRef<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Unmounted mid-drag (e.g. a rotation switches the layout): without this,
+  // `user-select: none` stayed on <body> and text selection was dead app-wide.
+  useEffect(
+    () => () => {
+      if (lastXRef.current === null) return;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    },
+    []
+  );
 
   function handlePointerDown(e: PointerEvent<HTMLDivElement>) {
     if (e.button !== 0) return;

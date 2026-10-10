@@ -91,6 +91,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
 import { callOpenRouter, EXPLICATION_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
+import { stripReasoning } from "@/lib/strip-reasoning";
 import { parseJsonResponse, MAX_SOURCE_CHARS, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
@@ -1099,6 +1100,57 @@ function buildPartLengthBudget(sliceLength: number): { target: number; ceiling: 
   return { target, ceiling: Math.round(target * 1.35) };
 }
 
+/**
+ * Anti-hallucination guard, appended to every part's user message (closest
+ * to the generation, where it weighs most). The base prompt asks for many
+ * examples and "why" chains; without a boundary the model filled them with
+ * other diseases / chapters that are nowhere in the course.
+ */
+const GROUNDING_INSTRUCTION = `CADRAGE STRICT (prioritaire) :
+- Explique UNIQUEMENT les notions présentes dans les extraits ci-dessus. N'ajoute aucun chapitre, aucune maladie, aucun traitement ni aucun sujet qui n'y figure pas.
+- Tes connaissances médicales servent seulement à expliquer le POURQUOI et le COMMENT de ce qui est écrit dans les extraits — jamais à élargir le sujet. En cas de doute sur un fait, ne l'écris pas.
+- N'invente aucun chiffre, aucune dose, aucune classification, aucune référence.
+- Le champ "explication" contient UNIQUEMENT le texte destiné à l'étudiant : jamais ta réflexion, ton plan, tes hésitations, ni aucune mention des "extraits", des "parties", du "JSON" ou de ces consignes.`;
+
+/** deepseek-v3.2 deployments never used for Explication: DeepInfra serves it in fp4 (degraded, incoherent long-form output). */
+const EXPLICATION_IGNORED_PROVIDERS = ["DeepInfra"];
+
+/**
+ * Paragraphs that are the model talking about its task instead of teaching:
+ * reasoning that a provider leaked into `content`, or the instructions echoed
+ * back. Matched per paragraph; a real medical paragraph never mentions the
+ * JSON, the numbered extracts or "part 2/5" of its own generation.
+ */
+const LEAK_PARAGRAPH_RE = [
+  /<\/?think(?:ing)?>/i,
+  /\bJSON\b/,
+  /"explication"\s*:/i,
+  /\bextraits? (?:n°\s*)?\d+\b/i,
+  /\bpartie \d+\s*\/\s*\d+\b/i,
+  /^(?:we need to|we have to|we must|i need to|i will now|i'll now|let me now) (?:write|produce|generate|output|create|draft|continue|structure|cover|start)\b/i,
+  /^(?:okay|alright),? (?:so )?(?:the user|i need|we need|let me)\b/i,
+  /^(?:nous devons |je dois |je vais (?:maintenant )?|il faut (?:que je )?)(?:rédiger|générer|produire|écrire|structurer|continuer la partie|commencer la partie)\b/i,
+  /\b(?:the user|l['’]utilisateur|le prompt|the prompt|ces consignes|these instructions)\b/i,
+];
+
+/**
+ * Removes leaked reasoning / instruction-echo paragraphs from a part. Returns
+ * the cleaned markdown and how much was removed, so the caller can reject a
+ * part that was mostly leak (retried by the client) instead of shipping it.
+ */
+function removeLeakedReasoning(markdown: string): { text: string; removedRatio: number } {
+  const paragraphs = stripReasoning(markdown).split(/\n\s*\n/);
+  const kept = paragraphs.filter((paragraph) => {
+    const trimmed = paragraph.trim();
+    // Headings and list/table structure are never reasoning.
+    if (/^#{1,6}\s/.test(trimmed) && trimmed.length < 160) return true;
+    return !LEAK_PARAGRAPH_RE.some((re) => re.test(trimmed));
+  });
+  const text = kept.join("\n\n").trim();
+  const removedRatio = markdown.length > 0 ? 1 - text.length / markdown.length : 0;
+  return { text, removedRatio };
+}
+
 function tailForContinuity(markdown: string): string {
   if (markdown.length <= PREVIOUS_PART_TAIL_CHARS) return markdown;
   const raw = markdown.slice(-PREVIOUS_PART_TAIL_CHARS);
@@ -1151,7 +1203,7 @@ export async function generateExplicationPart(
     { role: "system", content: partInstruction + "\n\n---\n\n" + explicationSystemPrompt },
     {
       role: "user",
-      content: `Voici le contenu source${totalParts > 1 ? ` (partie ${partNumber}/${totalParts})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\nGénère le JSON demandé.`,
+      content: `Voici le contenu source${totalParts > 1 ? ` (partie ${partNumber}/${totalParts})` : ""}, découpé en extraits numérotés :\n"""\n${numberedExtraits}\n"""\n\n${GROUNDING_INSTRUCTION}\n\nGénère le JSON demandé.`,
     },
   ];
   const callOptions = {
@@ -1162,11 +1214,21 @@ export async function generateExplicationPart(
     // why `effort: "low"` was switching DeepSeek V3.2's thinking mode ON
     // and causing the 180s part timeouts.
     reasoning: { enabled: false },
+    // Provider default is usually 1.0 — far too loose for a medical text
+    // that must stay on its source: it was the main driver of off-topic
+    // passages. 0.4 keeps the prose natural while sticking to the extracts.
+    temperature: 0.4,
     timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
     // Fastest-decoding provider of the 13 serving deepseek-v3.2: a part's
     // wall-clock is bounded by decode speed (up to 12,000 tokens), so this
     // is what directly shortens every part and avoids timeouts.
     providerSort: "throughput" as const,
+    // Only providers that honor `reasoning: { enabled: false }` — one that
+    // ignores it writes the model's thinking straight into the answer (the
+    // "it shows its reasoning" reports) — and never the fp4-quantized
+    // deployment, whose degraded output is where incoherent text came from.
+    requireParameters: true,
+    providerIgnore: EXPLICATION_IGNORED_PROVIDERS,
   };
 
   // Generation ledger (lib/ai/generation-ledger.ts): this exact part — same
@@ -1179,11 +1241,13 @@ export async function generateExplicationPart(
   // a margin so a follower that gives up waiting can still generate itself.
   return runThroughLedger(
     {
-      namespace: "explication-part",
+      // v2: entries written before the leak filter below existed are never
+      // replayed (some contained the model's reasoning / off-topic text).
+      namespace: "explication-part-v2",
       key: modelCallKey(messages, callOptions),
       peerWaitMs: 35_000,
       leaseMs: EXPLICATION_PART_TIMEOUT_MS + 15_000,
-      isValid: (value) => typeof value === "string" && value.trim().length >= 50,
+      isValid: (value) => typeof value === "string" && value.trim().length >= 50 && removeLeakedReasoning(value).removedRatio < 0.02,
     },
     async () => {
       const raw = await callOpenRouter(messages, callOptions);
@@ -1200,7 +1264,16 @@ export async function generateExplicationPart(
         );
         parsed = { explication: recovered };
       }
-      const partMarkdown = (typeof parsed.explication === "string" ? parsed.explication : "").trim();
+      const rawPartMarkdown = (typeof parsed.explication === "string" ? parsed.explication : "").trim();
+      const { text: partMarkdown, removedRatio } = removeLeakedReasoning(rawPartMarkdown);
+      if (removedRatio > 0) {
+        console.warn(`[studio-explication-delta] Partie ${partNumber}/${totalParts} : ${Math.round(removedRatio * 100)}% de raisonnement/consignes retirés de la réponse.`);
+      }
+      // Mostly reasoning, not a real part: fail so the client retries it
+      // (possibly on another provider) instead of shipping a gutted chapter.
+      if (removedRatio > 0.35) {
+        throw new Error(`La réponse de l'IA pour la partie ${partNumber}/${totalParts} contenait surtout du raisonnement interne — nouvel essai.`);
+      }
       // 50-char floor mirrors the old single-shot path's StudioTextSchema
       // (z.string().min(50)) — a trivially short but non-empty response (e.g.
       // `{"explication":"ok"}`) used to be caught by that Zod validation; this

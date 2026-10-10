@@ -156,18 +156,29 @@ export function NotificationCenter() {
     // Exam date set or cleared on another device (cross-device sync).
     const unsubscribe = onLocalActivitySynced(() => setCustomExamDate(readCustomExam(userId)?.date ?? null));
     let cancelled = false;
-    fetch("/api/groups")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (cancelled || !body?.success || !Array.isArray(body.groups)) return;
-        setGroupsUnread(body.groups.reduce((sum: number, group: { unreadCount?: number }) => sum + (Number(group.unreadCount) || 0), 0));
-      })
-      .catch(() => {});
+    function loadGroupsUnread() {
+      fetch("/api/groups")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((body) => {
+          if (cancelled || !body?.success || !Array.isArray(body.groups)) return;
+          setGroupsUnread(body.groups.reduce((sum: number, group: { unreadCount?: number }) => sum + (Number(group.unreadCount) || 0), 0));
+        })
+        .catch(() => {});
+    }
+    // Once per session + when the app comes back to the foreground. It used
+    // to re-run on every overview update (twice at startup alone), and
+    // /api/groups is one of the heaviest routes (several queries per group).
+    function handleVisibility() {
+      if (document.visibilityState === "visible") loadGroupsUnread();
+    }
+    loadGroupsUnread();
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       cancelled = true;
       unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [userId, overview]);
+  }, [userId]);
 
   const streak = useMemo(
     () => (overview && now ? computeStreak(activeDays(overview.activity, focusLog), now) : { current: 0, activeToday: false }),

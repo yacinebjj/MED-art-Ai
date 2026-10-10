@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { AcademicYear, CurriculumModule, CurriculumYearData, TeachingUnit } from "@/types/academic";
 
@@ -23,6 +24,37 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Supabase n'est pas configuré." }, { status: 500 });
   }
 
+  const result = await loadCurriculumCached(specialty, level);
+  if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
+  return NextResponse.json(result.payload, {
+    // Shared reference data, identical for every student of a year: the CDN
+    // and the browser serve it without reaching Supabase. It was fetched
+    // fresh (3 sequential queries) on every dashboard open.
+    headers: { "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400" },
+  });
+}
+
+type CurriculumResult = { payload: CurriculumYearData } | { error: string; status: number };
+
+/** Server-side cache of the same data (1 h): a CDN miss still skips the database. Errors are never cached. */
+async function loadCurriculumCached(specialty: string, level: number): Promise<CurriculumResult> {
+  try {
+    return { payload: await cachedCurriculum(specialty, level) };
+  } catch (error) {
+    if (error instanceof CurriculumLookupError) return { error: error.message, status: error.status };
+    return { error: error instanceof Error ? error.message : "Erreur inconnue.", status: 500 };
+  }
+}
+
+class CurriculumLookupError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+const cachedCurriculum = unstable_cache(loadCurriculum, ["curriculum-year-v1"], { revalidate: 3600, tags: ["curriculum"] });
+
+async function loadCurriculum(specialty: string, level: number): Promise<CurriculumYearData> {
   const supabase = getSupabaseAdmin();
 
   const { data: specialtyRow, error: specialtyError } = await supabase
@@ -32,10 +64,10 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
 
   if (specialtyError) {
-    return NextResponse.json({ error: specialtyError.message }, { status: 500 });
+    throw new CurriculumLookupError(specialtyError.message, 500);
   }
   if (!specialtyRow) {
-    return NextResponse.json({ error: "Filière introuvable." }, { status: 404 });
+    throw new CurriculumLookupError("Filière introuvable.", 404);
   }
 
   const { data: yearRow, error: yearError } = await supabase
@@ -46,10 +78,10 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
 
   if (yearError) {
-    return NextResponse.json({ error: yearError.message }, { status: 500 });
+    throw new CurriculumLookupError(yearError.message, 500);
   }
   if (!yearRow) {
-    return NextResponse.json({ error: "Année introuvable pour cette filière." }, { status: 404 });
+    throw new CurriculumLookupError("Année introuvable pour cette filière.", 404);
   }
 
   // Column names below (unit_order / module_order) match the live schema as
@@ -71,10 +103,10 @@ export async function GET(request: NextRequest) {
   ]);
 
   if (unitsResult.error) {
-    return NextResponse.json({ error: unitsResult.error.message }, { status: 500 });
+    throw new CurriculumLookupError(unitsResult.error.message, 500);
   }
   if (modulesResult.error) {
-    return NextResponse.json({ error: modulesResult.error.message }, { status: 500 });
+    throw new CurriculumLookupError(modulesResult.error.message, 500);
   }
 
   const units: TeachingUnit[] = (unitsResult.data ?? []).map((u) => ({
@@ -108,5 +140,5 @@ export async function GET(request: NextRequest) {
     independentModules: modules.filter((m) => m.teachingUnitId === null),
   };
 
-  return NextResponse.json(payload);
+  return payload;
 }
