@@ -549,6 +549,27 @@ textarea,
 *::after {
   -webkit-tap-highlight-color: transparent;
 }
+/* Landing hero entrance — pure CSS, so it runs from the first paint of the
+   server HTML instead of waiting for JavaScript to hydrate. */
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hero-rise {
+  animation: hero-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-rise {
+    animation: none;
+  }
+}
+
 @media (hover: none) and (pointer: coarse) {
   :is(a, button, summary, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [tabindex]):focus {
     outline: none;

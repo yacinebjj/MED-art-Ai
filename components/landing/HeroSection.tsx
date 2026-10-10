@@ -4,7 +4,7 @@ import { useRef } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { ArrowRight, Play, ShieldCheck, Sparkles } from "lucide-react";
 import { useLanguage } from "@/providers/LanguageProvider";
-import { GradientText, MagneticLink, RevealWords } from "./primitives";
+import { GradientText, MagneticLink } from "./primitives";
 import { HeroMockup } from "./HeroMockup";
 
 export function HeroSection() {
@@ -21,30 +21,23 @@ export function HeroSection() {
     <section ref={ref} className="relative overflow-hidden px-4 pb-20 pt-28 sm:px-6 sm:pt-36 lg:px-8 lg:pb-28">
       <div className="mx-auto grid max-w-7xl items-center gap-14 lg:grid-cols-[1.05fr_1fr] lg:gap-10">
         <motion.div style={{ y: textY, opacity: fade }} className="text-center lg:text-left">
-          <motion.span
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-1.5 text-xs font-semibold text-cyan-200 shadow-[0_0_30px_rgba(34,211,238,0.2)] backdrop-blur sm:text-sm"
-          >
+          {/* Hero text is server-rendered and visible on first paint: CSS-only
+              entrance (.hero-rise, app/globals.css), no JS-gated opacity. */}
+          <span className="hero-rise inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-1.5 text-xs font-semibold text-cyan-200 shadow-[0_0_30px_rgba(34,211,238,0.2)] backdrop-blur sm:text-sm">
             <Sparkles className="h-4 w-4" />
             {fr ? "Conçu pour les facultés de santé algériennes" : "Built for Algerian health faculties"}
-          </motion.span>
+          </span>
 
+          {/* The gradient line is ONE plain text node: iOS WebKit can't paint a
+              parent's background-clip:text through per-word animated
+              inline-blocks, which made it invisible on phones. */}
           <h1 className="mt-7 text-balance text-[2.6rem] font-black leading-[1.02] tracking-tight text-white sm:text-6xl lg:text-7xl">
-            <RevealWords text={fr ? "Transforme tes cours." : "Transform your courses."} />
+            {fr ? "Transforme tes cours." : "Transform your courses."}
             <br />
-            <GradientText>
-              <RevealWords text={fr ? "Domine tes examens." : "Master your exams."} delay={0.25} />
-            </GradientText>
+            <GradientText>{fr ? "Domine tes examens." : "Master your exams."}</GradientText>
           </h1>
 
-          <motion.p
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.55 }}
-            className="mx-auto mt-6 max-w-xl text-pretty text-base leading-relaxed text-slate-300 sm:text-lg lg:mx-0"
-          >
+          <p className="hero-rise mx-auto mt-6 max-w-xl text-pretty text-base leading-relaxed text-slate-300 [animation-delay:80ms] sm:text-lg lg:mx-0">
             {fr ? (
               <>
                 Le premier <span className="font-semibold text-white">système d&apos;exploitation médical</span> propulsé par l&apos;IA. Importe ton polycopié :
@@ -58,14 +51,9 @@ export function HeroSection() {
                 <span className="font-semibold text-cyan-200">100% based on YOUR courses</span>.
               </>
             )}
-          </motion.p>
+          </p>
 
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.7 }}
-            className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start"
-          >
+          <div className="hero-rise mt-9 flex flex-col items-center justify-center gap-3 [animation-delay:160ms] sm:flex-row lg:justify-start">
             <MagneticLink
               href="/register"
               className="group relative inline-flex items-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-400 to-blue-500 px-7 py-4 text-base font-black text-slate-950 shadow-[0_0_40px_rgba(34,211,238,0.5)] transition-shadow duration-300 hover:shadow-[0_0_70px_rgba(34,211,238,0.75)]"
@@ -82,17 +70,12 @@ export function HeroSection() {
               <Play className="h-4 w-4 fill-current" />
               {fr ? "Voir la démo" : "See it work"}
             </MagneticLink>
-          </motion.div>
+          </div>
 
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.95 }}
-            className="mt-5 flex items-center justify-center gap-2 text-xs text-slate-400 lg:justify-start"
-          >
+          <p className="hero-rise mt-5 flex items-center justify-center gap-2 text-xs text-slate-400 [animation-delay:240ms] lg:justify-start">
             <ShieldCheck className="h-4 w-4 text-emerald-400" />
             {fr ? "7 jours d'essai illimité · Sans carte bancaire · Paiement local Edahabia / CIB" : "7-day unlimited trial · No card required · Local payment Edahabia / CIB"}
-          </motion.p>
+          </p>
         </motion.div>
 
         <motion.div style={{ y: mockupY, rotateX: mockupRotate }} initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.9, delay: 0.3 }} className="[perspective:1400px]">

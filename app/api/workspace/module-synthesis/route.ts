@@ -7,7 +7,8 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { runModuleSynthesis, type ModuleSynthesisType } from "@/lib/module-synthesis";
 import { verifySynthesisRunToken } from "@/lib/synthesis-run-token";
-import { callOpenRouter, STUDIO_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, STUDIO_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { SynthesisOptionsSchema, buildSynthesisTransformPrompt, needsSynthesisTransform, type SynthesisOptions } from "@/lib/synthesis-options";
 
 /**
@@ -19,14 +20,25 @@ import { SynthesisOptionsSchema, buildSynthesisTransformPrompt, needsSynthesisTr
  */
 async function personalizeSummary(markdown: string, options: SynthesisOptions): Promise<{ content: string; personalized: boolean }> {
   try {
-    const raw = await callOpenRouter(
-      [
-        { role: "system", content: buildSynthesisTransformPrompt(options) },
-        { role: "user", content: markdown },
-      ],
-      // STUDIO_MODEL (Qwen3-235B) since 2026-10-07; 180s because it decodes
-      // slower than Gemini Flash did — still well under maxDuration.
-      { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 180_000, providerSort: "throughput" }
+    const messages: ChatMessageInput[] = [
+      { role: "system", content: buildSynthesisTransformPrompt(options) },
+      { role: "user", content: markdown },
+    ];
+    // STUDIO_MODEL (Qwen3-235B) since 2026-10-07; 180s because it decodes
+    // slower than Gemini Flash did — still well under maxDuration.
+    const callOptions = { model: STUDIO_MODEL, maxTokens: 8000, bypassMock: true, timeoutMs: 180_000, providerSort: "throughput" as const };
+    // Same stitched summary + same options → replayed from the generation
+    // ledger (0 tokens) instead of a new call. Quota was already reserved by
+    // /plan, so this changes the bill only, never what the student pays.
+    const raw = await runThroughLedger(
+      {
+        namespace: "module-synthesis:personalize",
+        key: modelCallKey(messages, callOptions),
+        peerWaitMs: 60_000,
+        leaseMs: 200_000,
+        isValid: (value) => typeof value === "string" && value.trim().length > 40,
+      },
+      () => callOpenRouter(messages, callOptions)
     );
     const cleaned = raw.replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
     return cleaned.length > 40 ? { content: cleaned, personalized: true } : { content: markdown, personalized: false };

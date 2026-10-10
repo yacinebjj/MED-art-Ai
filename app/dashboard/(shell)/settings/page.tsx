@@ -132,14 +132,11 @@ function SettingsHub() {
   // unconditionally from the start would strand every new student with no
   // way to ever choose one (registration doesn't collect it; this settings
   // page is the only place that does), so it can only lock in AFTER a first
-  // real choice. Année used to follow the identical "was it EVER set, then
-  // permanent" rule, but that meant literally every account (registration
-  // itself requires choosing a year) had it locked from day one, with zero
-  // way for a student to correct or update it — Année is deliberately left
-  // freely editable below (no lock state at all); only the specific
-  // (specialty, year) combinations isLockedInternYear itself disables stay
-  // gated, per-option, in the picker.
+  // real choice. Année locks together with it (product decision,
+  // 2026-10-10): registration saves both, so once the pair exists neither
+  // can be changed here.
   const [specialtyLocked, setSpecialtyLocked] = useState(false);
+  const [yearLocked, setYearLocked] = useState(false);
 
   // Set by the bootstrap effect right after it fetches years for the saved
   // specialty — tells the live "specialty changed" effect below to skip its
@@ -184,6 +181,7 @@ function SettingsHub() {
       }
 
       if (savedSpecialtyId != null) setSpecialtyLocked(true);
+      if (savedSpecialtyId != null && savedAcademicYearId != null) setYearLocked(true);
       setReady(true);
     }
 
@@ -346,7 +344,9 @@ function SettingsHub() {
               {specialtyLocked && <p className="mt-1.5 text-xs text-muted-foreground">La spécialité ne peut pas être modifiée après l&apos;inscription.</p>}
             </div>
             <div className="min-w-0">
-              <FieldLabelRow htmlFor="academicYear">Année</FieldLabelRow>
+              <FieldLabelRow htmlFor="academicYear" locked={yearLocked}>
+                Année
+              </FieldLabelRow>
               <Select
                 name="academicYear"
                 placeholder={
@@ -359,9 +359,11 @@ function SettingsHub() {
                 options={yearOptions}
                 value={academicYearId != null ? String(academicYearId) : ""}
                 onValueChange={handleYearChange}
-                disabled={specialtyId == null || yearsLoading}
+                disabled={yearLocked || specialtyId == null || yearsLoading}
+                className={yearLocked ? LOCKED_SELECT_CLASS : undefined}
                 onDisabledOptionClick={handleDisabledYearClick}
               />
+              {yearLocked && <p className="mt-1.5 text-xs text-muted-foreground">L&apos;année ne peut pas être modifiée après l&apos;inscription.</p>}
             </div>
           </div>
 
