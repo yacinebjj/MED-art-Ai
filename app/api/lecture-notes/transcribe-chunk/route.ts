@@ -3,7 +3,9 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { transcribeAudioViaOpenRouter, OpenRouterError } from "@/lib/ai/openrouter";
+import { transcribeAudioViaOpenRouter, OpenRouterError, TRANSCRIPTION_MODEL } from "@/lib/ai/openrouter";
+import { runThroughLedger } from "@/lib/ai/generation-ledger";
+import { createHash } from "crypto";
 import { LECTURE_TRANSCRIPTION_PROMPT } from "@/lib/ai/lecture-notes-prompts";
 import { LECTURE_RECORDINGS_BUCKET, MAX_CHUNK_BYTES, MAX_CHUNK_INDEX, UPLOAD_ID_PATTERN, lectureChunkPath } from "@/lib/lecture-notes-storage";
 
@@ -73,7 +75,34 @@ export async function POST(request: NextRequest) {
   const audioUrl = supabase.storage.from(LECTURE_RECORDINGS_BUCKET).getPublicUrl(path).data.publicUrl;
 
   try {
-    const { text } = await transcribeAudioViaOpenRouter(buffer, "wav", { prompt: LECTURE_TRANSCRIPTION_PROMPT, timeoutMs: 100_000 });
+    // Generation ledger (lib/ai/generation-ledger.ts): the same bytes, for the
+    // same student, with the same model + prompt, are transcribed ONCE — a
+    // chunk retried after a lost response (or while the first call is still
+    // running: single-flight) gets the stored transcript for 0 tokens. Keyed
+    // by the audio's sha256, scoped by user id so a transcript is never shared
+    // across accounts. Fail-open: any ledger problem just calls Whisper.
+    const text = await runThroughLedger(
+      {
+        namespace: "stt:lecture-chunk",
+        key: {
+          userId: user.id,
+          model: TRANSCRIPTION_MODEL,
+          prompt: LECTURE_TRANSCRIPTION_PROMPT,
+          format: "wav",
+          audio: createHash("sha256").update(buffer).digest("hex"),
+        },
+        ttlDays: 30,
+        peerWaitMs: 100_000,
+        leaseMs: 110_000,
+        isValid: (value) => typeof value === "string" && value.trim().length > 0,
+      },
+      async () => {
+        const result = await transcribeAudioViaOpenRouter(buffer, "wav", { prompt: LECTURE_TRANSCRIPTION_PROMPT, timeoutMs: 100_000 });
+        // Never memorize an empty transcript (may be a transient blip) — handled as a silent chunk below.
+        if (!result.text.trim()) throw new Error("Transcription vide");
+        return result.text;
+      }
+    );
     return NextResponse.json({ success: true, text, audioUrl });
   } catch (error) {
     const message = error instanceof OpenRouterError ? error.message : errorMessage(error);

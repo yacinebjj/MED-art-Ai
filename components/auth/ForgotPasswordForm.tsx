@@ -6,10 +6,12 @@ import { motion } from "framer-motion";
 import { Mail, MailCheck } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { createClient } from "@/lib/supabase/client";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { translateAuthError } from "@/lib/auth";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
+
+const RECOVERY_PATH = "/auth/update-password";
 
 export function ForgotPasswordForm() {
   const { language } = useLanguage();
@@ -23,14 +25,32 @@ export function ForgotPasswordForm() {
     setIsLoading(true);
     setError(null);
 
-    const supabase = createClient();
-    // Routed through /auth/callback (not straight to /auth/update-password)
-    // so the PKCE `code` this link carries is exchanged for a real session
-    // cookie server-side first, exactly like the sign-up confirmation link —
-    // see app/auth/callback/route.ts, which already forwards to whatever
-    // `next` path is given after a successful exchange.
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/auth/update-password")}`,
+    // Implicit flow on purpose (NOT the app's PKCE client): a PKCE recovery
+    // link only works in the browser that requested it, because the code
+    // verifier lives in that browser's cookies. Students open the email on
+    // their phone / in the Gmail in-app browser, the exchange failed, and
+    // they landed back on "forgot password" in a loop. The implicit link
+    // carries the session itself in the URL #fragment, so it works on any
+    // device; UpdatePasswordForm installs it with setSession().
+    //
+    // redirectTo stays on /auth/callback (already in Supabase's allowed
+    // redirect URLs): the callback forwards to /auth/update-password and the
+    // browser keeps the #fragment across that redirect.
+    const recoveryClient = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: {
+          flowType: "implicit",
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+          storageKey: "medart-password-recovery",
+        },
+      }
+    );
+    const { error: resetError } = await recoveryClient.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(RECOVERY_PATH)}`,
     });
 
     setIsLoading(false);

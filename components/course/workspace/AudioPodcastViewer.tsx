@@ -34,6 +34,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
 import { deleteSyncDoc, putSyncDoc, reconcileList, reconcileValue, type SyncedValue } from "@/lib/user-sync";
+import { MAX_CACHED_AUDIO_BYTES, deleteCachedAudio, getCachedAudio, putCachedAudio } from "@/lib/audio/audio-blob-cache";
 
 const SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 2] as const;
 type Speed = (typeof SPEED_OPTIONS)[number];
@@ -265,7 +266,8 @@ function computePeaks(buffer: AudioBuffer, bars: number): number[] {
   return values.map((value) => Math.max(0.06, Math.pow(value / max, 0.8)));
 }
 
-async function loadWaveform(audioUrl: string, signal: AbortSignal): Promise<WaveformData> {
+/** The waveform plus a copy of the downloaded file, so the caller can keep it (lib/audio/audio-blob-cache.ts) instead of downloading it again. */
+async function loadWaveform(audioUrl: string, signal: AbortSignal): Promise<WaveformData & { bytes: ArrayBuffer | null; type: string }> {
   const res = await fetch(audioUrl, { signal });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const declaredLength = Number(res.headers.get("Content-Length"));
@@ -273,11 +275,15 @@ async function loadWaveform(audioUrl: string, signal: AbortSignal): Promise<Wave
   const data = await res.arrayBuffer();
   if (data.byteLength > MAX_WAVEFORM_BYTES) throw new Error("Fichier trop volumineux pour l'analyse");
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+  // decodeAudioData DETACHES its input buffer — keep a copy for the local file cache first.
+  const bytes = data.byteLength <= MAX_CACHED_AUDIO_BYTES ? data.slice(0) : null;
+  const declaredType = (res.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
+  const type = declaredType.startsWith("audio/") ? declaredType : "audio/mpeg";
 
   const context = createDecodingContext();
   try {
     const audioBuffer = await decodeAudio(context, data);
-    return { peaks: computePeaks(audioBuffer, WAVEFORM_BARS), duration: audioBuffer.duration };
+    return { peaks: computePeaks(audioBuffer, WAVEFORM_BARS), duration: audioBuffer.duration, bytes, type };
   } finally {
     // Only a realtime AudioContext holds an audio device and has close();
     // an OfflineAudioContext is released with its last reference.
@@ -555,8 +561,24 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
     };
   }, [blobUrl]);
 
-  const playbackSrc =
-    sourceStage === "blob" && blobUrl ? blobUrl : sourceStage === "cache-bust" ? `${audioUrl}${audioUrl.includes("?") ? "&" : "?"}t=${CACHE_BUST_TOKEN}` : audioUrl;
+  // Local copy of this episode (lib/audio/audio-blob-cache.ts — IndexedDB,
+  // filled by the waveform download of an earlier visit). Looked up once per
+  // URL before the <audio> element gets a source, so a cached episode never
+  // touches the network and the element never switches source mid-playback.
+  // The lookup is bounded (~1.5 s worst case, usually a few ms) and any
+  // storage problem is a plain miss.
+  const [cachedSrc, setCachedSrc] = useState<string | null>(null);
+  const [localCacheChecked, setLocalCacheChecked] = useState(false);
+
+  const playbackSrc = !localCacheChecked
+    ? undefined
+    : sourceStage === "direct" && cachedSrc
+      ? cachedSrc
+      : sourceStage === "blob" && blobUrl
+        ? blobUrl
+        : sourceStage === "cache-bust"
+          ? `${audioUrl}${audioUrl.includes("?") ? "&" : "?"}t=${CACHE_BUST_TOKEN}`
+          : audioUrl;
 
   /** Starts the whole source ladder again (direct → cache-bust → blob). */
   const restartPlaybackLadder = useCallback(() => {
@@ -570,6 +592,12 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
   const handleMediaError = useCallback(() => {
     setIsPlaying(false);
     setIsBuffering(false);
+    // A corrupt/unplayable local copy: drop it and fall back to the network URL (same "direct" stage).
+    if (sourceStage === "direct" && cachedSrc) {
+      void deleteCachedAudio(audioUrl);
+      setCachedSrc(null);
+      return;
+    }
     if (sourceStage === "direct") {
       setSourceStage("cache-bust");
       return;
@@ -599,7 +627,7 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
     }
     // Direct, cache-busted and blob sources have all failed.
     if (sourceStage === "blob") setPlaybackError(true);
-  }, [sourceStage, audioUrl]);
+  }, [sourceStage, audioUrl, cachedSrc]);
   const waveRef = useRef<HTMLDivElement>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -827,12 +855,39 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
 
   // --- Waveform ------------------------------------------------------------------
 
+  // Local file cache lookup (see cachedSrc above): a hit gives both the
+  // playback source and, when stored with it, the waveform — no download.
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setCachedSrc(null);
+    setLocalCacheChecked(false);
+    void getCachedAudio(audioUrl).then((hit) => {
+      if (cancelled) return;
+      if (hit) {
+        objectUrl = URL.createObjectURL(hit.blob);
+        setCachedSrc(objectUrl);
+        if (hit.waveform && hit.waveform.peaks.length > 0 && !waveformCache.has(audioUrl)) {
+          waveformCache.set(audioUrl, hit.waveform);
+        }
+      }
+      setLocalCacheChecked(true);
+    });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [audioUrl]);
+
   useEffect(() => {
     const cached = waveformCache.get(audioUrl);
     if (cached) {
       setWaveform({ status: "ready", ...cached });
       return;
     }
+    // Wait for the local cache lookup: on a hit the waveform (or at least the
+    // file) is already here, and downloading it again would be wasted.
+    if (!localCacheChecked) return;
     if (shouldSkipWaveform()) {
       setWaveform({ status: "unavailable" });
       return;
@@ -840,7 +895,9 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
     const controller = new AbortController();
     setWaveform({ status: "loading" });
     loadWaveform(audioUrl, controller.signal)
-      .then((data) => {
+      .then(({ bytes, type, ...data }) => {
+        // Keep the file for next time (playback + waveform with zero network), even if this view is gone.
+        if (bytes) void putCachedAudio(audioUrl, bytes, type, data);
         if (controller.signal.aborted) return;
         waveformCache.set(audioUrl, data);
         setWaveform({ status: "ready", ...data });
@@ -851,7 +908,7 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
         setWaveform({ status: "unavailable" });
       });
     return () => controller.abort();
-  }, [audioUrl]);
+  }, [audioUrl, localCacheChecked]);
 
   // --- Bookmarks -------------------------------------------------------------------
 

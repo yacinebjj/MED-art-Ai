@@ -27,7 +27,7 @@ import {
   mapWithConcurrencyLimit,
   planShortfallUnits,
   refundRegenerationFallback,
-  reserveRegenerationFallback,
+  reserveModuleExamRegeneration,
   type EligibleCourseRow,
 } from "@/lib/exam-generation";
 import { lookupHarvestedQcms, storeHarvestedQcm } from "@/lib/exam-harvested-qcms";
@@ -209,29 +209,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // instead of the frontend having to guess or re-derive it separately.
   let regenerationsRemaining: number | undefined;
   if (isVariation) {
-    const rpcResult = await supabase.rpc("reserve_module_exam_regenerate", {
-      p_user_id: user.id,
-      p_cap: MODULE_EXAM_REGENERATE_CAP,
-    });
-    let regenCount: number | null = rpcResult.data as number | null;
-    let regenCapError = rpcResult.error;
-    if (isMissingRpcError(regenCapError)) {
-      console.warn("[exam/generate] reserve_module_exam_regenerate absent — repli sur la réservation directe (migration 20261004 à exécuter).");
-      const fallback = await reserveRegenerationFallback(supabase, user.id, MODULE_EXAM_REGENERATE_CAP);
-      if (fallback === "unavailable") {
-        return NextResponse.json(
-          { success: false, error: "La régénération est momentanément indisponible (mise à jour du serveur en cours). Ton examen actuel est conservé : réessaie dans quelques minutes." },
-          { status: 503 }
-        );
-      }
-      regenCount = fallback;
-      regenCapError = null;
+    const reservation = await reserveModuleExamRegeneration(supabase, user.id, MODULE_EXAM_REGENERATE_CAP);
+    if (!reservation.ok && !reservation.capped) {
+      return NextResponse.json({ success: false, error: reservation.reason }, { status: 503 });
     }
-    if (regenCapError) {
-      console.error("[exam/generate] Échec réservation du plafond de régénération:", regenCapError.message);
-      return NextResponse.json({ success: false, error: "Impossible de vérifier ton quota de régénérations pour le moment. Réessaie dans quelques minutes." }, { status: 500 });
-    }
-    if (regenCount === null) {
+    if (!reservation.ok) {
       return NextResponse.json(
         {
           success: false,
@@ -241,8 +223,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         { status: 403 }
       );
     }
-    // regenCount is the RPC's post-increment used-count for this student.
-    regenerationsRemaining = Math.max(0, MODULE_EXAM_REGENERATE_CAP - regenCount);
+    // reservation.used is the post-increment used-count (null when the
+    // column isn't migrated yet and the regeneration went through uncounted).
+    if (reservation.used !== null) regenerationsRemaining = Math.max(0, MODULE_EXAM_REGENERATE_CAP - reservation.used);
   }
 
   // Captured here, not read as `user.id` inside the nested function below —

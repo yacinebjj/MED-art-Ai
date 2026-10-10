@@ -24,7 +24,7 @@ import { reserveAssistantTurn } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { isAssistantMode, isAssistantStyle } from "@/lib/assistant-modes";
-import { buildAssistantSystemPrompt } from "@/lib/ai/assistant-prompts";
+import { buildAssistantSystemPrompt, DASHBOARD_ASSISTANT_SYSTEM_PROMPT } from "@/lib/ai/assistant-prompts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,7 +82,17 @@ const MAX_DOCUMENT_CHARS = 12000;
 // for a single reply.
 const MAX_OUTPUT_TOKENS = 8192;
 
-const SYSTEM_PROMPT = `Tu es l'Assistant MedArt — un assistant généraliste et bienveillant pour des étudiants en médecine, pharmacie et chirurgie dentaire. MIROIR DE LANGUE STRICT : réponds TOUJOURS dans la langue du dernier message de l'étudiant, jamais un défaut fixe — anglais reçu -> réponds en anglais, arabe classique -> arabe classique, Darija algérienne -> Darija algérienne (naturelle, pas de l'arabe classique traduit), français -> français. Réponds de façon claire et utile, à toute question : organisation des études, motivation, culture générale, questions pratiques. Ne donne jamais de conseil destiné à être appliqué directement à un patient réel — si une question semble décrire un cas réel plutôt qu'une question d'étudiant, oriente vers un professionnel de santé.`;
+// 0.3, aligned on app/api/courses/chat/route.ts (was 0.5 here): same model,
+// but medical answers need precision over variety — a lower temperature
+// gives a more stable structure and fewer invented details. The free chain
+// below also gets `reasoning: { effort: "low" }` like the course chat, so a
+// reasoning model can't burn the output budget on hidden thinking and
+// truncate the visible answer.
+const ANSWER_TEMPERATURE = 0.3;
+
+// Base persona — see DASHBOARD_ASSISTANT_SYSTEM_PROMPT's own comment in
+// lib/ai/assistant-prompts.ts (modeled on the course chat's prompt).
+const SYSTEM_PROMPT = DASHBOARD_ASSISTANT_SYSTEM_PROMPT;
 
 interface HistoryTurn {
   role: "user" | "assistant";
@@ -240,7 +250,7 @@ export async function POST(request: NextRequest) {
     try {
       // CHAT_MODEL (Qwen3-30B-2507) since 2026-10-07, was CHEAP_MODEL
       // (qwen-2.5-72b, measured 14-42 tok/s — the copilot's slowness).
-      const stream = await streamOpenRouter(messages, { model: CHAT_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5, providerSort: "latency" });
+      const stream = await streamOpenRouter(messages, { model: CHAT_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: ANSWER_TEMPERATURE, providerSort: "latency" });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
@@ -262,7 +272,7 @@ export async function POST(request: NextRequest) {
 
   for (const model of FREE_MODEL_CHAIN) {
     try {
-      const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.5, providerSort: "latency" });
+      const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: ANSWER_TEMPERATURE, reasoning: { effort: "low" }, providerSort: "latency" });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },

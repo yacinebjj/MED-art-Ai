@@ -126,7 +126,8 @@ function sanitizeQuestions(raw: unknown): ExamQuestion[] {
 function friendlyGenerationError(raw: unknown, fallback: string): string {
   if (typeof raw !== "string" || !raw.trim()) return fallback;
   if (/reserve_module_exam_regenerate|schema cache|could not find the function/i.test(raw)) {
-    return "La régénération est momentanément indisponible (mise à jour du serveur en cours). Ton examen actuel est conservé : réessaie dans quelques minutes.";
+    // Keep the real cause visible (support needs it), after the friendly line.
+    return `La régénération est momentanément indisponible. Ton examen actuel est conservé : réessaie dans quelques minutes. (Détail : ${raw.trim().slice(0, 200)})`;
   }
   return raw;
 }

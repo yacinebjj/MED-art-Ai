@@ -13,16 +13,53 @@ import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
 
 /**
- * Rendered at /auth/update-password, always arrived at via the recovery
- * link's redirect chain (ForgotPasswordForm -> Supabase email -> /auth/
- * callback?next=/auth/update-password), which exchanges the link's one-time
- * PKCE code for a real session cookie server-side BEFORE this page ever
- * loads — see app/auth/callback/route.ts. So by the time this mounts,
- * supabase.auth.getUser() should already resolve to the recovering student;
- * `checkingSession` just covers the one client render before that first
- * check resolves, and `hasSession === false` is what actually happens when
- * someone opens this URL cold (an expired/already-used link, or manual
- * navigation) with no such cookie ever set.
+ * Turns whatever the recovery link brought into a session cookie, then
+ * reports whether a user is signed in. Link shapes handled:
+ *  - `#access_token=…&refresh_token=…` — implicit links sent by
+ *    ForgotPasswordForm; work on any device. The app's PKCE client refuses
+ *    to read these by itself ("Not a valid PKCE flow url"), so they are
+ *    installed here with setSession().
+ *  - `?token_hash=…&type=recovery` — if the Supabase email template is ever
+ *    switched to the token-hash link.
+ *  - older PKCE links: already exchanged by /auth/callback, or by the client
+ *    itself on load when this browser holds the code verifier.
+ *  - `error_code` (expired / already-used link): no session → the page
+ *    offers a new link.
+ */
+async function establishRecoverySession(): Promise<boolean> {
+  const supabase = createClient();
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const query = new URLSearchParams(window.location.search);
+
+  const accessToken = fragment.get("access_token");
+  const refreshToken = fragment.get("refresh_token");
+  const tokenHash = query.get("token_hash");
+
+  try {
+    if (accessToken && refreshToken) {
+      const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+      if (error) console.error("Password recovery: setSession failed", error);
+    } else if (tokenHash) {
+      const { error } = await supabase.auth.verifyOtp({ type: "recovery", token_hash: tokenHash });
+      if (error) console.error("Password recovery: verifyOtp failed", error);
+    }
+  } finally {
+    // Never leave tokens in the address bar / history.
+    if (window.location.hash || window.location.search) {
+      window.history.replaceState(window.history.state, "", window.location.pathname);
+    }
+  }
+
+  const { data } = await supabase.auth.getUser();
+  return Boolean(data.user);
+}
+
+/**
+ * Rendered at /auth/update-password, arrived at via the recovery link's
+ * redirect chain (ForgotPasswordForm -> Supabase email -> /auth/callback ->
+ * here). `checkingSession` covers the render before establishRecoverySession
+ * resolves; `hasSession === false` means an expired/already-used link or a
+ * cold visit, and offers a fresh link.
  */
 export function UpdatePasswordForm() {
   const router = useRouter();
@@ -37,11 +74,15 @@ export function UpdatePasswordForm() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
-      setHasSession(Boolean(data.user));
+    let cancelled = false;
+    establishRecoverySession().then((ok) => {
+      if (cancelled) return;
+      setHasSession(ok);
       setCheckingSession(false);
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function handleSubmit(e: FormEvent) {

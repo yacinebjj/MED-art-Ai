@@ -24,7 +24,7 @@ import {
   generateExamJob,
   isMissingRpcError,
   refundRegenerationFallback,
-  reserveRegenerationFallback,
+  reserveModuleExamRegeneration,
   type EligibleCourseRow,
   type SupabaseAdmin,
 } from "@/lib/exam-generation";
@@ -281,19 +281,9 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
 
   const supabase = getSupabaseAdmin();
   if (params.isVariation) {
-    const rpc = await supabase.rpc("reserve_module_exam_regenerate", { p_user_id: userId, p_cap: MODULE_EXAM_REGENERATE_CAP });
-    let count = rpc.data as number | null;
-    let rpcError = rpc.error;
-    if (isMissingRpcError(rpcError)) {
-      const fallback = await reserveRegenerationFallback(supabase, userId, MODULE_EXAM_REGENERATE_CAP);
-      if (fallback === "unavailable") {
-        return bad("La régénération est momentanément indisponible (mise à jour du serveur en cours). Ton examen actuel est conservé : réessaie dans quelques minutes.", 503);
-      }
-      count = fallback;
-      rpcError = null;
-    }
-    if (rpcError) return bad("Impossible de vérifier ton quota de régénérations pour le moment. Réessaie dans quelques minutes.", 500);
-    if (count === null) {
+    const reservation = await reserveModuleExamRegeneration(supabase, userId, MODULE_EXAM_REGENERATE_CAP);
+    if (!reservation.ok && !reservation.capped) return bad(reservation.reason, 503);
+    if (!reservation.ok) {
       return NextResponse.json(
         { success: false, error: `Tu as atteint la limite de ${MODULE_EXAM_REGENERATE_CAP} régénérations pour l'Examen de Module.`, regenerationsRemaining: 0 },
         { status: 403 }
@@ -565,6 +555,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return bad("Action inconnue.");
   } catch (error) {
     console.error("[exam/run] Exception non interceptée:", error);
-    return bad("Une erreur inattendue est survenue. Réessaie.", 500);
+    return bad(`Une erreur inattendue est survenue (${errorMessage(error)}). Réessaie.`, 500);
   }
 }

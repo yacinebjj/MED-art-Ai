@@ -422,7 +422,11 @@ export async function POST(request: NextRequest) {
         const path = outputPath;
         const { error: uploadError } = await supabase.storage
           .from(PODCAST_BUCKET)
-          .upload(path, mp3Buffer, { contentType: "audio/mpeg", upsert: true });
+          // Content-addressed path (content hash + prompt version [+ dialect]):
+          // the bytes behind this URL never change meaning, so browsers/CDN may
+          // keep it for a year instead of Storage's 1 h default — a replay or a
+          // reload re-downloads nothing.
+          .upload(path, mp3Buffer, { contentType: "audio/mpeg", upsert: true, cacheControl: "31536000" });
         if (uploadError) throw uploadError;
 
         const { data: publicUrlData } = supabase.storage.from(PODCAST_BUCKET).getPublicUrl(path);

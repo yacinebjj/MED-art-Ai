@@ -5,6 +5,8 @@ import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 
 export const runtime = "nodejs";
 
+const RECOVERY_PATH = "/auth/update-password";
+
 interface CookieToSet {
   name: string;
   value: string;
@@ -25,6 +27,21 @@ export async function GET(request: NextRequest) {
   // NextResponse.redirect and the browser parse with evil-phish.com as the
   // actual host once concatenated onto `origin`).
   const next = sanitizeRedirectPath(searchParams.get("next"));
+  const isRecovery = next === RECOVERY_PATH;
+
+  // Password recovery always ends on the update-password page, which knows
+  // how to finish every link shape (session in the #fragment for implicit
+  // links — the server never sees it and the browser keeps it across this
+  // redirect —, a `token_hash`, or an error to explain). Sending it to
+  // /login instead is what made "forgot password" loop back on itself.
+  if (isRecovery && !code) {
+    const target = new URL(RECOVERY_PATH, origin);
+    for (const key of ["token_hash", "type", "error", "error_code", "error_description"]) {
+      const value = searchParams.get(key);
+      if (value) target.searchParams.set(key, value);
+    }
+    return NextResponse.redirect(target);
+  }
 
   if (code) {
     const cookieStore = cookies();
@@ -50,6 +67,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${origin}${next}`);
     }
     console.error("Auth callback: exchangeCodeForSession failed", error);
+    // Typically an older PKCE recovery link opened in another browser (no
+    // code verifier there): explain it on the recovery page.
+    if (isRecovery) {
+      return NextResponse.redirect(`${origin}${RECOVERY_PATH}?error_code=${encodeURIComponent(error.code ?? "exchange_failed")}`);
+    }
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth`);

@@ -47,6 +47,79 @@ export async function reserveRegenerationFallback(supabase: SupabaseAdmin, userI
   return "unavailable";
 }
 
+/** PostgREST/Postgres "column does not exist" (profiles.module_exam_regenerations_used not migrated yet). */
+function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "42703" || error.code === "PGRST204" || /column .*does not exist|could not find the .*column/i.test(error.message ?? "");
+}
+
+/** Creates the profiles row a few legacy accounts never got (handle_new_user trigger added later); no-op when it exists. */
+async function ensureProfileRow(supabase: SupabaseAdmin, userId: string): Promise<boolean> {
+  const { data } = await supabase.from("profiles").select("id").eq("id", userId).maybeSingle();
+  if (data) return false;
+  const { error } = await supabase.from("profiles").upsert({ id: userId }, { onConflict: "id", ignoreDuplicates: true });
+  if (error) console.warn("[exam] Création de la ligne profiles impossible:", error.message);
+  return !error;
+}
+
+export type RegenerationReservation =
+  | { ok: true; used: number | null; counted: boolean }
+  | { ok: false; capped: true }
+  | { ok: false; capped: false; reason: string };
+
+/**
+ * Reserves one "Régénérer" for the Examen de Module (cap MODULE_EXAM_REGENERATE_CAP,
+ * global per student). Shared by app/api/exam/run and app/api/exam/generate.
+ *
+ * Real failure this fixes: on a database where migration
+ * 20261004_module_exam_regenerations.sql was never applied, BOTH the RPC
+ * and the profiles column are missing — the RPC fallback then also failed
+ * and EVERY "Régénérer" click answered 503 "momentanément indisponible",
+ * forever. Now:
+ *  - RPC missing → compare-and-set fallback on the column (as before);
+ *  - column missing too → the regeneration is let through UNCOUNTED (still
+ *    billed against the monthly exam quota by reserveExam) and the missing
+ *    migration is logged loudly;
+ *  - no profiles row (RPC/fallback match zero rows, which used to read as
+ *    "cap reached") → the row is created and the reservation retried once;
+ *  - any other database error → its real message is returned to the caller.
+ */
+export async function reserveModuleExamRegeneration(supabase: SupabaseAdmin, userId: string, cap: number): Promise<RegenerationReservation> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const rpc = await supabase.rpc("reserve_module_exam_regenerate", { p_user_id: userId, p_cap: cap });
+    let count: number | null | "unavailable" = (rpc.data as number | null) ?? null;
+    if (rpc.error) {
+      if (!isMissingRpcError(rpc.error)) {
+        if (isMissingColumnError(rpc.error)) {
+          console.error("[exam] Colonne profiles.module_exam_regenerations_used absente — régénération NON comptée. Appliquer supabase/migrations/20261004_module_exam_regenerations.sql.");
+          return { ok: true, used: null, counted: false };
+        }
+        console.error("[exam] reserve_module_exam_regenerate a échoué:", rpc.error.code, rpc.error.message);
+        return { ok: false, capped: false, reason: `Impossible de vérifier ton quota de régénérations (${rpc.error.message}). Réessaie dans quelques minutes.` };
+      }
+      console.warn("[exam] reserve_module_exam_regenerate absent — repli sur la réservation directe (migration 20261004 à appliquer).");
+      const probe = await supabase.from("profiles").select("module_exam_regenerations_used").eq("id", userId).maybeSingle();
+      if (isMissingColumnError(probe.error)) {
+        console.error("[exam] Colonne profiles.module_exam_regenerations_used absente — régénération NON comptée. Appliquer supabase/migrations/20261004_module_exam_regenerations.sql.");
+        return { ok: true, used: null, counted: false };
+      }
+      if (probe.error) {
+        return { ok: false, capped: false, reason: `Impossible de vérifier ton quota de régénérations (${probe.error.message}). Réessaie dans quelques minutes.` };
+      }
+      count = probe.data ? await reserveRegenerationFallback(supabase, userId, cap) : null;
+      if (count === "unavailable") {
+        return { ok: false, capped: false, reason: "Impossible de réserver une régénération (conflit d'écriture répété sur ton profil). Réessaie dans un instant." };
+      }
+    }
+    if (count !== null) return { ok: true, used: count, counted: true };
+    // Zero rows matched: either the cap is reached, or this account has no
+    // profiles row at all — the latter used to be reported as "limit reached".
+    if (attempt === 0 && (await ensureProfileRow(supabase, userId))) continue;
+    return { ok: false, capped: true };
+  }
+  return { ok: false, capped: true };
+}
+
 export async function refundRegenerationFallback(supabase: SupabaseAdmin, userId: string): Promise<void> {
   const { data } = await supabase.from("profiles").select("module_exam_regenerations_used").eq("id", userId).maybeSingle();
   const used = Number((data as { module_exam_regenerations_used?: number | null } | null)?.module_exam_regenerations_used ?? 0);

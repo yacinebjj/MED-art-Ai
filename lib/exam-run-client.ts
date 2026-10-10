@@ -56,10 +56,21 @@ async function post<T>(url: string, payload: unknown): Promise<{ status: number;
   try {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const body = (await res.json().catch(() => ({}))) as T;
+    // A non-JSON failure (platform timeout page, gateway error) still carries its real cause.
+    if (!res.ok && body && typeof body === "object" && typeof (body as { error?: unknown }).error !== "string") {
+      (body as { error?: string }).error = httpFailureReason(res.status);
+    }
     return { status: res.status, retryAfter: Number(res.headers.get("Retry-After")) || null, body };
-  } catch {
-    return { status: 0, retryAfter: null, body: {} as T };
+  } catch (error) {
+    return { status: 0, retryAfter: null, body: { error: `Impossible de contacter le serveur (${error instanceof Error ? error.message : "réseau"}).` } as T };
   }
+}
+
+function httpFailureReason(status: number): string {
+  if (status === 504) return "Le serveur a dépassé son délai de réponse (HTTP 504).";
+  if (status === 401) return "Session expirée — reconnecte-toi (HTTP 401).";
+  if (status === 429) return "Trop de requêtes en cours (HTTP 429).";
+  return `Erreur serveur (HTTP ${status}).`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -102,6 +113,8 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
     minAttemptWindowMs: 20_000,
   });
   let fatal: string | null = null;
+  /** Last batch failure reason, so a run that gives up says WHY. */
+  let lastBatchError: string | null = null;
 
   async function runJobs(jobs: ExamJob[]): Promise<void> {
     const queue = jobs.map((job) => ({ job, attempt: 1 }));
@@ -142,6 +155,7 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
             fatal = body.error ?? "Génération interrompue.";
             return;
           }
+          if (body.error) lastBatchError = body.error;
           const kind = classifyUpstreamStatus(status) ?? "server";
           governor.reportUpstreamFailure(kind, retryAfter);
           if (next.attempt < MAX_JOB_ATTEMPTS) {
@@ -191,10 +205,11 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
       : stop === "deadline" || stop === "stalled"
         ? "La génération a pris trop de temps."
         : (fatal ?? "La génération n'a pas abouti.");
+  const detail = !fatal && lastBatchError ? ` (Détail : ${lastBatchError})` : "";
   return {
     ok: false,
     body: {
-      error: `${reason} Ta génération a été recréditée — réessaie dans quelques minutes.`,
+      error: `${reason}${detail} Ta génération a été recréditée — réessaie dans quelques minutes.`,
       ...(typeof refunded.regenerationsRemaining === "number" ? { regenerationsRemaining: refunded.regenerationsRemaining } : {}),
     },
   };
