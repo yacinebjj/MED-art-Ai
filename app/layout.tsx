@@ -9,6 +9,7 @@ import { PushClientFallbackProvider } from "@/providers/PushClientFallbackProvid
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { SecurityGuard } from "@/components/security/SecurityGuard";
 import { SplashScreen } from "@/components/layout/SplashScreen";
+import { ZoomLock } from "@/components/pwa/ZoomLock";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -42,11 +43,14 @@ export const metadata: Metadata = {
 // near a text input still need their own visualViewport listener as a
 // fallback there (see e.g. the Notes and Assistant pages).
 // viewportFit "cover" is what makes every env(safe-area-inset-*) in this app
-// non-zero on iOS — without it they all silently resolve to 0. No
-// maximum-scale/user-scalable: deliberate pinch-zoom stays available.
+// non-zero on iOS — without it they all silently resolve to 0.
+// maximumScale/userScalable lock the UI at 1x (native-app feel) and stop
+// iOS from zooming into a focused input; iOS pinch is blocked by ZoomLock.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
 };
@@ -74,6 +78,7 @@ export default function RootLayout({
           </LanguageProvider>
         </ThemeProvider>
         <SplashScreen />
+        <ZoomLock />
       </body>
     </html>
   );

@@ -50,6 +50,10 @@ export function useTextSelection(): UseTextSelectionResult {
   // a ref, not state, since it only ever gates a timer and must never
   // itself trigger a re-render.
   const selectionChangeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while the student's last tap/click landed on the toolbar itself (a
+  // button, the color picker, the note draft) — a selection collapse caused
+  // by that tap must not hide the toolbar under their finger.
+  const toolbarInteractionRef = useRef(false);
 
   useEffect(() => {
     if (!container) return;
@@ -90,14 +94,27 @@ export function useTextSelection(): UseTextSelectionResult {
       // making it seem to "only work at the top". Viewport coords fix that at
       // any scroll depth, whichever element actually scrolls.
       const left = rect.left + rect.width / 2;
-      let top = rect.top - 50; // just above the selection
-      if (top < 8) top = rect.bottom + 12; // flip below if too close to the top edge
+      let top: number;
+      if (window.matchMedia("(pointer: coarse)").matches) {
+        // Touch: iOS's edit menu and Android's floating toolbar sit ABOVE the
+        // selection, so ours goes below it, clear of the end handle.
+        top = rect.bottom + 36;
+        if (top > window.innerHeight - 64) top = Math.max(8, rect.top - 104);
+      } else {
+        top = rect.top - 50; // just above the selection
+        if (top < 8) top = rect.bottom + 12; // flip below if too close to the top edge
+      }
 
-      setSelection({ text, top, left });
+      // Same text at the same spot keeps the same object: a new one re-renders
+      // the toolbar and resets its open color picker / note draft.
+      setSelection((prev) =>
+        prev && prev.text === text && Math.abs(prev.top - top) < 1 && Math.abs(prev.left - left) < 1 ? prev : { text, top, left }
+      );
     }
 
     function dismissOnFreshInteraction(target: Node) {
-      const clickedInsideTooltip = tooltipRef.current?.contains(target);
+      const clickedInsideTooltip = tooltipRef.current?.contains(target) ?? false;
+      toolbarInteractionRef.current = clickedInsideTooltip;
       if (clickedInsideTooltip) return;
 
       // A fresh mousedown/touchstart that isn't on the tooltip always starts
@@ -133,6 +150,15 @@ export function useTextSelection(): UseTextSelectionResult {
       if (event.touches.length > 1) return;
       const touch = event.touches[0];
       if (!touch) return;
+      // A touch that starts while text is selected may be the drag of a native
+      // selection handle: hiding here and re-showing on selectionchange was
+      // the flicker loop. Keep the toolbar; selectionchange hides it if the
+      // selection collapses.
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.anchorNode && container!.contains(sel.anchorNode) && !tooltipRef.current?.contains(touch.target as Node)) {
+        toolbarInteractionRef.current = false;
+        return;
+      }
       dismissOnFreshInteraction(touch.target as Node);
     }
 
@@ -148,9 +174,18 @@ export function useTextSelection(): UseTextSelectionResult {
     // Debounced (150ms) because it fires on every micro-adjustment during a
     // drag — without this the tooltip would flicker/reposition continuously
     // instead of settling once after the student stops adjusting.
+    // Touch waits longer: handle drags fire many more micro-adjustments.
+    const settleMs = window.matchMedia("(pointer: coarse)").matches ? 300 : 150;
     function handleSelectionChange() {
       if (selectionChangeTimeoutRef.current) clearTimeout(selectionChangeTimeoutRef.current);
-      selectionChangeTimeoutRef.current = setTimeout(updateFromSelection, 150);
+      selectionChangeTimeoutRef.current = setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+          if (!toolbarInteractionRef.current) setSelection(null);
+          return;
+        }
+        updateFromSelection();
+      }, settleMs);
     }
 
     document.addEventListener("mouseup", handleMouseUp);

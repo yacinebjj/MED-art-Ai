@@ -491,11 +491,12 @@
   background-color: rgba(34, 211, 238, 0.4);
 }
 
-/* Native mobile foundation. `manipulation` kills double-tap zoom and the
-   300ms tap delay but keeps two-finger pinch (the PPTX viewer and
-   infographic depend on it), so zoom is never disabled outright. */
+/* Native mobile foundation. `pan-x pan-y` allows scrolling only: no
+   double-tap zoom, no pinch-zoom, no 300ms tap delay. With the viewport
+   lock (app/layout.tsx) and ZoomLock (iOS gesture events), the UI never
+   scales. Note: this also disables pinch on the PPTX slides. */
 html {
-  touch-action: manipulation;
+  touch-action: pan-x pan-y;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
@@ -536,6 +537,24 @@ textarea,
    its ring, so this never costs keyboard users their focus indicator. */
 :focus:not(:focus-visible) {
   outline: none;
+}
+
+/* Tap flash: the reset on html/body above, repeated on every element and
+   pseudo-element (portals, shadow-free widgets that don't inherit it). On
+   touch screens, a tapped control also never shows a focus outline or
+   Tailwind focus ring; text fields keep theirs, and desktop keyboard focus
+   is untouched (coarse pointers only). */
+*,
+*::before,
+*::after {
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: none) and (pointer: coarse) {
+  :is(a, button, summary, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [tabindex]):focus {
+    outline: none;
+    --tw-ring-offset-shadow: 0 0 #0000;
+    --tw-ring-shadow: 0 0 #0000;
+  }
 }
 
 /* Touch devices: every backdrop-filter re-blurs the always-animating aurora
