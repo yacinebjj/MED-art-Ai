@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 
 export type Language = "fr" | "en";
 
@@ -12,31 +12,30 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
+  // "fr" on the server and on the first client render (no hydration
+  // mismatch); the saved choice is applied right after mount.
   const [language, setLanguageState] = useState<Language>("fr");
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     const savedLang = localStorage.getItem("medart-language") as Language;
     if (savedLang === "en" || savedLang === "fr") {
       setLanguageState(savedLang);
     }
   }, []);
 
-  const setLanguage = (lang: Language) => {
+  const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
     localStorage.setItem("medart-language", lang);
-  };
+  }, []);
 
-  if (!mounted) {
-    return <>{children}</>;
-  }
+  const value = useMemo(() => ({ language, setLanguage }), [language, setLanguage]);
 
-  return (
-    <LanguageContext.Provider value={{ language, setLanguage }}>
-      {children}
-    </LanguageContext.Provider>
-  );
+  // Always the Provider, from the very first render. This used to return a
+  // bare fragment until mounted, then switch to the Provider: a different
+  // element type at the same spot, so React threw away and rebuilt the WHOLE
+  // app (every provider, layout and page under it, with all their effects
+  // and startup fetches) right after hydration, on every launch.
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 }
 
 export function useLanguage() {
