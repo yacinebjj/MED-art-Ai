@@ -208,13 +208,15 @@ export async function POST(request: NextRequest) {
       // bytes flowing over the connection for the ~100-260+ seconds
       // generateExplicationPart can legitimately take, so a mobile carrier's
       // NAT never sees this connection as idle long enough to drop it.
+      // Increased heartbeat frequency (10s instead of 15s) to work around
+      // browser/proxy 58-60s timeouts that ignore sparse heartbeats.
       const heartbeatInterval = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(`${JSON.stringify({ type: "heartbeat" })}\n`));
         } catch {
           clearInterval(heartbeatInterval);
         }
-      }, 15_000);
+      }, 10_000);
 
       generateExplicationPart(slice, systemPrompt, partIndex + 1, totalParts, previousPartTail)
         .then((partMarkdown) => {
@@ -248,6 +250,14 @@ export async function POST(request: NextRequest) {
 
   return new NextResponse(stream, {
     status: 200,
-    headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" },
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      // Explicit chunked encoding support for browsers that need it
+      "Transfer-Encoding": "chunked",
+      // Disable any intermediate compression that might buffer heartbeats
+      "Content-Encoding": "identity",
+    },
   });
 }
