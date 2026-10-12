@@ -4,7 +4,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
-import { generateOpenRouterAudio, CHEAP_MODEL, LAB_PRIMARY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
+import { generateOpenRouterAudio, LAB_PRIMARY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
 import { callOpenRouterChain } from "@/lib/ai/call-resilient";
 import {
   DEFAULT_PODCAST_DIALECT,
@@ -125,6 +125,22 @@ async function ensurePodcastBucket(supabase: ReturnType<typeof getSupabaseAdmin>
   }
 }
 
+/**
+ * Writes the podcast script (the narration stays on generateOpenRouterAudio).
+ * 2026-10-12 live measurements, production prompt on a 25,800-char course:
+ *  - qwen3-30b-a3b-instruct-2507 (this step's model until then): its host
+ *    pool had collapsed — DekaLLM 429 "rate-limited upstream (shared pool)",
+ *    SiliconFlow ~25 tok/s (a full script needs 120 s+), Nebius 35-55 tok/s
+ *    and degraded; 3 parallel calls mostly hit 45 s timeouts. Students got
+ *    "service IA momentanément lent" after ~78 s every time.
+ *  - qwen3-235b-a22b-2507: 55-90 s (Nebius / Google / Parasail), GMICloud 429.
+ *  - qwen3.8-flash (Alibaba, reasoning off): 33-36 s, 1,294-1,341 words,
+ *    course-grounded, 0 reasoning tokens, ~$0.002 per script — 4/4 OK.
+ * Same family as the rest of the app; already used for OCR/exam analysis
+ * (CHEAP_VISION_MODEL in lib/ai/openrouter.ts).
+ */
+const PODCAST_SCRIPT_MODEL = "qwen/qwen3.8-flash";
+
 /** Thrown when no course-grounded script could be written — mapped to a retryable 503 (quota refunded) instead of narrating anything generic. */
 class PodcastScriptError extends Error {
   constructor() {
@@ -151,8 +167,10 @@ class PodcastScriptError extends Error {
  *
  * Budget: 75 s here + 210 s narration = 285 s, the same worst-case sum as
  * before (60 + 225) inside the route's 300 s maxDuration, leaving the same
- * margin for mp3 encode + upload. The first attempt gets 60 s — measured
- * live at 28-29 s for a full ~1,400-word script from a 32,000-char source.
+ * margin for mp3 encode + upload.
+ *
+ * Model: PODCAST_SCRIPT_MODEL first, Qwen3-30B (LAB_PRIMARY_MODEL) only as
+ * the backup — see PODCAST_SCRIPT_MODEL's own comment for the measurements.
  */
 async function planPodcastScript(courseTitle: string, explicationExcerpt: string, dialect: PodcastDialect): Promise<string> {
   try {
@@ -166,12 +184,17 @@ async function planPodcastScript(courseTitle: string, explicationExcerpt: string
       {
         label: "[studio/podcast]",
         attempts: [
-          { model: LAB_PRIMARY_MODEL, timeoutMs: 60_000 },
-          { model: CHEAP_MODEL, timeoutMs: 45_000 },
+          { model: PODCAST_SCRIPT_MODEL, timeoutMs: 60_000 },
+          { model: LAB_PRIMARY_MODEL, timeoutMs: 45_000 },
         ],
         deadlineMs: 75_000, // script (75 s) + narration (210 s) must stay inside this route's 300 s maxDuration
         maxTokens: 6000,
         bypassMock: true,
+        // Thinking OFF on the Flash model (measured: 0 reasoning tokens).
+        // NOT paired with requireParameters: Qwen3-30B doesn't take this
+        // parameter, and requiring it would leave the backup with no provider
+        // at all — providers that don't support it simply ignore it.
+        reasoning: { enabled: false },
         providerSort: "throughput",
         validate: (raw) => {
           const text = raw.trim();

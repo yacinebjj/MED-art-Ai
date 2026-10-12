@@ -21,7 +21,7 @@
  * openai/gpt-audio-mini via OpenRouter (see app/api/studio/podcast/route.ts
  * and lib/ai/openrouter.ts's generateOpenRouterAudio). Same two-stage shape
  * as lib/ai/slides-prompts.ts:
- *  1. A cheap TEXT call (CHEAP_MODEL) writes the actual spoken script —
+ *  1. A cheap TEXT call (PODCAST_SCRIPT_MODEL in the route) writes the actual spoken script —
  *     this is what keeps the episode a real structured narrative in the
  *     requested français/darija algérienne mix, instead of leaving an
  *     audio-output chat model to freely improvise (and likely drift back to
@@ -158,8 +158,11 @@ const PODCAST_GROUNDING_INSTRUCTION = `CADRAGE STRICT (prioritaire) :
 - N'ajoute aucune maladie, aucun chapitre, aucun traitement ni aucun sujet absent du texte. Pas de conseils de méthode de travail génériques à la place du contenu du cours.
 - N'invente aucun chiffre, aucune dose, aucune classification, aucune référence. En cas de doute sur un fait, ne le dis pas.`;
 
+// The length is restated last because the script model (qwen3.8-flash, see
+// PODCAST_SCRIPT_MODEL in the route) stopped at ~960 words with the system
+// prompt's target alone; with it here, 1,158-1,593 words in 32-44 s (live, 2026-10-12).
 export function buildPodcastScriptUserMessage(courseTitle: string, explicationExcerpt: string): string {
-  return `Titre du cours : "${courseTitle}"\n\nContenu du cours :\n"""\n${explicationExcerpt}\n"""\n\n${PODCAST_GROUNDING_INSTRUCTION}\n\nÉcris le script complet de l'épisode de podcast demandé sur ce cours.`;
+  return `Titre du cours : "${courseTitle}"\n\nContenu du cours :\n"""\n${explicationExcerpt}\n"""\n\n${PODCAST_GROUNDING_INSTRUCTION}\n\nÉcris le script complet de l'épisode de podcast demandé sur ce cours : les 6 chapitres, 1400 à 1600 mots au total — ne t'arrête pas avant d'avoir couvert chaque chapitre en profondeur avec le contenu réel du cours.`;
 }
 
 /**
