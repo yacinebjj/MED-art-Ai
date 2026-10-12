@@ -56,13 +56,8 @@ export const config = {
      * token). Middleware's redirect behavior never applied to /api/** paths
      * anyway (they don't start with /dashboard or /study), so excluding them
      * loses no functionality while removing the race's other half.
-     *
-     * Static files from public/ are excluded too. /sw.js, /manifest.json,
-     * /pdf.worker.min.mjs (1.3 MB), videos and models used to run the full
-     * session refresh on every request that carried the cookie, delaying
-     * them and adding more racers for the single-use refresh token.
      */
-    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|js|mjs|json|webmanifest|txt|xml|glb|mp4|webm|mp3|woff2?|ttf|css|map)$).*)",
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
     // Feature-flag gate only (see above) — never reaches updateSession.
     "/api/lecture-notes/:path*",
     "/api/lecture-notes",

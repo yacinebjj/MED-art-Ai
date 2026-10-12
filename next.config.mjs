@@ -31,11 +31,11 @@ const CONTENT_SECURITY_POLICY = [
   // a WebSocket) for live group chat; without it this CSP would silently
   // break that feature while leaving everything else looking fine.
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com",
-  // components/course-viewer's "Afficher le cours"
+  // components/course/workspace/FileViewerModal.tsx's "Afficher le cours"
   // iframes either the raw uploaded file straight from Supabase Storage
   // (PDF) or Google Docs Viewer (docs.google.com/gview, for Office formats)
   // — both needed here, or that feature silently breaks for every file type.
-  // view.officeapps.live.com: CourseViewer previews DOCX/XLSX courses in
+  // view.officeapps.live.com: FileViewerModal previews DOCX/XLSX courses in
   // Microsoft Office Online embed viewer — without it that preview was blocked.
   "frame-src https://accounts.google.com https://docs.google.com https://view.officeapps.live.com https://*.supabase.co",
   "frame-ancestors 'self'",

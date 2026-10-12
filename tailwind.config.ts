@@ -177,22 +177,8 @@ const config: Config = {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
-        // Dashboard mascot's arm: two gentle waves, then a pause (was an
-        // infinite framer-motion loop on the main thread).
-        "mascot-wave": {
-          "0%, 32.5%, 65%, 100%": { transform: "rotate(0deg)" },
-          "16.25%, 48.75%": { transform: "rotate(-12deg)" },
-        },
-        // Streak flame flicker, then a pause (was an infinite framer-motion loop).
-        "flame-flicker": {
-          "0%, 66%, 100%": { transform: "scale(1) rotate(0deg)" },
-          "22%": { transform: "scale(1.05) rotate(-3deg)" },
-          "44%": { transform: "scale(1.08) rotate(3deg)" },
-        },
       },
       animation: {
-        "mascot-wave": "mascot-wave 4s ease-in-out infinite",
-        "flame-flicker": "flame-flicker 3.6s ease-in-out infinite",
         "fade-in": "fade-in 0.25s ease-out",
         "dash-flow": "dash-flow 1s linear infinite",
         "aurora-breathe": "aurora-breathe 12s ease-in-out infinite",

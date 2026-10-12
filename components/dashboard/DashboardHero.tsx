@@ -44,13 +44,15 @@ export function HeroMascot({ className }: { className?: string }) {
       {/* stethoscope */}
       <path d="M 44 54 Q 44 66 50 70 Q 56 66 56 54" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" />
       <circle cx="50" cy="72" r="3.2" fill="#7c3aed" />
-      {/* left arm — a slow, gentle wave, pivoting at the shoulder. CSS, so
-          it stops entirely while the mascot is hidden (phones) instead of
-          ticking on the main thread forever like the framer loop did. */}
-      <g className="animate-mascot-wave motion-reduce:animate-none" style={{ transformOrigin: "22px 70px", transformBox: "view-box" }}>
+      {/* left arm — a slow, gentle wave, pivoting at the shoulder */}
+      <motion.g
+        style={{ transformOrigin: "22px 70px" }}
+        animate={{ rotate: [0, -12, 0, -12, 0] }}
+        transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 1.4, ease: "easeInOut" }}
+      >
         <path d="M 22 70 Q 10 65 8 50" fill="none" stroke="#ffffff" strokeWidth="10" strokeLinecap="round" />
         <circle cx="7" cy="47" r="6.5" fill="#fbcfa0" />
-      </g>
+      </motion.g>
       {/* right arm */}
       <path d="M 78 70 Q 86 76 84 88" fill="none" stroke="#ffffff" strokeWidth="10" strokeLinecap="round" />
       {/* neck */}

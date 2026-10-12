@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "framer-motion";
 import { Stethoscope } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -12,8 +13,8 @@ const SIZE_MAP = {
 /**
  * "Medical cross intertwined with an AI neural node" brand mark — a
  * gradient stethoscope glyph with two expanding pulse rings (CSS
- * animate-ring-pulse, tailwind.config.ts) and two orbiting nodes (CSS
- * rotation). Used for the sidebar logo (sm, mostly static-feeling),
+ * animate-ring-pulse, tailwind.config.ts) and two orbiting nodes (framer-
+ * motion rotation). Used for the sidebar logo (sm, mostly static-feeling),
  * and full loading/empty states (lg, all motion active) — the same mark at
  * every size so it reads as one consistent identity, not a different logo
  * per context.
@@ -35,16 +36,22 @@ export function AnimatedBrandMark({
         style={{ animationDelay: "1.2s" }}
       />
 
-      {/* CSS rotation, not framer-motion: an infinite JS animation ticks on
-          the main thread every frame (this mark is always visible in the
-          mobile top bar), while a CSS transform animation runs on the
-          compositor and costs the page nothing. */}
-      <div className="absolute inset-0 animate-[spin_6s_linear_infinite] motion-reduce:animate-none" aria-hidden>
+      <motion.div
+        className="absolute inset-0"
+        animate={{ rotate: 360 }}
+        transition={{ repeat: Infinity, ease: "linear", duration: 6 }}
+        aria-hidden
+      >
         <span className={cn("absolute left-1/2 top-0 -translate-x-1/2 rounded-full bg-cyan-400 shadow-[0_0_8px_2px_rgba(34,211,238,0.7)]", dims.dot)} />
-      </div>
-      <div className="absolute inset-0 animate-[spin_8s_linear_infinite_reverse] motion-reduce:animate-none" aria-hidden>
+      </motion.div>
+      <motion.div
+        className="absolute inset-0"
+        animate={{ rotate: -360 }}
+        transition={{ repeat: Infinity, ease: "linear", duration: 8 }}
+        aria-hidden
+      >
         <span className={cn("absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full bg-violet-400 shadow-[0_0_6px_2px_rgba(167,139,250,0.7)]", dims.dot)} />
-      </div>
+      </motion.div>
 
       <span
         className={cn(

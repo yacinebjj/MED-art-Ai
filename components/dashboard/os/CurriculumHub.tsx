@@ -116,10 +116,8 @@ const ModuleCard = memo(function ModuleCard({
   }
 
   return (
-    // No `layout` prop: layout animations measure every card on every
-    // re-render of the hub (data, auth and language updates all trigger
-    // one), which made the dashboard stutter on phones.
     <motion.div
+      layout
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.96 }}
@@ -205,11 +203,10 @@ const ModuleCard = memo(function ModuleCard({
             <span className="tabular-nums text-foreground">{stats && stats.courseCount > 0 ? `${progress}%` : "—"}</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            {/* scaleX, not width: a transform animates without re-running layout on every frame for every card. */}
             <motion.div
-              className={cn("h-full w-full origin-left rounded-full bg-gradient-to-r", progress >= MASTERED_PCT ? "from-emerald-500 to-teal-400" : "from-primary-500 to-violet-500")}
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: progress / 100 }}
+              className={cn("h-full rounded-full bg-gradient-to-r", progress >= MASTERED_PCT ? "from-emerald-500 to-teal-400" : "from-primary-500 to-violet-500")}
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
               transition={{ duration: 0.8, ease: "easeOut" }}
             />
           </div>
@@ -536,7 +533,7 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
           <p className="text-sm text-muted-foreground">{tCockpit("noModuleMatch", language)}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 sm:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
+        <motion.div layout className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 sm:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
           <AnimatePresence initial={false}>
             {visible.map((entry) => (
               <ModuleCard
@@ -550,7 +547,7 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
               />
             ))}
           </AnimatePresence>
-        </div>
+        </motion.div>
       )}
 
       {selectedUnit && unitStatsOpen && (

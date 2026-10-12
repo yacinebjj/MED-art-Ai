@@ -35,7 +35,7 @@ export interface StudioCourseFull {
   casClinique: (Omit<GastriteCasCliniqueData, "slug" | "section"> | StudioClinicalRelevanceData) | null;
   qcms: GastriteQcmsData | null;
   exemplesAnalogies: string | null;
-  /** Public Supabase Storage URL of the originally uploaded file (see app/api/upload/route.ts's uploadSourceFile) — null for courses created from pasted text, or uploaded before this column existed. Powers CourseViewer's "Afficher le cours". */
+  /** Public Supabase Storage URL of the originally uploaded file (see app/api/upload/route.ts's uploadSourceFile) — null for courses created from pasted text, or uploaded before this column existed. Powers FileViewerModal's "Afficher le cours". */
   sourceFileUrl: string | null;
   /** ISO timestamp, bumped by /api/studio/generate and /api/studio/regenerate on every section save (row-level, not per-section — see StudioPanel's "Récemment généré" list, the only current consumer). Powers a relative "il y a 5 minutes" label instead of the previous, per-row-identical "{sourceCount} source(s)" text. */
   updatedAt: string | null;

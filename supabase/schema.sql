@@ -1884,10 +1884,10 @@ alter table profiles add column if not exists weakness_remediation_generated_at 
 -- Native file viewer for "Afficher le cours" — the original uploaded
 -- document's public Supabase Storage URL (bucket "course-sources", see
 -- app/api/upload/route.ts's uploadSourceFile), so the workspace can render
--- the REAL PDF/DOCX/PPTX (components/course-viewer)
+-- the REAL PDF/DOCX/PPTX (components/course/workspace/FileViewerModal.tsx)
 -- instead of only the raw extracted text. NULL for courses created from
 -- pasted text (no original file) or uploaded before this column existed —
--- CourseViewer falls back to raw_text in both cases.
+-- FileViewerModal falls back to raw_text in both cases.
 -- ---------------------------------------------------------------------------
 alter table studio_courses add column if not exists source_file_url text;
 

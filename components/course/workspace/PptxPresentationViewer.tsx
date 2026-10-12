@@ -1,13 +1,12 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Minimize2, PanelLeftClose, PanelLeftOpen, Play } from "lucide-react";
 // Type-only: erased at compile time. The library itself is browser-only and
 // is loaded with a dynamic import inside an effect (see the load effect).
-import type { PptxViewer as PptxRenderer, SlideHandle } from "@aiden0z/pptx-renderer";
+import type { PptxViewer, SlideHandle } from "@aiden0z/pptx-renderer";
 import { cn } from "@/lib/utils";
-import { loadWithRetry } from "../load-with-retry";
-import { ViewerStatus, useMediaQuery } from "../shared";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 /** Gap kept around the slide on the stage (per side), like PowerPoint's normal view. None while presenting. */
 const STAGE_PADDING_DESKTOP = 32;
@@ -36,60 +35,6 @@ const PPTX_ZIP_LIMITS = {
   maxConcurrency: 8,
 };
 
-/**
- * Downloads the deck, reporting progress when the server sends a
- * Content-Length (Supabase Storage does). A 40 MB deck on a phone used to sit
- * on a bare "Chargement..." for a long time, which read as "broken".
- */
-async function downloadWithProgress(url: string, signal: AbortSignal, onProgress: (ratio: number) => void): Promise<ArrayBuffer> {
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const total = Number(res.headers.get("content-length")) || 0;
-  if (!res.body || !total) return res.arrayBuffer();
-
-  const reader = res.body.getReader();
-  const bytes = new Uint8Array(total);
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (received + value.length > bytes.length) {
-      // Content-Length was wrong (e.g. compressed transfer): fall back to growing the buffer.
-      const grown = new Uint8Array(Math.max(bytes.length * 2, received + value.length));
-      grown.set(bytes.subarray(0, received));
-      return finishGrowing(reader, grown, received, value);
-    }
-    bytes.set(value, received);
-    received += value.length;
-    onProgress(received / total);
-  }
-  return toArrayBuffer(bytes, received);
-}
-
-/** The first `size` bytes as a standalone ArrayBuffer (no copy when the buffer is already exactly that size). */
-function toArrayBuffer(bytes: Uint8Array, size: number): ArrayBuffer {
-  const exact = size === bytes.byteLength ? bytes : bytes.slice(0, size);
-  return exact.buffer as ArrayBuffer;
-}
-
-async function finishGrowing(reader: ReadableStreamDefaultReader<Uint8Array>, buffer: Uint8Array, received: number, pending: Uint8Array): Promise<ArrayBuffer> {
-  let bytes = buffer;
-  let size = received;
-  let chunk: Uint8Array | undefined = pending;
-  while (chunk) {
-    if (size + chunk.length > bytes.length) {
-      const grown = new Uint8Array(Math.max(bytes.length * 2, size + chunk.length));
-      grown.set(bytes.subarray(0, size));
-      bytes = grown;
-    }
-    bytes.set(chunk, size);
-    size += chunk.length;
-    const next = await reader.read();
-    chunk = next.done ? undefined : next.value;
-  }
-  return toArrayBuffer(bytes, size);
-}
-
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
@@ -110,7 +55,7 @@ const SlideThumbnail = memo(function SlideThumbnail({
   showNumber,
   onSelect,
 }: {
-  viewer: PptxRenderer;
+  viewer: PptxViewer;
   index: number;
   width: number;
   aspect: number;
@@ -165,7 +110,7 @@ const SlideThumbnail = memo(function SlideThumbnail({
         style={{ width, height: Math.round(width / aspect) }}
         className={cn(
           // No transition: the selection ring switches instantly, like PowerPoint's slide rail.
-          "cv-pptx-stage pointer-events-none overflow-hidden rounded-[3px] bg-white",
+          "pptx-stage pointer-events-none overflow-hidden rounded-[3px] bg-white",
           active ? "ring-2 ring-primary-500 ring-offset-2 ring-offset-neutral-950" : "ring-1 ring-white/10 group-hover:ring-white/40"
         )}
       />
@@ -186,14 +131,10 @@ const SlideThumbnail = memo(function SlideThumbnail({
  * "Présenter" slideshow — true fullscreen where the browser allows it
  * (otherwise it covers the viewer), click/→ to advance, Esc to leave.
  *
- * Calls `onFailed` when the deck can't be downloaded or parsed (the shell then
- * shows the extracted text).
+ * Renders `fallback` instead when the deck can't be downloaded or parsed.
  */
-export function PptxViewer({ fileUrl, title, onFailed }: { fileUrl: string; title: string; onFailed: () => void }) {
+export function PptxPresentationViewer({ fileUrl, title, fallback }: { fileUrl: string; title: string; fallback: ReactNode }) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const onFailedRef = useRef(onFailed);
-  onFailedRef.current = onFailed;
-  const [progress, setProgress] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -202,7 +143,7 @@ export function PptxViewer({ fileUrl, title, onFailed }: { fileUrl: string; titl
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [viewer, setViewer] = useState<PptxRenderer | null>(null);
+  const [viewer, setViewer] = useState<PptxViewer | null>(null);
   const [slideCount, setSlideCount] = useState(0);
   const [current, setCurrent] = useState(0);
   const [aspect, setAspect] = useState(16 / 9);
@@ -237,21 +178,19 @@ export function PptxViewer({ fileUrl, title, onFailed }: { fileUrl: string; titl
     if (!box) return;
     const controller = new AbortController();
     let cancelled = false;
-    let instance: PptxRenderer | null = null;
+    let instance: PptxViewer | null = null;
 
     setStatus("loading");
     setViewer(null);
     setSlideCount(0);
     setCurrent(0);
-    setProgress(null);
 
     (async () => {
       try {
-        // Download and library chunk in parallel: neither waits on the other.
-        const [bytes, { PptxViewer: Viewer }] = await Promise.all([
-          downloadWithProgress(fileUrl, controller.signal, setProgress),
-          loadWithRetry(() => import("@aiden0z/pptx-renderer")),
-        ]);
+        const res = await fetch(fileUrl, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const bytes = await res.arrayBuffer();
+        const { PptxViewer: Viewer } = await import("@aiden0z/pptx-renderer");
         if (cancelled) return;
 
         const opened = await Viewer.open(bytes, box, {
@@ -283,9 +222,8 @@ export function PptxViewer({ fileUrl, title, onFailed }: { fileUrl: string; titl
         setStatus("ready");
       } catch (error) {
         if (cancelled || controller.signal.aborted) return;
-        console.error("[course-viewer] Impossible d'afficher la présentation:", error);
+        console.error("[pptx-viewer] Impossible d'afficher la présentation:", error);
         setStatus("error");
-        onFailedRef.current();
       }
     })();
 
@@ -445,7 +383,7 @@ export function PptxViewer({ fileUrl, title, onFailed }: { fileUrl: string; titl
     next();
   }
 
-  if (status === "error") return null; // the shell swaps in the text fallback via onFailed
+  if (status === "error") return <>{fallback}</>;
 
   const railVisible = isDesktop && railOpen && !presenting && status === "ready" && viewer !== null;
   const stripVisible = !isDesktop && !presenting && status === "ready" && viewer !== null;
@@ -456,7 +394,6 @@ export function PptxViewer({ fileUrl, title, onFailed }: { fileUrl: string; titl
       ref={rootRef}
       role="region"
       aria-roledescription="présentation"
-      data-presenting={presenting ? "true" : undefined}
       aria-label={`Présentation : ${title}`}
       className={cn(
         "flex h-full min-h-0 w-full overflow-hidden",
@@ -502,12 +439,10 @@ export function PptxViewer({ fileUrl, title, onFailed }: { fileUrl: string; titl
           onClick={handleStageClick}
         >
           {/* The renderer owns this node's children; React never renders into it. */}
-          <div ref={boxRef} className="cv-pptx-stage shrink-0" style={{ width: boxWidth, height: boxHeight }} />
+          <div ref={boxRef} className="pptx-stage shrink-0" style={{ width: boxWidth, height: boxHeight }} />
 
           {status === "loading" && (
-            <div className="absolute inset-0">
-              <ViewerStatus label={progress !== null && progress < 1 ? "Téléchargement de la présentation..." : "Préparation des diapositives..."} progress={progress} />
-            </div>
+            <p className="absolute inset-0 flex items-center justify-center text-sm text-neutral-400">Chargement de la présentation...</p>
           )}
 
           {presenting && (

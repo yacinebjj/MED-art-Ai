@@ -98,7 +98,6 @@ import { ExplicationGeneratingLabel, type ExplicationProgressView } from "@/comp
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
-import { CourseViewer, preloadCourseViewer } from "@/components/course-viewer";
 
 /**
  * Each of these 3 is a genuinely heavy render tree (multi-mode tabs,
@@ -112,14 +111,14 @@ import { CourseViewer, preloadCourseViewer } from "@/components/course-viewer";
  * (useParams + client-only state), so there's no SSR output to lose.
  */
 /**
- * Dialogs that are closed on arrival (stats, upload, command palette):
- * code-split out of the course page's initial bundle, fetched after first
- * paint instead of blocking it. The course file viewer is its own
- * self-contained, already code-split module (components/course-viewer).
+ * Dialogs that are closed on arrival (stats, upload, command palette, file
+ * viewer with react-pdf/pdfjs): code-split out of the course page's initial
+ * bundle, fetched after first paint instead of blocking it.
  */
 const CourseStatsModal = dynamic(() => import("@/components/dashboard/CourseStatsModal").then((m) => m.CourseStatsModal), { ssr: false });
 const UploadModal = dynamic(() => import("@/components/dashboard/UploadModal").then((m) => m.UploadModal), { ssr: false });
 const CommandPalette = dynamic(() => import("@/components/course/workspace/os/CommandPalette").then((m) => m.CommandPalette), { ssr: false });
+const FileViewerModal = dynamic(() => import("@/components/course/workspace/FileViewerModal").then((m) => m.FileViewerModal), { ssr: false });
 
 const GastriteResumeStudio = dynamic(
   () => import("@/components/course/workspace/GastriteResumeStudio").then((m) => m.GastriteResumeStudio),
@@ -757,7 +756,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                     />
                   )}
 
-                  <DropdownMenu onOpenChange={(open) => open && preloadCourseViewer()}>
+                  <DropdownMenu>
                     <DropdownMenuTrigger
                       className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground"
                       aria-label="Options de la source"
@@ -1068,7 +1067,7 @@ export default function ModuleWorkspacePage() {
   // Live per-part progress for the multi-request Explication pipeline — see
   // the onProgress call site below for why surfacing this matters.
   const [explicationProgress, setExplicationProgress] = useState<ExplicationProgressView | null>(null);
-  // "Afficher le cours" — the self-contained CourseViewer module, decoupled
+  // "Afficher le cours" — a self-contained modal (FileViewerModal), decoupled
   // from the isSplitScreen/studioPanel system entirely, showing whichever
   // course's file was requested from the Sources list.
   const [fileViewerCourse, setFileViewerCourse] = useState<StudioCourseFull | null>(null);
@@ -1868,9 +1867,7 @@ export default function ModuleWorkspacePage() {
     [toast, language]
   );
 
-  /** "Afficher le cours" — opens CourseViewer for this course, loading it first if it isn't already the active one. Fully decoupled from the chat/Studio split-screen. */
-  const closeFileViewer = useCallback(() => setFileViewerCourse(null), []);
-
+  /** "Afficher le cours" — opens FileViewerModal for this course, loading it first if it isn't already the active one. Fully decoupled from the chat/Studio split-screen. */
   const handleShowCourseFile = useCallback(async (courseId: number) => {
     const course = await handleSelectCourse(courseId);
     if (course) setFileViewerCourse(course);
@@ -2879,11 +2876,12 @@ export default function ModuleWorkspacePage() {
       <CommandPalette open={isPaletteOpen} onOpenChange={setIsPaletteOpen} items={paletteItems} groupOrder={PALETTE_GROUPS} />
 
       {fileViewerCourse !== null && (
-        <CourseViewer
+        <FileViewerModal
+          open
+          onOpenChange={(open) => !open && setFileViewerCourse(null)}
           title={fileViewerCourse.title}
           fileUrl={fileViewerCourse.sourceFileUrl ?? null}
           rawText={fileViewerCourse.rawText ?? ""}
-          onClose={closeFileViewer}
         />
       )}
     </div>
