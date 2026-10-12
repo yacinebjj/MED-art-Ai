@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { needsLaunchWarmup, useAppWarmup, WARMUP_MAX_MS } from "@/lib/pwa/app-warmup";
 
 const FADE_MS = 320;
 
@@ -27,6 +28,7 @@ const SPLASH_CSS = `
 #medart-splash .medart-splash-logo{animation:medart-splash-breathe 1.8s ease-in-out infinite}
 #medart-splash .medart-splash-track{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 56px);width:min(160px,40vw);height:3px;transform:translateX(-50%);overflow:hidden;border-radius:999px;background:#e0f2fe}
 #medart-splash .medart-splash-bar{position:absolute;inset:0 auto 0 0;width:40%;border-radius:999px;background:linear-gradient(90deg,#0ea5e9,#14b8a6);animation:medart-splash-slide 1.1s cubic-bezier(.65,0,.35,1) infinite}
+#medart-splash .medart-splash-bar[data-progress="true"]{animation:none;transform:none;transition:width .35s ease}
 ${SHARED_KEYFRAMES}
 @media (prefers-reduced-motion:reduce){#medart-splash .medart-splash-logo{animation:none}#medart-splash .medart-splash-bar{animation-duration:2.4s}}
 `;
@@ -48,24 +50,59 @@ ${SHARED_KEYFRAMES}
  *    already-rendered hero and read as a "white flash" over the dark landing.
  * Both leave as soon as React has hydrated (this effect) and painted once
  * more — no longer waiting for web fonts or the window load event (images,
- * 3D background), which held it up to 3.5 s.
+ * 3D background), which held it up to 3.5 s. Exception: the first dashboard
+ * launch of an app session, held (with a real progress bar) for the launch
+ * warm-up — see the effect below.
  */
 export function SplashScreen() {
   const pathname = usePathname() ?? "/";
   const fullSplash = SPLASH_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
   const [phase, setPhase] = useState<"visible" | "leaving" | "gone">("visible");
+  const [tracking, setTracking] = useState(false);
+  const warmDone = useAppWarmup((state) => state.done);
+  const warmTotal = useAppWarmup((state) => state.total);
 
   useEffect(() => {
     let fadeTimer: ReturnType<typeof setTimeout> | undefined;
-    const frame = requestAnimationFrame(() => {
-      setPhase("leaving");
-      fadeTimer = setTimeout(() => setPhase("gone"), FADE_MS);
-    });
+    let capTimer: ReturnType<typeof setTimeout> | undefined;
+    let frame: number | undefined;
+    let unsubscribe: (() => void) | undefined;
+    let left = false;
+    const leave = () => {
+      if (left) return;
+      left = true;
+      frame = requestAnimationFrame(() => {
+        setPhase("leaving");
+        fadeTimer = setTimeout(() => setPhase("gone"), FADE_MS);
+      });
+    };
+
+    // First dashboard launch of this app session: stay up while
+    // components/pwa/AppWarmup.tsx prefetches pages and loads the Studio
+    // code, so the app is fully usable the moment it appears. Capped —
+    // never longer than WARMUP_MAX_MS (+ fade margin), and the CSS timeout
+    // above still hides it at 8 s if JavaScript stalls entirely.
+    const holdForWarmup = window.location.pathname.startsWith("/dashboard") && needsLaunchWarmup();
+    if (!holdForWarmup) {
+      leave();
+    } else {
+      setTracking(true);
+      if (useAppWarmup.getState().finished) leave();
+      unsubscribe = useAppWarmup.subscribe((state) => {
+        if (state.finished) leave();
+      });
+      capTimer = setTimeout(leave, WARMUP_MAX_MS + 500);
+    }
+
     return () => {
-      cancelAnimationFrame(frame);
+      if (frame !== undefined) cancelAnimationFrame(frame);
       if (fadeTimer) clearTimeout(fadeTimer);
+      if (capTimer) clearTimeout(capTimer);
+      unsubscribe?.();
     };
   }, []);
+
+  const progressPct = warmTotal > 0 ? Math.max(8, Math.round((warmDone / warmTotal) * 100)) : 8;
 
   if (phase === "gone") return null;
 
@@ -83,7 +120,11 @@ export function SplashScreen() {
       <style dangerouslySetInnerHTML={{ __html: SPLASH_CSS }} />
       <Image src="/logo.png" alt="MedArt AI" width={120} height={156} sizes="120px" priority className="medart-splash-logo" />
       <div className="medart-splash-track" aria-hidden="true">
-        <div className="medart-splash-bar" />
+        <div
+          className="medart-splash-bar"
+          data-progress={tracking ? "true" : undefined}
+          style={tracking ? { width: `${progressPct}%` } : undefined}
+        />
       </div>
     </div>
   );

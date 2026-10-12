@@ -2,6 +2,7 @@ import { AuthProvider } from "@/providers/AuthProvider";
 import { PomodoroAuthSync } from "@/providers/PomodoroAuthSync";
 import { LanguageStoreHydrator } from "@/components/course/workspace/AiLanguageSelect";
 import { ChunkErrorRecovery } from "@/components/pwa/ChunkErrorRecovery";
+import { AppWarmup } from "@/components/pwa/AppWarmup";
 import { PaywallProvider } from "@/components/billing/PaywallProvider";
 import { DeviceGuard } from "@/components/security/DeviceGuard";
 import { OnboardingProvider } from "@/lib/onboarding/onboarding-context";
@@ -22,6 +23,7 @@ export default function DashboardLayout({
       <PomodoroAuthSync />
       <LanguageStoreHydrator />
       <ChunkErrorRecovery />
+      <AppWarmup />
       <PaywallProvider>
         <OnboardingProvider>{children}</OnboardingProvider>
         <DeviceGuard />

@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Loader2, Sparkles, X } from "lucide-react";
@@ -35,7 +36,7 @@ export function LectureQuizPanel({ smartNotes }: LectureQuizPanelProps) {
   async function handleGenerate() {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/lecture-notes/insights", {
+      const res = await fetchKeepAlive("/api/lecture-notes/insights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ smartNotes }),

@@ -73,6 +73,7 @@ import { SOURCES_WIDTH, STUDIO_WIDTH, useWorkspaceLayout } from "@/hooks/useWork
 import { useHotkeys, useModKeyLabel } from "@/hooks/useHotkeys";
 import { LAB_TOOLS, type LabToolId } from "@/lib/workspace-lab";
 import { recordLastOpenedCourse } from "@/lib/dashboard/local-activity";
+import { fetchWarm } from "@/lib/pwa/warm-fetch";
 // Global AI-content language: read at REQUEST time (getContentLanguage), so a
 // plain tile click generates in the language chosen anywhere in the app — not
 // only when the student opens a tile's options popover.
@@ -91,7 +92,9 @@ import { useCourseChat } from "@/hooks/useCourseChat";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { MAX_LEITNER_BOX } from "@/lib/srs";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
-import { DEMO_SECTIONS, buildQuotedChatMessage, visibleStudioSections, type DemoSectionId } from "@/lib/demo-content";
+import { DEMO_SECTIONS, buildQuotedChatMessage, visibleStudioSections, type DemoSectionId, type JsonSectionId } from "@/lib/demo-content";
+import { fetchKeepAlive, KeepAliveConnectionLost } from "@/lib/http/fetch-keep-alive";
+import { waitForSavedStudioSection } from "@/lib/studio-section-recovery";
 import { getInFlightGeneration, trackGeneration } from "@/lib/studio-generation-tracker";
 import { PodcastGeneratingLabel } from "@/components/course/workspace/PodcastGeneratingLabel";
 import { ExplicationGeneratingLabel, type ExplicationProgressView } from "@/components/course/workspace/ExplicationGeneratingLabel";
@@ -245,6 +248,56 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
       return { ...course, audioUrl: value as StudioCourseFull["audioUrl"] };
   }
 }
+
+/** The client's current value of a JSON section, serialized — lets connection-loss recovery tell a freshly saved result from the old one. */
+function sectionJson(course: StudioCourseFull | undefined, section: DemoSectionId): string | null {
+  if (!course) return null;
+  const value =
+    section === "explication"
+      ? course.explication
+      : section === "resume"
+        ? course.resume
+        : section === "cas_clinique"
+          ? course.casClinique
+          : section === "qcm"
+            ? course.qcms
+            : section === "exemples_analogies"
+              ? course.exemplesAnalogies
+              : null;
+  return value === null || value === undefined ? null : JSON.stringify(value);
+}
+
+/**
+ * Reads back a section whose request lost its connection after the server
+ * accepted it (see lib/studio-section-recovery.ts), shaped like a normal
+ * /api/studio/generate response so callers need no special case.
+ */
+async function recoverSavedSection(
+  section: JsonSectionId,
+  courseId: number,
+  lost: KeepAliveConnectionLost,
+  startedAt: number,
+  previousJson: string | null
+): Promise<{ res: Response; data: StudioGenerateResponse }> {
+  const value = await waitForSavedStudioSection({
+    courseId,
+    section,
+    // Server clock when it accepted the request; without it, rely on the content changing.
+    savedAfter: lost.serverStartedAt ?? 0,
+    deadlineAt: startedAt + SECTION_RECOVERY_WINDOW_MS,
+    previousJson,
+  });
+  if (value === null) {
+    return {
+      res: new Response(null, { status: 504 }),
+      data: { success: false, error: "La connexion a été coupée pendant la génération et le résultat n'a pas pu être récupéré. Réessaie." },
+    };
+  }
+  return { res: new Response(null, { status: 200 }), data: { success: true, data: value, cached: false } };
+}
+
+/** Route maxDuration (300 s) + margin: past this, the server has either saved the section or given up and refunded. */
+const SECTION_RECOVERY_WINDOW_MS = 330_000;
 
 /** Composite key for the generating/regenerating-by-key Sets below — course-scoped so an in-flight section on one course can never bleed into another's identically-named tile. */
 function sectionKey(courseId: number, section: DemoSectionId): string {
@@ -880,7 +933,7 @@ export default function ModuleWorkspacePage() {
     setLoading(true);
     setNotFound(false);
 
-    fetch(`/api/curriculum/modules/${params.id}`)
+    fetchWarm(`/api/curriculum/modules/${params.id}`)
       .then(async (res) => {
         if (!res.ok) throw new Error("not found");
         const body = await res.json();
@@ -1115,7 +1168,7 @@ export default function ModuleWorkspacePage() {
     if (!Number.isFinite(moduleId)) return;
     let cancelled = false;
 
-    fetch(`/api/studio/courses?moduleId=${moduleId}`)
+    fetchWarm(`/api/studio/courses?moduleId=${moduleId}`)
       .then((res) => res.json())
       .then((body) => {
         if (!cancelled && body.success) setCourses(body.courses);
@@ -1140,7 +1193,7 @@ export default function ModuleWorkspacePage() {
   >([]);
 
   useEffect(() => {
-    fetch("/api/srs/course-mastery")
+    fetchWarm("/api/srs/course-mastery")
       .then((res) => res.json())
       .then((data) => setCourseMastery(data.mastery ?? []))
       .catch(() => setCourseMastery([]));
@@ -1380,7 +1433,7 @@ export default function ModuleWorkspacePage() {
         let cached: boolean;
 
         if (id === "infographic") {
-          const res = await fetch("/api/studio/infographic", {
+          const res = await fetchKeepAlive("/api/studio/infographic", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ courseId, language: options?.language ?? getContentLanguage(), model: options?.model }),
@@ -1559,12 +1612,23 @@ export default function ModuleWorkspacePage() {
 
     const regenerationPromise = (async () => {
       try {
-        const res = await fetch("/api/studio/regenerate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ courseId, section: id, language: getContentLanguage() }),
-        });
-        const data = await res.json().catch(() => ({}));
+        const previousJson = sectionJson(courseCacheRef.current.get(courseId), id);
+        const startedAt = Date.now();
+        let res: Response;
+        let data: StudioGenerateResponse & { remaining?: number };
+        try {
+          res = await fetchKeepAlive("/api/studio/regenerate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ courseId, section: id, language: getContentLanguage() }),
+          });
+          data = await res.json().catch(() => ({ success: false }));
+        } catch (error) {
+          // Accepted by the server, then the connection dropped: it still
+          // saves the new series — read it back, never POST (and pay) again.
+          if (!(error instanceof KeepAliveConnectionLost)) throw error;
+          ({ res, data } = await recoverSavedSection("qcm", courseId, error, startedAt, previousJson));
+        }
         if (!res.ok || !data.success) {
           // The server is the authority on the cap: when it says 0 remain, sync the counter so the entry disables.
           if (typeof data?.remaining === "number" && data.remaining <= 0) {
@@ -1691,7 +1755,10 @@ export default function ModuleWorkspacePage() {
     courseId: number,
     extra?: Record<string, unknown>
   ): Promise<{ res: Response; data: StudioGenerateResponse }> {
-    const res = await fetch("/api/studio/generate", {
+    // fetchKeepAlive: the route streams heartbeats while the model works, so
+    // the connection is never idle long enough for iOS/mobile networks to
+    // drop it (the old "HTTP 0" on QCM / Cas clinique).
+    const res = await fetchKeepAlive("/api/studio/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // studyYear is sent unconditionally (not folded into `extra`) — it
@@ -1704,13 +1771,15 @@ export default function ModuleWorkspacePage() {
   }
 
   /**
-   * Wraps one generation call with two independent, silent recovery layers
-   * — the student never sees an error banner for either unless BOTH the
-   * original attempt and its one retry fail:
-   *  1. A thrown network error (connection dropped mid-request, a brief
-   *     wifi hiccup) gets one retry after a short pause — no toast, no
-   *     visible interruption, just a slightly longer wait.
-   *  2. A 401 doesn't necessarily mean the student is actually logged out —
+   * Wraps one generation call with silent recovery layers — the student
+   * never sees an error banner unless recovery itself fails:
+   *  1. fetch() throwing (the request never reached the server: a brief
+   *     wifi hiccup) gets one retry after a short pause.
+   *  2. The connection dropping AFTER the server accepted the request
+   *     (KeepAliveConnectionLost) is NOT retried — the server keeps
+   *     generating and saves the section itself, so the result is read back
+   *     from Supabase instead. Re-POSTing would reserve quota a second time.
+   *  3. A 401 doesn't necessarily mean the student is actually logged out —
    *     Supabase's refresh tokens are single-use, and a concurrent request
    *     elsewhere in the app can win the race to rotate the same cookie
    *     first (see lib/supabase/session-server.ts). Forcing this browser
@@ -1719,17 +1788,29 @@ export default function ModuleWorkspacePage() {
    *     logged out" error mid-generation.
    */
   async function postStudioGenerate(actionType: DemoSectionId, courseId: number, extra?: Record<string, unknown>) {
+    const previousJson = sectionJson(courseCacheRef.current.get(courseId), actionType);
+    const send = async (): Promise<{ res: Response; data: StudioGenerateResponse }> => {
+      const startedAt = Date.now();
+      try {
+        return await requestStudioGeneration(actionType, courseId, extra);
+      } catch (error) {
+        if (!(error instanceof KeepAliveConnectionLost)) throw error;
+        console.warn(`[studio:${actionType}] ${error.message} — récupération du résultat sauvegardé.`);
+        return recoverSavedSection(actionType as JsonSectionId, courseId, error, startedAt, previousJson);
+      }
+    };
+
     let attempt: { res: Response; data: StudioGenerateResponse };
     try {
-      attempt = await requestStudioGeneration(actionType, courseId, extra);
+      attempt = await send();
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      attempt = await requestStudioGeneration(actionType, courseId, extra);
+      attempt = await send();
     }
 
     if (attempt.res.status === 401) {
       await supabase.auth.getUser();
-      attempt = await requestStudioGeneration(actionType, courseId, extra);
+      attempt = await send();
     }
 
     return attempt;

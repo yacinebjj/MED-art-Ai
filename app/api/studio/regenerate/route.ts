@@ -1,5 +1,6 @@
 import { buildLanguageDirective, parseContentLanguage } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { callOpenRouter, OpenRouterError, STUDIO_MODEL } from "@/lib/ai/openrouter";
 import { STUDIO_BYPASS_MOCK, STUDIO_PROMPT_CONFIG, STUDIO_SECTION_KEYS, buildStudioSystemMessage } from "@/lib/ai/studio-prompts";
 import { parseAndValidateStudioSection } from "@/lib/ai/studio-section-validation";
@@ -272,7 +273,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 // other section. Set to false to refuse even that.
 const REGENERATION_ENABLED = true as boolean;
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handleWithBackstop(request: NextRequest): Promise<NextResponse> {
   if (!REGENERATION_ENABLED) {
     return NextResponse.json(
       { success: false, error: "La régénération est désactivée : le contenu déjà généré est conservé et partagé." },
@@ -286,3 +287,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
+
+// Streams heartbeats/progress while the model works, so the connection is never idle (see lib/http/keep-alive.ts).
+export const POST = withKeepAlive(handleWithBackstop);

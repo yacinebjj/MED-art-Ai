@@ -1,5 +1,6 @@
 import { buildLanguageDirective } from "@/lib/ai/language-directive";
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { callOpenRouter, OpenRouterError, STUDIO_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import {
@@ -525,7 +526,7 @@ class StudioGenerationFailure extends Error {
  * Never masks a real, already-handled error response — only ever catches
  * what the handler itself did not.
  */
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handleWithBackstop(request: NextRequest): Promise<NextResponse> {
   try {
     return await handlePost(request);
   } catch (error) {
@@ -533,3 +534,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
+
+// Streams heartbeats/progress while the model works, so the connection is never idle (see lib/http/keep-alive.ts).
+export const POST = withKeepAlive(handleWithBackstop);

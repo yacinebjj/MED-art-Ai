@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
 import { AiRunGovernor, classifyUpstreamStatus, type GovernorStopReason } from "@/lib/ai-run-governor";
 import {
@@ -279,7 +280,7 @@ async function postJson(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const res = await fetchKeepAlive(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

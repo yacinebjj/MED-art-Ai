@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { FormEvent, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Clock, PlayCircle, RotateCcw, Save, Send, Sparkles } from "lucide-react";
@@ -51,7 +52,7 @@ export function PlanGenerationView({ planId, initialCoachMessage, initialDays, o
     setError(null);
 
     try {
-      const res = await fetch("/api/study-planner/generate", {
+      const res = await fetchKeepAlive("/api/study-planner/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId, message }),

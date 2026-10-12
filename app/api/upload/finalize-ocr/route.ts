@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
@@ -33,7 +34,7 @@ export const maxDuration = 280;
  * own response already returned; the file is already sitting in Storage
  * from the original upload, so this never needs the file re-uploaded.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -155,3 +156,5 @@ async function digestStoredFile(supabase: ReturnType<typeof getSupabaseAdmin>, p
     return null;
   }
 }
+
+export const POST = withKeepAlive(postHandler);

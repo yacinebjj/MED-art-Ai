@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -411,7 +412,7 @@ export default function ModuleWorkspacePage() {
           let status = 0;
           let retryAfter: number | null = null;
           try {
-            const res = await fetch("/api/workspace/module-synthesis/batch", {
+            const res = await fetchKeepAlive("/api/workspace/module-synthesis/batch", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ moduleId, courseIds: batch, type, runToken: plan.runToken }),
@@ -441,7 +442,7 @@ export default function ModuleWorkspacePage() {
     await Promise.all(Array.from({ length: Math.max(1, Math.min(6, batches.length)) }, worker));
 
     setSynthesisProgress({ done: missing.length, total: missing.length, phase: "assemble" });
-    const res = await fetch("/api/workspace/module-synthesis", {
+    const res = await fetchKeepAlive("/api/workspace/module-synthesis", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -475,7 +476,7 @@ export default function ModuleWorkspacePage() {
       if (selectedIds.size > DIRECT_SYNTHESIS_MAX_COURSES) {
         ({ ok, body } = await runBatchedSynthesis(type, Array.from(selectedIds)));
       } else {
-        const res = await fetch("/api/workspace/module-synthesis", {
+        const res = await fetchKeepAlive("/api/workspace/module-synthesis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ moduleId, courseIds: Array.from(selectedIds), type, ...(type === "global_summary" ? { options: summaryOptions } : {}) }),

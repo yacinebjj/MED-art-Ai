@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { callOpenRouter, ECONOMY_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
@@ -49,7 +50,7 @@ function sanitizeKit(raw: unknown): LectureStudyKit {
  * notes. Ephemeral like app/api/lecture-notes/insights (cached on the
  * student's device, nothing persisted server-side): rate-limited, no quota.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -93,3 +94,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });
   }
 }
+
+export const POST = withKeepAlive(postHandler);

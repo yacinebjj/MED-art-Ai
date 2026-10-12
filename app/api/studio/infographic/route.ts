@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -99,7 +100,7 @@ function decodeImageDataUrl(dataUrl: string): { buffer: Buffer; contentType: str
  * to an image response — see lib/demo-content.ts's JsonSectionId comment for
  * why "infographic" is excluded from every one of those mappings.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -275,3 +276,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 });
   }
 }
+
+export const POST = withKeepAlive(postHandler);

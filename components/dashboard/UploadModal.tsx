@@ -17,12 +17,37 @@ import { OcrSuggestedError } from "@/lib/upload-client";
 import { useCyberTilt } from "@/components/cyber/hooks";
 import { CourseCreditLine } from "@/components/billing/UsageNotices";
 import { notifyUsageChanged } from "@/hooks/useUsage";
+import { isPptxFile, PPTX_MIME_TYPE } from "@/lib/file-kind";
 
 // Must match the server-side MAX_FILE_BYTES in app/api/generate-course/route.ts
 // AND app/api/upload/route.ts. Checked here so an oversized file is rejected
 // instantly, before spending a student's time and mobile data.
 const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo
 const MAX_BATCH_FILES = 10;
+
+/**
+ * Downloads a Drive presentation straight from the browser as a real .pptx
+ * (Google Slides are exported to PPTX by Drive itself). Returns null on any
+ * failure — oversized export, revoked token, network — so the caller falls
+ * back to the server-side text import instead of failing the whole import.
+ */
+async function downloadDrivePresentation(picked: DriveListItem, accessToken: string): Promise<File | null> {
+  const isGoogleSlides = picked.mimeType === "application/vnd.google-apps.presentation";
+  const url = isGoogleSlides
+    ? `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(picked.id)}/export?mimeType=${encodeURIComponent(PPTX_MIME_TYPE)}`
+    : `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(picked.id)}?alt=media`;
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (blob.size === 0 || blob.size > MAX_UPLOAD_FILE_BYTES) return null;
+    const baseName = picked.name.replace(/\.pptx$/i, "").trim() || "Présentation";
+    // globalThis: this module imports lucide's `File` icon, which shadows the DOM constructor.
+    return new globalThis.File([blob], `${baseName}.pptx`, { type: PPTX_MIME_TYPE });
+  } catch {
+    return null;
+  }
+}
 
 type Method = "upload" | "drive" | "text" | "link";
 type QueueStatus = "pending" | "uploading" | "done" | "error";
@@ -299,12 +324,29 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     }
   }
 
-  /** A Drive file is downloaded + extracted server-side, then goes through the same text path. */
+  /**
+   * A Drive file is downloaded + extracted server-side, then goes through the
+   * same text path — EXCEPT a presentation when the caller handles real files
+   * (module workspace): that one is downloaded here as a genuine .pptx and
+   * goes through the normal file upload, so the original deck is stored and
+   * "Afficher le cours" shows its slides instead of only extracted text.
+   */
   async function handleDriveFileSelected(picked: DriveListItem, accessToken: string) {
     if (isDriveImporting) return;
     setError(null);
     setIsDriveImporting(true);
     try {
+      if (onSubmitFile && isPptxFile(picked.mimeType, picked.name)) {
+        const deck = await downloadDrivePresentation(picked, accessToken);
+        if (deck) {
+          const result = await onSubmitFile(deck);
+          onUploaded(result);
+          toast({ variant: "success", title: "Source importée depuis Drive" });
+          notifyUsageChanged();
+          handleOpenChange(false);
+          return;
+        }
+      }
       const res = await fetch("/api/drive/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

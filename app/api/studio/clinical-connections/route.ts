@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
@@ -38,7 +39,7 @@ interface StudioCourseRow {
  * and app/api/notes/summarize's own pattern: rate-limit only, no quota
  * reservation, same CHEAP_MODEL tier.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -139,3 +140,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });
   }
 }
+
+export const POST = withKeepAlive(postHandler);

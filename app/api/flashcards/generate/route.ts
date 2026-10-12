@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { CHEAP_MODEL, FLASHCARD_MODEL, callOpenRouter, type ChatMessageInput, type OpenRouterResponseFormat } from "@/lib/ai/openrouter";
@@ -195,6 +196,8 @@ async function generateCards(messages: Parameters<typeof callOpenRouter>[0]): Pr
       temperature: 0.3,
       timeoutMs: FALLBACK_TIMEOUT_MS,
       responseFormat: { type: "json_object" },
+      // Already FLASHCARD_MODEL's fallback; its automatic fallback would be that same failed model.
+      fallbackModels: [],
     });
     return parseGeneratedCards(raw);
   }
@@ -234,7 +237,7 @@ function parseGeneratedCards(raw: string): FlashcardQA[] {
  * At most one model call per request bounds latency and spend; the deck
  * only asks again once the student is close to the end of a batch.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -472,3 +475,5 @@ export async function POST(request: NextRequest) {
     remainingUnseen: Math.max(0, poolSize - batch.length),
   });
 }
+
+export const POST = withKeepAlive(postHandler);

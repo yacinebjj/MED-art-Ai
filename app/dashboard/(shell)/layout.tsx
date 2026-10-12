@@ -15,6 +15,7 @@ import { Spotlight } from "@/components/layout/cockpit/Spotlight";
 import { LabLauncher } from "@/components/layout/cockpit/LabLauncher";
 import { NightModeOverlay } from "@/components/layout/cockpit/ThemeModeSwitcher";
 import { useOnboarding } from "@/lib/onboarding/onboarding-context";
+import { useAppWarmup } from "@/lib/pwa/app-warmup";
 import { t } from "@/lib/translations";
 import { cn } from "@/lib/utils";
 
@@ -136,6 +137,7 @@ export default function DashboardShellLayout({
   // One shared /api/dashboard/overview for Topbar, Sidebar and the dashboard page.
   useCockpitSync(user?.id ?? null);
   const onboarding = useOnboarding();
+  const warmupFinished = useAppWarmup((state) => state.finished);
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
   const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname) || isGroupChatRoomRoute(pathname);
   const isChromelessOnMobile = CHROMELESS_MOBILE_ROUTES.includes(pathname);
@@ -205,7 +207,8 @@ export default function DashboardShellLayout({
       </a>
       <div className="aurora-canvas-bg relative flex h-dvh w-full overflow-hidden">
         <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
-        {!OPAQUE_STAGE_ROUTES.includes(pathname) && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
+        {/* Decorative three.js scene: mounted only after the launch warm-up so it never competes with the app's own code on a phone's first load. */}
+        {warmupFinished && !OPAQUE_STAGE_ROUTES.includes(pathname) && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
 
         <div className="hidden shrink-0 lg:block lg:p-3">
           <Sidebar />

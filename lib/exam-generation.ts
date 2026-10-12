@@ -620,6 +620,8 @@ export async function generateExamJob(
           // ~350 tokens per QCM measured; generous headroom, never the old 16k.
           maxTokens: 1_000 * count + 1_500,
           bypassMock: true,
+          // `chain` above is the model ladder; no automatic fallback inside a step.
+          fallbackModels: [],
           providerSort: "throughput",
           timeoutMs: step.timeoutMs,
           ...(isVariation ? { temperature: VARIATION_TEMPERATURE } : {}),

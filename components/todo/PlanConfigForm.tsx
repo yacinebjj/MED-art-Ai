@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { DragEvent, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { CalendarDays, FileText, ImageIcon, Loader2, Sparkles, UploadCloud, X } from "lucide-react";
@@ -133,7 +134,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
         .map((t) => t.trim())
         .filter(Boolean);
 
-      const generateRes = await fetch("/api/study-planner/generate", {
+      const generateRes = await fetchKeepAlive("/api/study-planner/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

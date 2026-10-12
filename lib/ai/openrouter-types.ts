@@ -49,10 +49,16 @@ export interface OpenRouterChatCompletionResponse {
 
 /** One SSE `data: {...}` chunk from the streaming chat-completions endpoint (generateOpenRouterAudio, streamOpenRouter). */
 export interface OpenRouterStreamChunk {
+  /** Upstream provider that served this completion (e.g. "Parasail"). */
+  provider?: string;
+  /** Mid-stream failure: OpenRouter reports errors after a 200 as a data frame. */
+  error?: { code?: number | string; message?: string };
   choices?: {
     finish_reason?: string;
     delta?: {
       content?: string;
+      /** Streamed reasoning tokens (reasoning models); activity, not answer text. */
+      reasoning?: string;
       /** Audio-modality delta (generateOpenRouterAudio) — base64 PCM chunk plus its running transcript. */
       audio?: { data?: string; transcript?: string };
     };

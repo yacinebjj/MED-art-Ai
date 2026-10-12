@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
@@ -28,7 +29,7 @@ Consignes STRICTES :
  * light on-demand AI add-ons (notes summarize, Studio clinical-connections):
  * rate-limit only, no quota reservation, CHEAP_MODEL tier.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -96,3 +97,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });
   }
 }
+
+export const POST = withKeepAlive(postHandler);

@@ -1,3 +1,4 @@
+import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
 import type { ExamPreferences } from "@/lib/exam-preferences";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
@@ -54,7 +55,7 @@ const TOP_UP_ROUNDS = 2;
 
 async function post<T>(url: string, payload: unknown): Promise<{ status: number; retryAfter: number | null; body: T }> {
   try {
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const res = await fetchKeepAlive(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const body = (await res.json().catch(() => ({}))) as T;
     // A non-JSON failure (platform timeout page, gateway error) still carries its real cause.
     if (!res.ok && body && typeof body === "object" && typeof (body as { error?: unknown }).error !== "string") {

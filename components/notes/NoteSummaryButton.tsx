@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Copy, Loader2, Sparkles, X } from "lucide-react";
@@ -29,7 +30,7 @@ export function NoteSummaryButton({ getPlainText }: NoteSummaryButtonProps) {
     if (!text) return;
     setIsLoading(true);
     try {
-      const res = await fetch("/api/notes/summarize", {
+      const res = await fetchKeepAlive("/api/notes/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text }),
