@@ -23,7 +23,7 @@ import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
 import { reserveAssistantTurn } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { isAssistantMode, isAssistantStyle } from "@/lib/assistant-modes";
+import { isAssistantMode, isAssistantStyle, type AssistantMode } from "@/lib/assistant-modes";
 import { buildAssistantSystemPrompt, DASHBOARD_ASSISTANT_SYSTEM_PROMPT } from "@/lib/ai/assistant-prompts";
 
 export const runtime = "nodejs";
@@ -81,6 +81,25 @@ const MAX_DOCUMENT_CHARS = 12000;
 // (see maxDuration above) without any real student needing more than this
 // for a single reply.
 const MAX_OUTPUT_TOKENS = 8192;
+
+// Paid tier (CHAT_MODEL) ceilings — 2026-10-12, explicit product order (cost).
+// Plain questions are concise by prompt now (120-250 words, 400 max), so the
+// default only stops a runaway; each quick action keeps room for the format
+// it asks for (up to 10 QCM with a per-option correction, 12 flashcards, a
+// revision sheet, a differential table) so it is never cut mid-answer. The
+// free chain keeps MAX_OUTPUT_TOKENS above (reasoning headroom, no cost).
+const PAID_MAX_OUTPUT_TOKENS_DEFAULT = 900;
+// Image questions (ECONOMY_MODEL): room for a concise read of an ECG / imaging
+// plus the model's capped thinking.
+const PAID_MAX_OUTPUT_TOKENS_VISION = 2500;
+const PAID_MAX_OUTPUT_TOKENS_BY_MODE: Record<AssistantMode, number> = {
+  clinical_case: 1000,
+  mcq: 3000,
+  differential: 1500,
+  summary: 1800,
+  simplify: 700,
+  flashcards: 1500,
+};
 
 // 0.3, aligned on app/api/courses/chat/route.ts (was 0.5 here): same model,
 // but medical answers need precision over variety — a lower temperature
@@ -231,7 +250,17 @@ export async function POST(request: NextRequest) {
       } as unknown as ChatMessageInput,
     ];
     try {
-      const stream = await streamOpenRouter(visionMessages, { model: ECONOMY_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.3, providerSort: "latency" });
+      // Reasoning capped like this model's other call sites (lecture-notes):
+      // uncapped, gemini-3.7-flash billed hidden thinking at $3.75/M — live
+      // 2026-10-12, one question: 965 reasoning tokens, $0.0054, 18.8 s vs
+      // 0, $0.0019, 7.6 s with this cap, same answer length.
+      const stream = await streamOpenRouter(visionMessages, {
+        model: ECONOMY_MODEL,
+        maxTokens: PAID_MAX_OUTPUT_TOKENS_VISION,
+        temperature: 0.3,
+        reasoning: { effort: "low" },
+        providerSort: "latency",
+      });
       return new NextResponse(stream, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     } catch (error) {
       console.error("[dashboard-assistant] Analyse d'image échouée:", error instanceof Error ? error.message : error);
@@ -250,7 +279,16 @@ export async function POST(request: NextRequest) {
     try {
       // CHAT_MODEL (Qwen3-30B-2507) since 2026-10-07, was CHEAP_MODEL
       // (qwen-2.5-72b, measured 14-42 tok/s — the copilot's slowness).
-      const stream = await streamOpenRouter(messages, { model: CHAT_MODEL, maxTokens: MAX_OUTPUT_TOKENS, temperature: ANSWER_TEMPERATURE, providerSort: "latency" });
+      // qwen3.7-flash since 2026-10-12 — a hybrid thinking model, reasoning
+      // switched OFF explicitly (see CHAT_MODEL in lib/ai/openrouter.ts).
+      const paidMaxTokens = isAssistantMode(mode) ? PAID_MAX_OUTPUT_TOKENS_BY_MODE[mode] : PAID_MAX_OUTPUT_TOKENS_DEFAULT;
+      const stream = await streamOpenRouter(messages, {
+        model: CHAT_MODEL,
+        maxTokens: paidMaxTokens,
+        temperature: ANSWER_TEMPERATURE,
+        reasoning: { enabled: false },
+        providerSort: "latency",
+      });
       return new NextResponse(stream, {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },

@@ -457,7 +457,14 @@ export async function runStudioExplicationDeltaPipeline(
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { model: EXPLICATION_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { enabled: false }, providerIgnore: EXPLICATION_IGNORED_PROVIDERS }
+        {
+          model: EXPLICATION_MODEL,
+          maxTokens: 16384,
+          bypassMock: true,
+          reasoning: { enabled: false },
+          providerOrder: EXPLICATION_PROVIDER_ORDER,
+          providerIgnore: EXPLICATION_IGNORED_PROVIDERS,
+        }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -488,7 +495,14 @@ export async function runStudioExplicationDeltaPipeline(
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      { model: EXPLICATION_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { enabled: false }, providerIgnore: EXPLICATION_IGNORED_PROVIDERS }
+      {
+        model: EXPLICATION_MODEL,
+        maxTokens: 4000,
+        bypassMock: true,
+        reasoning: { enabled: false },
+        providerOrder: EXPLICATION_PROVIDER_ORDER,
+        providerIgnore: EXPLICATION_IGNORED_PROVIDERS,
+      }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -1123,6 +1137,17 @@ const GROUNDING_INSTRUCTION = `CADRAGE STRICT (prioritaire) :
 const EXPLICATION_IGNORED_PROVIDERS = ["DeepInfra", "GMICloud"];
 
 /**
+ * deepseek-v3.2 deployments tried first, in this order; OpenRouter's normal
+ * fallbacks still apply after them (minus EXPLICATION_IGNORED_PROVIDERS).
+ * Replaces `providerSort: "throughput"`, which — once GMICloud was excluded —
+ * routed every part to Friendli, the priciest usable host ($0.50/$1.50 per M
+ * vs Baidu $0.28/$0.42). 2026-10-12 live, same Explication-sized request:
+ * Baidu 44-65 tok/s, 0 reasoning tokens, finish "stop", ~$0.0006-0.0008 per
+ * call (8/8 OK); Friendli 38-53 tok/s, ~$0.0036-0.0038 per call, and one 429.
+ */
+const EXPLICATION_PROVIDER_ORDER = ["Baidu", "Friendli"];
+
+/**
  * Paragraphs that are the model talking about its task instead of teaching:
  * reasoning that a provider leaked into `content`, or the instructions echoed
  * back. Matched per paragraph; a real medical paragraph never mentions the
@@ -1226,10 +1251,10 @@ export async function generateExplicationPart(
     // passages. 0.4 keeps the prose natural while sticking to the extracts.
     temperature: 0.4,
     timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
-    // Fastest-decoding provider of the 13 serving deepseek-v3.2: a part's
-    // wall-clock is bounded by decode speed (up to 12,000 tokens), so this
-    // is what directly shortens every part and avoids timeouts.
-    providerSort: "throughput" as const,
+    // Cheapest host that decodes as fast as the fastest one — see
+    // EXPLICATION_PROVIDER_ORDER (a part's wall-clock is bounded by decode
+    // speed, up to 12,000 tokens, so speed still matters as much as price).
+    providerOrder: EXPLICATION_PROVIDER_ORDER,
     // Only providers that honor `reasoning: { enabled: false }` — one that
     // ignores it writes the model's thinking straight into the answer (the
     // "it shows its reasoning" reports) — and never the fp4-quantized

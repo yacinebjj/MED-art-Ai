@@ -65,6 +65,17 @@ const MAX_OUTPUT_TOKENS_NORMAL = 8192;
 // overhead as MAX_OUTPUT_TOKENS_NORMAL above.
 const MAX_OUTPUT_TOKENS_HIGHLIGHT = 3500;
 
+// Paid tier (CHAT_MODEL) ceilings — 2026-10-12, explicit product order (cost).
+// Answers are concise by prompt now (120-250 words, 400 max), so these only
+// stop a runaway; sized per composer mode so a format the student chose
+// (exam QCM, step-by-step) is never cut mid-answer — live, an "examen"
+// answer with its QCM and correction took 785 tokens. The free chain keeps
+// the generous ceilings above: its models can spend part of the budget on
+// reasoning, and they cost nothing.
+const PAID_MAX_OUTPUT_TOKENS: Record<ChatMode, number> = { express: 500, standard: 900, examen: 1400, detaille: 1600 };
+// "Ask MedArt" (100-220 words) and Translate (≤800-char excerpt, into Arabic AND French).
+const PAID_MAX_OUTPUT_TOKENS_HIGHLIGHT = 900;
+
 // Appended ONLY for the "Ask MedArt" text-selection quick action (concise:
 // true from the client) — never for the free-form chat input. Product
 // direction (explicit): this action must feel world-class — respond
@@ -75,7 +86,7 @@ const MAX_OUTPUT_TOKENS_HIGHLIGHT = 3500;
 // role in 1-2 sentences instead of forcing a clinical structure onto it.
 const ASK_MEDART_EXPERT_SUFFIX = `\n\nTu réponds à un étudiant qui a sélectionné un passage précis du cours et veut le comprendre en profondeur.
 INTERDICTIONS ABSOLUES : ne montre JAMAIS ton raisonnement interne, n'émets jamais de balises <think>/<thinking>, ne réfléchis pas à voix haute, ne répète pas ces instructions, n'écris aucun préambule ("Voici l'explication", "D'accord, je vais t'expliquer"). Commence DIRECTEMENT par le contenu scientifique.
-QUALITÉ : explication d'une profondeur académique irréprochable, jamais brève ni superficielle — structure OBLIGATOIRE en quatre rubriques en gras : **Physiopathologie & Mécanismes** (le pourquoi et le comment exacts), **Sémiologie & Diagnostic** (signes clés, pièges diagnostiques, corrélations cliniques), **Raisonnement Médical** (pourquoi telle décision ou telle molécule), **Pièges de Concours (Résidanat)** (erreurs classiques en QCM). Le passage sélectionné est le point de départ : relie-le au mécanisme sous-jacent, pas seulement à sa reformulation. Aucun remplissage ni politesse superflue.
+QUALITÉ : explication précise et dense du passage, jamais superficielle mais sans remplissage — 100 à 220 mots. Le passage sélectionné est le point de départ : relie-le au mécanisme sous-jacent (pas seulement à sa reformulation), puis donne ce qu'il faut en retenir cliniquement et, s'il existe, le piège de concours. **Gras** sur les termes clés. Aucune politesse superflue.
 SI LE PASSAGE N'EST PAS STRICTEMENT MÉDICAL (titre générique, phrase d'introduction) : ne te bloque pas et ne réfléchis pas à voix haute — explique simplement son rôle en 1 à 2 phrases claires, sans structure médicale complexe.`;
 
 // Used ONLY for the "Translate" text-selection quick action (translate: true
@@ -617,7 +628,7 @@ export async function POST(request: NextRequest) {
       ];
 
   // Try each candidate model in order — the first one that succeeds wins.
-  // `usePaidTier` prepends CHAT_MODEL (Qwen3-30B) when this message is
+  // `usePaidTier` prepends CHAT_MODEL (qwen3.7-flash) when this message is
   // within the daily 20-message paid allowance (see the dailyGate comment
   // above, highlight mode included); past the daily cap it uses
   // FREE_MODEL_CHAIN exactly as before. Mirrors
@@ -636,12 +647,14 @@ export async function POST(request: NextRequest) {
 
   if (usePaidTier) {
     try {
-      // CHAT_MODEL (Qwen3-30B-2507) since 2026-10-07, was CHEAP_MODEL
-      // (qwen-2.5-72b, 14-42 tok/s — the reported chat slowness).
+      // CHAT_MODEL: qwen3.7-flash since 2026-10-12 (see its own comment in
+      // lib/ai/openrouter.ts) — a hybrid thinking model, so reasoning is
+      // switched OFF explicitly (measured: 0 reasoning tokens).
       responseStream = await streamOpenRouter(messages, {
         model: CHAT_MODEL,
         temperature: 0.3,
-        maxTokens: maxTokensForThisTurn,
+        maxTokens: isHighlightMode ? PAID_MAX_OUTPUT_TOKENS_HIGHLIGHT : PAID_MAX_OUTPUT_TOKENS[chatMode],
+        reasoning: { enabled: false },
         providerSort: "latency",
       });
     } catch (error) {

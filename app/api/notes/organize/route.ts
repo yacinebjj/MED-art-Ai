@@ -35,6 +35,13 @@ const MAX_OUTPUT_TOKENS = 16_000;
 const CHARS_PER_TOKEN_ESTIMATE = 3.2;
 const HTML_MARKUP_OVERHEAD = 1.7;
 
+// The note itself had no length cap — every token of an arbitrarily large
+// paste was billed, and past ~30,000 chars the rewrite can't fit
+// MAX_OUTPUT_TOKENS anyway (it fails as truncated, after being paid for).
+// Rejected up front instead, with headroom above that estimate so a note
+// the estimate over-counts still goes through.
+const MAX_ORGANIZE_INPUT_CHARS = 40_000;
+
 function computeOrganizeMaxTokens(inputLength: number): number {
   const estimated = Math.ceil((inputLength / CHARS_PER_TOKEN_ESTIMATE) * HTML_MARKUP_OVERHEAD);
   return Math.min(MAX_OUTPUT_TOKENS, Math.max(MIN_OUTPUT_TOKENS, estimated));
@@ -85,6 +92,12 @@ export async function POST(request: NextRequest) {
   const { content } = (body ?? {}) as { content?: unknown };
   if (typeof content !== "string" || !content.trim()) {
     return NextResponse.json({ error: "Le contenu est vide." }, { status: 400 });
+  }
+  if (content.length > MAX_ORGANIZE_INPUT_CHARS) {
+    return NextResponse.json(
+      { error: "Cette note est trop longue pour être organisée en une seule fois (40 000 caractères maximum) — découpe-la en plusieurs notes." },
+      { status: 413 }
+    );
   }
 
   try {

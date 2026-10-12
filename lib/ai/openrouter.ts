@@ -360,7 +360,17 @@ export const STREAMLAKE_FIRST = ["StreamLake"];
 // reported slowness. qwen3-30b-a3b-instruct-2507 measured 154 tok/s here, is
 // cheaper on both input and output, non-thinking, and a newer generation.
 // Not yet validated on real student chat traffic.
-export const CHAT_MODEL = FLASHCARD_MODEL;
+//
+// 2026-10-12 (explicit product order: Copilot cost down to ~$0.0001/message)
+// -> qwen/qwen3.7-flash (Alibaba, $0.03/M in, $0.13/M out — 3x cheaper input
+// and 2.3x cheaper output than qwen3-30b, whose host pool had also collapsed
+// that day). MUST be called with `reasoning: { enabled: false }` (hybrid
+// thinking model) — both routes do. Live, streamed, with the concise prompts
+// and real course excerpts: first token in 1.5-2.6 s, 0 reasoning tokens,
+// 180-375 words, $0.000076-0.000176 per message (11/11 OK), vs $0.000427 for
+// qwen3-30b on the same message. NOT qwen3.8-flash: $0.15/$0.47 per M would
+// cost MORE than qwen3-30b on a chat-sized input.
+export const CHAT_MODEL = "qwen/qwen3.7-flash";
 
 /**
  * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
@@ -1375,7 +1385,8 @@ export async function streamOpenRouter(
     model?: string;
     timeoutMs?: number;
     temperature?: number;
-    reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean };
+    /** `enabled: false` turns thinking OFF on a hybrid model (CHAT_MODEL) — same option callOpenRouter takes. */
+    reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean; enabled?: boolean };
     /** OpenRouter provider routing — "latency" favours the fastest first token for a chat reply. */
     providerSort?: "throughput" | "latency" | "price";
   }

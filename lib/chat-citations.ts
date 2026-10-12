@@ -37,6 +37,10 @@ export interface CitationLocation {
 }
 
 const CITATION_PATTERN = /\[\[\s*(?:source|cite)\s*:\s*([^|\]]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi;
+// A complete marker missing its "| quote" half — e.g. `[[source : "Épistaxis"]]`,
+// seen from qwen3.7-flash (CHAT_MODEL) about once in seven answers. It has
+// nothing to verify, so it is dropped instead of rendering as raw text.
+const MALFORMED_CITATION_PATTERN = /\s*\[\[\s*(?:source|cite)\s*:[^|\]]*\]\]/gi;
 // Built from an escaped string (not a regex literal) so the combining-mark
 // range stays readable ASCII in source — same idiom as
 // lib/course-generation-shared.ts's slugify.
@@ -69,15 +73,17 @@ export function extractCitations(markdown: string): { markdown: string; citation
     return ` [${index}](#cite-${index})`;
   });
 
-  return { markdown: replaced.replace(/\[\[[^\]]*\]?$/, ""), citations };
+  return { markdown: replaced.replace(MALFORMED_CITATION_PATTERN, "").replace(/\[\[[^\]]*\]?$/, ""), citations };
 }
 
 /** Plain-text version of a reply for copy / notes / read-aloud — markers become «quote» inline. */
 export function stripCitationMarkers(markdown: string): string {
-  return markdown.replace(CITATION_PATTERN, (_full, _title: string, rawQuote: string) => {
-    const quote = rawQuote.replace(QUOTE_EDGE_CHARS, "").trim();
-    return quote ? ` (« ${quote} »)` : "";
-  });
+  return markdown
+    .replace(CITATION_PATTERN, (_full, _title: string, rawQuote: string) => {
+      const quote = rawQuote.replace(QUOTE_EDGE_CHARS, "").trim();
+      return quote ? ` (« ${quote} »)` : "";
+    })
+    .replace(MALFORMED_CITATION_PATTERN, "");
 }
 
 export function citationIndexFromHref(href: string | undefined): number | null {

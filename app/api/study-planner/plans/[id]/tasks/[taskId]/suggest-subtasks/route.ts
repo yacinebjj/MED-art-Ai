@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { callOpenRouter, OpenRouterError, HAIKU_MODEL } from "@/lib/ai/openrouter";
+import { callOpenRouter, OpenRouterError, CHAT_MODEL } from "@/lib/ai/openrouter";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveHighlightMessage, refundHighlightPool } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse } from "@/lib/course-generation-shared";
@@ -101,9 +101,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const raw = await callOpenRouter(
       [{ role: "system", content: buildPrompt(title.trim()) }],
-      // HAIKU_MODEL — small, fast, cheap: a 2-4 item suggestion list for one
-      // task title doesn't need a heavier tier.
-      { model: HAIKU_MODEL, maxTokens: 500, bypassMock: true, timeoutMs: 60_000 }
+      // CHAT_MODEL (qwen3.7-flash, reasoning off) since 2026-10-12, was
+      // HAIKU_MODEL ($1/$5 per M, ~$0.002-0.003 a click) — a 2-4 item list
+      // for one task title. Live with this exact prompt: valid JSON 3/3,
+      // 3-4 s, 0 reasoning tokens, $0.000015-0.000024 a click.
+      { model: CHAT_MODEL, maxTokens: 500, bypassMock: true, timeoutMs: 60_000, reasoning: { enabled: false } }
     );
 
     const parsed = parseJsonResponse(raw);
