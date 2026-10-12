@@ -75,6 +75,61 @@ export async function subscribeToPush(): Promise<{ success: boolean; error?: str
   }
 }
 
+function isSameKey(current: ArrayBuffer | null, expected: Uint8Array): boolean {
+  if (!current) return false;
+  const bytes = new Uint8Array(current);
+  return bytes.length === expected.length && bytes.every((value, i) => value === expected[i]);
+}
+
+/**
+ * Self-heal for "notifications dead on every device". The opt-in button
+ * trusts the BROWSER's subscription (it shows "Désactiver les rappels"), but
+ * the server only pushes to what `profiles.push_subscriptions` holds — on
+ * 2026-10-12 that was 1 device across 32 accounts. Any lost server copy (a
+ * failed /api/push/subscribe after the browser had subscribed, another
+ * account signed in on this browser, an endpoint pruned after a 404/410)
+ * left a device that looked subscribed but could never receive anything.
+ *
+ * Re-registers this browser's EXISTING subscription for the signed-in
+ * student (the route dedupes by endpoint). Never creates one: no
+ * subscription means the student never opted in or turned reminders off,
+ * and that choice is respected. A subscription made with another VAPID key
+ * than the deployed one is replaced — permission is already granted, so
+ * nothing is shown to the student. Resolves `true` once the server has it.
+ */
+export async function syncPushSubscription(): Promise<boolean> {
+  if (!isPushSupported() || Notification.permission !== "granted") return false;
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  if (!publicKey) return false;
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+    let subscription = await registration?.pushManager.getSubscription();
+    if (!registration || !subscription) return false;
+
+    const applicationServerKey = urlBase64ToUint8Array(publicKey);
+    // `options` is missing on older engines — the key can't be checked there, only re-sent.
+    const currentKey = subscription.options?.applicationServerKey;
+    if (currentKey !== undefined && !isSameKey(currentKey, applicationServerKey)) {
+      await subscription.unsubscribe();
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey as unknown as BufferSource,
+      });
+    }
+
+    const res = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    return res.ok;
+  } catch {
+    // Best-effort: the opt-in button keeps working exactly as before.
+    return false;
+  }
+}
+
 export async function unsubscribeFromPush(): Promise<{ success: boolean; error?: string }> {
   if (!isPushSupported()) return { success: true };
 

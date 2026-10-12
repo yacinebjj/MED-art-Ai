@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { getPushStatus } from "@/lib/push/subscribe";
+import { getPushStatus, syncPushSubscription } from "@/lib/push/subscribe";
 
 /**
  * 60 minutes. (Was a 2-minute TESTING value left in production — the cause
@@ -34,8 +34,30 @@ const CHECK_INTERVAL_MS = 30 * 1000;
 
 const STORAGE_KEY = "medart:last-push-dispatch-self-at";
 
+/** Set once this browser session has re-registered its push subscription with the server (see syncPushSubscription). */
+const SYNC_SESSION_KEY = "medart:push-subscription-synced";
+
 export function PushClientFallbackProvider({ children }: { children: React.ReactNode }) {
   const checkingRef = useRef(false);
+
+  // Once per browser session, and only after it actually reached the server
+  // (a signed-out page load answers 401 and is retried on the next load):
+  // make sure the server holds this device's existing subscription.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(SYNC_SESSION_KEY) === "1") return;
+    } catch {
+      // Storage blocked — sync anyway, the route is idempotent.
+    }
+    void syncPushSubscription().then((synced) => {
+      if (!synced) return;
+      try {
+        sessionStorage.setItem(SYNC_SESSION_KEY, "1");
+      } catch {
+        // Storage blocked — the next load simply syncs again.
+      }
+    });
+  }, []);
 
   useEffect(() => {
     async function tick() {
