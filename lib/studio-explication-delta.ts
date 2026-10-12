@@ -457,7 +457,7 @@ export async function runStudioExplicationDeltaPipeline(
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        { model: EXPLICATION_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { enabled: false } }
+        { model: EXPLICATION_MODEL, maxTokens: 16384, bypassMock: true, reasoning: { enabled: false }, providerIgnore: EXPLICATION_IGNORED_PROVIDERS }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -488,7 +488,7 @@ export async function runStudioExplicationDeltaPipeline(
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      { model: EXPLICATION_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { enabled: false } }
+      { model: EXPLICATION_MODEL, maxTokens: 4000, bypassMock: true, reasoning: { enabled: false }, providerIgnore: EXPLICATION_IGNORED_PROVIDERS }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -1112,8 +1112,15 @@ const GROUNDING_INSTRUCTION = `CADRAGE STRICT (prioritaire) :
 - N'invente aucun chiffre, aucune dose, aucune classification, aucune référence.
 - Le champ "explication" contient UNIQUEMENT le texte destiné à l'étudiant : jamais ta réflexion, ton plan, tes hésitations, ni aucune mention des "extraits", des "parties", du "JSON" ou de ces consignes.`;
 
-/** deepseek-v3.2 deployments never used for Explication: DeepInfra serves it in fp4 (degraded, incoherent long-form output). */
-const EXPLICATION_IGNORED_PROVIDERS = ["DeepInfra"];
+/**
+ * deepseek-v3.2 deployments never used for Explication: DeepInfra serves it in
+ * fp4 (degraded, incoherent long-form output). GMICloud ignores
+ * `reasoning: { enabled: false }` and `max_tokens` (2026-10-12 live test: up to
+ * 13,580 hidden reasoning tokens, 17,416 output tokens for a 12,000 cap, 230 s
+ * for one part) while still passing `require_parameters` — as the
+ * "throughput" pick it made every part hit EXPLICATION_PART_TIMEOUT_MS.
+ */
+const EXPLICATION_IGNORED_PROVIDERS = ["DeepInfra", "GMICloud"];
 
 /**
  * Paragraphs that are the model talking about its task instead of teaching:
