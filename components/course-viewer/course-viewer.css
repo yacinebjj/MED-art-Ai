@@ -1,0 +1,23 @@
+/*
+ * Course viewer styles — loaded with the viewer chunk only. Everything is
+ * scoped under .course-viewer so it can't leak into the app, and the app's
+ * global rules that would distort a rendered slide are undone here.
+ */
+
+/* Tailwind's preflight caps images/videos at their container's width
+   (max-width: 100%); slide images are absolutely positioned by the renderer
+   and may legitimately be wider than their wrapper. The slide itself is
+   clipped by its stage, so nothing overflows visually. */
+.course-viewer .cv-pptx-stage img,
+.course-viewer .cv-pptx-stage video,
+.course-viewer .cv-pptx-stage canvas {
+  max-width: none;
+}
+
+/* The renderer wraps tables in an overflow:hidden box sized to the table's
+   declared frame; real decks often have rows taller than that frame, which
+   cut the last rows off. */
+.course-viewer .cv-pptx-stage div:has(> table) {
+  overflow: visible !important;
+}
+

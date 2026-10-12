@@ -70,14 +70,13 @@ function StreakWidget({ userId }: { userId: string | null }) {
     <OsCard icon={Flame} iconClassName="from-orange-500 to-rose-500" title={tCockpit("streakTitle", language)} glow="hover:shadow-orange-500/15">
       <div className="flex items-center gap-4">
         <div className="relative">
-          <motion.span
-            className="block text-5xl leading-none"
-            animate={streak.current > 0 ? { scale: [1, 1.08, 1], rotate: [0, -3, 3, 0] } : undefined}
-            transition={{ duration: 2.4, repeat: Infinity, repeatDelay: 1.2 }}
+          {/* CSS keyframes (compositor), not an infinite framer-motion loop on the main thread. */}
+          <span
+            className={cn("block text-5xl leading-none", streak.current > 0 && "animate-flame-flicker motion-reduce:animate-none")}
             aria-hidden
           >
             {streak.current > 0 ? "🔥" : "🪵"}
-          </motion.span>
+          </span>
         </div>
         <div className="min-w-0">
           <p className="text-3xl font-extrabold tabular-nums tracking-tight text-foreground">

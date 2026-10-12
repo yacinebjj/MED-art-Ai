@@ -64,6 +64,18 @@ function writeCachedProfile(userId: string, profile: StudentCurriculumProfile): 
   }
 }
 
+/** Same account with the same visible data (refreshUser after updateUser() bumps updated_at, so edits still propagate). */
+function isSameUser(a: User | null, b: User | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.id === b.id &&
+    a.updated_at === b.updated_at &&
+    a.email === b.email &&
+    JSON.stringify(a.user_metadata) === JSON.stringify(b.user_metadata)
+  );
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createClient(), []);
   const [user, setUser] = useState<User | null>(null);
@@ -79,15 +91,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // fetch of the app (profile, curriculum, subscription, overview…) waited
     // behind on each cold open. Trusting the local session for the UI is
     // safe: every /api/** route verifies the user itself server-side.
+    // Keeps the previous object when nothing visible changed: getSession and
+    // the INITIAL_SESSION event both deliver the user at startup, and every
+    // TOKEN_REFRESHED delivers it again — each new object used to re-render
+    // every useAuth() consumer in the app.
+    const applyUser = (next: User | null) => setUser((current) => (isSameUser(current, next) ? current : next));
+
     supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
+      applyUser(data.session?.user ?? null);
       setLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      applyUser(session?.user ?? null);
       setLoading(false);
     });
 
@@ -178,26 +196,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
   }
 
-  const profile = user ? { ...profileFromUser(user), avatarUrl } : null;
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        curriculumProfile,
-        loading,
-        trial,
-        isSubscribed,
-        signOut,
-        refreshUser,
-        refreshCurriculumProfile: fetchCurriculumProfile,
-        refreshAvatarUrl: fetchAvatarUrl,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  // Memoized: a fresh object on every AuthProvider render re-rendered every
+  // useAuth() consumer (shell, sidebar, topbar, dashboard widgets…) about six
+  // times during startup alone. The functions only close over `supabase`
+  // (stable) and `user` (a dependency), so the memoized ones are never stale.
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      profile: user ? { ...profileFromUser(user), avatarUrl } : null,
+      curriculumProfile,
+      loading,
+      trial,
+      isSubscribed,
+      signOut,
+      refreshUser,
+      refreshCurriculumProfile: fetchCurriculumProfile,
+      refreshAvatarUrl: fetchAvatarUrl,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user, avatarUrl, curriculumProfile, loading, trial, isSubscribed]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

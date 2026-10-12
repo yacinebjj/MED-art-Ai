@@ -15,8 +15,8 @@ interface CookieToSet {
 const PROTECTED_PREFIXES = ["/dashboard", "/study"];
 
 /**
- * Upper bound on the Supabase round trip (getUser, which may also refresh
- * the session) before a navigation is let through. Without it, a slow or
+ * Upper bound on the Supabase round trip (getSession refreshing an expired
+ * access token) before a navigation is let through. Without it, a slow or
  * stalled connection — the norm for an installed PWA resumed on a mobile
  * network — left every client-side navigation waiting on this call with no
  * limit: the UI stayed on the old page until a manual reload.
@@ -89,6 +89,18 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
+  // The installed app always launches on "/" (manifest start_url). With a
+  // session cookie, go straight to /dashboard: verifying here as well meant
+  // two serial auth checks (up to 2 × AUTH_CHECK_TIMEOUT_MS) before the
+  // first byte of every launch. /dashboard's own load runs the check below
+  // and still sends a stale session to /login.
+  if (pathname === "/") {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/dashboard";
+    redirectUrl.search = "";
+    return NextResponse.redirect(redirectUrl);
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -110,14 +122,21 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
+  // getSession(), not getUser(): it reads the session from the cookie and
+  // only goes to the network when the access token has expired (to refresh
+  // it — which is what keeps the cookie fresh). getUser() asked Supabase Auth
+  // on EVERY full page load, the main cost of each app launch on a mobile
+  // network. That's enough here because this redirect is a UX gate only:
+  // every /api/** route still verifies the user itself (getAuthenticatedUser),
+  // so no data is ever served on the strength of this check.
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const authResult = await Promise.race([
     supabase.auth
-      .getUser()
-      .then(({ data }) => ({ timedOut: false as const, user: data.user }))
-      .catch(() => ({ timedOut: false as const, user: null })),
-    new Promise<{ timedOut: true; user: null }>((resolve) => {
-      timeoutId = setTimeout(() => resolve({ timedOut: true, user: null }), AUTH_CHECK_TIMEOUT_MS);
+      .getSession()
+      .then(({ data }) => ({ timedOut: false as const, signedIn: data.session !== null }))
+      .catch(() => ({ timedOut: false as const, signedIn: false })),
+    new Promise<{ timedOut: true; signedIn: false }>((resolve) => {
+      timeoutId = setTimeout(() => resolve({ timedOut: true, signedIn: false }), AUTH_CHECK_TIMEOUT_MS);
     }),
   ]);
   if (timeoutId) clearTimeout(timeoutId);
@@ -128,17 +147,15 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
-  const user = authResult.user;
-
-  if (!user && isProtected) {
+  if (!authResult.signedIn && isProtected) {
     return redirectToLogin(request, pathname);
   }
 
-  if (user && (pathname === "/login" || pathname === "/register" || pathname === "/")) {
+  if (authResult.signedIn && (pathname === "/login" || pathname === "/register")) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/dashboard";
     redirectUrl.search = "";
-    // Carry over any session cookies getUser() just refreshed: dropping
+    // Carry over any session cookies getSession() just refreshed: dropping
     // them made the /dashboard load right after this redirect refresh
     // again with the already-consumed refresh token.
     const redirect = NextResponse.redirect(redirectUrl);

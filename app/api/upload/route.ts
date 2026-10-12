@@ -41,7 +41,7 @@ async function ensureSourceFilesBucket(supabase: ReturnType<typeof getSupabaseAd
 /**
  * Uploads the ORIGINAL file bytes to Supabase Storage so "Afficher le cours"
  * can later render the real PDF/DOCX/PPTX instead of just its extracted text
- * (see components/course/workspace/FileViewerModal.tsx). Fails open: any
+ * (see components/course-viewer). Fails open: any
  * error here is logged and swallowed — text extraction (this route's actual
  * purpose) must never fail just because Storage is unreachable or
  * misconfigured; the workspace simply falls back to the raw-text view for

@@ -52,7 +52,7 @@ export const DialogContent = forwardRef<
   ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     overlayClassName?: string;
     onOverlayClick?: () => void;
-    /** Off for callers that are already full-screen (FileViewerModal). */
+    /** Off for callers that are already full-screen. */
     sheetOnMobile?: boolean;
   }
 >(({ className, overlayClassName, onOverlayClick, sheetOnMobile = true, children, ...props }, forwardedRef) => {
@@ -124,7 +124,7 @@ export const DialogContent = forwardRef<
           default (every other caller of this component relies on that, purely
           via `open`/`onOpenChange` on <Dialog>) — `onOverlayClick` is an
           additional, explicit, opt-in handler for callers (e.g.
-          FileViewerModal) that want the "click the blurred background to
+          full-screen viewers) that want the "click the blurred background to
           close" behavior spelled out literally rather than implicit. Purely
           additive: omitted by every other Dialog user, so their behavior is
           byte-for-byte unchanged. */}
@@ -149,7 +149,7 @@ export const DialogContent = forwardRef<
             the sizing/chrome classes callers pass via `className` above,
             which stay on Content itself exactly as before this animation was
             added. `flex h-full min-h-0 flex-col` is the one addition: it lets
-            a caller's own flex-height content (e.g. FileViewerModal's
+            a caller's own flex-height content (e.g. a full-screen viewer's
             full-screen layout) actually stretch to fill Content — without it,
             this div's height falls back to fitting its children instead of
             Content's explicit height. It's a no-op for every other caller,
