@@ -22,10 +22,11 @@
  * full-price Explication generation — exactly the same contract as every
  * other cache/clone layer already in this codebase.
  *
- * MODEL POLICY: every OpenRouter call in this file — the delta-chapter/
+ * MODEL POLICY: every model call in this file — the delta-chapter/
  * wrapper calls below, and generateExplicationPart — runs on
- * EXPLICATION_MODEL (lib/ai/openrouter.ts), with reasoning explicitly
- * DISABLED (`reasoning: { enabled: false }`).
+ * EXPLICATION_MODEL via the DIRECT DeepSeek API (lib/ai/deepseek.ts, since
+ * 2026-10-13 — no longer through OpenRouter), with thinking explicitly
+ * DISABLED. The history below dates from the OpenRouter era.
  *
  * This used to send `reasoning: { effort: "low" }` on the belief that
  * deepseek-v3.2 always reasons and "low" would cap it. OpenRouter's own
@@ -89,7 +90,8 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getEmbedding } from "@/lib/ai/embeddings";
-import { callOpenRouter, EXPLICATION_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { type ChatMessageInput } from "@/lib/ai/openrouter";
+import { callDeepSeek, EXPLICATION_MODEL } from "@/lib/ai/deepseek";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { stripReasoning } from "@/lib/strip-reasoning";
 import { parseJsonResponse, MAX_SOURCE_CHARS, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
@@ -452,19 +454,12 @@ export async function runStudioExplicationDeltaPipeline(
       // this file's short-lived move to Qwen). `reasoning: { enabled: false }`
       // — see this file's own header comment for why this is the correct,
       // necessary setting for deepseek-v3.2 specifically.
-      const rawDelta = await callOpenRouter(
+      const rawDelta = await callDeepSeek(
         [
           { role: "system", content: deltaPrompt },
           { role: "user", content: `Voici le contenu nouveau/modifié :\n"""\n${unmatchedText}\n"""\n\nGénère le JSON demandé.` },
         ],
-        {
-          model: EXPLICATION_MODEL,
-          maxTokens: 16384,
-          bypassMock: true,
-          reasoning: { enabled: false },
-          providerOrder: EXPLICATION_PROVIDER_ORDER,
-          providerIgnore: EXPLICATION_IGNORED_PROVIDERS,
-        }
+        { model: EXPLICATION_MODEL, maxTokens: 16384, thinking: false }
       );
 
       const parsedDelta = parseJsonResponse(rawDelta);
@@ -490,19 +485,12 @@ export async function runStudioExplicationDeltaPipeline(
     // also a deliberate safety property: the narrative framing a student
     // reads is always genuinely their own course's, never borrowed.
     const wrapperPrompt = buildExplicationWrapperPrompt(allChapters.map((ch) => ch.heading));
-    const rawWrapper = await callOpenRouter(
+    const rawWrapper = await callDeepSeek(
       [
         { role: "system", content: wrapperPrompt },
         { role: "user", content: "Génère le JSON demandé." },
       ],
-      {
-        model: EXPLICATION_MODEL,
-        maxTokens: 4000,
-        bypassMock: true,
-        reasoning: { enabled: false },
-        providerOrder: EXPLICATION_PROVIDER_ORDER,
-        providerIgnore: EXPLICATION_IGNORED_PROVIDERS,
-      }
+      { model: EXPLICATION_MODEL, maxTokens: 4000, thinking: false }
     );
     const parsedWrapper = parseJsonResponse(rawWrapper);
     const intro = typeof parsedWrapper.intro === "string" ? parsedWrapper.intro : "";
@@ -1126,26 +1114,6 @@ const GROUNDING_INSTRUCTION = `CADRAGE STRICT (prioritaire) :
 - N'invente aucun chiffre, aucune dose, aucune classification, aucune référence.
 - Le champ "explication" contient UNIQUEMENT le texte destiné à l'étudiant : jamais ta réflexion, ton plan, tes hésitations, ni aucune mention des "extraits", des "parties", du "JSON" ou de ces consignes.`;
 
-/**
- * deepseek-v3.2 deployments never used for Explication: DeepInfra serves it in
- * fp4 (degraded, incoherent long-form output). GMICloud ignores
- * `reasoning: { enabled: false }` and `max_tokens` (2026-10-12 live test: up to
- * 13,580 hidden reasoning tokens, 17,416 output tokens for a 12,000 cap, 230 s
- * for one part) while still passing `require_parameters` — as the
- * "throughput" pick it made every part hit EXPLICATION_PART_TIMEOUT_MS.
- */
-const EXPLICATION_IGNORED_PROVIDERS = ["DeepInfra", "GMICloud"];
-
-/**
- * deepseek-v3.2 deployments tried first, in this order; OpenRouter's normal
- * fallbacks still apply after them (minus EXPLICATION_IGNORED_PROVIDERS).
- * Replaces `providerSort: "throughput"`, which — once GMICloud was excluded —
- * routed every part to Friendli, the priciest usable host ($0.50/$1.50 per M
- * vs Baidu $0.28/$0.42). 2026-10-12 live, same Explication-sized request:
- * Baidu 44-65 tok/s, 0 reasoning tokens, finish "stop", ~$0.0006-0.0008 per
- * call (8/8 OK); Friendli 38-53 tok/s, ~$0.0036-0.0038 per call, and one 429.
- */
-const EXPLICATION_PROVIDER_ORDER = ["Baidu", "Friendli"];
 
 /**
  * Paragraphs that are the model talking about its task instead of teaching:
@@ -1241,26 +1209,14 @@ export async function generateExplicationPart(
   const callOptions = {
     model: EXPLICATION_MODEL,
     maxTokens: EXPLICATION_PART_MAX_TOKENS,
-    bypassMock: true,
-    // Reasoning OFF, not "low" — see this file's MODEL POLICY header for
-    // why `effort: "low"` was switching DeepSeek V3.2's thinking mode ON
-    // and causing the 180s part timeouts.
-    reasoning: { enabled: false },
+    // Thinking OFF — DeepSeek V4 thinks by default, which would spend time
+    // and token budget before any visible text (the old 180s part timeouts).
+    thinking: false,
     // Provider default is usually 1.0 — far too loose for a medical text
     // that must stay on its source: it was the main driver of off-topic
     // passages. 0.4 keeps the prose natural while sticking to the extracts.
     temperature: 0.4,
     timeoutMs: EXPLICATION_PART_TIMEOUT_MS,
-    // Cheapest host that decodes as fast as the fastest one — see
-    // EXPLICATION_PROVIDER_ORDER (a part's wall-clock is bounded by decode
-    // speed, up to 12,000 tokens, so speed still matters as much as price).
-    providerOrder: EXPLICATION_PROVIDER_ORDER,
-    // Only providers that honor `reasoning: { enabled: false }` — one that
-    // ignores it writes the model's thinking straight into the answer (the
-    // "it shows its reasoning" reports) — and never the fp4-quantized
-    // deployment, whose degraded output is where incoherent text came from.
-    requireParameters: true,
-    providerIgnore: EXPLICATION_IGNORED_PROVIDERS,
   };
 
   // Generation ledger (lib/ai/generation-ledger.ts): this exact part — same
@@ -1282,7 +1238,7 @@ export async function generateExplicationPart(
       isValid: (value) => typeof value === "string" && value.trim().length >= 50 && removeLeakedReasoning(value).removedRatio < 0.02,
     },
     async () => {
-      const raw = await callOpenRouter(messages, callOptions);
+      const raw = await callDeepSeek(messages, callOptions);
 
       let parsed: Record<string, unknown>;
       try {

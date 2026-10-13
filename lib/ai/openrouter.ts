@@ -283,7 +283,9 @@ export const CHEAP_MODEL = "qwen/qwen-2.5-72b-instruct";
 // deepseek/deepseek-v3.2/endpoints): 13 providers, $0.21-0.28/M in,
 // $0.31-0.42/M out — no more expensive than CHEAP_MODEL. Every other
 // CHEAP_MODEL call site stays on Qwen.
-export const EXPLICATION_MODEL = "deepseek/deepseek-v3.2";
+// 2026-10-13 — MOVED OFF OPENROUTER: Explication now calls the DeepSeek API
+// directly (lib/ai/deepseek.ts, its own EXPLICATION_MODEL and
+// DEEPSEEK_API_KEY). The direct API no longer serves V3.2 — see that file.
 
 // FLASHCARD-ONLY MODEL, 2026-10-03 — /api/flashcards/generate. Chosen from
 // the live OpenRouter catalog on three criteria: cost, speed (the route must
@@ -458,7 +460,7 @@ function findSystemText(messages: ChatMessageInput[]): string {
  * (which can name the underlying model / provider) stays in the server log
  * only — the UI only ever speaks of "MedArt Neural Engine".
  */
-function brandedUpstreamMessage(status: number, kind: "text" | "image"): string {
+export function brandedUpstreamMessage(status: number, kind: "text" | "image"): string {
   const subject = kind === "image" ? "La génération de l'image" : "MedArt Neural Engine";
   if (status === 429) return `${subject} est très sollicité en ce moment. Réessaie dans une minute.`;
   if (status === 401 || status === 403) return `${subject} est momentanément indisponible (configuration serveur).`;
