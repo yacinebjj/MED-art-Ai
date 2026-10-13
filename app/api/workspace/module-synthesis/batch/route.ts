@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
@@ -20,7 +19,7 @@ const MAX_BATCH_COURSES = 5;
  * Idempotent: already-cached courses are skipped, so a retried batch is free.
  * Body: { moduleId, courseIds, type, runToken } → { success, generated, fromCache }.
  */
-async function postHandler(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser();
     if (!user) return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -45,5 +44,3 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
-
-export const POST = withKeepAlive(postHandler);

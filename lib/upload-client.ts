@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
 
@@ -118,7 +117,7 @@ async function fetchJsonWithTimeout(
   try {
     const result = await Promise.race([
       (async () => {
-        const res = await fetchKeepAlive(url, { ...init, signal: controller.signal });
+        const res = await fetch(url, { ...init, signal: controller.signal });
         const data = await res.json().catch(() => ({}));
         return { ok: res.ok, status: res.status, data: data as Record<string, unknown> };
       })(),

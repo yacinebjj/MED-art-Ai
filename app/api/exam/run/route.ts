@@ -1,7 +1,6 @@
 import crypto from "crypto";
 import { requirePaidPlan } from "@/lib/subscription";
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { OpenRouterError } from "@/lib/ai/openrouter";
@@ -527,7 +526,7 @@ async function handleRefund(userId: string, params: RunParams, runToken: string)
   return NextResponse.json({ success: true, refunded: true, ...(regenerationsRemaining !== undefined ? { regenerationsRemaining } : {}) });
 }
 
-async function postHandler(request: NextRequest): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const user = await getAuthenticatedUser();
     if (!user) return bad("Tu dois être connecté(e).", 401);
@@ -559,5 +558,3 @@ async function postHandler(request: NextRequest): Promise<NextResponse> {
     return bad(`Une erreur inattendue est survenue (${errorMessage(error)}). Réessaie.`, 500);
   }
 }
-
-export const POST = withKeepAlive(postHandler);

@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -239,7 +238,7 @@ function NotesPageContent() {
 
     setIsOrganizing(true);
     try {
-      const res = await fetchKeepAlive("/api/notes/organize", {
+      const res = await fetch("/api/notes/organize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: rawText }),

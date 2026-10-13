@@ -122,8 +122,6 @@ async function runChain<T>(
         model: attempt.model,
         maxTokens: attempt.maxTokens ?? maxTokens,
         timeoutMs,
-        // This chain IS the model ladder; a one-model chain keeps callOpenRouter's automatic fallback.
-        ...(attempts.length > 1 ? { fallbackModels: [] } : {}),
       });
       const value = validate(raw);
       if (index > 0) console.warn(`${label} Généré par le modèle de secours ${attempt.model}.`);

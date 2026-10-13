@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Download, Loader2, NotebookPen, RefreshCw, RotateCcw, Sparkles, Target } from "lucide-react";
@@ -75,7 +74,7 @@ export function useStudyKit(smartNotes: string | null) {
         }
         return;
       }
-      const res = await fetchKeepAlive("/api/lecture-notes/study-kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ smartNotes }) });
+      const res = await fetch("/api/lecture-notes/study-kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ smartNotes }) });
       const data = (await res.json().catch(() => ({}))) as { success?: boolean; kit?: LectureStudyKit; error?: string };
       if (!res.ok || !data.success || !data.kit) throw new Error(data.error ?? "La génération du kit a échoué.");
       setKit(data.kit);

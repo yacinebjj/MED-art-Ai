@@ -19,9 +19,6 @@ export const metadata: Metadata = {
   description:
     "Transforme tes cours de Médecine, Pharmacie et Chirurgie Dentaire en explications détaillées, résumés, pièges, mnémotechniques, cas cliniques et QCMs grâce à l'IA.",
   manifest: "/manifest.json",
-  // Home-screen launch on iOS: full-screen standalone app with a light status
-  // bar matching the white launch splash (components/layout/SplashScreen.tsx).
-  appleWebApp: { capable: true, title: "MedArt", statusBarStyle: "default" },
   // Generated from public/logo.png's emblem (the wordmark is unreadable at
   // icon sizes):
   //  - favicon.ico (16/32/48) + a 192px PNG: transparent, square, multiples

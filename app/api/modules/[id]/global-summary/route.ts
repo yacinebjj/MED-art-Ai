@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { requirePaidPlan } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
@@ -159,7 +158,7 @@ async function handlePost(request: NextRequest, { params }: { params: { id: stri
  * route.ts's own comment for the full rationale; this route shares the same
  * runModuleSynthesis pipeline and the same class of risk.
  */
-async function postHandler(request: NextRequest, context: { params: { id: string } }): Promise<NextResponse> {
+export async function POST(request: NextRequest, context: { params: { id: string } }): Promise<NextResponse> {
   try {
     return await handlePost(request, context);
   } catch (error) {
@@ -167,5 +166,3 @@ async function postHandler(request: NextRequest, context: { params: { id: string
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
-
-export const POST = withKeepAlive(postHandler);

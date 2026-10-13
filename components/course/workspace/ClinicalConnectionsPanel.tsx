@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Link2, Loader2, Sparkles, X } from "lucide-react";
@@ -29,7 +28,7 @@ export function ClinicalConnectionsPanel({ courseId }: ClinicalConnectionsPanelP
   async function handleClick() {
     setIsLoading(true);
     try {
-      const res = await fetchKeepAlive("/api/studio/clinical-connections", {
+      const res = await fetch("/api/studio/clinical-connections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ courseId }),

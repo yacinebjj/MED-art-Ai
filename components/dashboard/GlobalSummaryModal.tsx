@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchKeepAlive, KeepAliveConnectionLost } from "@/lib/http/fetch-keep-alive";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import ReactMarkdown from "react-markdown";
@@ -24,26 +23,6 @@ interface StoredGlobalSummary {
 
 /** Mirrors lib/module-synthesis.ts's own MIN_COURSES_REQUIRED — duplicated as a plain constant rather than imported, since that module pulls in server-only dependencies (getSupabaseAdmin, OpenRouter calls) that have no place in a "use client" bundle. Enforced again server-side in that same route (never trust a client-only gate). */
 const MIN_COURSES_REQUIRED = 5;
-
-const SAVED_POLL_INTERVAL_MS = 5_000;
-const SAVED_POLL_MAX_MS = 5 * 60_000;
-
-/** Polls the stored summary until one newer than `previousGeneratedAt` appears (or gives up). */
-async function waitForSavedSummary(moduleId: number | string, previousGeneratedAt: string | null): Promise<StoredGlobalSummary | null> {
-  const deadline = Date.now() + SAVED_POLL_MAX_MS;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, SAVED_POLL_INTERVAL_MS));
-    try {
-      const res = await fetch(`/api/modules/${moduleId}/global-summary`);
-      const body = await res.json().catch(() => null);
-      const stored: StoredGlobalSummary | null = body?.success ? body.summary ?? null : null;
-      if (stored && stored.generatedAt !== previousGeneratedAt) return stored;
-    } catch {
-      // Still offline — keep waiting.
-    }
-  }
-  return null;
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
@@ -120,25 +99,12 @@ export function GlobalSummaryModal({
     }
 
     setIsGenerating(true);
-    const previousGeneratedAt = summary?.generatedAt ?? null;
     try {
-      let res: Response;
-      try {
-        res = await fetchKeepAlive(`/api/modules/${moduleId}/global-summary`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ courseIds: Array.from(selectedIds) }),
-        });
-      } catch (error) {
-        // The server keeps generating after a dropped connection and saves the
-        // summary — read it back instead of paying for a second generation.
-        if (!(error instanceof KeepAliveConnectionLost)) throw error;
-        const saved = await waitForSavedSummary(moduleId, previousGeneratedAt);
-        if (!saved) throw new Error("La connexion a été interrompue. Rouvre cette fenêtre dans un instant pour retrouver ta synthèse.");
-        setSummary(saved);
-        toast({ variant: "success", title: tDiscovery("globalSummaryGenerated", language) });
-        return;
-      }
+      const res = await fetch(`/api/modules/${moduleId}/global-summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseIds: Array.from(selectedIds) }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         throw new Error(res.status === 429 ? buildRateLimitMessage(res) : data?.error ?? "La génération a échoué.");

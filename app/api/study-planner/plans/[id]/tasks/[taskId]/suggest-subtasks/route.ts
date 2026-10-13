@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -36,7 +35,7 @@ function buildPrompt(title: string): string {
  * new quota bucket/RPC pair for this — both are the same shape of
  * lightweight, per-click, single-item AI assist.
  */
-async function postHandler(request: NextRequest, { params }: { params: { id: string; taskId: string } }) {
+export async function POST(request: NextRequest, { params }: { params: { id: string; taskId: string } }) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -129,5 +128,3 @@ async function postHandler(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
   }
 }
-
-export const POST = withKeepAlive(postHandler);

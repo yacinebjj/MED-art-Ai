@@ -68,11 +68,6 @@ const DOCUMENT_EXTENSION_BY_MIME: Record<string, string> = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
   "text/plain": "txt",
 };
-const DOCUMENT_MIME_BY_EXTENSION: Record<string, string> = Object.fromEntries(
-  Object.entries(DOCUMENT_EXTENSION_BY_MIME).map(([mime, extension]) => [extension, mime])
-);
-/** Browsers (iOS Safari, some Windows setups) often send Office files with an empty or generic MIME type — fall back to the file name's extension then. */
-const GENERIC_MIME_TYPES = new Set(["", "application/octet-stream", "application/zip", "application/x-zip-compressed"]);
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 
 /** Keeps a readable, storage-safe original name for the download card. */
@@ -134,10 +129,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: false, error: "Aucun fichier reçu." }, { status: 400 });
   }
 
-  const nameExtension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  const documentExtension =
-    DOCUMENT_EXTENSION_BY_MIME[file.type] ?? (GENERIC_MIME_TYPES.has(file.type) && DOCUMENT_MIME_BY_EXTENSION[nameExtension] ? nameExtension : undefined);
-  const documentMime = documentExtension ? DOCUMENT_MIME_BY_EXTENSION[documentExtension] : undefined;
+  const documentExtension = DOCUMENT_EXTENSION_BY_MIME[file.type];
   const messageType: ChatMessageType | undefined = documentExtension ? "text" : MIME_TO_TYPE[file.type];
   if (!messageType) {
     return NextResponse.json(
@@ -169,7 +161,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const path = `${groupId}/${randomUUID()}.${extension}`;
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    const { error: uploadError } = await supabase.storage.from(CHAT_MEDIA_BUCKET).upload(path, buffer, { contentType: documentMime ?? file.type, upsert: false });
+    const { error: uploadError } = await supabase.storage.from(CHAT_MEDIA_BUCKET).upload(path, buffer, { contentType: file.type, upsert: false });
     if (uploadError) throw uploadError;
 
     const { data } = supabase.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path);
@@ -191,7 +183,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
             type: "text",
             content_text: encodeEnvelope({
               text: "",
-              attachment: { url: mediaUrl, name: safeDocumentName(file.name), mime: documentMime ?? file.type, size: file.size },
+              attachment: { url: mediaUrl, name: safeDocumentName(file.name), mime: file.type, size: file.size },
             }),
             sender_name: senderName,
           }

@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, Reorder, useReducedMotion } from "framer-motion";
@@ -255,7 +254,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
   async function requestSuggestions(task: StudyPlanTask) {
     setSuggestingIds((prev) => new Set(prev).add(task.id));
     try {
-      const res = await fetchKeepAlive(`/api/study-planner/plans/${planId}/tasks/${task.id}/suggest-subtasks`, {
+      const res = await fetch(`/api/study-planner/plans/${planId}/tasks/${task.id}/suggest-subtasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: task.title, moduleId: task.moduleId }),

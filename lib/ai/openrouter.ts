@@ -2,7 +2,6 @@ import { createReplyCleaner, stripReasoning } from "@/lib/strip-reasoning";
 import { Agent } from "undici";
 import dns from "dns";
 import { detectMockPayload } from "@/lib/ai/mock-data";
-import { reportGenerationProgress } from "@/lib/ai/generation-progress";
 import type {
   OpenRouterChatCompletionResponse,
   OpenRouterStreamChunk,
@@ -374,21 +373,6 @@ export const STREAMLAKE_FIRST = ["StreamLake"];
 export const CHAT_MODEL = "qwen/qwen3.7-flash";
 
 /**
- * Automatic, silent fallback used by callOpenRouter when the primary model
- * is stuck, decoding too slowly to finish before the deadline, or failing.
- * qwen3-30b-a3b-instruct-2507 is the fast tier (~150 tok/s measured here)
- * with healthy providers; the slow tiers below fall back to it.
- * qwen3-235b-a22b-2507 measured ~38 tok/s and, on 2026-10-12, had several
- * providers down (DeepInfra 0%, Nebius 30% uptime) — the Studio QCM /
- * clinical-case timeouts.
- */
-export const AUTO_FALLBACK_MODELS: Record<string, string[]> = {
-  [LAB_FALLBACK_MODEL]: [FLASHCARD_MODEL],
-  [EXPLICATION_MODEL]: [FLASHCARD_MODEL],
-  [CHEAP_MODEL]: [FLASHCARD_MODEL],
-};
-
-/**
  * OpenRouter `response_format`. `json_schema` with `strict: true` constrains
  * decoding to the schema (structured outputs); `json_object` only guarantees
  * syntactically valid JSON.
@@ -734,298 +718,62 @@ export async function fetchOpenRouterWithRetry(url: string, init: RequestInit): 
  * Thin wrapper around OpenRouter's OpenAI-compatible chat completions API.
  * Every real AI call in this app goes through here — never call Anthropic
  * (or any other provider) directly.
- *
- * STREAMED UNDER THE HOOD, returned whole. The request always uses
- * `stream: true` and accumulates the text, which is what makes three things
- * possible that a buffered `res.json()` never could:
- *  1. A stuck provider is detected in seconds, not at the deadline: no first
- *     token within FIRST_TOKEN_TIMEOUT_MS, or no new token for
- *     STALL_TIMEOUT_MS, aborts the attempt.
- *  2. Live decode speed is measured. When a fallback model exists and the
- *     current one cannot realistically finish before the deadline, the
- *     attempt is abandoned EARLY — while the fallback still has the time to
- *     produce the whole answer — instead of timing out at the end.
- *  3. Callers wrapped by lib/http/keep-alive.ts see real progress (via
- *     lib/ai/generation-progress.ts) and keep the browser connection busy.
- *
- * `timeoutMs` is the TOTAL budget across every model tried, so a route's
- * own maxDuration arithmetic stays valid. `fallbackModels` defaults to
- * AUTO_FALLBACK_MODELS for the primary model; pass `[]` to disable (e.g. a
- * caller that already runs its own model ladder).
  */
-export interface CallOpenRouterOptions {
-  maxTokens?: number;
-  model?: string;
-  bypassMock?: boolean;
-  temperature?: number;
-  timeoutMs?: number;
-  /**
-   * `enabled: false` turns reasoning OFF on a HYBRID model (e.g.
-   * deepseek/deepseek-v3.2): on such a model `effort` switches thinking ON
-   * rather than capping it. Only an always-reasoning model (Gemini Flash)
-   * is actually capped by `effort`.
-   */
-  reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean; enabled?: boolean };
-  /** Forces JSON output; also sends `provider.require_parameters` so only providers honoring it are used. */
-  responseFormat?: OpenRouterResponseFormat;
-  /** "throughput" = fastest-decoding provider, "latency" = quickest first token. */
-  providerSort?: "throughput" | "latency" | "price";
-  /** OpenRouter `provider.order`: providers tried first, in order; normal fallbacks still apply. */
-  providerOrder?: string[];
-  /** OpenRouter `provider.ignore`: providers never used for this call (e.g. a degraded fp4 deployment). */
-  providerIgnore?: string[];
-  /** Only route to providers that honor every parameter sent (e.g. `reasoning: { enabled: false }`). */
-  requireParameters?: boolean;
-  /** Models tried, in order, when the primary is stuck, too slow, or fails. Defaults to AUTO_FALLBACK_MODELS. */
-  fallbackModels?: string[];
-  /** Typical answer length, used to judge whether the current model is too slow. Defaults to 60% of maxTokens. */
-  expectedOutputTokens?: number;
-}
-
-/** No token at all within this window (prompt processing included) = the provider is stuck. */
-const FIRST_TOKEN_TIMEOUT_MS = 45_000;
-/** No new token for this long after the stream started = the provider stalled mid-answer. */
-const STALL_TIMEOUT_MS = 35_000;
-/** Speed is only judged after this much decoding, so a slow first second never triggers a switch. */
-const SPEED_WARMUP_MS = 15_000;
-/** Conservative decode speed assumed for a fallback model (qwen3-30b-a3b-2507 measured ~150 tok/s). */
-const FALLBACK_TOKENS_PER_SECOND = 100;
-/** Connection + prompt processing time budgeted before a fallback's first token. */
-const FALLBACK_STARTUP_MS = 10_000;
-/** A fallback attempt with less time than this left cannot produce a full answer. */
-const MIN_FALLBACK_ATTEMPT_MS = 20_000;
-/** Rough chars-per-token for French medical prose/JSON, only used for speed estimates. */
-const CHARS_PER_TOKEN = 3.5;
-const TRANSIENT_UPSTREAM_STATUSES = new Set([429, 500, 502, 503, 504]);
-/** Key/credit/permission failures apply to every model — switching cannot fix them. */
-const NON_RECOVERABLE_STATUSES = new Set([401, 402, 403]);
-
-type AttemptAbortReason = "deadline" | "first-token" | "stall" | "slow";
-
-class StreamAttemptAborted extends OpenRouterError {
-  constructor(readonly reason: AttemptAbortReason) {
-    super("MedArt Neural Engine met trop de temps à répondre. Réessaie dans un instant.", 504);
-  }
-}
-
-interface StreamAttemptResult {
-  content: string;
-  finishReason?: string;
-  usage?: OpenRouterUsage;
-  provider?: string;
-}
-
-function buildChatCompletionBody(messages: ChatMessageInput[], model: string, options: CallOpenRouterOptions | undefined, maxTokens: number) {
-  const wantsProvider =
-    options?.responseFormat || options?.requireParameters || options?.providerSort || options?.providerOrder?.length || options?.providerIgnore?.length;
-  return {
-    model,
-    messages,
-    max_tokens: maxTokens,
-    ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
-    ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
-    ...(options?.responseFormat ? { response_format: options.responseFormat } : {}),
-    ...(wantsProvider
-      ? {
-          provider: {
-            ...(options?.responseFormat || options?.requireParameters ? { require_parameters: true } : {}),
-            ...(options?.providerSort ? { sort: options.providerSort } : {}),
-            ...(options?.providerOrder?.length ? { order: options.providerOrder } : {}),
-            ...(options?.providerIgnore?.length ? { ignore: options.providerIgnore } : {}),
-          },
-        }
-      : {}),
-    stream: true,
-    stream_options: { include_usage: true },
-  };
-}
-
-/**
- * One streamed attempt against one model. The deadline timer, the stall
- * watchdog and the speed check all abort the SAME controller, so the
- * request is torn down cleanly whichever fires first, in the headers phase
- * or the body phase alike (the timer is never cleared before the body is
- * fully read — see the history in callOpenRouter's doc comment).
- */
-async function streamCompletionAttempt(
+export async function callOpenRouter(
   messages: ChatMessageInput[],
-  model: string,
-  options: CallOpenRouterOptions | undefined,
-  apiKey: string,
-  maxTokens: number,
-  deadlineAt: number,
-  speedCheck: { expectedTokens: number } | null
-): Promise<StreamAttemptResult> {
-  const controller = new AbortController();
-  let abortReason: AttemptAbortReason | null = null;
-  const abort = (reason: AttemptAbortReason) => {
-    if (abortReason) return;
-    abortReason = reason;
-    controller.abort();
-  };
-
-  const startedAt = Date.now();
-  let firstTokenAt: number | null = null;
-  let lastTokenAt = startedAt;
-  let generatedChars = 0;
-
-  const deadlineTimer = setTimeout(() => abort("deadline"), Math.max(0, deadlineAt - startedAt));
-  const watchdog = setInterval(() => {
-    const now = Date.now();
-    if (firstTokenAt === null) {
-      if (now - startedAt > FIRST_TOKEN_TIMEOUT_MS) abort("first-token");
-      return;
-    }
-    if (now - lastTokenAt > STALL_TIMEOUT_MS) {
-      abort("stall");
-      return;
-    }
-    if (!speedCheck || now - firstTokenAt < SPEED_WARMUP_MS) return;
-    const producedTokens = generatedChars / CHARS_PER_TOKEN;
-    const tokensPerSecond = producedTokens / ((now - firstTokenAt) / 1000);
-    const remainingMs = deadlineAt - now;
-    const expectedTokens = Math.max(speedCheck.expectedTokens, producedTokens * 1.15);
-    const projectedTokens = producedTokens + tokensPerSecond * (remainingMs / 1000);
-    if (projectedTokens >= expectedTokens) return;
-    // Only switch while the fallback can still write the WHOLE answer in the
-    // time left; past that point the current model is the better bet.
-    const fallbackNeedMs = (expectedTokens / FALLBACK_TOKENS_PER_SECOND) * 1000 + FALLBACK_STARTUP_MS;
-    if (remainingMs > fallbackNeedMs) abort("slow");
-  }, 1_000);
-
-  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  try {
-    const res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
-        "X-Title": "Med Art AI",
-      },
-      body: JSON.stringify(buildChatCompletionBody(messages, model, options, maxTokens)),
-      signal: controller.signal,
-    });
-
-    if (!res.ok || !res.body) {
-      const body = await res.text().catch(() => "");
-      console.error(`OpenRouter API error (${res.status}) model=${model}:`, extractOpenRouterErrorDetail(body), body.slice(0, 500));
-      throw new OpenRouterError(brandedUpstreamMessage(res.status, "text"), res.status);
-    }
-
-    reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let content = "";
-    let finishReason: string | undefined;
-    let usage: OpenRouterUsage | undefined;
-    let provider: string | undefined;
-    let sawDone = false;
-
-    const handleLine = (rawLine: string) => {
-      const line = rawLine.trim();
-      // ": OPENROUTER PROCESSING" keep-alive comments and blank separators.
-      if (!line.startsWith("data:")) return;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") {
-        sawDone = true;
-        return;
-      }
-      if (!payload) return;
-      let chunk: OpenRouterStreamChunk;
-      try {
-        chunk = JSON.parse(payload);
-      } catch {
-        return;
-      }
-      if (chunk.provider) provider = chunk.provider;
-      if (chunk.error) {
-        const code = typeof chunk.error.code === "number" ? chunk.error.code : 502;
-        console.error(`OpenRouter mid-stream error model=${model} provider=${provider ?? "?"}:`, chunk.error.message ?? chunk.error);
-        throw new OpenRouterError(brandedUpstreamMessage(code, "text"), code >= 400 && code < 600 ? code : 502);
-      }
-      const choice = chunk.choices?.[0];
-      const delta = choice?.delta;
-      const textDelta = typeof delta?.content === "string" ? delta.content : "";
-      const reasoningDelta = typeof delta?.reasoning === "string" ? delta.reasoning : "";
-      if (textDelta || reasoningDelta) {
-        const now = Date.now();
-        if (firstTokenAt === null) firstTokenAt = now;
-        lastTokenAt = now;
-        generatedChars += textDelta.length + reasoningDelta.length;
-      }
-      if (textDelta) {
-        content += textDelta;
-        reportGenerationProgress(textDelta.length);
-      }
-      if (choice?.finish_reason) finishReason = choice.finish_reason;
-      if (chunk.usage) usage = chunk.usage;
-    };
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let newlineIndex: number;
-      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-        handleLine(line);
-      }
-    }
-    buffer += decoder.decode();
-    if (buffer) handleLine(buffer);
-
-    if (finishReason === "error") {
-      throw new OpenRouterError(brandedUpstreamMessage(502, "text"), 502);
-    }
-    // The connection closed mid-answer (provider or proxy dropped it): the
-    // text is partial, so it must never be returned as a success.
-    if (!finishReason && !sawDone) {
-      console.error(`OpenRouter stream closed before completion model=${model} provider=${provider ?? "?"} after ${generatedChars} chars`);
-      throw new OpenRouterError(brandedUpstreamMessage(502, "text"), 502);
-    }
-
-    const totalSeconds = (Date.now() - startedAt) / 1000;
-    const decodeSeconds = firstTokenAt ? (Date.now() - firstTokenAt) / 1000 : 0;
-    const completionTokens = usage?.completion_tokens ?? Math.round(generatedChars / CHARS_PER_TOKEN);
-    console.log(
-      `[openrouter] model=${model} provider=${provider ?? "?"} ttft=${firstTokenAt ? firstTokenAt - startedAt : "?"}ms ` +
-        `total=${totalSeconds.toFixed(1)}s tokens=${completionTokens} speed=${decodeSeconds > 0 ? (completionTokens / decodeSeconds).toFixed(0) : "?"}tok/s finish=${finishReason ?? "?"}`
-    );
-    return { content, finishReason, usage, provider };
-  } catch (error) {
-    if (error instanceof OpenRouterError) throw error;
-    if (abortReason) {
-      const elapsed = Math.round((Date.now() - startedAt) / 1000);
-      const speed = firstTokenAt ? Math.round(generatedChars / CHARS_PER_TOKEN / Math.max(1, (Date.now() - firstTokenAt) / 1000)) : 0;
-      console.error(`OpenRouter attempt aborted (${abortReason}) model=${model} after ${elapsed}s, ~${speed} tok/s, ${generatedChars} chars`);
-      throw new StreamAttemptAborted(abortReason);
-    }
-    console.error(`OpenRouter fetch failed model=${model}`, error);
-    throw new OpenRouterError("MedArt Neural Engine n'a pas pu répondre. Réessaie dans un instant.", 502);
-  } finally {
-    clearTimeout(deadlineTimer);
-    clearInterval(watchdog);
-    if (reader) reader.cancel().catch(() => {});
+  options?: {
+    maxTokens?: number;
+    model?: string;
+    bypassMock?: boolean;
+    temperature?: number;
+    timeoutMs?: number;
+    // Same reasoning-token cap as streamOpenRouter's own `reasoning` option
+    // (see its comment) — needed here too now that lib/cache-prewarming.ts
+    // calls this non-streaming path with a model that can route to
+    // ECONOMY_MODEL, which has the same hidden-reasoning-token behavior
+    // regardless of whether the call streams or not.
+    //
+    // `enabled: false` is the way to turn reasoning OFF on a HYBRID model
+    // (one where thinking is optional, e.g. deepseek/deepseek-v3.2 — every
+    // one of its OpenRouter providers lists "reasoning" as a supported,
+    // opt-in parameter). On such a model, sending `effort` does NOT cap
+    // hidden thinking — it switches thinking ON. Only a model that always
+    // reasons (e.g. Gemini Flash) is actually capped by `effort`.
+    reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean; enabled?: boolean };
+    // Forces JSON output. When set, `provider.require_parameters` is sent too,
+    // so OpenRouter only routes to providers that actually honor it — never to
+    // one that would silently ignore the format and answer free text.
+    responseFormat?: OpenRouterResponseFormat;
+    /**
+     * OpenRouter provider routing: "throughput" sends the request to the
+     * fastest-decoding provider of the model, "latency" to the quickest first
+     * token. Used by time-critical calls (Lab, podcast script).
+     */
+    providerSort?: "throughput" | "latency" | "price";
+    /** OpenRouter `provider.order`: providers tried first, in order; normal fallbacks still apply. */
+    providerOrder?: string[];
+    /** OpenRouter `provider.ignore`: providers never used for this call (e.g. a degraded fp4 deployment). */
+    providerIgnore?: string[];
+    /**
+     * OpenRouter `provider.require_parameters`: only route to providers that
+     * honor every parameter sent — without it, a provider that ignores
+     * `reasoning: { enabled: false }` can write its thinking into `content`.
+     */
+    requireParameters?: boolean;
   }
-}
-
-/** A fallback model must not inherit options tuned for the primary's own providers/reasoning mode. */
-function fallbackAttemptOptions(options: CallOpenRouterOptions | undefined): CallOpenRouterOptions {
-  return {
-    ...options,
-    reasoning: undefined,
-    requireParameters: undefined,
-    providerIgnore: undefined,
-    providerOrder: undefined,
-    providerSort: "throughput",
-  };
-}
-
-export async function callOpenRouter(messages: ChatMessageInput[], options?: CallOpenRouterOptions): Promise<string> {
-  // detectMockPayload matches loosely on the system prompt text; `bypassMock`
-  // lets a pipeline whose prompts could collide with a fixture marker opt out.
+): Promise<string> {
+  // detectMockPayload matches by loose substring against the SYSTEM PROMPT
+  // TEXT, not by an explicit section id — it was built for one fixed set of
+  // prompts (lib/prompts/public-course-sections.ts) and has no way to know a
+  // caller belongs to a different pipeline entirely. This already bit the
+  // Studio pipeline once: its "explication" prompt happened to contain the
+  // literal substring "explication ULTRA-DÉTAILLÉE", which is also this
+  // mock system's marker for the real per-course pipeline — so in dev mode
+  // it silently served the hardcoded méningite JSON fixture instead of ever
+  // calling Claude, no matter how the prompt was worded. `bypassMock` lets a
+  // caller opt out of this matching entirely rather than playing whack-a-mole
+  // rewording prompts to dodge marker collisions that could reappear with
+  // any future edit.
   if (USE_MOCK_AI && !options?.bypassMock) {
     const systemText = findSystemText(messages);
     const mock = detectMockPayload(systemText);
@@ -1042,88 +790,137 @@ export async function callOpenRouter(messages: ChatMessageInput[], options?: Cal
     throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
   }
 
-  const primaryModel = options?.model ?? MODEL;
-  const fallbacks = (options?.fallbackModels ?? AUTO_FALLBACK_MODELS[primaryModel] ?? []).filter((model) => model !== primaryModel);
-  const models = [primaryModel, ...fallbacks];
-  const maxTokens = options?.maxTokens ?? 8192;
-  const expectedTokens = options?.expectedOutputTokens ?? Math.round(maxTokens * 0.6);
-  const deadlineAt = Date.now() + (options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
 
-  let index = 0;
-  let retriedSameModel = false;
-  let lastError: unknown = null;
-
-  while (index < models.length) {
-    const model = models[index];
-    const isFallback = index > 0;
-    const hasNext = index < models.length - 1;
-    const attemptStartedAt = Date.now();
-    if (isFallback && deadlineAt - attemptStartedAt < MIN_FALLBACK_ATTEMPT_MS) break;
-
-    try {
-      const result = await streamCompletionAttempt(
+  // THE TIMEOUT MUST STAY ARMED THROUGH THE BODY READ — this was a real,
+  // confirmed production bug, and the direct cause of the recurring
+  // "flux terminé sans résultat après 280s" failure on Explication
+  // Ultra-Détaillée. `fetch()` resolves as soon as response HEADERS arrive,
+  // which for OpenRouter is a second or two — the model then keeps
+  // generating for MINUTES while the body streams. The previous shape
+  // cleared this timer in a `finally` attached to the fetch alone, so the
+  // AbortController was disarmed ~2s in and `await res.json()` below waited
+  // out the entire generation with NO timeout of any kind. Whatever value
+  // callers passed as `timeoutMs` was therefore irrelevant to the phase
+  // where all the time is actually spent: the request could only ever end
+  // by finishing, or by Vercel hard-killing the whole invocation at its
+  // maxDuration wall — which kills the route mid-flight, so no catch/finally
+  // ever runs and no error line is ever written to the client.
+  //
+  // This also retroactively explains the `waitUntil` mystery this codebase
+  // documented elsewhere ("a real OpenRouter fetch hung 450+ seconds and
+  // never resolved, not even into a clean timeout error"): that timeout was
+  // not unreliable, it was structurally incapable of firing — already
+  // cleared. An architecture was abandoned on the strength of that
+  // misdiagnosis.
+  let data: OpenRouterChatCompletionResponse | undefined;
+  try {
+    const res = await fetchOpenRouterWithRetry(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        // Optional but recommended by OpenRouter for attribution/rankings.
+        "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+        "X-Title": "Med Art AI",
+      },
+      body: JSON.stringify({
+        model: options?.model ?? MODEL,
         messages,
-        model,
-        isFallback ? fallbackAttemptOptions(options) : options,
-        apiKey,
-        maxTokens,
-        deadlineAt,
-        hasNext ? { expectedTokens } : null
-      );
+        max_tokens: options?.maxTokens ?? 8192,
+        ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
+        ...(options?.responseFormat ? { response_format: options.responseFormat } : {}),
+        ...(options?.responseFormat || options?.requireParameters || options?.providerSort || options?.providerOrder || options?.providerIgnore
+          ? {
+              provider: {
+                ...(options.responseFormat || options.requireParameters ? { require_parameters: true } : {}),
+                ...(options.providerSort ? { sort: options.providerSort } : {}),
+                ...(options.providerOrder ? { order: options.providerOrder } : {}),
+                ...(options.providerIgnore ? { ignore: options.providerIgnore } : {}),
+              },
+            }
+          : {}),
+      }),
+      signal: timeoutController.signal,
+    });
 
-      // finish_reason "length" = cut off by max_tokens: the text is genuinely
-      // incomplete, so it must fail loudly (callers subdivide or retry)
-      // instead of reaching a JSON-recovery path as a fake success.
-      if (result.finishReason === "length") {
-        console.error(`OpenRouter response truncated by max_tokens ceiling (model=${model}, maxTokens=${maxTokens})`);
-        throw new OpenRouterError(
-          "La réponse de l'IA a été coupée avant la fin (limite de longueur atteinte). Réessaie — la génération sera automatiquement redécoupée si besoin.",
-          502,
-          { truncated: true }
-        );
-      }
-      if (!result.content.trim()) {
-        console.error(`OpenRouter returned an empty completion (model=${model}, provider=${result.provider ?? "?"}, finish=${result.finishReason ?? "?"})`);
-        throw new OpenRouterError("Réponse inattendue du modèle.", 502);
-      }
-
-      logUsage(`callOpenRouter model=${model}`, result.usage);
-      if (isFallback) console.warn(`[openrouter] Réponse fournie par le modèle de secours ${model} (primaire : ${primaryModel}).`);
-
-      // Same cleanup as the streaming path (reasoning blocks, leading prompt
-      // echo); never turns a reply made only of such text into "".
-      const cleaned = stripReasoning(result.content);
-      return cleaned.length > 0 ? cleaned : result.content;
-    } catch (error) {
-      lastError = error;
-      const status = error instanceof OpenRouterError ? error.status : 502;
-      if (NON_RECOVERABLE_STATUSES.has(status)) throw error;
-
-      if (hasNext) {
-        const reason = error instanceof StreamAttemptAborted ? error.reason : `HTTP ${status}`;
-        console.warn(`[openrouter] ${model} abandonné (${reason}) après ${Math.round((Date.now() - attemptStartedAt) / 1000)}s — bascule sur ${models[index + 1]}.`);
-        index++;
-        continue;
-      }
-
-      // Last model: one more try on a quick transient failure, or on a
-      // provider that stalled, when enough time is left for a full answer
-      // (OpenRouter usually routes the retry to another provider).
-      const remainingMs = deadlineAt - Date.now();
-      const quickTransient =
-        error instanceof OpenRouterError && !error.truncated && TRANSIENT_UPSTREAM_STATUSES.has(status) && Date.now() - attemptStartedAt < 15_000;
-      const stalled = error instanceof StreamAttemptAborted && (error.reason === "first-token" || error.reason === "stall");
-      if (!retriedSameModel && (quickTransient || stalled) && remainingMs > 45_000) {
-        retriedSameModel = true;
-        console.warn(`[openrouter] Nouvel essai unique sur ${model} (${stalled ? (error as StreamAttemptAborted).reason : `HTTP ${status}`}).`);
-        await delay(quickTransient ? 1_500 : 0);
-        continue;
-      }
-      throw error;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const detail = extractOpenRouterErrorDetail(body);
+      console.error(`OpenRouter API error (${res.status})`, body.slice(0, 500));
+      // Propagate OpenRouter's own status (400 bad request/model id, 401 bad
+      // key, 429 rate limit, ...) instead of collapsing everything to a
+      // generic 502 — every caller of callOpenRouter already forwards
+      // OpenRouterError.status straight through to its own API response, so
+      // this makes THAT response accurate too, not just the server log.
+      console.error("OpenRouter error detail:", detail);
+      throw new OpenRouterError(brandedUpstreamMessage(res.status, "text"), res.status);
     }
+
+    data = await res.json();
+  } catch (error) {
+    // Re-thrown unchanged so the real upstream status (429/400/401/...) set
+    // just above isn't collapsed into a generic 502 by the catch-all below.
+    if (error instanceof OpenRouterError) throw error;
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter call timed out after ${timeoutMs}ms (headers or body phase)`);
+      throw new OpenRouterError("MedArt Neural Engine met trop de temps à répondre. Réessaie dans un instant.", 504);
+    }
+    console.error("OpenRouter fetch failed", error);
+    throw new OpenRouterError("MedArt Neural Engine n'a pas pu répondre. Réessaie dans un instant.", 502);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  throw lastError ?? new OpenRouterError("MedArt Neural Engine met trop de temps à répondre. Réessaie dans un instant.", 504);
+  // REAL BUG this was silently causing, found while investigating the
+  // recurring "the Explication came out incomplete, stopped mid-way"
+  // production report: this function used to read ONLY
+  // `message.content`, never the standard OpenAI-compatible
+  // `finish_reason` field OpenRouter also returns per choice. When a
+  // response hits its `max_tokens` ceiling mid-generation, `finish_reason`
+  // is `"length"` and `content` is genuinely, silently INCOMPLETE (cut off
+  // mid-sentence) — but it was still a normal string, so it sailed straight
+  // through as a "successful" call. Downstream, generateExplicationPart's
+  // JSON-repair/recovery fallback (lib/studio-explication-delta.ts) then
+  // salvaged whatever partial "explication" text it could find and accepted
+  // it as a complete part with only a trivial 50-character floor — its own
+  // doc comment already named this exact "cut off before ever closing" shape
+  // as "the far more common shape for a very long response", i.e. this was
+  // a known, accepted risk, not a hidden edge case. Failing loudly HERE
+  // instead restores that recovery path's real intended scope (rescuing a
+  // COMPLETE response that's merely malformed JSON — a real, separate
+  // failure mode) while turning genuine truncation into an honest,
+  // retryable error every caller's own retry logic can act on, instead of a
+  // silently-corrupted "success".
+  const finishReason = data?.choices?.[0]?.finish_reason;
+  if (finishReason === "length") {
+    console.error(
+      `OpenRouter response truncated by max_tokens ceiling (model=${options?.model ?? MODEL}, maxTokens=${options?.maxTokens ?? 8192})`
+    );
+    throw new OpenRouterError(
+      "La réponse de l'IA a été coupée avant la fin (limite de longueur atteinte). Réessaie — la génération sera automatiquement redécoupée si besoin.",
+      502,
+      { truncated: true }
+    );
+  }
+
+  const content = data?.choices?.[0]?.message?.content;
+
+  if (typeof content !== "string" || !content.trim()) {
+    console.error("OpenRouter returned an unexpected payload", JSON.stringify(data).slice(0, 500));
+    throw new OpenRouterError("Réponse inattendue du modèle.", 502);
+  }
+
+  logUsage(`callOpenRouter model=${options?.model ?? MODEL}`, data?.usage);
+
+  // Same cleanup as the streaming path (reasoning blocks, leading prompt
+  // echo). Falls back to the raw text if cleaning would leave nothing, so a
+  // reply made ONLY of such text is never turned into an empty "success".
+  const cleaned = stripReasoning(content);
+  return cleaned.length > 0 ? cleaned : content;
 }
 
 // Studio "Infographie / Mindmap" tab — confirmed live against

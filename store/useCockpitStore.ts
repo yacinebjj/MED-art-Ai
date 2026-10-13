@@ -39,7 +39,7 @@ let currentUserId: string | null = null;
 /** Last good overview, per user, on this device — shown instantly on the next launch while a fresh copy loads (stale-while-revalidate). */
 const cacheKey = (userId: string) => `medart:cockpit-overview:${userId}`;
 
-export function readCachedOverview(userId: string): { overview: DashboardOverview; savedAt: number } | null {
+function readCachedOverview(userId: string): { overview: DashboardOverview; savedAt: number } | null {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(cacheKey(userId)) ?? "null");
     if (!parsed || typeof parsed !== "object") return null;

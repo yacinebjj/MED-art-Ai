@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -214,7 +213,7 @@ function pickSourceText(course: StudioCourseRow): string {
  * and refunds it on any failure after that point. Nothing is persisted
  * server-side; the client caches the map per student/course.
  */
-async function postHandler(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -346,5 +345,3 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });
   }
 }
-
-export const POST = withKeepAlive(postHandler);

@@ -1,6 +1,5 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { z } from "zod";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -808,7 +807,7 @@ async function handleDiagnose(user: { id: string }, body: z.infer<typeof Diagnos
   }
 }
 
-async function postHandler(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return jsonError("Tu dois être connecté(e).", 401);
@@ -831,5 +830,3 @@ async function postHandler(request: NextRequest) {
   if (body.action === "exam") return handleExam(user, body);
   return handleDiagnose(user, body);
 }
-
-export const POST = withKeepAlive(postHandler);

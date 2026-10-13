@@ -1,6 +1,5 @@
 "use client";
 
-import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useRef, useState } from "react";
 import { CheckCircle2, FileUp, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -50,7 +49,7 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetchKeepAlive("/api/exam/analyze-reference", { method: "POST", body: formData });
+      const res = await fetch("/api/exam/analyze-reference", { method: "POST", body: formData });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.success) {
         setError(body?.error ?? "L'analyse du style a échoué. Réessaie.");

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { callOpenRouter, CHEAP_MODEL, OpenRouterError } from "@/lib/ai/openrouter";
@@ -26,7 +25,7 @@ Consignes STRICTES :
  * `content` directly, no note lookup by id needed) — same rate-limit-only
  * gating, no quota reservation, matching that sibling feature's own choice.
  */
-async function postHandler(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -74,5 +73,3 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ error: errorMessage(error) }, { status });
   }
 }
-
-export const POST = withKeepAlive(postHandler);

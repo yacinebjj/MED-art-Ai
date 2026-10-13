@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { callOpenRouter, OpenRouterError, CHEAP_VISION_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { EXAM_STYLE_EXTRACTION_SYSTEM_PROMPT, EXAM_STYLE_EXTRACTION_USER_TEXT } from "@/lib/ai/exam-prompts";
@@ -58,7 +57,7 @@ function buildAnalysisMessage(base64: string, mimeType: string, kind: "pdf" | "i
   return { role: "user", content: parts } as unknown as ChatMessageInput;
 }
 
-async function postHandler(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -144,5 +143,3 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
   }
 }
-
-export const POST = withKeepAlive(postHandler);

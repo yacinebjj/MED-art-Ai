@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { callOpenRouter, FLASHCARD_MODEL, OpenRouterError, STREAMLAKE_FIRST, type ChatMessageInput } from "@/lib/ai/openrouter";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
@@ -41,7 +40,7 @@ const SEAM_MIN_LENGTH_RATIO = 0.85;
  * HAIKU_MODEL — a small structural judgment call on a tiny input, not
  * long-form writing.
  */
-async function postHandler(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -104,5 +103,3 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status });
   }
 }
-
-export const POST = withKeepAlive(postHandler);

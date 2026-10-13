@@ -31,7 +31,6 @@
  * push-notification card (`?cardId=`) bypasses the saved session.
  */
 
-import { fetchKeepAlive } from "@/lib/http/fetch-keep-alive";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { Layers, Loader2, AlertTriangle, LogIn, Lock, ArrowRight, RotateCcw, Sparkles, Flame, Gauge, Zap, Activity, Trophy, Timer } from "lucide-react";
@@ -341,7 +340,7 @@ type BatchResult =
 async function requestBatch(contentLanguage: ContentLanguage, signal: AbortSignal): Promise<BatchResult> {
   let res: Response;
   try {
-    res = await fetchKeepAlive("/api/flashcards/generate", {
+    res = await fetch("/api/flashcards/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ language: contentLanguage }),

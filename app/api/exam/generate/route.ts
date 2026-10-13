@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withKeepAlive } from "@/lib/http/keep-alive";
 import { requirePaidPlan } from "@/lib/subscription";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -596,7 +595,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
  * masks a real, already-handled error response — only ever catches what
  * handlePost itself did not.
  */
-async function postHandler(request: NextRequest): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     return await handlePost(request);
   } catch (error) {
@@ -604,5 +603,3 @@ async function postHandler(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: "Une erreur inattendue est survenue. Réessaie." }, { status: 500 });
   }
 }
-
-export const POST = withKeepAlive(postHandler);
