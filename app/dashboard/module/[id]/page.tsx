@@ -80,6 +80,7 @@ import { getContentLanguage } from "@/store/useLanguageStore";
 import type { ChatMode } from "@/lib/chat-constants";
 import type { CitationSourceText } from "@/lib/chat-citations";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
+import { MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_MB, MAX_UPLOAD_FILES } from "@/lib/upload-limits";
 import { OcrSuggestedError } from "@/lib/upload-client";
 import type { CurriculumYearData } from "@/types/academic";
 import { QCM_REGENERATE_CAP, StudioPanel, type SectionStatus, type TileGenerationOptions } from "@/components/course/workspace/StudioPanel";
@@ -2075,9 +2076,12 @@ export default function ModuleWorkspacePage() {
   /** Files dropped on (or attached in) the co-pilot become new sources — same direct-to-storage pipeline as the Add-source modal. */
   const handleImportFiles = useCallback(
     async (files: File[]) => {
-      for (const file of files) {
-        if (file.size > 100 * 1024 * 1024) {
-          toast({ variant: "error", title: "Fichier trop volumineux", description: `${file.name} dépasse 100 Mo.` });
+      if (files.length > MAX_UPLOAD_FILES) {
+        toast({ variant: "error", title: "Trop de fichiers", description: `${MAX_UPLOAD_FILES} fichiers max à la fois — seuls les ${MAX_UPLOAD_FILES} premiers sont importés.` });
+      }
+      for (const file of files.slice(0, MAX_UPLOAD_FILES)) {
+        if (file.size > MAX_UPLOAD_FILE_BYTES) {
+          toast({ variant: "error", title: "Fichier trop volumineux", description: `${file.name} dépasse ${MAX_UPLOAD_FILE_MB} Mo.` });
           continue;
         }
         if (!ACCEPTED_FILE_TYPES.some((ext) => file.name.toLowerCase().endsWith(ext))) continue;

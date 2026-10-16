@@ -45,6 +45,7 @@ import {
 import { CHAT_MAX_CONTEXT_CHARS, MAX_CHAT_SOURCE_COURSES, type ChatMode } from "@/lib/chat-constants";
 import { stripCitationMarkers, type CitationSourceText } from "@/lib/chat-citations";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
+import { MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useVoiceDictation } from "@/hooks/useVoiceDictation";
 import { isSpeechSupported, speak, stopSpeaking, useSpeakingId } from "@/hooks/useSpeechSynthesis";
@@ -881,7 +882,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           >
             <FileUp className="h-8 w-8" />
             <p className="text-sm font-semibold">Dépose ton polycop pour l&apos;ajouter aux sources</p>
-            <p className="text-xs opacity-80">PDF, DOCX, PPTX, TXT — max 100 Mo</p>
+            <p className="text-xs opacity-80">PDF, DOCX, PPTX, TXT — max {MAX_UPLOAD_FILE_MB} Mo</p>
           </motion.div>
         )}
       </AnimatePresence>

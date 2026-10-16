@@ -5,6 +5,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { assertAcceptedMember } from "@/lib/group-chat";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
 import { ENVELOPE_PREFIX, decodeEnvelope, encodeEnvelope } from "@/lib/group-chat-envelope";
 import type { ChatMessage, ChatMessageType, MessageReactions } from "@/types/group-chat";
 
@@ -21,8 +22,8 @@ export const maxDuration = 60; // media upload, not an AI call — but a large v
 
 const CHAT_MEDIA_BUCKET = "chat_media";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
-const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+const MAX_VIDEO_BYTES = MAX_UPLOAD_FILE_BYTES;
+const MAX_AUDIO_BYTES = MAX_UPLOAD_FILE_BYTES;
 
 const MIME_TO_TYPE: Record<string, ChatMessageType> = {
   "image/jpeg": "image",
@@ -68,7 +69,7 @@ const DOCUMENT_EXTENSION_BY_MIME: Record<string, string> = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
   "text/plain": "txt",
 };
-const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = MAX_UPLOAD_FILE_BYTES;
 
 /** Keeps a readable, storage-safe original name for the download card. */
 function safeDocumentName(name: string): string {

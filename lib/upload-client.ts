@@ -134,10 +134,16 @@ async function fetchJsonWithTimeout(
   }
 }
 
-export async function uploadDocumentDirect(file: File, moduleId?: number): Promise<UploadedDocument> {
+/**
+ * Steps 1-2 of the direct-to-storage pipeline, shared by every caller: ask
+ * `signUrl` for a signed upload URL, then PUT the file straight to Supabase
+ * Storage. Returns where it landed; the caller's own finalize/analyze step
+ * takes it from there.
+ */
+export async function uploadFileToSignedStorage(signUrl: string, signBody: Record<string, unknown>, file: File): Promise<{ bucket: string; path: string }> {
   const signOutcome = await fetchJsonWithTimeout(
-    "/api/upload/sign",
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, fileSize: file.size }) },
+    signUrl,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, fileSize: file.size, ...signBody }) },
     SIGN_TIMEOUT_MS,
     "La préparation de l'envoi a pris trop de temps — vérifie ta connexion puis réessaie."
   );
@@ -183,6 +189,11 @@ export async function uploadDocumentDirect(file: File, moduleId?: number): Promi
     }
     throw new Error(`L'envoi du fichier a échoué : ${message || "erreur inconnue."}`);
   }
+  return { bucket, path };
+}
+
+export async function uploadDocumentDirect(file: File, moduleId?: number): Promise<UploadedDocument> {
+  const { path } = await uploadFileToSignedStorage("/api/upload/sign", {}, file);
 
   const finalizeOutcome = await fetchJsonWithTimeout(
     "/api/upload/finalize",

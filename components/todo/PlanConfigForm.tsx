@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
+import { MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
 import type { GeneratedPlanDay } from "@/types/study-planner";
 
 function buildRestDaysOptions(language: Language) {
@@ -73,6 +74,10 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
   }, [hoursPerDay, restDays, examDate]);
 
   async function uploadFile(file: File) {
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      setError(`Fichier trop volumineux (max ${MAX_UPLOAD_FILE_MB} Mo).`);
+      return;
+    }
     setIsUploading(true);
     setError(null);
     try {

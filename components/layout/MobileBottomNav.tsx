@@ -25,6 +25,7 @@ import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { t } from "@/lib/translations";
 import { tCockpit } from "@/lib/translations/cockpit";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/Dialog";
 import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
@@ -66,7 +67,7 @@ const MENU_ROUTES = ["/dashboard/billing", "/dashboard/settings", "/dashboard/to
 
 const MENU_ITEMS: { href: string; icon: LucideIcon; labelKey: Parameters<typeof tCockpit>[0]; tint: string }[] = [
   { href: "/dashboard/todo", icon: ListTodo, labelKey: "navTodo", tint: "from-cyan-500 to-sky-500" },
-  { href: "/dashboard/groups", icon: Users, labelKey: "navGroups", tint: "from-blue-500 to-indigo-500" },
+  ...(STUDY_GROUPS_ENABLED ? [{ href: "/dashboard/groups", icon: Users, labelKey: "navGroups" as const, tint: "from-blue-500 to-indigo-500" }] : []),
   { href: "/dashboard/billing", icon: CreditCard, labelKey: "navBilling", tint: "from-emerald-500 to-teal-500" },
   { href: "/dashboard/settings", icon: Settings, labelKey: "navSettings", tint: "from-slate-500 to-slate-600" },
 ];

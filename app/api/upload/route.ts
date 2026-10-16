@@ -5,6 +5,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/document-extraction";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
 // Bumped from 60s alongside MAX_FILE_BYTES below — a 100 Mo image-heavy PDF
@@ -15,7 +16,7 @@ export const runtime = "nodejs"; // officeparser needs the Node runtime, not edg
 // raise the plan/tier too if large uploads still time out in production.
 export const maxDuration = 300;
 
-const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo — same cap as /api/generate-course. Bumped so a heavy, image/radiology-rich course PDF isn't rejected outright — see components/dashboard/UploadModal.tsx's matching client-side MAX_UPLOAD_FILE_BYTES.
+const MAX_FILE_BYTES = MAX_UPLOAD_FILE_BYTES; // 10 Mo — app-wide cap, see lib/upload-limits.ts.
 
 const SOURCE_FILES_BUCKET = "course-sources";
 

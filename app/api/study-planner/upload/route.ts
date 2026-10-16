@@ -5,6 +5,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { ACCEPTED_DOCUMENT_EXTENSIONS, extractDocumentText } from "@/lib/document-extraction";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
 
 export const runtime = "nodejs"; // officeparser needs the Node runtime, not edge.
 // Bumped alongside MAX_FILE_BYTES below — see app/api/upload/route.ts's own
@@ -13,7 +14,7 @@ export const runtime = "nodejs"; // officeparser needs the Node runtime, not edg
 // regardless of what's declared here).
 export const maxDuration = 300;
 
-const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo — same cap as /api/upload.
+const MAX_FILE_BYTES = MAX_UPLOAD_FILE_BYTES; // 10 Mo — app-wide cap, see lib/upload-limits.ts.
 const STUDY_PLAN_SOURCES_BUCKET = "study-plan-sources";
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 const ACCEPTED_EXTENSIONS = [...ACCEPTED_DOCUMENT_EXTENSIONS, ...IMAGE_EXTENSIONS];

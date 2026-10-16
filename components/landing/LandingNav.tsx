@@ -7,11 +7,12 @@ import { ArrowRight, Menu, X } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 
 const LINKS = [
   { href: "#arsenal", fr: "Fonctionnalités", en: "Features" },
   { href: "#simulateur", fr: "Comment ça marche", en: "How it works" },
-  { href: "#groupes", fr: "Groupes d'étude", en: "Study groups" },
+  ...(STUDY_GROUPS_ENABLED ? [{ href: "#groupes", fr: "Groupes d'étude", en: "Study groups" }] : []),
   { href: "#tarifs", fr: "Tarifs", en: "Pricing" },
   { href: "#faq", fr: "FAQ", en: "FAQ" },
 ];

@@ -38,6 +38,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useAuth } from "@/providers/AuthProvider";
 import { useToast } from "@/components/ui/Toast";
+import { MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
 import { useSmartPaste } from "@/hooks/useBlockPaste";
 import { useChatTheme } from "@/hooks/useChatTheme";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
@@ -964,6 +965,10 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
   }
 
   async function uploadMedia(file: File) {
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      toast({ variant: "error", title: `Fichier trop volumineux (max ${MAX_UPLOAD_FILE_MB} Mo).` });
+      return;
+    }
     setIsUploadingMedia(true);
     try {
       const body = new FormData();

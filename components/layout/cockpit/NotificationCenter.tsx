@@ -13,6 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { activeDays, computeStreak, daysUntil } from "@/lib/dashboard/metrics";
 import { onLocalActivitySynced, readCustomExam, readSeenNotificationIds, writeSeenNotificationIds } from "@/lib/dashboard/local-activity";
 import { tCockpit } from "@/lib/translations/cockpit";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import type { DashboardOverview } from "@/types/dashboard-overview";
 import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 
@@ -157,6 +158,7 @@ export function NotificationCenter() {
     const unsubscribe = onLocalActivitySynced(() => setCustomExamDate(readCustomExam(userId)?.date ?? null));
     let cancelled = false;
     function loadGroupsUnread() {
+      if (!STUDY_GROUPS_ENABLED) return;
       fetch("/api/groups")
         .then((res) => (res.ok ? res.json() : null))
         .then((body) => {

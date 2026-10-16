@@ -1470,7 +1470,7 @@ removed after two limitations proved unfixable from our side:
 - A 401 mid-session throws `DriveAuthExpiredError` so the UI can offer
   "Se reconnecter"; `/api/drive/import` returns `authExpired: true` for the same
   purpose on the import path.
-- The import route enforces a **100 MB cap**, checking both `Content-Length` and
+- The import route enforces a **10 MB cap**, checking both `Content-Length` and
   the actual buffered length.
 
 <div style="page-break-after: always;"></div>
@@ -1555,7 +1555,7 @@ a same-origin relative path. Applied in `app/auth/callback/route.ts` and
 
 | Control | Implementation |
 |---|---|
-| Upload size caps | 100 MB, enforced at the route **and** at the Storage bucket |
+| Upload size caps | 10 MB per file (10 files max per batch), enforced at the route **and** at the Storage bucket |
 | Text length caps | `MAX_HIGHLIGHT_CHARS`, `MAX_MESSAGE_CHARS`, `MAX_SOURCE_CHARS` |
 | Webhook authenticity | HMAC over the raw body |
 | Cron authenticity | `Authorization: Bearer $CRON_SECRET` |

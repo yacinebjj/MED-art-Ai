@@ -2,6 +2,7 @@
 
 import { Check, GraduationCap, Languages, Lock, ShieldCheck, Smartphone, Wallet, X } from "lucide-react";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { GlassPanel, GradientText, Reveal, SectionHeading } from "./primitives";
 
 /** The original "avantage injuste" comparison, sharpened and extended. */
@@ -9,7 +10,7 @@ const COMPARISON = [
   { old: { fr: "Des heures à relire des PDF", en: "Hours re-reading PDFs" }, now: { fr: "Une explication limpide générée en quelques instants", en: "A crystal-clear explanation generated in moments" } },
   { old: { fr: "QCM génériques trouvés en ligne", en: "Generic MCQs found online" }, now: { fr: "40+ QCM tirés de TES cours, corrigés en détail", en: "40+ MCQs from YOUR courses, corrected in detail" } },
   { old: { fr: "Notes éparpillées entre plusieurs apps", en: "Notes scattered across apps" }, now: { fr: "Tout centralisé, rangé par module officiel", en: "Everything centralized, filed by official module" } },
-  { old: { fr: "Réviser seul, perdu dans les groupes WhatsApp", en: "Revising alone, lost in WhatsApp groups" }, now: { fr: "Groupes d'étude temps réel : sondages, fichiers, mentions", en: "Real-time study groups: polls, files, mentions" } },
+  ...(STUDY_GROUPS_ENABLED ? [{ old: { fr: "Réviser seul, perdu dans les groupes WhatsApp", en: "Revising alone, lost in WhatsApp groups" }, now: { fr: "Groupes d'étude temps réel : sondages, fichiers, mentions", en: "Real-time study groups: polls, files, mentions" } }] : []),
   { old: { fr: "Aucune idée de ce qu'il reste à revoir", en: "No idea what's left to review" }, now: { fr: "Progression, série et compte à rebours d'examen", en: "Progress, streak and exam countdown" } },
 ];
 
@@ -78,8 +79,8 @@ const PROOFS = [
   },
   {
     icon: Lock,
-    fr: { t: "Tes cours restent à toi", d: "Tes documents ne sont visibles que par toi ; les groupes sont privés, sur invitation." },
-    en: { t: "Your courses stay yours", d: "Your documents are visible to you only; groups are private and invite-only." },
+    fr: { t: "Tes cours restent à toi", d: STUDY_GROUPS_ENABLED ? "Tes documents ne sont visibles que par toi ; les groupes sont privés, sur invitation." : "Tes documents ne sont visibles que par toi." },
+    en: { t: "Your courses stay yours", d: STUDY_GROUPS_ENABLED ? "Your documents are visible to you only; groups are private and invite-only." : "Your documents are visible to you only." },
   },
   {
     icon: Wallet,

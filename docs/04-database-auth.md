@@ -170,7 +170,7 @@ permanent meant losing a multi-minute generation to a self-resolving race.
 
 | Bucket | Contents | Size limit |
 |---|---|---|
-| `course-sources` | Uploaded PDF/DOCX/PPTX/TXT | 100 MB (bucket-level) |
+| `course-sources` | Uploaded PDF/DOCX/PPTX/TXT | 10 MB (bucket-level) |
 | `lecture-recordings` | Audio chunks for transcription | 24 MB per chunk |
 
 Both are provisioned lazily by an `ensure…Bucket()` helper

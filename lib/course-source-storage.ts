@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
 
 /**
  * Shared Supabase Storage config for uploaded course source files — used by
@@ -17,7 +18,7 @@ export const SOURCE_FILE_MIME_TYPES: Record<string, string> = {
   txt: "text/plain",
 };
 
-// Same 100 MB ceiling every other upload route declares (app/api/upload/route.ts,
+// Same 10 MB ceiling (lib/upload-limits.ts) every other upload route declares (app/api/upload/route.ts,
 // app/api/study-planner/upload/route.ts, components/dashboard/UploadModal.tsx's
 // client-side check) — SECURITY: without this on the BUCKET itself, that
 // ceiling was only ever enforced against a client-DECLARED `fileSize` number
@@ -26,7 +27,7 @@ export const SOURCE_FILE_MIME_TYPES: Record<string, string> = {
 // fileSize to pass that check, then PUT an arbitrarily large real file — the
 // bucket had no limit of its own to reject it. Mirrors
 // lib/lecture-notes-storage.ts's own fix for the identical gap.
-export const MAX_SOURCE_FILE_BYTES = 100 * 1024 * 1024;
+export const MAX_SOURCE_FILE_BYTES = MAX_UPLOAD_FILE_BYTES;
 
 export async function ensureSourceFilesBucket(supabase: ReturnType<typeof getSupabaseAdmin>): Promise<void> {
   const { data: buckets } = await supabase.storage.listBuckets();

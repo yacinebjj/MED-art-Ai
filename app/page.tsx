@@ -7,6 +7,7 @@ import { MetricsStrip } from "@/components/landing/MetricsStrip";
 import { ArsenalSection } from "@/components/landing/ArsenalSection";
 import { SimulatorSection } from "@/components/landing/SimulatorSection";
 import { GroupsShowcase } from "@/components/landing/GroupsShowcase";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { ComparisonSection, ProofSection } from "@/components/landing/ProofSections";
 import { FaqSection, FinalCta, PricingSection } from "@/components/landing/PricingFaqCta";
 import { LandingFooter } from "@/components/landing/LandingFooter";
@@ -50,7 +51,7 @@ export default function LandingPage() {
         <MetricsStrip />
         <ArsenalSection />
         <SimulatorSection />
-        <GroupsShowcase />
+        {STUDY_GROUPS_ENABLED && <GroupsShowcase />}
         <ComparisonSection />
         <ProofSection />
         <PricingSection />

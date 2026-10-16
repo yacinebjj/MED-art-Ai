@@ -4,6 +4,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { ACCEPTED_DOCUMENT_EXTENSIONS } from "@/lib/document-extraction";
 import { ensureSourceFilesBucket, buildSourceFilePath, SOURCE_FILES_BUCKET } from "@/lib/course-source-storage";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 // the project level (50 MB by default on some plans) — this app-level check
 // can't see or override that; a file under this number can still be
 // rejected by Storage itself on a project with a lower configured limit.
-const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_FILE_BYTES = MAX_UPLOAD_FILE_BYTES;
 
 /**
  * Step 1 of the direct-to-storage upload pipeline (see app/api/upload/finalize
@@ -22,7 +23,7 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
  * through this (or any) Next.js Route Handler, which is what actually fixes
  * "large files fail to upload": Vercel enforces a hard ~4.5 MB request-body
  * ceiling on every Node.js Function, on every plan, with no config to raise
- * it — the legacy /api/upload route's own 100 MB business-logic check was
+ * it — the legacy /api/upload route's own size business-logic check was
  * correct but functionally dead for anything past that ceiling, since
  * Vercel's platform rejects the request before this app's code ever runs.
  * A signed Storage upload goes straight to Supabase's own servers instead.

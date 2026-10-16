@@ -326,7 +326,7 @@ The current design talks to the **Drive REST API directly**:
 - A 401 mid-session throws `DriveAuthExpiredError` so the UI can offer
   "Se reconnecter" instead of a dead end; `/api/drive/import` returns
   `authExpired: true` for the same reason.
-- The import route enforces a 100 MB cap (`Content-Length` *and* actual buffer
+- The import route enforces a 10 MB cap (`Content-Length` *and* actual buffer
   length).
 
 [Next: Contribution Guidelines →](./06-contributing.md)

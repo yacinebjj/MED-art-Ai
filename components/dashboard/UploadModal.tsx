@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
+import { MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_MB, MAX_UPLOAD_FILES as MAX_BATCH_FILES } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
 import { preloadGoogleDriveScripts, type DriveListItem } from "@/lib/google-drive-picker";
 import { DriveBrowser } from "@/components/dashboard/DriveBrowser";
@@ -18,11 +19,9 @@ import { useCyberTilt } from "@/components/cyber/hooks";
 import { CourseCreditLine } from "@/components/billing/UsageNotices";
 import { notifyUsageChanged } from "@/hooks/useUsage";
 
-// Must match the server-side MAX_FILE_BYTES in app/api/generate-course/route.ts
-// AND app/api/upload/route.ts. Checked here so an oversized file is rejected
-// instantly, before spending a student's time and mobile data.
-const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024; // 100 Mo
-const MAX_BATCH_FILES = 10;
+// Caps come from lib/upload-limits.ts (same numbers the upload routes enforce)
+// — checked here so an oversized file is rejected instantly, before spending
+// a student's time and mobile data.
 
 type Method = "upload" | "drive" | "text" | "link";
 type QueueStatus = "pending" | "uploading" | "done" | "error";
@@ -161,7 +160,10 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     setError(null);
     const incoming = Array.from(list).slice(0, allowsBatch ? MAX_BATCH_FILES : 1);
     const oversized = incoming.filter((f) => f.size > MAX_UPLOAD_FILE_BYTES);
-    if (oversized.length > 0) setError(`${oversized.map((f) => f.name).join(", ")} : trop volumineux (max 100 Mo).`);
+    const problems: string[] = [];
+    if (allowsBatch && list.length > MAX_BATCH_FILES) problems.push(`${MAX_BATCH_FILES} fichiers max à la fois — seuls les ${MAX_BATCH_FILES} premiers sont gardés.`);
+    if (oversized.length > 0) problems.push(`${oversized.map((f) => f.name).join(", ")} : trop volumineux (max ${MAX_UPLOAD_FILE_MB} Mo).`);
+    if (problems.length > 0) setError(problems.join(" "));
     const accepted = incoming
       .filter((f) => f.size <= MAX_UPLOAD_FILE_BYTES)
       .map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 7)}`, file, status: "pending" as const }));
@@ -394,7 +396,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                 </motion.span>
                 <p className="text-base font-bold text-foreground">{isDragging ? "Dépose ici" : allowsBatch ? "Glisse-dépose tes fichiers ici" : "Glisse-dépose ton fichier ici"}</p>
                 <p className="text-xs text-muted-foreground">
-                  PDF, DOCX, PPTX, TXT — 100 Mo max{allowsBatch ? ` par fichier · jusqu'à ${MAX_BATCH_FILES} à la fois` : ""}
+                  PDF, DOCX, PPTX, TXT — {MAX_UPLOAD_FILE_MB} Mo max{allowsBatch ? ` par fichier · jusqu'à ${MAX_BATCH_FILES} à la fois` : ""}
                 </p>
               </div>
 

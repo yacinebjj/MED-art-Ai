@@ -9,6 +9,7 @@ import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, POOL_DEADLINE_DAYS, PROMO_S
 import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
 import { PricingTierCard } from "@/components/pricing/PricingTierCard";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 import { GradientText, MagneticLink, ParticleField, Reveal, SectionHeading } from "./primitives";
 
@@ -121,10 +122,10 @@ const FAQ = [
     fr: { q: "Le contenu généré est-il fiable ?", a: "L'IA travaille sur TON cours, pas sur Internet : explications, QCM et cas cliniques restent fidèles à ton polycopié. Comme pour tout outil, garde ton esprit critique et vérifie ce qui te paraît douteux." },
     en: { q: "Is the generated content reliable?", a: "The AI works on YOUR course, not the internet: explanations, MCQs and cases stay faithful to your handout. As with any tool, keep a critical mind and double-check anything that looks off." },
   },
-  {
+  ...(STUDY_GROUPS_ENABLED ? [{
     fr: { q: "Comment fonctionnent les groupes d'étude ?", a: "Crée un groupe, partage son code ou son lien : chaque demande est validée par l'admin. Messages en temps réel, sondages, documents, vocaux, mentions et réactions — dans un espace privé." },
     en: { q: "How do study groups work?", a: "Create a group, share its code or link: the admin approves every request. Real-time messages, polls, documents, voice notes, mentions and reactions — in a private space." },
-  },
+  }] : []),
   {
     fr: {
       q: "Comment payer ?",

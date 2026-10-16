@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { extractDocumentText } from "@/lib/document-extraction";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
 
 export const runtime = "nodejs";
 // Bumped alongside the other upload routes' MAX_FILE_BYTES (see
@@ -33,12 +34,12 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   "text/plain": "txt",
 };
 
-// SECURITY: same 100 MB ceiling every other document-ingestion route
+// SECURITY: same 10 MB ceiling (lib/upload-limits.ts) every other document-ingestion route
 // enforces (app/api/upload/route.ts, app/api/study-planner/upload/route.ts)
 // — this route was the one exception, buffering an arbitrarily large Drive
 // file into memory with no size check at all before ever calling
 // extractDocumentText, risking function memory/time exhaustion.
-const MAX_DRIVE_IMPORT_BYTES = 100 * 1024 * 1024;
+const MAX_DRIVE_IMPORT_BYTES = MAX_UPLOAD_FILE_BYTES;
 
 function formatOversizedFileError(bytes: number): string {
   return `Fichier trop volumineux (${(bytes / (1024 * 1024)).toFixed(1)} Mo, max ${MAX_DRIVE_IMPORT_BYTES / (1024 * 1024)} Mo).`;

@@ -31,8 +31,8 @@ const STEPS = [
     en: { title: "AI analyses it in depth", text: "Every mechanism is unpacked, every MCQ trap spotted — staying faithful to YOUR course, not the internet." },
   },
   {
-    fr: { title: "Tu révises comme jamais", text: "Sept formats, examen corrigé, flashcards, Lab clinique, groupes : tout est rangé par module, prêt avant le jour J." },
-    en: { title: "You revise like never before", text: "Seven formats, a corrected exam, flashcards, the clinical Lab, groups: all filed by module, ready before exam day." },
+    fr: { title: "Tu révises comme jamais", text: "Sept formats, examen corrigé, flashcards, Lab clinique : tout est rangé par module, prêt avant le jour J." },
+    en: { title: "You revise like never before", text: "Seven formats, a corrected exam, flashcards, the clinical Lab: all filed by module, ready before exam day." },
   },
 ];
 

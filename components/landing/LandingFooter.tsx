@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 
 /** Footer with the giant neon "MedArt AI" signature. */
 export function LandingFooter() {
@@ -14,7 +15,7 @@ export function LandingFooter() {
       links: [
         { href: "#arsenal", label: fr ? "Fonctionnalités" : "Features" },
         { href: "#simulateur", label: fr ? "Comment ça marche" : "How it works" },
-        { href: "#groupes", label: fr ? "Groupes d'étude" : "Study groups" },
+        ...(STUDY_GROUPS_ENABLED ? [{ href: "#groupes", label: fr ? "Groupes d'étude" : "Study groups" }] : []),
         { href: "/pricing", label: fr ? "Tarifs" : "Pricing" },
       ],
     },

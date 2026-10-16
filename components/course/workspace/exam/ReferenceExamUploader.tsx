@@ -4,11 +4,15 @@ import { useRef, useState } from "react";
 import { CheckCircle2, FileUp, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
+import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
+import { uploadFileToSignedStorage } from "@/lib/upload-client";
+import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg"];
 const ACCEPTED_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg"];
-// Kept in sync with app/api/exam/analyze-reference/route.ts's own MAX_FILE_BYTES — checked here too so an oversized file never even reaches the network.
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// Same cap app/api/exam/analyze-reference/route.ts enforces — checked here too so an oversized file never even reaches the network.
+const MAX_FILE_BYTES = MAX_UPLOAD_FILE_BYTES;
+const ANALYSIS_CLIENT_TIMEOUT_MS = 310_000;
 
 interface ReferenceExamUploaderProps {
   styleProfile: ExamStyleProfile | null;
@@ -47,16 +51,30 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
     setIsAnalyzing(true);
     onStyleProfileChange(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/exam/analyze-reference", { method: "POST", body: formData });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || !body?.success) {
-        setError(body?.error ?? "L'analyse du style a échoué. Réessaie.");
+      // Straight to Storage first — a Route Handler body is capped at ~4.5 MB,
+      // below the 10 MB upload limit — then only the path goes to the analysis.
+      let path: string;
+      try {
+        ({ path } = await uploadFileToSignedStorage("/api/exam/analyze-reference/sign", { mimeType: file.type }, file));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "L'envoi du fichier a échoué. Réessaie.");
         setFileName(null);
         return;
       }
-      onStyleProfileChange(body.styleProfile as ExamStyleProfile);
+      // Heartbeat-streamed route (see app/api/exam/analyze-reference) — a heavy
+      // PDF can take minutes to read; the timeout sits just above its maxDuration.
+      const outcome = await postJsonWithHeartbeat(
+        "/api/exam/analyze-reference",
+        { path, fileName: file.name, mimeType: file.type },
+        ANALYSIS_CLIENT_TIMEOUT_MS
+      );
+      if (!outcome.ok || !outcome.data.styleProfile) {
+        const serverError = typeof outcome.data.error === "string" ? outcome.data.error : null;
+        setError(serverError ?? (outcome.status === 0 ? `L'analyse du style a été interrompue (${outcome.diagnostic}). Réessaie.` : "L'analyse du style a échoué. Réessaie."));
+        setFileName(null);
+        return;
+      }
+      onStyleProfileChange(outcome.data.styleProfile as ExamStyleProfile);
     } catch {
       setError("L'analyse du style a échoué (problème réseau). Réessaie.");
       setFileName(null);

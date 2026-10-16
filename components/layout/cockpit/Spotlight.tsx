@@ -29,6 +29,7 @@ import { useCockpitUi } from "@/store/useCockpitUi";
 import { LAB_TOOLS } from "@/lib/workspace-lab";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit } from "@/lib/translations/cockpit";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { ASSISTANT_PREFILL_KEY } from "@/lib/dashboard/assistant-prefill";
 import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 
@@ -43,7 +44,7 @@ const PREFETCH_ON_OPEN = [
   "/dashboard/study",
   "/dashboard/todo",
   "/dashboard/notes",
-  "/dashboard/groups",
+  ...(STUDY_GROUPS_ENABLED ? ["/dashboard/groups"] : []),
   "/dashboard/billing",
   "/dashboard/settings",
 ];
@@ -90,7 +91,7 @@ export function Spotlight() {
       { id: "nav-pomodoro", group: g.nav, label: tCockpit("navPomodoro", language), icon: Timer, keywords: ["focus", "timer", "chrono"], run: go("/dashboard/study?tab=session") },
       { id: "nav-todo", group: g.nav, label: tCockpit("navTodo", language), icon: ListTodo, keywords: ["planning", "planner", "tâches"], run: go("/dashboard/todo") },
       { id: "nav-notes", group: g.nav, label: tCockpit("navNotes", language), icon: NotebookPen, run: go("/dashboard/notes") },
-      { id: "nav-groups", group: g.nav, label: tCockpit("navGroups", language), icon: Users, keywords: ["communauté", "chat"], run: go("/dashboard/groups") },
+      ...(STUDY_GROUPS_ENABLED ? [{ id: "nav-groups", group: g.nav, label: tCockpit("navGroups", language), icon: Users, keywords: ["communauté", "chat"], run: go("/dashboard/groups") }] : []),
       { id: "nav-billing", group: g.nav, label: tCockpit("navBilling", language), icon: CreditCard, keywords: ["quota", "abonnement", "plan"], run: go("/dashboard/billing") },
       { id: "nav-settings", group: g.nav, label: tCockpit("navSettings", language), icon: Settings, run: go("/dashboard/settings") },
       // Held back for V2 (lib/feature-flags.ts).

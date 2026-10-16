@@ -38,6 +38,7 @@ import { LAB_TOOLS } from "@/lib/workspace-lab";
 import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
 import { t } from "@/lib/translations";
 import { tCockpit, type CockpitKey } from "@/lib/translations/cockpit";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import {
@@ -258,10 +259,14 @@ const SECTIONS: NavSection[] = [
       { id: "notes", labelKey: "navNotes", icon: NotebookPen, href: "/dashboard/notes", hue: "indigo" },
     ],
   },
-  {
-    titleKey: "sectionCommunity",
-    items: [{ id: "groups", labelKey: "navGroups", icon: Users, href: "/dashboard/groups", hue: "blue", isActive: (p) => p.startsWith("/dashboard/groups") }],
-  },
+  ...(STUDY_GROUPS_ENABLED
+    ? [
+        {
+          titleKey: "sectionCommunity",
+          items: [{ id: "groups", labelKey: "navGroups", icon: Users, href: "/dashboard/groups", hue: "blue", isActive: (p) => p.startsWith("/dashboard/groups") }],
+        } satisfies NavSection,
+      ]
+    : []),
 ];
 
 function NavSections({ collapsed, pathname, tab, language }: { collapsed: boolean; pathname: string; tab: string | null; language: Language }) {
