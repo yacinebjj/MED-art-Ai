@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { getSubscription, getUsageSnapshot, isSubscriptionActive, resolveEffectivePlan } from "@/lib/subscription";
+import { ensureSubscriptionRow, getSubscription, getUsageSnapshot, isSubscriptionActive, resolveEffectivePlan } from "@/lib/subscription";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { FREE_TRIAL, PLANS } from "@/lib/pricing";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { isBillingAdmin } from "@/lib/billing-pools";
+import { ensurePendingPoolActivations, isBillingAdmin } from "@/lib/billing-pools";
 
 /** Mirrors MODULE_EXAM_REGENERATE_CAP in lib/exam-generation.ts. */
 const EXAM_REGENERATE_CAP = 5;
@@ -34,14 +34,26 @@ export async function GET() {
     return NextResponse.json({ subscription: null, trial: null, usage: null }, { status: 401 });
   }
 
-  const [sub, usage, examRegenerationsUsed] = await Promise.all([getSubscription(user.id), getUsageSnapshot(user.id), readExamRegenerationsUsed(user.id)]);
+  // A paid member of a completed group whose activation was interrupted is activated here (idempotent, never throws).
+  if (isSupabaseConfigured()) await ensurePendingPoolActivations(user.id);
+
+  const [initialSub, initialUsage, examRegenerationsUsed] = await Promise.all([getSubscription(user.id), getUsageSnapshot(user.id), readExamRegenerationsUsed(user.id)]);
+  let sub = initialSub;
+  let usage = initialUsage;
+  if (!sub && isSupabaseConfigured()) {
+    // Self-heal: an account whose signup trigger never created its subscriptions row would
+    // otherwise see « Ta consommation n'est pas disponible » until its first quota-gated action.
+    await ensureSubscriptionRow(user.id);
+    [sub, usage] = await Promise.all([getSubscription(user.id), getUsageSnapshot(user.id)]);
+    if (!sub) console.error(`[api/subscription] no readable subscriptions row for user ${user.id}`);
+  }
   const effectivePlanId = resolveEffectivePlan(sub);
-  const effectivePlan = PLANS[effectivePlanId];
+  const effectivePlan = PLANS[effectivePlanId] ?? PLANS.freemium;
 
   const subscriptionPayload = sub
     ? {
         plan: sub.plan,
-        planLabel: PLANS[sub.plan].label,
+        planLabel: PLANS[sub.plan]?.label ?? sub.plan,
         status: sub.status,
         active: isSubscriptionActive(sub),
         periodEnd: sub.period_end,

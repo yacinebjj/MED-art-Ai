@@ -12,9 +12,11 @@ import {
   Clock,
   Copy,
   CreditCard,
+  Crown,
   Hourglass,
   Loader2,
   Lock,
+  LogOut,
   PartyPopper,
   RefreshCw,
   Send,
@@ -27,7 +29,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { CyberHeader, CyberPanel, CyberStage, NeonRing, ParticleBurst } from "@/components/cyber/primitives";
-import { PLANS, POOL_DEADLINE_DAYS, REFUND_DELAY_LABEL, formatDZD, type BillingCycle, type PlanId, SEAT_HOLD_MINUTES } from "@/lib/pricing";
+import { PAYMENT_CONFIRM_GRACE_MINUTES, PLANS, POOL_DEADLINE_DAYS, REFUND_DELAY_LABEL, formatDZD, type BillingCycle, type PlanId, SEAT_HOLD_MINUTES } from "@/lib/pricing";
 import type { PoolView } from "@/lib/billing-pools";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +53,8 @@ type LoadState =
   | { kind: "ready"; pool: PoolView };
 
 type ConfirmPhase = "idle" | "polling" | "timeout";
+
+type PoolAction = "checkout" | "join" | "leave";
 
 type Phase =
   | "refunded"
@@ -85,9 +89,11 @@ function resolvePhase(pool: PoolView): Phase {
     return "paid_waiting";
   }
   if (me.status === "holding" && pool.status === "open") return "holding";
+  // A leader's group is « complete » from the start (all seats paid): friends join until it is full.
+  if (pool.mode === "leader") return pool.confirmed >= pool.size ? "full_outsider" : "join";
   if (pool.status === "expired") return "expired_outsider";
   if (pool.status === "complete" || pool.confirmed >= pool.size) return "full_outsider";
-  return pool.mode === "leader" ? "join" : "pay";
+  return "pay";
 }
 
 function formatFrenchDate(iso: string): string {
@@ -198,7 +204,7 @@ function Gauge({ pool, phase }: { pool: PoolView; phase: Phase }) {
   const now = useNow(30000);
   const showCountdown = pool.mode === "pooled" && pool.status === "open";
   const remainingMs = new Date(pool.expiresAt).getTime() - now;
-  const unit = pool.mode === "leader" ? "places prises" : "étudiants confirmés";
+  const unit = pool.mode === "leader" ? "places prises" : "places payées";
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -307,21 +313,59 @@ function TrustList({ pool }: { pool: PoolView }) {
 
 function Reassurance({ pool, paid }: { pool: PoolView; paid: boolean }) {
   const remaining = Math.max(0, pool.size - pool.confirmed);
-  const group = "de ton groupe";
-  const waiting = paid
-    ? `${remaining} autre${remaining > 1 ? "s" : ""} étudiant${remaining > 1 ? "s" : ""} ${group}`
-    : `${remaining} étudiant${remaining > 1 ? "s" : ""} ${group} (toi compris)`;
   return (
     <p className="text-sm leading-relaxed text-slate-300">
-      <span className="font-bold text-white">Ton paiement est sécurisé.</span> Nous attendons que {waiting}{" "}
-      {remaining > 1 ? "s'inscrivent" : "s'inscrive"}. Dès que la jauge atteint{" "}
+      <span className="font-bold text-white">Ton argent est protégé.</span>{" "}
+      {paid ? "Ta part est payée et ta place est bloquée. " : "Ta place n'est bloquée qu'une fois ta part payée. "}
+      Encore <span className="font-bold text-white">{remaining}</span> paiement{remaining > 1 ? "s" : ""} et la jauge atteint{" "}
       <span className="font-bold text-white">
         {pool.size}/{pool.size}
       </span>
-      , MedArt AI se débloque instantanément pour tout le monde pour {CYCLE_DURATION[pool.cycle]}. Si l&apos;objectif des {pool.size}{" "}
-      n&apos;est pas atteint sous {POOL_DEADLINE_DAYS} jours, le remboursement de tes {formatDZD(pool.pricePerMember)} est déclenché
-      automatiquement — tu le reçois sous {REFUND_DELAY_LABEL}.
+      : MedArt AI se débloque alors pour tout le monde, pour {CYCLE_DURATION[pool.cycle]}. Si le groupe n&apos;est pas complet sous {POOL_DEADLINE_DAYS} jours,
+      chaque part payée ({formatDZD(pool.pricePerMember)}) est remboursée automatiquement — reçue sous {REFUND_DELAY_LABEL}.
     </p>
+  );
+}
+
+type StepState = "done" | "current" | "todo";
+
+/** « Where am I » for a pooled purchase: pay your share → invite → activation at size/size. */
+function Steps({ pool, paid }: { pool: PoolView; paid: boolean }) {
+  const complete = pool.status === "complete";
+  const steps: { title: string; text: string; state: StepState }[] = [
+    { title: "Paie ta part", text: formatDZD(pool.pricePerMember), state: paid || complete ? "done" : "current" },
+    { title: "Invite tes amis", text: `${pool.confirmed}/${pool.size} payés`, state: complete ? "done" : paid ? "current" : "todo" },
+    { title: `Activation à ${pool.size}/${pool.size}`, text: "pour tout le monde", state: complete ? "done" : "todo" },
+  ];
+  return (
+    <ol className="mt-5 grid grid-cols-3 gap-2" aria-label="Étapes">
+      {steps.map((step, index) => (
+        <li
+          key={step.title}
+          aria-current={step.state === "current" ? "step" : undefined}
+          className={cn(
+            "rounded-2xl border px-3 py-2.5",
+            step.state === "done" && "border-emerald-400/40 bg-emerald-500/10",
+            step.state === "current" && "border-cyan-400/60 bg-cyan-500/10 shadow-[0_0_20px_rgba(34,211,238,0.18)]",
+            step.state === "todo" && "border-white/10 bg-white/[0.02]"
+          )}
+        >
+          <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+            <span
+              className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-black",
+                step.state === "done" ? "bg-emerald-400 text-slate-950" : step.state === "current" ? "bg-cyan-300 text-slate-950" : "bg-white/10 text-slate-400"
+              )}
+            >
+              {step.state === "done" ? <Check className="h-2.5 w-2.5" /> : index + 1}
+            </span>
+            Étape {index + 1}
+          </p>
+          <p className={cn("mt-1 text-xs font-black leading-tight sm:text-sm", step.state === "todo" ? "text-slate-400" : "text-white")}>{step.title}</p>
+          <p className="mt-0.5 truncate text-[11px] text-slate-400">{step.text}</p>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -464,7 +508,7 @@ function PoolTracker() {
 
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [confirmPhase, setConfirmPhase] = useState<ConfirmPhase>(returnStatus === "success" ? "polling" : "idle");
-  const [busy, setBusy] = useState<"checkout" | "join" | null>(null);
+  const [busy, setBusy] = useState<PoolAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [burst, setBurst] = useState(0);
   const [showFailure, setShowFailure] = useState(returnStatus === "failure");
@@ -553,7 +597,7 @@ function PoolTracker() {
     if (phase === "celebrate") setBurst((n) => n + 1);
   }, [phase]);
 
-  async function post(action: "checkout" | "join") {
+  async function post(action: PoolAction) {
     setBusy(action);
     setActionError(null);
     let redirecting = false;
@@ -582,6 +626,13 @@ function PoolTracker() {
       if (action === "join" && data.pool) {
         setState({ kind: "ready", pool: data.pool });
         toast({ variant: "success", title: "Bienvenue dans le groupe !", description: "Ta place est confirmée." });
+      }
+      if (action === "leave" && data.pool) {
+        setState({ kind: "ready", pool: data.pool });
+        setConfirmPhase("idle");
+        if (data.pool.me.status === "released") {
+          toast({ variant: "success", title: "Tu as quitté le groupe", description: "Ta place est libérée et rien n'a été payé." });
+        }
       }
     } catch {
       setActionError("Connexion impossible. Vérifie ton réseau et réessaie.");
@@ -641,11 +692,20 @@ function PoolTracker() {
   const currentPhase = phase ?? "pay";
   const paidMe = readyPool.me.status === "paid" || readyPool.me.status === "activated";
   const showInvite =
-    readyPool.status === "open" &&
     readyPool.confirmed < readyPool.size &&
-    (readyPool.mode === "leader" ? readyPool.isCreator : currentPhase !== "refund_pending" && currentPhase !== "refunded");
+    (readyPool.mode === "leader"
+      ? // A leader's paid group stays « complete »: its creator hands out the seats until the period ends.
+        readyPool.isCreator && readyPool.status === "complete" && (!readyPool.periodEnd || new Date(readyPool.periodEnd).getTime() > Date.now())
+      : readyPool.status === "open" && currentPhase !== "refund_pending" && currentPhase !== "refunded");
   const accessEnd = accessEndIso(readyPool);
   const kindLabel = `Groupe · ${readyPool.size} personnes`;
+  const showSteps =
+    readyPool.mode === "pooled" && (currentPhase === "pay" || currentPhase === "holding" || currentPhase === "paid_waiting" || currentPhase === "celebrate");
+  // Only while there is something to pay — never next to « Ne repaie pas » while a payment is being confirmed.
+  const creatorMustPay = readyPool.mode === "pooled" && readyPool.isCreator && readyPool.status === "open" && currentPhase === "pay" && !readyPool.me.activePlanEnd;
+  const extraRefunds = readyPool.me.extraRefunds ?? [];
+  const extraRefundTotal = extraRefunds.reduce((sum, r) => sum + r.amount, 0);
+  const extraRefundsSent = extraRefunds.length > 0 && extraRefunds.every((r) => r.status === "refunded");
 
   return (
     <CyberStage accent={currentPhase === "celebrate" ? "emerald" : "cyan"} className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">
@@ -660,10 +720,26 @@ function PoolTracker() {
         subtitle={`${readyPool.planLabel} · ${formatDZD(readyPool.pricePerMember)} par personne`}
       />
 
+      {showSteps && <Steps pool={readyPool} paid={paidMe} />}
+
       <div className="mt-5 space-y-3">
+        {creatorMustPay && (
+          <Banner tone="cyan" icon={Crown} title="Tu as créé ce groupe : paie ta part pour bloquer ta place">
+            Tant que ta part ({formatDZD(readyPool.pricePerMember)}) n&apos;est pas payée, tu ne fais pas partie des {readyPool.size} et un autre ami pourrait
+            prendre la dernière place. Paie d&apos;abord, puis partage le lien d&apos;invitation.
+            {readyPool.confirmed === 0 && " Un ami a déjà lancé votre groupe ? Utilise plutôt son lien, pour ne pas créer deux groupes."}
+          </Banner>
+        )}
+        {extraRefunds.length > 0 && (
+          <Banner tone="amber" icon={Undo2} title="Paiement en double détecté : remboursement automatique">
+            {`Tu as payé ta part une fois de trop.${paidMe ? " Ta place reste confirmée." : ""} Le remboursement de ce paiement en trop (${formatDZD(extraRefundTotal)}) `}
+            {extraRefundsSent ? "t'a été envoyé." : `a été déclenché automatiquement : tu le reçois sous ${REFUND_DELAY_LABEL}, sans rien faire.`}
+          </Banner>
+        )}
         {confirmPhase === "polling" && !isSettledPayment(meStatus) && (
           <Banner tone="cyan" icon={Loader2} title="Confirmation de ton paiement…">
-            Chargily nous transmet la confirmation, cela prend généralement quelques secondes. Tu peux garder cette page ouverte.
+            Chargily nous transmet la confirmation : quelques secondes en général, parfois quelques minutes avec Edahabia. Ne repaie pas, cette page se met à
+            jour toute seule.
           </Banner>
         )}
         {confirmPhase === "timeout" && !isSettledPayment(meStatus) && (
@@ -701,7 +777,7 @@ function PoolTracker() {
           </Banner>
         )}
         {actionError && (
-          <Banner tone="rose" icon={AlertCircle} title="Action impossible">
+          <Banner tone="rose" icon={AlertCircle} title="Ce n'est pas possible pour le moment">
             {actionError}
           </Banner>
         )}
@@ -722,6 +798,7 @@ function PoolTracker() {
               accessEnd={accessEnd}
               onPay={() => void post("checkout")}
               onJoin={() => void post("join")}
+              onLeave={() => void post("leave")}
               onRefresh={() => void load()}
             />
           </CyberPanel>
@@ -758,21 +835,32 @@ function StatePanel({
   accessEnd,
   onPay,
   onJoin,
+  onLeave,
   onRefresh,
 }: {
   pool: PoolView;
   phase: Phase;
-  busy: "checkout" | "join" | null;
+  busy: PoolAction | null;
   accessEnd: string | null;
   onPay: () => void;
   onJoin: () => void;
+  onLeave: () => void;
   onRefresh: () => void;
 }) {
   const refund = pool.me.refund;
   const overflow = pool.status === "complete";
+  const now = useNow(15000);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  useEffect(() => {
+    if (!confirmLeave) return;
+    const id = window.setTimeout(() => setConfirmLeave(false), 6000);
+    return () => window.clearTimeout(id);
+  }, [confirmLeave]);
 
   switch (phase) {
-    case "pay":
+    case "pay": {
+      const activePlanEnd = pool.me.activePlanEnd;
       return (
         <div>
           <p className="cyber-kicker">Ta part</p>
@@ -780,20 +868,38 @@ function StatePanel({
           <p className="mt-1 text-sm text-slate-400">
             au lieu de <span className="line-through">{formatDZD(soloPrice(pool.cycle))}</span> en individuel · {CYCLE_DURATION[pool.cycle]} d&apos;accès complet
           </p>
-          <Button
-            size="lg"
-            onClick={onPay}
-            isLoading={busy === "checkout"}
-            className="mt-5 h-14 w-full rounded-2xl bg-gradient-to-r from-cyan-300 to-sky-400 text-base font-black text-slate-950 hover:bg-transparent"
-          >
-            {busy !== "checkout" && <Lock className="h-4 w-4" />}
-            Payer ma part : {formatDZD(pool.pricePerMember)}
-          </Button>
-          <p className="mt-3 text-center text-[11px] text-slate-500">
-            Ta place est réservée {HOLD_MINUTES} minutes pendant le paiement · Edahabia / CIB via Chargily Pay
-          </p>
+          {activePlanEnd ? (
+            <>
+              <div className="mt-5">
+                <Banner tone="amber" icon={CalendarCheck} title={`Tu as déjà un abonnement actif jusqu'au ${formatFrenchDate(activePlanEnd)}`}>
+                  Tu n&apos;as rien à payer pour l&apos;instant : tu profites déjà de tout MedArt AI. Tu pourras rejoindre un groupe à la fin de ton abonnement —
+                  préviens le créateur pour qu&apos;il invite quelqu&apos;un d&apos;autre à ta place.
+                </Banner>
+              </div>
+              <Button asChild variant="outline" className="mt-4 w-full border-white/15 text-slate-200">
+                <Link href="/dashboard/billing">Voir mon abonnement</Link>
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                size="lg"
+                onClick={onPay}
+                isLoading={busy === "checkout"}
+                disabled={busy !== null}
+                className="mt-5 h-14 w-full rounded-2xl bg-gradient-to-r from-cyan-300 to-sky-400 text-base font-black text-slate-950 hover:bg-transparent"
+              >
+                {busy !== "checkout" && <Lock className="h-4 w-4" />}
+                Payer ma part : {formatDZD(pool.pricePerMember)}
+              </Button>
+              <p className="mt-3 text-center text-[11px] text-slate-500">
+                Ta place est réservée {HOLD_MINUTES} minutes pendant le paiement · Edahabia / CIB via Chargily Pay
+              </p>
+            </>
+          )}
         </div>
       );
+    }
 
     case "join":
       return (
@@ -815,34 +921,90 @@ function StatePanel({
         </div>
       );
 
-    case "holding":
+    case "holding": {
+      // Right after a checkout is opened, only « Actualiser » is offered: an Edahabia / CIB
+      // confirmation can take minutes, and paying a second checkout meanwhile would charge twice.
+      const startedAt = pool.me.paymentStartedAt ? new Date(pool.me.paymentStartedAt).getTime() : null;
+      const graceEndsAt = startedAt !== null ? startedAt + PAYMENT_CONFIRM_GRACE_MINUTES * 60_000 : null;
+      const confirming = graceEndsAt !== null && now < graceEndsAt;
+      const minutesLeft = graceEndsAt !== null ? Math.max(1, Math.ceil((graceEndsAt - now) / 60_000)) : 0;
       return (
         <div>
-          <div className="flex items-center gap-2">
-            <Loader2 className="h-5 w-5 animate-spin text-cyan-300" />
-            <p className="text-lg font-black text-white">Paiement en cours…</p>
-          </div>
-          <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            Ta place est réservée {HOLD_MINUTES} minutes pendant le paiement. Si tu as fermé la page Chargily avant de valider, reprends le paiement ci-dessous.
-            Si tu l&apos;as déjà validé, la confirmation arrive en quelques instants.
-          </p>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <Button onClick={onPay} isLoading={busy === "checkout"} className="flex-1 bg-gradient-to-r from-cyan-300 to-sky-400 font-black text-slate-950 hover:bg-transparent">
-              Reprendre le paiement
-            </Button>
-            <Button variant="outline" onClick={onRefresh} className="flex-1 border-white/15 text-slate-200">
-              <RefreshCw className="h-4 w-4" />
-              Actualiser
-            </Button>
-          </div>
+          {confirming ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-cyan-300" />
+                <p className="text-lg font-black text-white">Confirmation de ton paiement…</p>
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                Si tu as validé le paiement sur Chargily, la confirmation Edahabia / CIB peut prendre quelques minutes.{" "}
+                <span className="font-bold text-white">Ne repaie pas</span> : ta place est réservée et cette page se met à jour toute seule.
+              </p>
+              <Button
+                onClick={onRefresh}
+                disabled={busy !== null}
+                className="mt-4 w-full bg-gradient-to-r from-cyan-300 to-sky-400 font-black text-slate-950 hover:bg-transparent"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Actualiser
+              </Button>
+              <p className="mt-3 text-center text-[11px] text-slate-500">
+                Tu n&apos;as pas terminé le paiement ? Tu pourras le reprendre dans {minutesLeft} min si rien n&apos;arrive.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Hourglass className="h-5 w-5 text-amber-300" />
+                <p className="text-lg font-black text-white">Paiement non confirmé</p>
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                Nous n&apos;avons reçu aucune confirmation de Chargily. Si tu n&apos;as pas terminé le paiement, reprends-le : ton ancienne page de paiement est
+                annulée automatiquement, impossible de payer deux fois.
+              </p>
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <Button
+                  onClick={onPay}
+                  isLoading={busy === "checkout"}
+                  disabled={busy !== null}
+                  className="flex-1 bg-gradient-to-r from-cyan-300 to-sky-400 font-black text-slate-950 hover:bg-transparent"
+                >
+                  Reprendre le paiement
+                </Button>
+                <Button variant="outline" onClick={onRefresh} disabled={busy !== null} className="flex-1 border-white/15 text-slate-200">
+                  <RefreshCw className="h-4 w-4" />
+                  Actualiser
+                </Button>
+              </div>
+            </>
+          )}
+          {/* Like « Reprendre », leaving cancels the open checkout: never offered while a payment may be confirming. */}
+          {!confirming && (
+            <div className="mt-4 border-t border-white/[0.07] pt-3">
+              <button
+                type="button"
+                onClick={() => (confirmLeave ? onLeave() : setConfirmLeave(true))}
+                disabled={busy !== null}
+                className={cn(
+                  "inline-flex min-h-9 items-center gap-1.5 text-xs font-bold underline-offset-4 hover:underline disabled:opacity-60",
+                  confirmLeave ? "text-rose-200" : "text-slate-400"
+                )}
+              >
+                {busy === "leave" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />}
+                {confirmLeave ? "Confirmer : quitter ce groupe et libérer ma place" : "Quitter ce groupe (je n'ai pas payé)"}
+              </button>
+            </div>
+          )}
         </div>
       );
+    }
 
     case "paid_waiting":
       return (
         <div>
-          <Banner tone="emerald" icon={ShieldCheck} title="Ta part est payée — ta place est confirmée">
-            Il ne te reste plus qu&apos;à inviter tes camarades. Tu n&apos;as rien d&apos;autre à faire : dès {pool.size}/{pool.size}, l&apos;accès s&apos;active tout seul sur ton compte.
+          <Banner tone="emerald" icon={ShieldCheck} title="Ta part est payée : ta place est bloquée ✓">
+            Prochaine étape : partage le lien d&apos;invitation (juste en dessous) à tes amis. Dès {pool.size}/{pool.size}, MedArt AI s&apos;active automatiquement
+            pour tout le monde — tu n&apos;as rien d&apos;autre à faire.
           </Banner>
         </div>
       );

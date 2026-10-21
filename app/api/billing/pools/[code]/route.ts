@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit } from "@/lib/rate-limit";
-import { getPoolView, joinLeaderSeat, normalizeInviteCode, PoolError, startPoolCheckout } from "@/lib/billing-pools";
+import { getPoolView, joinLeaderSeat, leavePool, normalizeInviteCode, PoolError, startPoolCheckout } from "@/lib/billing-pools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +27,11 @@ export async function GET(_request: NextRequest, { params }: { params: { code: s
   }
 }
 
-/** POST { action: "checkout" } → Chargily URL for the student's share; { action: "join" } → takes a seat paid by a Groupe leader. */
+/**
+ * POST { action: "checkout" } → Chargily URL for the student's share;
+ * { action: "join" } → takes a seat paid by a Groupe leader;
+ * { action: "leave" } → frees a reserved-but-unpaid seat.
+ */
 export async function POST(request: NextRequest, { params }: { params: { code: string } }) {
   const user = await getAuthenticatedUser();
   if (!user) return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -44,6 +48,9 @@ export async function POST(request: NextRequest, { params }: { params: { code: s
     }
     if (body?.action === "join") {
       return NextResponse.json({ success: true, pool: await joinLeaderSeat(code, user.id) });
+    }
+    if (body?.action === "leave") {
+      return NextResponse.json({ success: true, pool: await leavePool(code, user.id) });
     }
     return NextResponse.json({ success: false, error: "Action inconnue." }, { status: 400 });
   } catch (error) {

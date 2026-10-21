@@ -99,6 +99,45 @@ export async function createChargilyCheckout(
   return (await res.json()) as ChargilyCheckout;
 }
 
+/** Outcome of a call that never throws: `status` is the HTTP status, 0 when the request itself failed. */
+export type ChargilyCallResult<T> = { ok: true; data: T } | { ok: false; status: number };
+
+const CHARGILY_CALL_TIMEOUT_MS = 10_000;
+
+async function chargilyCall<T>(path: string, method: "GET" | "POST"): Promise<ChargilyCallResult<T>> {
+  try {
+    const res = await fetch(`${CHARGILY_API_BASE}/${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${getSecretKey()}`, Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(CHARGILY_CALL_TIMEOUT_MS),
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    return { ok: true, data: (await res.json()) as T };
+  } catch (error) {
+    console.error(`[chargily] ${method} ${path} failed:`, error instanceof Error ? error.message : error);
+    return { ok: false, status: 0 };
+  }
+}
+
+/**
+ * GET /checkouts/{id} — the checkout's current state. Status is one of
+ * "pending" | "processing" | "paid" | "failed" | "canceled". Never throws.
+ */
+export async function getChargilyCheckout(id: string): Promise<ChargilyCallResult<Pick<ChargilyCheckout, "id" | "status">>> {
+  return chargilyCall(`checkouts/${encodeURIComponent(id)}`, "GET");
+}
+
+/**
+ * POST /checkouts/{id}/expire — makes a still-pending checkout unpayable.
+ * Chargily answers 400 when the checkout already expired (checkouts expire
+ * on their own after 30 minutes) and 403 when it is no longer pending
+ * (processing, paid, failed or canceled). Never throws.
+ */
+export async function expireChargilyCheckout(id: string): Promise<ChargilyCallResult<unknown>> {
+  return chargilyCall(`checkouts/${encodeURIComponent(id)}/expire`, "POST");
+}
+
 /**
  * Verifies the `signature` header Chargily sends with every webhook:
  * HMAC-SHA256 of the raw request body, keyed with the API secret key.

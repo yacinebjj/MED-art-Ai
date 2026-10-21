@@ -27,6 +27,8 @@ interface RefundsResponse {
 const REASON_LABEL: Record<RefundRequestView["reason"], string> = {
   pool_expired: "Groupe non complet à J+7",
   pool_overflow: "Paiement arrivé sur un groupe déjà complet",
+  duplicate_payment: "Second paiement d'un membre déjà payé",
+  orphan_payment: "Paiement pour un groupe introuvable",
 };
 
 function formatDateTime(iso: string): string {
@@ -107,13 +109,16 @@ function RefundRow({ request, onMark }: { request: RefundRequestView; onMark: (r
           {request.note && <p className="mt-1 text-slate-300">Note : {request.note}</p>}
         </div>
       ) : (
-        <Button
-          onClick={() => onMark(request)}
-          className="mt-4 w-full bg-gradient-to-r from-emerald-300 to-teal-400 font-black text-slate-950 hover:bg-transparent sm:w-auto"
-        >
-          <Undo2 className="h-4 w-4" />
-          Marquer comme remboursé
-        </Button>
+        <>
+          {request.note && <p className="mt-3 text-xs text-slate-300">Note : {request.note}</p>}
+          <Button
+            onClick={() => onMark(request)}
+            className="mt-4 w-full bg-gradient-to-r from-emerald-300 to-teal-400 font-black text-slate-950 hover:bg-transparent sm:w-auto"
+          >
+            <Undo2 className="h-4 w-4" />
+            Marquer comme remboursé
+          </Button>
+        </>
       )}
     </CyberPanel>
   );

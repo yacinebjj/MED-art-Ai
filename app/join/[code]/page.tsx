@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { ArrowRight, Clock, Loader2, LogIn, ShieldCheck, Sparkles, Undo2, UserPlus, Users } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { CyberPanel, CyberStage } from "@/components/cyber/primitives";
-import { GROUP_SIZE, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, REFUND_DELAY_LABEL, formatDZD } from "@/lib/pricing";
+import { GROUP_SIZE, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, REFUND_DELAY_LABEL, SEAT_HOLD_MINUTES, formatDZD } from "@/lib/pricing";
 import { createClient } from "@/lib/supabase/client";
 
 /** Read back after sign-up (RegisterForm has no `next` param yet) to send the student to their tracker. */
@@ -38,7 +38,7 @@ function copyFor(kind: InviteKind): InviteCopy {
     icon: Undo2,
     text: `Objectif non atteint sous ${POOL_DEADLINE_DAYS} jours ? Le remboursement est déclenché automatiquement, reçu sous ${REFUND_DELAY_LABEL}.`,
   };
-  const secure = { icon: ShieldCheck, text: "Paiement sécurisé par Chargily Pay (Edahabia / CIB) — ta place est réservée 30 minutes pendant le paiement." };
+  const secure = { icon: ShieldCheck, text: `Paiement sécurisé par Chargily Pay (Edahabia / CIB) — ta place est réservée ${SEAT_HOLD_MINUTES} minutes pendant le paiement.` };
 
   switch (kind) {
     case "promo":

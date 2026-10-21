@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { CreditCard, Gauge, Users, Zap } from "lucide-react";
+import { ArrowRight, CreditCard, Gauge, Users, Zap } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PricingTierCard } from "@/components/pricing/PricingTierCard";
 import { CohortVerificationFlow } from "@/components/pricing/CohortVerificationFlow";
 import { cn } from "@/lib/utils";
+import type { PoolView } from "@/lib/billing-pools";
 import {
   formatDZD,
   GROUP_SIZE,
@@ -22,11 +23,14 @@ import {
 export type PlanAction =
   | { type: "checkout"; plan: PlanId }
   | { type: "leader"; plan: PlanId }
-  | { type: "pool"; kind: "group" | "promo"; cycle: BillingCycle };
+  | { type: "pool"; kind: "group" | "promo"; cycle: BillingCycle }
+  | { type: "open"; code: string };
 
 /** Stable key so the page can show a spinner on the exact button that was pressed. */
 export function planActionKey(action: PlanAction): string {
-  return action.type === "pool" ? `pool:${action.kind}:${action.cycle}` : `${action.type}:${action.plan}`;
+  if (action.type === "pool") return `pool:${action.kind}:${action.cycle}`;
+  if (action.type === "open") return `open:${action.code}`;
+  return `${action.type}:${action.plan}`;
 }
 
 interface PlanCardProps {
@@ -35,7 +39,17 @@ interface PlanCardProps {
   /** Key of the action in flight (planActionKey), or null. */
   loadingKey: string | null;
   onAction: (action: PlanAction) => void;
+  /** The student's open pooled group, if any: group buttons lead back to it instead of starting a second one. */
+  openPool?: PoolView | null;
+  /** End of the student's running paid plan, if any: a pooled group can only be started once it is over. */
+  activePlanEnd?: string | null;
 }
+
+function formatFrenchDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+}
+
+const CYCLE_LABEL: Record<BillingCycle, string> = { monthly: "1 mois", quad: "4 mois", annual: "8 mois" };
 
 const MODE_OPTIONS: { id: GroupPaymentMode; icon: typeof Zap; title: string }[] = [
   { id: "leader", icon: Zap, title: "Je paie pour les 5" },
@@ -48,7 +62,7 @@ const MODE_OPTIONS: { id: GroupPaymentMode; icon: typeof Zap; title: string }[] 
  * student picks « Je paie pour les 5 » (leader checkout) or « Chacun paie sa
  * part » (pooled purchase); Groupe de 10 → pooled purchase, any duration.
  */
-export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction }: PlanCardProps) {
+export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction, openPool = null, activePlanEnd = null }: PlanCardProps) {
   const [groupMode, setGroupMode] = useState<GroupPaymentMode>("leader");
   const busy = loadingKey !== null;
   const cycle: BillingCycle = plan.cycle ?? "monthly";
@@ -56,8 +70,27 @@ export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction }: PlanCard
   let action: PlanAction;
   let ctaLabel: string;
   let ctaNote: string | null = null;
+  /** Shown instead of an action that cannot happen right now. */
+  let blocked = false;
 
-  if (plan.tier === "group") {
+  const startsPooledGroup = plan.tier === "promo" || (plan.tier === "group" && groupMode === "pooled");
+  const sameFormula = openPool !== null && openPool.kind === (plan.tier === "promo" ? "promo" : "group") && openPool.cycle === cycle;
+  const myHoldLive =
+    openPool !== null && openPool.me.status === "holding" && Boolean(openPool.me.holdExpiresAt) && new Date(openPool.me.holdExpiresAt ?? 0).getTime() > Date.now();
+  // An EMPTY group the student started (nobody paid, they are not paying) can be replaced by another formula.
+  const replaceable = openPool !== null && openPool.isCreator && openPool.confirmed === 0 && openPool.me.status !== "paid" && !myHoldLive;
+
+  if (startsPooledGroup && openPool && (sameFormula || !replaceable)) {
+    // One open group at a time: lead the student back to theirs instead of starting a second one.
+    action = { type: "open", code: openPool.code };
+    ctaLabel = `Ouvrir mon groupe en cours (${openPool.confirmed}/${openPool.size})`;
+    ctaNote = `Tu as déjà un groupe en cours (Groupe de ${openPool.size} · ${CYCLE_LABEL[openPool.cycle] ?? openPool.cycle}) : retrouve-le, partage son lien ou paie ta part.`;
+  } else if (startsPooledGroup && activePlanEnd) {
+    action = { type: "pool", kind: plan.tier === "promo" ? "promo" : "group", cycle };
+    ctaLabel = `Abonnement actif jusqu'au ${formatFrenchDate(activePlanEnd)}`;
+    ctaNote = "Tu profites déjà de tout MedArt AI. Tu pourras lancer ou rejoindre un groupe dès la fin de ton abonnement.";
+    blocked = true;
+  } else if (plan.tier === "group") {
     if (groupMode === "leader") {
       action = { type: "leader", plan: plan.id };
       ctaLabel = `Payer ${formatDZD(groupLeaderTotalDZD(plan))} pour les ${GROUP_SIZE}`;
@@ -65,15 +98,18 @@ export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction }: PlanCard
     } else {
       action = { type: "pool", kind: "group", cycle };
       ctaLabel = "Créer le groupe";
-      ctaNote = `Tu paies ta part (${formatDZD(plan.priceDZD)}) à l'étape suivante, puis tu partages le lien.`;
+      ctaNote = `Étape suivante : tu paies ta part (${formatDZD(plan.priceDZD)}), puis tu partages le lien. Un ami a déjà créé ton groupe ? Ouvre plutôt son lien.`;
     }
   } else if (plan.tier === "promo") {
     action = { type: "pool", kind: "promo", cycle };
     ctaLabel = `Lancer le ${plan.label}`;
-    ctaNote = `Tu paies ta part (${formatDZD(plan.priceDZD)}) à l'étape suivante, puis tu partages le lien à tes amis.`;
+    ctaNote = `Étape suivante : tu paies ta part (${formatDZD(plan.priceDZD)}), puis tu partages le lien à tes amis. Un ami a déjà lancé ton groupe ? Ouvre plutôt son lien.`;
   } else {
     action = { type: "checkout", plan: plan.id };
     ctaLabel = isCurrentPlan ? "Renouveler" : `Payer ${formatDZD(plan.priceDZD)}`;
+  }
+  if (startsPooledGroup && openPool && replaceable && !sameFormula && action.type === "pool" && !blocked) {
+    ctaNote = `Ton groupe en cours (Groupe de ${openPool.size} · ${CYCLE_LABEL[openPool.cycle] ?? openPool.cycle}), encore vide, sera remplacé par celui-ci.`;
   }
 
   const key = planActionKey(action);
@@ -86,13 +122,13 @@ export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction }: PlanCard
         <div className="mt-6">
           <Button
             size="lg"
-            variant={plan.featured ? "primary" : "outline"}
+            variant={plan.featured || action.type === "open" ? "primary" : "outline"}
             className="h-auto min-h-[3rem] w-full whitespace-normal py-3 text-center leading-tight"
             onClick={() => onAction(action)}
             isLoading={loadingKey === key}
-            disabled={busy}
+            disabled={busy || blocked}
           >
-            <CreditCard className="h-4 w-4 shrink-0" />
+            {action.type === "open" ? <ArrowRight className="h-4 w-4 shrink-0" /> : <CreditCard className="h-4 w-4 shrink-0" />}
             {ctaLabel}
           </Button>
           {ctaNote && <p className="mt-2 text-center text-[11px] leading-snug text-muted-foreground">{ctaNote}</p>}

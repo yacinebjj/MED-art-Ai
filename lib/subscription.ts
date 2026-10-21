@@ -135,7 +135,7 @@ export async function getSubscription(userId: string): Promise<SubscriptionRow |
 }
 
 /** Every account has a row (the signup trigger creates it); this repairs one that predates it. */
-async function ensureSubscriptionRow(userId: string): Promise<SubscriptionRow | null> {
+export async function ensureSubscriptionRow(userId: string): Promise<SubscriptionRow | null> {
   const existing = await getSubscription(userId);
   if (existing) return existing;
   const now = new Date().toISOString();

@@ -59,8 +59,19 @@ export const GROUP_SIZE = 5;
 export const PROMO_SIZE = 10;
 /** A pooled purchase (Groupe de 10, or Groupe de 5 paid member by member) must fill within this many days. */
 export const POOL_DEADLINE_DAYS = 7;
-/** A member about to pay holds their seat this long (so a pool never takes more payments than seats). */
-export const SEAT_HOLD_MINUTES = 30;
+/**
+ * A member about to pay holds their seat this long (so a pool never takes
+ * more payments than seats). Longer than the 30 minutes a Chargily checkout
+ * stays payable, so a payment still being confirmed when its checkout
+ * expires keeps its seat until the confirmation lands.
+ */
+export const SEAT_HOLD_MINUTES = 35;
+/**
+ * After a member opens a checkout, the tracker shows only « Actualiser » for
+ * this long: an Edahabia / CIB confirmation can take a few minutes, and a
+ * second checkout opened meanwhile could be paid twice.
+ */
+export const PAYMENT_CONFIRM_GRACE_MINUTES = 10;
 /** What a student is told about the refund delay once it has been requested (processed by the team). */
 export const REFUND_DELAY_LABEL = "5 jours ouvrés";
 

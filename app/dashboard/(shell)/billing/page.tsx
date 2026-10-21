@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -15,6 +15,7 @@ import {
   Download,
   FileQuestion,
   Gauge,
+  Hourglass,
   Infinity as InfinityIcon,
   Layers,
   Lock,
@@ -200,7 +201,7 @@ function UsageBar({
   );
 }
 
-function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: boolean }) {
+function UsagePanel({ usage, loaded, onRetry }: { usage: UsageSnapshot | null; loaded: boolean; onRetry: () => void }) {
   if (!loaded) {
     return (
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -211,7 +212,15 @@ function UsagePanel({ usage, loaded }: { usage: UsageSnapshot | null; loaded: bo
     );
   }
   if (!usage) {
-    return <p className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-slate-400">Ta consommation n&apos;est pas disponible pour le moment. Réessaie dans un instant.</p>;
+    return (
+      <div className="mt-4 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center">
+        <p className="text-sm text-slate-400">Ta consommation n&apos;a pas pu être chargée. Tes paiements et ton abonnement ne sont pas concernés.</p>
+        <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+          <RotateCcw className="h-3.5 w-3.5" />
+          Réessayer
+        </Button>
+      </div>
+    );
   }
 
   const trial = usage.isTrial;
@@ -318,7 +327,119 @@ function poolStatusBadge(pool: PoolView): { label: string; variant: "success" | 
   return { label: pool.mode === "leader" ? "Places à distribuer" : "En attente des membres", variant: "primary" };
 }
 
-function PoolItem({ pool, copied, onCopy }: { pool: PoolView; copied: boolean; onCopy: (code: string) => void }) {
+/** The student's seat reservation is still running (an expired one no longer ties them to the group). */
+function holdIsLive(pool: PoolView): boolean {
+  return pool.me.status === "holding" && Boolean(pool.me.holdExpiresAt) && new Date(pool.me.holdExpiresAt ?? 0).getTime() > Date.now();
+}
+
+/** Where the student stands in a pooled group, in one line (null when there is nothing to say). */
+function myShareLine(pool: PoolView): { text: string; tone: "ok" | "wait" | "todo" } | null {
+  if (pool.mode !== "pooled" || pool.status !== "open") return null;
+  if (pool.me.status === "paid") return { text: "Ta part est payée : ta place est bloquée.", tone: "ok" };
+  if (holdIsLive(pool)) return { text: "Ton paiement est en cours de confirmation.", tone: "wait" };
+  if (pool.isCreator && pool.me.status !== "refund_pending" && pool.me.status !== "refunded") {
+    return { text: "Ta part n'est pas encore payée : ta place n'est pas bloquée.", tone: "todo" };
+  }
+  return null;
+}
+
+/** The invite link a student shares (same as the tracker's: /join/{code}?k=…). */
+function inviteLinkOf(origin: string, pool: PoolView): string {
+  return `${origin}/join/${encodeURIComponent(pool.code)}?k=${pool.mode === "leader" ? "lead" : pool.kind}`;
+}
+
+const CYCLE_LABEL: Record<BillingCycle, string> = { monthly: "1 mois", quad: "4 mois", annual: "8 mois" };
+
+/** The open pooled groups the student is part of (paid or paying) or started — what « Ton groupe en cours » shows. */
+function currentOpenPools(pools: PoolView[] | null): PoolView[] {
+  const open = (pools ?? []).filter(
+    (p) => p.mode === "pooled" && p.status === "open" && (p.me.status === "paid" || holdIsLive(p) || (p.isCreator && p.me.status !== "refund_pending" && p.me.status !== "refunded"))
+  );
+  const rank = (p: PoolView) => (p.me.status === "paid" ? 0 : holdIsLive(p) ? 1 : 2);
+  return [...open].sort((a, b) => rank(a) - rank(b));
+}
+
+function CurrentGroupCard({ pool, others, copied, onCopy }: { pool: PoolView; others: number; copied: boolean; onCopy: (pool: PoolView) => void }) {
+  const ratio = pool.size > 0 ? Math.min(1, pool.confirmed / pool.size) : 0;
+  const remaining = Math.max(0, pool.size - pool.confirmed);
+  const share = myShareLine(pool);
+  const paid = pool.me.status === "paid";
+  const ctaLabel = paid ? "Ouvrir mon groupe" : holdIsLive(pool) ? "Voir mon paiement" : "Payer ma part";
+
+  return (
+    <CyberPanel laser="spin" accent="violet" className="mt-6 p-5 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="cyber-kicker flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5" />
+            Ton groupe en cours
+          </p>
+          <p className="mt-1 text-xl font-black text-white">
+            Groupe de {pool.size} · {CYCLE_LABEL[pool.cycle] ?? pool.cycle}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            {formatDZD(pool.pricePerMember)} par personne · {pool.isCreator ? "tu l'as lancé" : "tu en fais partie"}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-4xl font-black tabular-nums text-white">
+            {pool.confirmed}
+            <span className="text-xl text-slate-500">/{pool.size}</span>
+          </p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">places payées</p>
+        </div>
+      </div>
+
+      <div
+        className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-white/10"
+        role="progressbar"
+        aria-label={`${pool.confirmed} places payées sur ${pool.size}`}
+        aria-valuemin={0}
+        aria-valuemax={pool.size}
+        aria-valuenow={pool.confirmed}
+      >
+        <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 transition-[width] duration-700" style={{ width: `${Math.round(ratio * 100)}%` }} />
+      </div>
+
+      {share && (
+        <p
+          className={cn(
+            "mt-3 flex items-center gap-1.5 text-sm font-semibold",
+            share.tone === "ok" ? "text-emerald-300" : share.tone === "wait" ? "text-cyan-200" : "text-amber-200"
+          )}
+        >
+          {share.tone === "ok" ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : share.tone === "wait" ? <Hourglass className="h-4 w-4 shrink-0" /> : <Lock className="h-4 w-4 shrink-0" />}
+          {share.text}
+        </p>
+      )}
+      <p className="mt-1 text-xs text-slate-400">
+        {remaining > 0
+          ? `Encore ${remaining} paiement${remaining > 1 ? "s" : ""} : l'accès démarre pour tous à ${pool.size}/${pool.size}. Date limite : ${formatFrenchDate(pool.expiresAt)} (sinon, remboursement automatique).`
+          : "Toutes les places sont payées : l'activation est en cours."}
+      </p>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <Button asChild size="lg" className="flex-1 bg-gradient-to-r from-cyan-300 to-sky-400 font-black text-slate-950 hover:bg-transparent">
+          <Link href={`/dashboard/billing/pool/${encodeURIComponent(pool.code)}`}>
+            {ctaLabel}
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </Button>
+        <Button type="button" size="lg" variant="outline" className="flex-1 border-white/15 text-slate-200" onClick={() => onCopy(pool)}>
+          {copied ? <Check className="h-4 w-4 text-emerald-300" /> : <Copy className="h-4 w-4" />}
+          {copied ? "Lien copié !" : "Copier le lien d'invitation"}
+        </Button>
+      </div>
+      {others > 0 && (
+        <p className="mt-3 text-[11px] text-slate-500">
+          + {others} autre{others > 1 ? "s" : ""} groupe{others > 1 ? "s" : ""} en cours dans « Tes groupes », plus bas.
+        </p>
+      )}
+    </CyberPanel>
+  );
+}
+
+function PoolItem({ pool, copied, onCopy }: { pool: PoolView; copied: boolean; onCopy: (pool: PoolView) => void }) {
   const badge = poolStatusBadge(pool);
   const ratio = pool.size > 0 ? Math.min(1, pool.confirmed / pool.size) : 0;
   const kindLabel = `Groupe de ${pool.size}`;
@@ -357,6 +478,14 @@ function PoolItem({ pool, copied, onCopy }: { pool: PoolView; copied: boolean; o
         {pool.status === "complete" && (pool.periodEnd ? `Actif jusqu'au ${formatFrenchDate(pool.periodEnd)}.` : "Actif pour tous les membres.")}
         {pool.status === "expired" && "Le groupe n'a pas été complété à temps."}
       </p>
+      {(() => {
+        const share = myShareLine(pool);
+        return share ? (
+          <p className={cn("mt-1 text-[11px] font-semibold", share.tone === "ok" ? "text-emerald-300" : share.tone === "wait" ? "text-cyan-200" : "text-amber-200")}>
+            {share.text}
+          </p>
+        ) : null;
+      })()}
       {pool.me.refund && (
         <p className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-200">
           <Undo2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -371,7 +500,7 @@ function PoolItem({ pool, copied, onCopy }: { pool: PoolView; copied: boolean; o
           <p className="min-w-0 text-xs text-slate-400">
             Code d&apos;invitation : <span className="break-all font-mono text-sm font-bold tracking-wider text-white">{pool.code}</span>
           </p>
-          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => onCopy(pool.code)}>
+          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => onCopy(pool)}>
             {copied ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? "Lien copié" : "Copier le lien d'invitation"}
           </Button>
@@ -415,46 +544,88 @@ function BillingPageContent() {
   const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    fetch("/api/subscription")
-      .then((res) => res.json() as Promise<SubscriptionResponse>)
-      .then((data) => {
-        if (cancelled) return;
+  const loadSubscription = useCallback(async () => {
+    try {
+      const res = await fetch("/api/subscription", { cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as SubscriptionResponse | null;
+      if (data) {
         setSubscription(data.subscription ?? null);
         setUsage(data.usage ?? null);
         setIsAdmin(data.isAdmin === true);
-      })
-      .catch(() => undefined)
-      .finally(() => !cancelled && setLoaded(true));
+      }
+    } catch {
+      // Network error: the usage panel offers « Réessayer ».
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  const loadPools = useCallback(async () => {
+    try {
+      const res = await fetch("/api/billing/pools", { cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as { success?: boolean; pools?: unknown } | null;
+      if (data?.success && Array.isArray(data.pools)) setPools(data.pools as PoolView[]);
+      else setPools((current) => current ?? []);
+    } catch {
+      // A failed refresh keeps the last known gauges on screen.
+      setPools((current) => current ?? []);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    void loadSubscription();
+    void loadPools();
     fetch("/api/billing/invoices")
       .then((res) => res.json())
       .then((data: { invoices?: unknown }) => !cancelled && setInvoices(Array.isArray(data?.invoices) ? (data.invoices as Invoice[]) : []))
       .catch(() => !cancelled && setInvoices([]));
-    fetch("/api/billing/pools")
-      .then((res) => res.json())
-      .then((data: { success?: boolean; pools?: unknown }) => !cancelled && setPools(data?.success && Array.isArray(data.pools) ? (data.pools as PoolView[]) : []))
-      .catch(() => !cancelled && setPools([]));
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, loadSubscription, loadPools]);
+
+  const openPools = useMemo(() => currentOpenPools(pools), [pools]);
+  const primaryOpenPool = openPools[0] ?? null;
+
+  // Live gauge: while a group is filling up, refresh it every 20 s (and when the tab comes back).
+  const hasOpenPool = openPools.length > 0;
+  useEffect(() => {
+    if (!user || !hasOpenPool) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadPools();
+    };
+    const id = window.setInterval(refresh, 20000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [user, hasOpenPool, loadPools]);
 
   async function handleAction(action: PlanAction) {
     if (!user || loadingKey) return;
     setError(null);
     setLoadingKey(planActionKey(action));
     try {
+      if (action.type === "open") {
+        router.push(`/dashboard/billing/pool/${encodeURIComponent(action.code)}`);
+        return;
+      }
       if (action.type === "pool") {
         const res = await fetch("/api/billing/pools", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ kind: action.kind, cycle: action.cycle }),
         });
-        if (!res.ok) throw new Error(await readError(res, "Impossible de créer le groupe pour le moment."));
+        if (!res.ok) {
+          // A refused creation is often « you already have a group »: show it right away.
+          void loadPools();
+          throw new Error(await readError(res, "La création du groupe n'a pas abouti — rien n'a été payé. Réessaie dans un instant."));
+        }
         const data = (await res.json()) as { success?: boolean; code?: unknown; error?: unknown };
-        if (!data.success || typeof data.code !== "string") throw new Error(typeof data.error === "string" ? data.error : "Impossible de créer le groupe pour le moment.");
+        if (!data.success || typeof data.code !== "string") throw new Error(typeof data.error === "string" ? data.error : "La création du groupe n'a pas abouti — rien n'a été payé. Réessaie dans un instant.");
         router.push(`/dashboard/billing/pool/${encodeURIComponent(data.code)}`);
         return;
       }
@@ -473,13 +644,14 @@ function BillingPageContent() {
     }
   }
 
-  async function copyInvite(code: string) {
+  async function copyInvite(pool: PoolView) {
+    const code = pool.code;
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/join/${encodeURIComponent(code)}`);
+      await navigator.clipboard.writeText(inviteLinkOf(window.location.origin, pool));
       setCopiedCode(code);
       window.setTimeout(() => setCopiedCode((current) => (current === code ? null : current)), 1800);
     } catch {
-      setError("Copie impossible sur cet appareil — recopie le code affiché.");
+      setError(`Copie impossible sur cet appareil — partage ce code à tes amis : ${code}`);
     }
   }
 
@@ -547,6 +719,11 @@ function BillingPageContent() {
         )}
         {error && !plansOpen && <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
       </div>
+
+      {/* ── Ton groupe en cours (never lost, never a second group) ─────── */}
+      {primaryOpenPool && (
+        <CurrentGroupCard pool={primaryOpenPool} others={openPools.length - 1} copied={copiedCode === primaryOpenPool.code} onCopy={copyInvite} />
+      )}
 
       {/* ── Status ─────────────────────────────────────────────────────── */}
       <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
@@ -625,7 +802,15 @@ function BillingPageContent() {
           {error && <div className="mt-4 rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
           <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
             {plansForCycle.map((plan) => (
-              <PlanCard key={plan.id} plan={plan} isCurrentPlan={isPaidActive && subscription?.effectivePlan === plan.id} loadingKey={loadingKey} onAction={handleAction} />
+              <PlanCard
+                key={plan.id}
+                plan={plan}
+                isCurrentPlan={isPaidActive && subscription?.effectivePlan === plan.id}
+                loadingKey={loadingKey}
+                onAction={handleAction}
+                openPool={primaryOpenPool}
+                activePlanEnd={isPaidActive ? (subscription?.periodEnd ?? null) : null}
+              />
             ))}
           </div>
           <p className="mt-4 text-center text-[11px] text-slate-500">Aucun renouvellement automatique : tu paies une fois pour la durée choisie, puis tu décides.</p>
@@ -638,7 +823,14 @@ function BillingPageContent() {
           <Gauge className="h-5 w-5 text-cyan-300" />
           Ta consommation
         </h2>
-        <UsagePanel usage={usage} loaded={loaded} />
+        <UsagePanel
+          usage={usage}
+          loaded={loaded}
+          onRetry={() => {
+            setLoaded(false);
+            void loadSubscription();
+          }}
+        />
       </CyberPanel>
 
       {/* ── Tes groupes ────────────────────────────────────────────────── */}
