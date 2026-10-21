@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Compass } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { GlassArt } from "@/components/ui/GlassArt";
 
 /**
  * 404 page (Next.js App Router convention). Without this file Next.js serves
@@ -14,9 +14,8 @@ import { Button } from "@/components/ui/Button";
 export default function NotFound() {
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 px-6 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <Compass className="h-7 w-7" />
-      </div>
+      {/* A fractured glass bone: the broken link, in a medical student's own vocabulary. */}
+      <GlassArt name="fracture" size={160} className="h-32 w-32 animate-float motion-reduce:animate-none sm:h-40 sm:w-40" />
 
       <div className="space-y-2">
         <h1 className="text-xl font-bold tracking-tight text-foreground">Page introuvable</h1>

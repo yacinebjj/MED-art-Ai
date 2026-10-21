@@ -55,6 +55,7 @@ import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { Button } from "@/components/ui/Button";
+import { GlassArt } from "@/components/ui/GlassArt";
 import { Input } from "@/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
 import {
@@ -659,7 +660,8 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
         ) : courses.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-8 text-center">
             <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
-              <FileText className="h-6 w-6 text-[color-mix(in_oklab,var(--muted-foreground)_50%,transparent)]" />
+              {/* An MRI ring at rest with a blank page waiting in front of it: the first course is what wakes it up. */}
+              <GlassArt name="sources" size={80} className="h-20 w-20" />
             </motion.div>
             <p className="text-sm font-medium text-muted-foreground">{tModulePage("noSourcesEmptyState", language)}</p>
             <p className="text-xs text-[color-mix(in_oklab,var(--muted-foreground)_70%,transparent)]">

@@ -31,6 +31,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
+import { GlassArt } from "@/components/ui/GlassArt";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { cn } from "@/lib/utils";
@@ -615,9 +616,9 @@ function NotesPageContent() {
         >
           {!selectedNote ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-              <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-cyan-400/20 to-violet-500/20 text-cyan-100 ring-1 ring-inset ring-white/15">
-                <span aria-hidden className="cyber-breathe absolute inset-0 rounded-3xl bg-cyan-400/10" />
-                <NotebookPen className="relative h-8 w-8" />
+              <div className="relative flex items-center justify-center">
+                <span aria-hidden className="cyber-breathe absolute inset-2 rounded-full bg-[radial-gradient(closest-side,rgba(34,211,238,0.22),transparent)]" />
+                <GlassArt name="notes" size={128} className="relative h-28 w-28 animate-float motion-reduce:animate-none" />
               </div>
               <div className="max-w-xs">
                 <p className="text-sm font-bold text-white">{notes.length === 0 ? tNotes("notebookEmpty", language) : tNotes("emptySelectionTitleWithNotes", language)}</p>

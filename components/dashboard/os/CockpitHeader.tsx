@@ -8,7 +8,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { useCockpitUi } from "@/store/useCockpitUi";
-import { HeroMascot } from "@/components/dashboard/DashboardHero";
+import { GlassArt } from "@/components/ui/GlassArt";
 import { Kbd } from "@/components/course/workspace/os/Kbd";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit } from "@/lib/translations/cockpit";
@@ -128,7 +128,11 @@ export function CockpitHeader() {
 
         <div className="hidden items-center gap-4 sm:flex">
           <div className="hidden flex-col items-end gap-2 sm:flex">
-            <HeroMascot className="h-24 w-24 lg:h-28 lg:w-28" />
+            <GlassArt
+              name="stethoscope"
+              size={112}
+              className="h-24 w-24 animate-float drop-shadow-[0_12px_22px_rgba(13,148,136,0.25)] motion-reduce:animate-none lg:h-28 lg:w-28"
+            />
             <button
               type="button"
               onClick={() => setSpotlightOpen(true)}

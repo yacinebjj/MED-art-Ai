@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, Reorder, useReducedMotion } from "framer-motion";
-import { AlertTriangle, ChevronDown, ClipboardCheck, Coffee, Columns3, GitCommitVertical, LayoutGrid, ListChecks, PartyPopper, RotateCcw } from "lucide-react";
+import { AlertTriangle, ChevronDown, Coffee, Columns3, GitCommitVertical, LayoutGrid, ListChecks, PartyPopper, RotateCcw } from "lucide-react";
 import { NeonRing, SegmentedControl } from "@/components/cyber/primitives";
 import { useStoredPreference } from "@/components/cyber/hooks";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
+import { GlassArt } from "@/components/ui/GlassArt";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tTodo } from "@/lib/translations/todo";
@@ -382,7 +383,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
 
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/50 px-6 py-12 text-center">
-          <ClipboardCheck className="h-8 w-8 text-muted-foreground/60" />
+          <GlassArt name="todo" size={96} className="h-20 w-20 animate-float motion-reduce:animate-none sm:h-24 sm:w-24" />
           <p className="text-sm text-muted-foreground">{tTodo("emptyStateText", language)}</p>
         </div>
       ) : view === "timeline" ? (

@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { motion } from "framer-motion";
 import { GraduationCap, Settings } from "lucide-react";
+import { GlassArt } from "@/components/ui/GlassArt";
 import { FloatingMedicalIcons } from "@/components/dashboard/FloatingMedicalIcons";
 import { CockpitHeader } from "@/components/dashboard/os/CockpitHeader";
 import dynamic from "next/dynamic";
@@ -138,16 +138,7 @@ export default function DashboardPage() {
           <CurriculumHubSkeleton />
         ) : !curriculumProfile?.academicYear ? (
           <div className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed p-3 text-center sm:flex-row sm:items-center sm:gap-5 sm:p-6 sm:text-left">
-            <div className="shrink-0 overflow-hidden rounded-2xl shadow-md">
-              <Image
-                src="/illustrations/dashboard-empty-state-mascot.jpeg"
-                alt=""
-                role="presentation"
-                width={96}
-                height={96}
-                className="h-20 w-20 object-cover sm:h-24 sm:w-24"
-              />
-            </div>
+            <GlassArt name="graduation" size={96} className="h-20 w-20 shrink-0 animate-float motion-reduce:animate-none sm:h-24 sm:w-24" />
             <div className="flex flex-col items-center gap-3 sm:items-start">
               <p className="text-sm text-muted-foreground">{tDashboard("chooseSpecialtyHelper", language)}</p>
               <Link

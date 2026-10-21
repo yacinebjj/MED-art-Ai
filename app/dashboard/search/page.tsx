@@ -6,6 +6,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Search, Loader2, FileText, BookOpen, Sparkles, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { GlassArt } from "@/components/ui/GlassArt";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tDiscovery } from "@/lib/translations/discovery";
 
@@ -212,7 +213,8 @@ function SearchPageContent() {
                 exit={{ opacity: 0 }}
                 className="glass-card flex flex-col items-center gap-3 rounded-2xl border-dashed p-8 text-center shadow-glass dark:shadow-glass-dark sm:p-10"
               >
-                <Search className="h-7 w-7 text-slate-300 dark:text-neutral-700" />
+                {/* "Culture négative": a clean, empty Petri dish. */}
+                <GlassArt name="search" size={96} className="h-20 w-20 animate-float motion-reduce:animate-none sm:h-24 sm:w-24" />
                 <p className="max-w-sm text-sm text-slate-500 dark:text-gray-400">
                   Aucun résultat pour « {query} ». Essaie une autre formulation, ou vérifie que tu as bien des cours avec du contenu généré.
                 </p>
