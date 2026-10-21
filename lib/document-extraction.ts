@@ -52,3 +52,27 @@ export async function extractDocumentText(buffer: Buffer, extension: string, tim
     clearTimeout(timeoutId!);
   }
 }
+
+/**
+ * A PDF's own text layer plus its page count (officeparser's metadata), for a
+ * caller that must tell a real text layer from a scanned PDF whose only
+ * selectable text is a typed header or footer — a few dozen characters per
+ * page. Same parser and same bounded timeout as extractDocumentText.
+ */
+export async function extractPdfTextLayer(buffer: Buffer, timeoutMs: number = DEFAULT_EXTRACTION_TIMEOUT_MS): Promise<{ text: string; pages: number | null }> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error("L'extraction a pris trop de temps — le fichier est peut-être trop volumineux ou trop complexe.")),
+      timeoutMs
+    );
+  });
+
+  try {
+    const ast = await Promise.race([OfficeParser.parseOffice(buffer, { fileType: "pdf" }), timeout]);
+    const pages = ast.metadata?.pages;
+    return { text: ast.toText().trim(), pages: typeof pages === "number" && pages > 0 ? pages : null };
+  } finally {
+    clearTimeout(timeoutId!);
+  }
+}

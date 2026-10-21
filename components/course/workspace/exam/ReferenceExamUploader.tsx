@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CheckCircle2, FileUp, Loader2, X } from "lucide-react";
+import { CheckCircle2, FileUp, Loader2, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
@@ -13,6 +13,13 @@ const ACCEPTED_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg"];
 // Same cap app/api/exam/analyze-reference/route.ts enforces — checked here too so an oversized file never even reaches the network.
 const MAX_FILE_BYTES = MAX_UPLOAD_FILE_BYTES;
 const ANALYSIS_CLIENT_TIMEOUT_MS = 310_000;
+const MIME_BY_EXTENSION: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
+
+/** The file's media type — from its extension when the browser gave none (or a generic one), as some file pickers do. */
+function resolveMimeType(file: File): string | null {
+  if (ACCEPTED_MIME_TYPES.includes(file.type)) return file.type;
+  return MIME_BY_EXTENSION[file.name.split(".").pop()?.toLowerCase() ?? ""] ?? null;
+}
 
 interface ReferenceExamUploaderProps {
   styleProfile: ExamStyleProfile | null;
@@ -31,14 +38,21 @@ interface ReferenceExamUploaderProps {
  */
 export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disabled }: ReferenceExamUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // Only the latest analysis may update the UI: a cleared or replaced upload
+  // must never bring its (late) style profile back into the exam request.
+  const analysisIdRef = useRef(0);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The file of a failed analysis, so "Réessayer" works without picking it again.
+  const [retryFile, setRetryFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   async function analyzeFile(file: File) {
     setError(null);
-    if (!ACCEPTED_MIME_TYPES.includes(file.type)) {
+    setRetryFile(null);
+    const mimeType = resolveMimeType(file);
+    if (!mimeType) {
       setError("Format non supporté — dépose un fichier PDF, PNG ou JPG.");
       return;
     }
@@ -46,6 +60,17 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
       setError(`Fichier trop volumineux (max ${MAX_FILE_BYTES / (1024 * 1024)} Mo).`);
       return;
     }
+    // Storage checks the uploaded Content-Type against the bucket's allowed types.
+    const upload = file.type === mimeType ? file : new File([file], file.name, { type: mimeType });
+
+    const analysisId = ++analysisIdRef.current;
+    const isCurrent = () => analysisIdRef.current === analysisId;
+    const fail = (message: string) => {
+      if (!isCurrent()) return;
+      setError(message);
+      setRetryFile(file);
+      setFileName(null);
+    };
 
     setFileName(file.name);
     setIsAnalyzing(true);
@@ -55,31 +80,25 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
       // below the 10 MB upload limit — then only the path goes to the analysis.
       let path: string;
       try {
-        ({ path } = await uploadFileToSignedStorage("/api/exam/analyze-reference/sign", { mimeType: file.type }, file));
+        ({ path } = await uploadFileToSignedStorage("/api/exam/analyze-reference/sign", { mimeType }, upload));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "L'envoi du fichier a échoué. Réessaie.");
-        setFileName(null);
+        fail(err instanceof Error ? err.message : "L'envoi du fichier a échoué. Réessaie.");
         return;
       }
-      // Heartbeat-streamed route (see app/api/exam/analyze-reference) — a heavy
-      // PDF can take minutes to read; the timeout sits just above its maxDuration.
-      const outcome = await postJsonWithHeartbeat(
-        "/api/exam/analyze-reference",
-        { path, fileName: file.name, mimeType: file.type },
-        ANALYSIS_CLIENT_TIMEOUT_MS
-      );
+      // Heartbeat-streamed route (see app/api/exam/analyze-reference) — a scanned
+      // PDF can take a minute or two to read; the timeout sits just above its maxDuration.
+      const outcome = await postJsonWithHeartbeat("/api/exam/analyze-reference", { path, fileName: file.name, mimeType }, ANALYSIS_CLIENT_TIMEOUT_MS);
+      if (!isCurrent()) return;
       if (!outcome.ok || !outcome.data.styleProfile) {
         const serverError = typeof outcome.data.error === "string" ? outcome.data.error : null;
-        setError(serverError ?? (outcome.status === 0 ? `L'analyse du style a été interrompue (${outcome.diagnostic}). Réessaie.` : "L'analyse du style a échoué. Réessaie."));
-        setFileName(null);
+        fail(serverError ?? (outcome.status === 0 ? `L'analyse du style a été interrompue (${outcome.diagnostic}). Réessaie.` : "L'analyse du style a échoué. Réessaie."));
         return;
       }
       onStyleProfileChange(outcome.data.styleProfile as ExamStyleProfile);
     } catch {
-      setError("L'analyse du style a échoué (problème réseau). Réessaie.");
-      setFileName(null);
+      fail("L'analyse du style a échoué (problème réseau). Réessaie.");
     } finally {
-      setIsAnalyzing(false);
+      if (isCurrent()) setIsAnalyzing(false);
     }
   }
 
@@ -89,8 +108,11 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
   }
 
   function handleClear() {
+    analysisIdRef.current++;
     setFileName(null);
     setError(null);
+    setRetryFile(null);
+    setIsAnalyzing(false);
     onStyleProfileChange(null);
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -151,9 +173,12 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
             </button>
           </div>
           {isAnalyzing ? (
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Analyse du style en cours...
+            <div className="mt-2 flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+              <span>
+                Analyse du style en cours...
+                <span className="block text-[11px] text-gray-400 dark:text-gray-500">Jusqu&apos;à 1 à 2 minutes pour un document scanné.</span>
+              </span>
             </div>
           ) : styleProfile ? (
             <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-primary-50 px-2 py-1.5 text-xs text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
@@ -164,7 +189,22 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
         </div>
       )}
 
-      {error && <p className="mt-2 text-xs text-red-500 dark:text-red-400">{error}</p>}
+      {error && (
+        <div className="mt-2 flex items-start justify-between gap-2">
+          <p className="text-xs text-red-500 dark:text-red-400">{error}</p>
+          {retryFile && (
+            <button
+              type="button"
+              onClick={() => void analyzeFile(retryFile)}
+              disabled={disabled}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200/70 px-2 py-0.5 text-[11px] font-medium text-gray-600 transition-colors hover:bg-white/60 disabled:pointer-events-none disabled:opacity-50 dark:border-neutral-700/70 dark:text-gray-300 dark:hover:bg-neutral-800/60"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Réessayer
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

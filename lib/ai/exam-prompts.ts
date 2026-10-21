@@ -155,6 +155,22 @@ Base-toi UNIQUEMENT sur ce que tu observes réellement dans le document fourni �
 export const EXAM_STYLE_EXTRACTION_USER_TEXT = "Voici l'examen de référence à analyser. Extrais son profil de style au format JSON demandé.";
 
 /**
+ * Same task as EXAM_STYLE_EXTRACTION_USER_TEXT when the reference exam
+ * arrives as TEXT (a PDF's own text layer, or a scanned PDF read by OCR)
+ * instead of as an attachment — the document is inlined, and the model is
+ * told its layout may have been flattened by the extraction. `isSample`:
+ * only the first pages are included (a professor's style shows there).
+ */
+export function buildExamStyleExtractionTextMessage(examText: string, isSample: boolean): string {
+  return `Voici le texte de l'examen de référence à analyser${isSample ? " (ses premières pages, suffisantes pour en dégager le style)" : ""}, extrait du document fourni par l'étudiant. La mise en page d'origine (colonnes, cases à cocher, numérotation) a pu être aplatie par l'extraction : reconstitue la structure des questions et des propositions à partir du texte.
+"""
+${examText}
+"""
+
+Extrais son profil de style au format JSON demandé.`;
+}
+
+/**
  * Style-adapted replacement for buildExamStaticSystemPrompt, used ONLY when
  * a student attached a reference exam (app/api/exam/generate/route.ts's
  * styleProfile branch). Same course-content block and same overall rigor/
