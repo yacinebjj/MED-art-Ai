@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -40,6 +40,7 @@ import { useLanguage } from "@/providers/LanguageProvider";
 import { tSettings } from "@/lib/translations/settings";
 import { cn } from "@/lib/utils";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
+import { PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE, PAYMENT_INTERRUPTED_MESSAGE } from "@/lib/payment-messages";
 
 interface SubscriptionInfo {
   plan: PlanId;
@@ -72,6 +73,72 @@ interface Invoice {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** No answer from our checkout route by then (it gives Chargily 20 s): the gateway is stalling — say so instead of spinning. */
+const CHECKOUT_REQUEST_TIMEOUT_MS = 35_000;
+/** Back from Chargily with ?status=success: ask every 5 s, for up to 2 minutes, until the payment is confirmed. */
+const CONFIRM_POLL_MS = 5000;
+const CONFIRM_POLL_MAX_MS = 2 * 60 * 1000;
+/**
+ * Set right before leaving for Chargily. Coming back WITHOUT ?status= (its page
+ * stalled on a 504, the back button, a closed tab) then reads as an
+ * interrupted payment. A checkout lives 30 minutes, so an older mark means nothing.
+ */
+const CHECKOUT_STARTED_KEY = "medart:chargily-checkout-started";
+const CHECKOUT_MARK_MAX_AGE_MS = 45 * 60 * 1000;
+
+type ConfirmPhase = "idle" | "checking" | "confirmed" | "slow";
+
+function markCheckoutStarted() {
+  try {
+    sessionStorage.setItem(CHECKOUT_STARTED_KEY, String(Date.now()));
+  } catch {
+    // Storage blocked: only the « interrupted payment » notice is lost.
+  }
+}
+
+/** Reads and clears the mark: true when a Chargily payment was started in this tab less than 45 minutes ago. */
+function takeCheckoutMark(): boolean {
+  try {
+    const raw = sessionStorage.getItem(CHECKOUT_STARTED_KEY);
+    sessionStorage.removeItem(CHECKOUT_STARTED_KEY);
+    const startedAt = Number(raw);
+    return raw !== null && Number.isFinite(startedAt) && Date.now() - startedAt < CHECKOUT_MARK_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Confirms the student's pending payments directly with Chargily (activating the paid ones); null when it could not ask. */
+async function reconcilePayments(): Promise<{ activated: number; pending: number; latestPaid: boolean } | null> {
+  try {
+    const res = await fetch("/api/chargily/reconcile", { method: "POST", cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as { activated?: unknown; pending?: unknown; latestStatus?: unknown } | null;
+    if (typeof data?.activated !== "number" || typeof data.pending !== "number") return null;
+    return { activated: data.activated, pending: data.pending, latestPaid: data.latestStatus === "paid" };
+  } catch {
+    return null;
+  }
+}
+
+/** An outage of the payment gateway reads as a calm « try again shortly », not as a failure. */
+function ErrorNotice({ message, className }: { message: string; className?: string }) {
+  const gatewayDown = message === PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE;
+  return (
+    <div
+      role="alert"
+      className={cn(
+        "rounded-2xl border p-4 text-sm",
+        gatewayDown ? "flex items-start gap-3 border-amber-400/40 bg-amber-500/10 text-amber-100" : "border-rose-400/40 bg-rose-500/10 text-rose-200",
+        className
+      )}
+    >
+      {gatewayDown && <Hourglass className="mt-0.5 h-4 w-4 shrink-0" />}
+      {gatewayDown ? <span>{message}</span> : message}
+    </div>
+  );
+}
 
 function formatFrenchDate(iso: string): string {
   return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
@@ -543,6 +610,10 @@ function BillingPageContent() {
   const [plansOpenOverride, setPlansOpenOverride] = useState<boolean | null>(null);
   const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [confirmPhase, setConfirmPhase] = useState<ConfirmPhase>(() => (status === "success" ? "checking" : "idle"));
+  const [interrupted, setInterrupted] = useState(false);
+  const silentCheckDoneRef = useRef(false);
+  const userId = user?.id ?? null;
 
   const loadSubscription = useCallback(async () => {
     try {
@@ -572,19 +643,90 @@ function BillingPageContent() {
     }
   }, []);
 
+  const loadInvoices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/billing/invoices", { cache: "no-store" });
+      const data = (await res.json()) as { invoices?: unknown };
+      setInvoices(Array.isArray(data?.invoices) ? (data.invoices as Invoice[]) : []);
+    } catch {
+      setInvoices((current) => current ?? []);
+    }
+  }, []);
+
   useEffect(() => {
     if (!user) return;
-    let cancelled = false;
     void loadSubscription();
     void loadPools();
-    fetch("/api/billing/invoices")
-      .then((res) => res.json())
-      .then((data: { invoices?: unknown }) => !cancelled && setInvoices(Array.isArray(data?.invoices) ? (data.invoices as Invoice[]) : []))
-      .catch(() => !cancelled && setInvoices([]));
+    void loadInvoices();
+  }, [user, loadSubscription, loadPools, loadInvoices]);
+
+  const refreshAfterPayment = useCallback(() => {
+    void loadSubscription();
+    void loadPools();
+    void loadInvoices();
+  }, [loadSubscription, loadPools, loadInvoices]);
+
+  // Came back without Chargily's redirect (its page stalled on a 504, back button…): say what happens next.
+  useEffect(() => {
+    if (takeCheckoutMark() && status !== "success" && status !== "failure") setInterrupted(true);
+  }, [status]);
+
+  // The browser's back button may restore this page as it was left — pay button still spinning. Unfreeze it.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      setLoadingKey(null);
+      if (takeCheckoutMark()) setInterrupted(true);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
+  // Confirms payments with Chargily itself, never waiting on its webhook alone: once silently on every
+  // visit, then every 5 s for 2 minutes after a payment (success return or interrupted one). Activation
+  // goes through the webhook's own once-only claim, so a payment is never activated twice.
+  const watchPayments = confirmPhase === "checking" || interrupted;
+  useEffect(() => {
+    if (!userId) return;
+    if (!watchPayments && silentCheckDoneRef.current) return;
+    silentCheckDoneRef.current = true;
+    const startedAt = Date.now();
+    let cancelled = false;
+    let timer = 0;
+    const tick = async () => {
+      const outcome = await reconcilePayments();
+      if (cancelled) return;
+      if (outcome && outcome.activated > 0) {
+        setConfirmPhase("confirmed");
+        setInterrupted(false);
+        refreshAfterPayment();
+        return;
+      }
+      if (!watchPayments) return;
+      if (outcome && outcome.latestPaid) {
+        // The payment just made is already settled — by its webhook or an earlier check.
+        setConfirmPhase("confirmed");
+        setInterrupted(false);
+        refreshAfterPayment();
+        return;
+      }
+      if (outcome && outcome.pending === 0) {
+        // Nothing left to ask Chargily about; a late webhook still activates the payment on its own.
+        setConfirmPhase((phase) => (phase === "checking" ? "slow" : phase));
+        return;
+      }
+      if (Date.now() - startedAt >= CONFIRM_POLL_MAX_MS) {
+        setConfirmPhase((phase) => (phase === "checking" ? "slow" : phase));
+        return;
+      }
+      timer = window.setTimeout(tick, CONFIRM_POLL_MS);
+    };
+    void tick();
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [user, loadSubscription, loadPools]);
+  }, [userId, watchPayments, refreshAfterPayment]);
 
   const openPools = useMemo(() => currentOpenPools(pools), [pools]);
   const primaryOpenPool = openPools[0] ?? null;
@@ -629,14 +771,27 @@ function BillingPageContent() {
         router.push(`/dashboard/billing/pool/${encodeURIComponent(data.code)}`);
         return;
       }
-      const res = await fetch("/api/chargily/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action.type === "leader" ? { plan: action.plan, mode: "leader" } : { plan: action.plan }),
-      });
-      if (!res.ok) throw new Error(await readError(res, "Impossible de créer le paiement."));
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), CHECKOUT_REQUEST_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch("/api/chargily/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(action.type === "leader" ? { plan: action.plan, mode: "leader" } : { plan: action.plan }),
+          signal: controller.signal,
+        });
+      } catch {
+        // No answer in time: the gateway is stalling. Otherwise the request never left this device.
+        throw new Error(controller.signal.aborted ? PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE : "Connexion impossible : vérifie ton réseau puis réessaie. Rien n'a été débité.");
+      } finally {
+        window.clearTimeout(timeout);
+      }
+      // 502/503/504 without our own message = a gateway or platform timeout in front of the route.
+      if (!res.ok) throw new Error(await readError(res, res.status >= 502 && res.status <= 504 ? PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE : "Impossible de créer le paiement."));
       const data = (await res.json()) as { checkoutUrl?: unknown };
       if (typeof data.checkoutUrl !== "string") throw new Error("Impossible de créer le paiement.");
+      markCheckoutStarted();
       window.location.href = data.checkoutUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Impossible de créer le paiement.");
@@ -702,13 +857,37 @@ function BillingPageContent() {
       />
 
       <div className="mt-6 space-y-4">
-        {status === "success" && (
+        {confirmPhase === "confirmed" ? (
           <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm text-emerald-200">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              Paiement reçu ! Ton abonnement sera activé dans quelques instants (confirmation automatique). Si tu as payé pour un Groupe, ton code
-              d&apos;invitation apparaît dans « Tes groupes ».
+              Paiement confirmé : ton abonnement est actif. Merci ! Si tu as payé pour un Groupe, ton code d&apos;invitation apparaît dans « Tes
+              groupes ».
             </span>
+          </div>
+        ) : confirmPhase === "slow" ? (
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+            <Hourglass className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Paiement reçu — la confirmation de Chargily / Algérie Poste prend plus de temps que d&apos;habitude. Ton abonnement s&apos;active
+              automatiquement dès qu&apos;elle arrive : surtout ne repaie pas. Tu peux fermer cette page.
+            </span>
+          </div>
+        ) : (
+          status === "success" && (
+            <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+              <Hourglass className="mt-0.5 h-4 w-4 shrink-0 animate-pulse" />
+              <span>
+                Paiement reçu ! Confirmation auprès de Chargily en cours : ton abonnement s&apos;active automatiquement dans quelques instants, ne
+                repaie pas. Si tu as payé pour un Groupe, ton code d&apos;invitation apparaît dans « Tes groupes ».
+              </span>
+            </div>
+          )
+        )}
+        {interrupted && confirmPhase !== "confirmed" && (
+          <div role="status" className="flex items-start gap-3 rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+            <Hourglass className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{PAYMENT_INTERRUPTED_MESSAGE}</span>
           </div>
         )}
         {status === "failure" && (
@@ -717,7 +896,7 @@ function BillingPageContent() {
             Le paiement a échoué ou a été annulé. Aucun montant n&apos;a été débité.
           </div>
         )}
-        {error && !plansOpen && <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
+        {error && !plansOpen && <ErrorNotice message={error} />}
       </div>
 
       {/* ── Ton groupe en cours (never lost, never a second group) ─────── */}
@@ -799,7 +978,7 @@ function BillingPageContent() {
           <div className="mt-4 flex justify-center">
             <BillingCycleToggle value={cycle} onChange={setCycle} />
           </div>
-          {error && <div className="mt-4 rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
+          {error && <ErrorNotice message={error} className="mt-4" />}
           <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
             {plansForCycle.map((plan) => (
               <PlanCard

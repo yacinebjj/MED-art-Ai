@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { createChargilyCheckout, expireChargilyCheckout, getChargilyCheckout, type ChargilyCheckout } from "@/lib/chargily";
+import { ChargilyUnavailableError, createChargilyCheckout, expireChargilyCheckout, getChargilyCheckout, type ChargilyCheckout } from "@/lib/chargily";
+import { PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE } from "@/lib/payment-messages";
 import { GROUP_SIZE, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, SEAT_HOLD_MINUTES, type BillingCycle, type PlanId } from "@/lib/pricing";
 import { activateSubscription, getSubscription, isSubscriptionActive } from "@/lib/subscription";
 
@@ -569,6 +570,7 @@ export async function startPoolCheckout(code: string, user: { id: string; email?
     // No payable checkout exists for this seat: free it so the student can retry right away
     // (instead of waiting on a « confirmation en cours » for a payment that was never opened).
     await releaseHold(pool.id, user.id, previousCheckoutId);
+    if (creationError instanceof ChargilyUnavailableError) throw new PoolError(PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE, 503);
     throw new PoolError("Chargily ne répond pas pour le moment : rien n'a été payé. Réessaie dans un instant.", 502);
   }
   // The seat records its payable checkout as a compare-and-set on the one this request settled:

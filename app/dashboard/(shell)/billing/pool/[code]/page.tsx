@@ -550,6 +550,9 @@ function PoolTracker() {
     let cancelled = false;
     let timer = 0;
     const tick = async () => {
+      // Asks Chargily directly too, so a late or lost webhook never leaves a paid share unconfirmed.
+      await fetch("/api/chargily/reconcile", { method: "POST", cache: "no-store" }).catch(() => undefined);
+      if (cancelled) return;
       const pool = await load();
       if (cancelled) return;
       if (pool && isSettledPayment(pool.me.status)) return; // The effect below finishes the flow.

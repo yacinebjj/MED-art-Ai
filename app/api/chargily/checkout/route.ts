@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createChargilyCheckout } from "@/lib/chargily";
+import { ChargilyUnavailableError, createChargilyCheckout } from "@/lib/chargily";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { GROUP_SIZE, groupLeaderTotalDZD, isPaidPlanId, isPlanId, PLANS } from "@/lib/pricing";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { billingPoolsAvailable } from "@/lib/billing-pools";
+import { PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE } from "@/lib/payment-messages";
 
 export const runtime = "nodejs";
+// Room for Chargily's own 20 s creation timeout (lib/chargily.ts), so a stalled gateway gets a clear answer, never a platform timeout.
+export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -53,7 +56,8 @@ export async function POST(request: NextRequest) {
   }
   const amount = asGroupLeader ? groupLeaderTotalDZD(planDetails) : planDetails.priceDZD;
   const kind = asGroupLeader ? "group_leader" : "individual";
-  const appUrl = process.env.APP_URL || request.nextUrl.origin;
+  // No trailing slash: Chargily must call back exactly /api/chargily/webhook, not //api/chargily/webhook.
+  const appUrl = (process.env.APP_URL || request.nextUrl.origin).replace(/\/+$/, "");
 
   try {
     const checkout = await createChargilyCheckout({
@@ -91,6 +95,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ checkoutUrl: checkout.checkout_url });
   } catch (error) {
     console.error("Chargily checkout creation failed", error);
+    if (error instanceof ChargilyUnavailableError) {
+      // Chargily / Algérie Poste down or overloaded (timeout, 502/504…): no payment page exists, nothing was charged.
+      return NextResponse.json(
+        { error: PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE, code: "gateway_unavailable" },
+        { status: 503, headers: { "Retry-After": "60" } }
+      );
+    }
     return NextResponse.json(
       { error: "Impossible de créer le paiement. Réessaie dans un instant." },
       { status: 502 }

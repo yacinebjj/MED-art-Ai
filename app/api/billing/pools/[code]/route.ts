@@ -6,6 +6,8 @@ import { getPoolView, joinLeaderSeat, leavePool, normalizeInviteCode, PoolError,
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// A share checkout can expire + re-read the previous one (10 s each) before creating a new one (20 s) at Chargily.
+export const maxDuration = 60;
 
 function fail(error: unknown): NextResponse {
   if (error instanceof PoolError) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest, { params }: { params: { code: s
   const body = (await request.json().catch(() => null)) as { action?: unknown } | null;
   try {
     if (body?.action === "checkout") {
-      const appUrl = process.env.APP_URL || request.nextUrl.origin;
+      const appUrl = (process.env.APP_URL || request.nextUrl.origin).replace(/\/+$/, "");
       return NextResponse.json({ success: true, checkoutUrl: await startPoolCheckout(code, user, appUrl) });
     }
     if (body?.action === "join") {

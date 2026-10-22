@@ -69,30 +69,55 @@ export interface CreateCheckoutParams {
   metadata?: ChargilyCheckoutMetadata;
 }
 
+/**
+ * Chargily itself is unreachable or overloaded — a network failure, a
+ * timeout, a 5xx (its Cloudflare front answers 502/504 when its servers or the
+ * Algérie Poste / CIB network behind them stall) or a 429. Distinct from a 4xx
+ * on our own request, so callers can tell the student "try again in a few
+ * minutes" instead of a generic failure.
+ */
+export class ChargilyUnavailableError extends Error {
+  constructor(readonly status: number, detail: string) {
+    super(`Chargily unavailable (${status || "network"}): ${detail}`);
+    this.name = "ChargilyUnavailableError";
+  }
+}
+
+/** A checkout creation that has not answered by then will not: the student gets a clear message instead of a spinner. */
+const CHECKOUT_CREATE_TIMEOUT_MS = 20_000;
+
 export async function createChargilyCheckout(
   params: CreateCheckoutParams
 ): Promise<ChargilyCheckout> {
-  const res = await fetch(`${CHARGILY_API_BASE}/checkouts`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${getSecretKey()}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      amount: params.amount,
-      currency: params.currency ?? "dzd",
-      success_url: params.successUrl,
-      failure_url: params.failureUrl,
-      webhook_endpoint: params.webhookEndpoint,
-      description: params.description,
-      locale: params.locale ?? "fr",
-      metadata: params.metadata,
-    }),
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${CHARGILY_API_BASE}/checkouts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getSecretKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: params.amount,
+        currency: params.currency ?? "dzd",
+        success_url: params.successUrl,
+        failure_url: params.failureUrl,
+        webhook_endpoint: params.webhookEndpoint,
+        description: params.description,
+        locale: params.locale ?? "fr",
+        metadata: params.metadata,
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(CHECKOUT_CREATE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // Timeout (AbortSignal) or network failure: no answer from Chargily at all.
+    throw new ChargilyUnavailableError(0, error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status >= 500 || res.status === 429) throw new ChargilyUnavailableError(res.status, body.slice(0, 300));
     throw new Error(`Chargily checkout creation failed (${res.status}): ${body.slice(0, 500)}`);
   }
 
@@ -121,10 +146,11 @@ async function chargilyCall<T>(path: string, method: "GET" | "POST"): Promise<Ch
 }
 
 /**
- * GET /checkouts/{id} — the checkout's current state. Status is one of
- * "pending" | "processing" | "paid" | "failed" | "canceled". Never throws.
+ * GET /checkouts/{id} — the checkout's current state, with the amount,
+ * currency and metadata it was created with. Status is one of "pending" |
+ * "processing" | "paid" | "failed" | "canceled". Never throws.
  */
-export async function getChargilyCheckout(id: string): Promise<ChargilyCallResult<Pick<ChargilyCheckout, "id" | "status">>> {
+export async function getChargilyCheckout(id: string): Promise<ChargilyCallResult<ChargilyCheckout>> {
   return chargilyCall(`checkouts/${encodeURIComponent(id)}`, "GET");
 }
 
