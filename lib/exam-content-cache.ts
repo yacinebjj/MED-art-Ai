@@ -32,12 +32,17 @@ interface ExamCourseForHash {
  * every other content-hash cache in this app (lab_course_cache,
  * studio_content_cache, flashcards_content_cache). The "c2:" prefix keeps new
  * keys disjoint from the old per-student ones.
+ *
+ * "c3:" (the three question formats, lib/exam-formats.ts): every exam cached
+ * or pooled as a variation before them is QCS-only, and serving it again
+ * would keep a course set on single-answer questions forever. The old rows
+ * stay in place, unread; already-saved student exams are not affected.
  */
 export function computeExamContentHash(courses: ExamCourseForHash[]): string {
   const digests = courses
     .map((course) => createHash("sha256").update(normalizeText(course.explication ?? course.raw_text), "utf8").digest("hex"))
     .sort();
-  return createHash("sha256").update(`c2:${digests.join("|")}`, "utf8").digest("hex");
+  return createHash("sha256").update(`c3:${digests.join("|")}`, "utf8").digest("hex");
 }
 
 /** Checked before generating (skipped entirely for variation:true requests — see the route). Returns `null` on any Supabase error or misconfiguration — a lookup failure must never block generation, only skip the optimization. */

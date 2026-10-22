@@ -52,9 +52,9 @@ const DIFFICULTY_DIRECTIVES: Record<ExamDifficulty, string> = {
 const FOCUS_DIRECTIVES: Record<ExamQuestionFocus, string> = {
   equilibre: "",
   cas_cliniques:
-    "FORMAT : au moins 70 % des questions sont des CAS CLINIQUES — une vignette de patient (âge, terrain, symptômes, examens) suivie d'une question de raisonnement (diagnostic, examen à demander, conduite à tenir).",
+    "TYPE DE QUESTIONS : au moins 70 % des questions sont des CAS CLINIQUES — une vignette de patient (âge, terrain, symptômes, examens) suivie d'une question de raisonnement (diagnostic, examen à demander, conduite à tenir) — dans les formats QCS, QCM et combinaisons demandés.",
   connaissances:
-    "FORMAT : majoritairement des questions de CONNAISSANCE directe (définitions, mécanismes, classifications, chiffres clés), avec des énoncés courts ; au maximum 20 % de vignettes cliniques.",
+    "TYPE DE QUESTIONS : majoritairement des questions de CONNAISSANCE directe (définitions, mécanismes, classifications, chiffres clés), avec des énoncés courts ; au maximum 20 % de vignettes cliniques — dans les formats QCS, QCM et combinaisons demandés.",
 };
 
 const EXPLANATION_DIRECTIVES: Record<ExamExplanationDepth, string> = {

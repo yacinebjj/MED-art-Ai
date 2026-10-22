@@ -1,6 +1,7 @@
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
 import type { ExamPreferences } from "@/lib/exam-preferences";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
+import { remainingFormatCounts, type FormatCounts } from "@/lib/exam-formats";
 
 /**
  * Browser driver for the Examen de Module (app/api/exam/run): plan → many
@@ -37,6 +38,8 @@ interface ExamJob {
   courseIds: number[];
   count: number;
   segment: [number, number] | null;
+  /** Format quota planned by the server (lib/exam-formats.ts). */
+  formats?: FormatCounts;
 }
 
 interface Sealed {
@@ -147,7 +150,10 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
             done += body.questions.length;
             report("questions");
             const missing = next.job.count - body.questions.length;
-            if (missing > 0 && next.attempt < MAX_JOB_ATTEMPTS) queue.push({ job: { ...next.job, count: missing }, attempt: next.attempt + 1 });
+            // Re-asks for the formats that did not come back, not just for a count.
+            if (missing > 0 && next.attempt < MAX_JOB_ATTEMPTS) {
+              queue.push({ job: { ...next.job, count: missing, formats: remainingFormatCounts(next.job.formats, body.questions, missing) }, attempt: next.attempt + 1 });
+            }
             continue;
           }
           // Session expired / forbidden / invalid: retrying cannot help.

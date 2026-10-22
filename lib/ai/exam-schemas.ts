@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EXAM_FORMATS, EXAM_POLARITIES, QCM_MAX_CORRECT, QCM_MIN_CORRECT, formatCombination, parseCombination, type ExamFormat, type ExamPolarity } from "@/lib/exam-formats";
 
 /**
  * Structural validation of the generated exam — this IS the hard backstop
@@ -26,27 +27,103 @@ import { z } from "zod";
  * genuinely wrong upstream (see the route's own "still reachable,
  * deliberately" comment), and still fails cleanly rather than being served.
  */
-const ExamOptionSchema = z
-  .object({
-    label: z.enum(["A", "B", "C", "D", "E"]),
-    text: z.string().min(1),
-    isCorrect: z.boolean(),
-    explanation: z.string().min(10),
-  })
-  .strict();
+const ExamOptionSchema = z.object({
+  label: z.enum(["A", "B", "C", "D", "E"]),
+  text: z.string().min(1),
+  isCorrect: z.boolean(),
+  explanation: z.string().min(10),
+});
 
+/** One numbered proposition (1–5, by position) of a "combinaison" question. */
+const ExamPropositionSchema = z.object({
+  text: z.string().min(3),
+  isTrue: z.boolean(),
+  explanation: z.string().min(10),
+});
+
+/** Case and the aliases a model sometimes writes ("QCM", "combination") are folded in before the enum check. */
+const FORMAT_ALIASES: Record<string, ExamFormat> = { combinaisons: "combinaison", combination: "combinaison", combinations: "combinaison", combinatoire: "combinaison" };
+const normalizeEnumText = (aliases: Record<string, string>) => (value: unknown) => {
+  if (typeof value !== "string") return value;
+  const key = value.trim().toLowerCase();
+  return aliases[key] ?? key;
+};
+
+export interface ExamQuestionOutput {
+  vignette: string;
+  options: { label: "A" | "B" | "C" | "D" | "E"; text: string; isCorrect: boolean; explanation: string }[];
+  weakPointTag: string;
+  /** Absent on every question saved before the three formats existed: read as a QCS. */
+  format?: ExamFormat;
+  polarity?: ExamPolarity;
+  /** "combinaison" only: the five numbered propositions, 1 to 5 in order. */
+  propositions?: { text: string; isTrue: boolean; explanation: string }[];
+}
+
+/**
+ * One exam question, in any of the three formats (lib/exam-formats.ts).
+ * Unknown keys are dropped rather than rejecting an otherwise-valid question;
+ * options are returned in A→E order. A question WITHOUT `format` (every exam
+ * saved before the formats, and every pooled single-answer Studio QCM) is
+ * validated exactly as before: five options, exactly one correct.
+ *
+ * Nothing is repaired or invented: a combination whose correct option does
+ * not list exactly the propositions to tick, a QCM with one (or five)
+ * answers, a duplicated combination — each is rejected, and the generator
+ * asks for that question again.
+ */
 export const ExamQuestionSchema = z
   .object({
     vignette: z.string().min(30),
-    options: z
-      .array(ExamOptionSchema)
-      .length(5)
-      .refine((options) => options.filter((o) => o.isCorrect).length === 1, {
-        message: "Chaque question doit avoir EXACTEMENT une seule bonne réponse.",
-      }),
+    options: z.array(ExamOptionSchema).length(5),
     weakPointTag: z.string().min(3),
+    format: z.preprocess(normalizeEnumText(FORMAT_ALIASES), z.enum(EXAM_FORMATS)).optional(),
+    polarity: z.preprocess(normalizeEnumText({}), z.enum(EXAM_POLARITIES)).optional(),
+    propositions: z.array(ExamPropositionSchema).length(5).optional(),
   })
-  .strict();
+  .transform((question, ctx): ExamQuestionOutput => {
+    const fail = (message: string) => {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+      return z.NEVER;
+    };
+    if (new Set(question.options.map((option) => option.label)).size !== question.options.length) {
+      return fail("Les 5 options doivent être A, B, C, D et E, chacune une seule fois.");
+    }
+    const options = [...question.options].sort((a, b) => a.label.localeCompare(b.label));
+    const correctCount = options.filter((option) => option.isCorrect).length;
+    const { vignette, weakPointTag, format, polarity } = question;
+    const base = { vignette, weakPointTag, ...(polarity ? { polarity } : {}) };
+
+    if (format === "qcm") {
+      if (correctCount < QCM_MIN_CORRECT || correctCount > QCM_MAX_CORRECT) {
+        return fail(`Un QCM doit avoir entre ${QCM_MIN_CORRECT} et ${QCM_MAX_CORRECT} réponses à cocher.`);
+      }
+      return { ...base, format, options };
+    }
+
+    if (format === "combinaison") {
+      const propositions = question.propositions;
+      if (!propositions) return fail("Une question à combinaisons doit avoir 5 propositions numérotées.");
+      if (!polarity) return fail("Une question à combinaisons doit préciser RJ ou RF.");
+      if (correctCount !== 1) return fail("Une question à combinaisons doit avoir exactement une combinaison juste.");
+      const combinations = options.map((option) => parseCombination(option.text));
+      if (combinations.some((combination) => combination === null)) {
+        return fail("Chaque option d'une question à combinaisons doit être une combinaison de numéros 1 à 5 (ex. 1+3).");
+      }
+      const keys = combinations.map((combination) => formatCombination(combination!));
+      if (new Set(keys).size !== keys.length) return fail("Les 5 combinaisons doivent être différentes.");
+      const expected = formatCombination(propositions.flatMap((proposition, index) => (proposition.isTrue === (polarity === "rj") ? [index + 1] : [])));
+      if (!expected) return fail("Au moins une proposition doit être à cocher.");
+      if (keys[options.findIndex((option) => option.isCorrect)] !== expected) {
+        return fail("La combinaison juste doit contenir toutes et seulement les propositions à cocher.");
+      }
+      return { ...base, format, propositions, options: options.map((option, index) => ({ ...option, text: keys[index] })) };
+    }
+
+    // "qcs", or a question without format.
+    if (correctCount !== 1) return fail("Chaque question doit avoir EXACTEMENT une seule bonne réponse.");
+    return { ...base, ...(format ? { format } : {}), options };
+  });
 
 export const ExamGenerationSchema = z.object({
   questions: z.array(ExamQuestionSchema).min(30).max(60),

@@ -68,8 +68,10 @@ import { DEFAULT_EXAM_PREFERENCES, EXAM_DIFFICULTIES, EXAM_EXPLANATION_DEPTHS, E
 import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
+import { ExamCombinationText, ExamFormatBadges, ExamPropositionsList, examFormatHint, getQuestionKind } from "@/components/course/workspace/exam/ExamQuestionFormat";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { runExamGeneration, type ExamRunProgress } from "@/lib/exam-run-client";
+import { isAnswerCorrect, parseAnswerLabels, serializeAnswerLabels } from "@/lib/exam-scoring";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 type ResultStatus = "correct" | "incorrect" | "skipped";
@@ -87,6 +89,10 @@ interface ExamQuestion {
   vignette: string;
   options: ExamOption[];
   weakPointTag: string;
+  /** QCS / QCM / combinaison (lib/exam-formats.ts) — absent on exams saved before the formats: read as a QCS. */
+  format?: string;
+  polarity?: string;
+  propositions?: { text: string; isTrue: boolean; explanation: string }[];
 }
 
 interface SavedExam {
@@ -515,9 +521,18 @@ export default function ExamGeneratorPage() {
     }
   }
 
+  /** QCS / combinaison: the one ticked letter. QCM: toggles the letter in the ticked set, stored as "A,C" (lib/exam-scoring.ts). */
   function handleSelectAnswer(questionId: string, optionLabel: string) {
-    setAnswers((prev) => ({ ...prev, [questionId]: optionLabel }));
-    setAnswerBurst((prev) => ({ questionId, label: optionLabel, nonce: prev.nonce + 1 }));
+    const question = questions.find((q) => q.id === questionId);
+    const multiple = question ? getQuestionKind(question).multiple : false;
+    const ticking = !multiple || !parseAnswerLabels(answers[questionId]).includes(optionLabel);
+    setAnswers((prev) => {
+      if (!multiple) return { ...prev, [questionId]: optionLabel };
+      const current = parseAnswerLabels(prev[questionId]);
+      const next = current.includes(optionLabel) ? current.filter((label) => label !== optionLabel) : [...current, optionLabel];
+      return { ...prev, [questionId]: serializeAnswerLabels(next) };
+    });
+    if (ticking) setAnswerBurst((prev) => ({ questionId, label: optionLabel, nonce: prev.nonce + 1 }));
   }
 
   // Keyboard cockpit while testing: A–E / 1–5 answer, ← → navigate.
@@ -540,7 +555,8 @@ export default function ExamGeneratorPage() {
     const key = e.key.toUpperCase();
     const byLetter = question.options.find((o) => o.label.toUpperCase() === key);
     const digit = Number(e.key);
-    const byDigit = Number.isInteger(digit) && digit >= 1 ? question.options[digit - 1] : undefined;
+    // On a combination question 1–5 name the propositions, so only letters answer.
+    const byDigit = Number.isInteger(digit) && digit >= 1 && getQuestionKind(question).format !== "combinaison" ? question.options[digit - 1] : undefined;
     const option = byLetter ?? byDigit;
     if (option) {
       e.preventDefault();
@@ -555,22 +571,11 @@ export default function ExamGeneratorPage() {
 
   const answeredCount = useMemo(() => Object.values(answers).filter(Boolean).length, [answers]);
 
-  const score = useMemo(
-    () =>
-      questions.filter((q) => {
-        const correct = q.options.find((o) => o.isCorrect);
-        return correct && answers[q.id] === correct.label;
-      }).length,
-    [answers, questions]
-  );
+  // Same rule as the server's saved score (lib/exam-scoring.ts): the ticked set must equal the set to tick.
+  const score = useMemo(() => questions.filter((q) => isAnswerCorrect(q, answers[q.id])).length, [answers, questions]);
 
   const weakPoints = useMemo(() => {
-    const tags = questions
-      .filter((q) => {
-        const correct = q.options.find((o) => o.isCorrect);
-        return !correct || answers[q.id] !== correct.label;
-      })
-      .map((q) => q.weakPointTag);
+    const tags = questions.filter((q) => !isAnswerCorrect(q, answers[q.id])).map((q) => q.weakPointTag);
     return Array.from(new Set(tags));
   }, [answers, questions]);
 
@@ -664,7 +669,7 @@ export default function ExamGeneratorPage() {
                   {savedAttempt.score}/{savedAttempt.totalQuestions}
                 </Badge>
               )}
-              <span className="text-xs text-muted-foreground">{exam.content.questions.length} QCM</span>
+              <span className="text-xs text-muted-foreground">{exam.content.questions.length} questions</span>
             </span>
           </button>
         );
@@ -771,7 +776,7 @@ export default function ExamGeneratorPage() {
       <GenerationAura
         title={
           generationProgress?.phase === "questions" && generationProgress.total > 0
-            ? `Rédaction des QCM ${generationProgress.done}/${generationProgress.total}…`
+            ? `Rédaction des questions ${generationProgress.done}/${generationProgress.total}…`
             : generationProgress?.phase === "assemble"
               ? "Assemblage de ton épreuve…"
               : "Création de ton épreuve clinique…"
@@ -786,7 +791,7 @@ export default function ExamGeneratorPage() {
         chips={
           <>
             <TelemetryChip icon={ListChecks}>{selectedCourseIds.size || activeExam?.selectedCourses.length || 0} cours</TelemetryChip>
-            <TelemetryChip icon={FileQuestion}>40 à 60 QCM</TelemetryChip>
+            <TelemetryChip icon={FileQuestion}>40 à 60 questions · QCS, QCM, combinaisons</TelemetryChip>
             <TelemetryChip icon={Sparkles}>{(() => { const d = preferences.difficulty; return d === "debutant" ? "Débutant" : d === "examen_blanc" ? "Examen blanc" : "Intermédiaire"; })()}</TelemetryChip>
           </>
         }
@@ -799,6 +804,8 @@ export default function ExamGeneratorPage() {
   // normal, non-fullscreen panel, which needs its own bounded height/scroll
   // — the modal provides its own single scroll region instead).
   const currentQuestion = questions[currentQuestionIndex] as ExamQuestion | undefined;
+  const currentKind = currentQuestion ? getQuestionKind(currentQuestion) : null;
+  const currentTicked = currentQuestion ? parseAnswerLabels(answers[currentQuestion.id]) : [];
 
   const testingInnerContent =
     questions.length === 0 ? (
@@ -841,7 +848,7 @@ export default function ExamGeneratorPage() {
         className="mb-4 shrink-0"
       />
 
-      {currentQuestion && (
+      {currentQuestion && currentKind && (
         <AnimatePresence mode="wait" custom={slideDirection}>
           <motion.div
             key={currentQuestion.id}
@@ -860,15 +867,24 @@ export default function ExamGeneratorPage() {
             }}
             className="cursor-grab touch-pan-y rounded-2xl border border-white/[0.08] cyber-surface-deep p-4 shadow-[0_20px_60px_-30px_rgba(34,211,238,0.5)] active:cursor-grabbing sm:p-6"
           >
-            <div className="mb-4 flex items-center gap-2">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
               <Badge variant="primary">Q{currentQuestionIndex + 1} / {questions.length}</Badge>
+              <ExamFormatBadges kind={currentKind} />
               {answers[currentQuestion.id] && <Badge variant="success">Répondue</Badge>}
             </div>
-            <p className="mb-5 break-words text-base font-medium leading-relaxed text-white [overflow-wrap:anywhere]">{currentQuestion.vignette}</p>
-            <p className="mb-3 hidden text-[10px] font-semibold text-slate-500 sm:block">Raccourcis : A–E pour répondre · ← → pour naviguer</p>
-            <div className="space-y-2.5" role="radiogroup" aria-label={`Options question ${currentQuestionIndex + 1}`}>
+            <p className="mb-4 break-words text-base font-medium leading-relaxed text-white [overflow-wrap:anywhere]">{currentQuestion.vignette}</p>
+            {currentKind.propositions && <ExamPropositionsList propositions={currentKind.propositions} className="mb-4" />}
+            <p className="mb-2 text-xs font-semibold text-cyan-200">{examFormatHint(currentKind)}</p>
+            <p className="mb-3 hidden text-[10px] font-semibold text-slate-500 sm:block">
+              Raccourcis : A–E pour {currentKind.multiple ? "cocher ou décocher" : "répondre"} · ← → pour naviguer
+            </p>
+            <div
+              className="space-y-2.5"
+              role={currentKind.multiple ? "group" : "radiogroup"}
+              aria-label={`Options question ${currentQuestionIndex + 1}${currentKind.multiple ? " — plusieurs réponses possibles" : ""}`}
+            >
               {currentQuestion.options.map((opt) => {
-                const selected = answers[currentQuestion.id] === opt.label;
+                const selected = currentTicked.includes(opt.label);
                 return (
                   <label
                     key={opt.label}
@@ -883,7 +899,7 @@ export default function ExamGeneratorPage() {
                       <ParticleBurst nonce={answerBurst.nonce} count={12} spread={40} />
                     )}
                     <input
-                      type="radio"
+                      type={currentKind.multiple ? "checkbox" : "radio"}
                       name={currentQuestion.id}
                       className="sr-only"
                       checked={selected}
@@ -891,7 +907,9 @@ export default function ExamGeneratorPage() {
                     />
                     <span
                       className={cn(
-                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-xs font-black transition-colors",
+                        // Square box for a QCM (tick several), rounded for one answer.
+                        "flex h-8 w-8 shrink-0 items-center justify-center border text-xs font-black transition-colors",
+                        currentKind.multiple ? "rounded-md" : "rounded-lg",
                         selected
                           ? "border-cyan-300 bg-gradient-to-br from-cyan-300 to-sky-500 text-slate-950 shadow-[0_0_14px_rgba(34,211,238,0.7)]"
                           : "border-white/20 text-slate-400"
@@ -899,11 +917,20 @@ export default function ExamGeneratorPage() {
                     >
                       {opt.label}
                     </span>
-                    <span className="min-w-0 break-words text-slate-100 [overflow-wrap:anywhere]">{opt.text}</span>
+                    <span className="min-w-0 break-words text-slate-100 [overflow-wrap:anywhere]">
+                      {currentKind.format === "combinaison" ? <ExamCombinationText text={opt.text} /> : opt.text}
+                    </span>
                   </label>
                 );
               })}
             </div>
+            {currentKind.multiple && (
+              <p className="mt-3 text-[11px] font-semibold text-slate-400" aria-live="polite">
+                {currentTicked.length === 0
+                  ? "Aucune réponse cochée"
+                  : `${currentTicked.length} réponse${currentTicked.length > 1 ? "s" : ""} cochée${currentTicked.length > 1 ? "s" : ""} : ${currentTicked.join(", ")}`}
+              </p>
+            )}
           </motion.div>
         </AnimatePresence>
       )}
@@ -953,9 +980,8 @@ export default function ExamGeneratorPage() {
   const questionStatus = useMemo(() => {
     const map: Record<string, ResultStatus> = {};
     for (const q of questions) {
-      const correct = q.options.find((o) => o.isCorrect);
       const answer = answers[q.id];
-      map[q.id] = !answer ? "skipped" : correct && answer === correct.label ? "correct" : "incorrect";
+      map[q.id] = parseAnswerLabels(answer).length === 0 ? "skipped" : isAnswerCorrect(q, answer) ? "correct" : "incorrect";
     }
     return map;
   }, [answers, questions]);
@@ -990,7 +1016,11 @@ export default function ExamGeneratorPage() {
         if (resultFilter !== "all" && questionStatus[question.id] !== resultFilter) return false;
         if (tagFilter.size > 0 && !tagFilter.has(question.weakPointTag)) return false;
         if (!q) return true;
-        return question.vignette.toLowerCase().includes(q) || question.options.some((o) => o.text.toLowerCase().includes(q));
+        return (
+          question.vignette.toLowerCase().includes(q) ||
+          question.options.some((o) => o.text.toLowerCase().includes(q)) ||
+          (Array.isArray(question.propositions) && question.propositions.some((p) => typeof p?.text === "string" && p.text.toLowerCase().includes(q)))
+        );
       });
   }, [questions, questionStatus, resultFilter, tagFilter, resultQuery]);
 
@@ -1144,7 +1174,8 @@ export default function ExamGeneratorPage() {
             <p className="rounded-2xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-slate-500">Aucune question ne correspond à ces filtres.</p>
           )}
           {filteredResults.map(({ question: q, index }) => {
-            const userAnswer = answers[q.id];
+            const ticked = parseAnswerLabels(answers[q.id]);
+            const kind = getQuestionKind(q);
             const status = questionStatus[q.id];
             return (
               <motion.div
@@ -1156,19 +1187,24 @@ export default function ExamGeneratorPage() {
                 )}
               >
                 <div className="mb-3 flex items-start justify-between gap-3">
-                  <p className="min-w-0 break-words text-sm font-medium leading-relaxed text-slate-100 [overflow-wrap:anywhere]">
-                    <span className="mr-2 font-black text-cyan-300">Q{index + 1}.</span>
-                    {q.vignette}
-                  </p>
+                  <div className="min-w-0">
+                    <ExamFormatBadges kind={kind} className="mb-2" />
+                    <p className="min-w-0 break-words text-sm font-medium leading-relaxed text-slate-100 [overflow-wrap:anywhere]">
+                      <span className="mr-2 font-black text-cyan-300">Q{index + 1}.</span>
+                      {q.vignette}
+                    </p>
+                  </div>
                   <Badge variant={status === "correct" ? "success" : status === "incorrect" ? "danger" : "outline"} className="shrink-0">
                     {status === "correct" ? <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> : status === "incorrect" ? <XCircle className="mr-1 h-3.5 w-3.5" /> : <CircleDashed className="mr-1 h-3.5 w-3.5" />}
                     {status === "correct" ? "Correcte" : status === "incorrect" ? "Incorrecte" : "Sans réponse"}
                   </Badge>
                 </div>
 
+                {kind.propositions && <ExamPropositionsList propositions={kind.propositions} reveal className="mb-3" />}
+
                 <div className="space-y-2">
                   {q.options.map((opt) => {
-                    const isUserChoice = userAnswer === opt.label;
+                    const isUserChoice = ticked.includes(opt.label);
                     return (
                       <div
                         key={opt.label}
@@ -1181,7 +1217,9 @@ export default function ExamGeneratorPage() {
                         )}
                       >
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-current text-xs font-black text-slate-400">{opt.label}</span>
-                        <span className="min-w-0 flex-1 break-words text-slate-100 [overflow-wrap:anywhere]">{opt.text}</span>
+                        <span className="min-w-0 flex-1 break-words text-slate-100 [overflow-wrap:anywhere]">
+                          {kind.format === "combinaison" ? <ExamCombinationText text={opt.text} /> : opt.text}
+                        </span>
                         {isUserChoice && opt.isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />}
                         {isUserChoice && !opt.isCorrect && <XCircle className="h-4 w-4 shrink-0 text-rose-300" />}
                         {!isUserChoice && opt.isCorrect && (

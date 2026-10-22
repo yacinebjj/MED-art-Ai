@@ -26,13 +26,43 @@
  * — a defensible proxy (labels which course a question belongs to; invents
  * no medical content) rather than leaving a required field empty or guessing
  * a fake topic string.
+ *
+ * QUESTION FORMATS (lib/exam-formats.ts): a Studio QCM with exactly one
+ * correct answer pools as a QCS, exactly as before; one with 2 to 4 correct
+ * answers — legitimately multi-correct, never forced to single-correct —
+ * now pools as a "qcm" instead of being left out. A harvested exam question
+ * carries its own format, numbered propositions and topic tag (`exam`, see
+ * convertExamQuestionToHarvestableQcm), so it comes back exactly as written.
  */
 
 import { z } from "zod";
 import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
+import { QCM_MAX_CORRECT, questionFormat, type ExamFormat, type ExamPolarity, type FormatCounts } from "@/lib/exam-formats";
 import type { QcmItem } from "@/lib/types";
 
 export type ExamQuestion = z.infer<typeof ExamQuestionSchema>;
+
+/** What a harvested row keeps of an exam question beyond the Studio QcmItem shape. Stored only in exam_harvested_qcms, which only this module reads. */
+export interface HarvestedExamMeta {
+  format: ExamFormat;
+  polarity?: ExamPolarity;
+  propositions?: { text: string; isTrue: boolean; explanation: string }[];
+  weakPointTag?: string;
+}
+
+export type HarvestableQcm = QcmItem & { exam?: HarvestedExamMeta };
+
+/** Only the known fields of a stored `exam` value — a malformed one can never override the question's own text or options. */
+function readHarvestedMeta(raw: unknown): Partial<HarvestedExamMeta> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const { format, polarity, propositions, weakPointTag } = raw as Record<string, unknown>;
+  return {
+    ...(format !== undefined ? { format: format as ExamFormat } : {}),
+    ...(polarity !== undefined ? { polarity: polarity as ExamPolarity } : {}),
+    ...(propositions !== undefined ? { propositions: propositions as HarvestedExamMeta["propositions"] } : {}),
+    ...(typeof weakPointTag === "string" && weakPointTag.trim().length >= 3 ? { weakPointTag } : {}),
+  };
+}
 
 const EXAM_OPTION_LABELS = ["A", "B", "C", "D", "E"] as const;
 
@@ -56,10 +86,10 @@ function shuffle<T>(items: T[]): T[] {
  */
 function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | null {
   if (!Array.isArray(qcm.options) || qcm.options.length !== 5) return null;
-  if (!Array.isArray(qcm.reponsesCorrectes) || qcm.reponsesCorrectes.length !== 1) return null;
+  if (!Array.isArray(qcm.reponsesCorrectes) || qcm.reponsesCorrectes.length < 1 || qcm.reponsesCorrectes.length > QCM_MAX_CORRECT) return null;
   if (typeof qcm.question !== "string" || qcm.question.trim().length < 30) return null;
 
-  const correctLabel = qcm.reponsesCorrectes[0];
+  const correctLabels = new Set(qcm.reponsesCorrectes);
   const explication = qcm.explication;
 
   const options: ExamQuestion["options"] = [];
@@ -68,12 +98,22 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
     if (!option || typeof option.text !== "string") return null;
     const explanation = explication?.[label];
     if (typeof explanation !== "string" || explanation.trim().length < 10) return null;
-    options.push({ label, text: option.text, isCorrect: label === correctLabel, explanation });
+    options.push({ label, text: option.text, isCorrect: correctLabels.has(label), explanation });
   }
 
-  if (options.filter((o) => o.isCorrect).length !== 1) return null;
+  // Every listed answer must be one of the five options (no stray or duplicate label).
+  if (options.filter((o) => o.isCorrect).length !== qcm.reponsesCorrectes.length) return null;
 
-  const candidate = { vignette: qcm.question, options, weakPointTag: courseTitle.slice(0, 80) };
+  const meta = readHarvestedMeta((qcm as HarvestableQcm).exam);
+  const { weakPointTag: harvestedTag, ...formatFields } = meta ?? {};
+  const candidate = {
+    vignette: qcm.question,
+    options,
+    weakPointTag: harvestedTag ?? courseTitle.slice(0, 80),
+    // A harvested exam question brings its own format; an organic Studio QCM
+    // is a QCS (one answer) or a QCM (several) — ExamQuestionSchema decides.
+    ...(meta ? formatFields : qcm.reponsesCorrectes.length > 1 ? { format: "qcm" } : {}),
+  };
   const result = ExamQuestionSchema.safeParse(candidate);
   return result.success ? result.data : null;
 }
@@ -88,9 +128,11 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
  * field that already supports more, per StudioQcmsSchema). QcmExplication
  * requires a "globale" field ExamQuestion has no direct equivalent of (no
  * whole-question summary) — reuses the correct option's own explanation
- * text rather than inventing a new fact.
+ * text rather than inventing a new fact. A question with a `format` also
+ * keeps it (with its polarity, propositions and topic tag) under `exam`, so
+ * pooling it again restores the very same question.
  */
-export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: number): QcmItem {
+export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: number): HarvestableQcm {
   const correctOption = question.options.find((o) => o.isCorrect);
   const explication = { globale: correctOption?.explanation ?? "" } as QcmItem["explication"];
   for (const option of question.options) {
@@ -102,6 +144,16 @@ export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: 
     options: question.options.map((o) => ({ label: o.label, text: o.text })),
     reponsesCorrectes: question.options.filter((o) => o.isCorrect).map((o) => o.label),
     explication,
+    ...(question.format
+      ? {
+          exam: {
+            format: question.format,
+            ...(question.polarity ? { polarity: question.polarity } : {}),
+            ...(question.propositions ? { propositions: question.propositions } : {}),
+            weakPointTag: question.weakPointTag,
+          },
+        }
+      : {}),
   };
 }
 
@@ -129,11 +181,17 @@ export interface ExamPoolingResult {
  * "Régénérer" click — regeneration naturally draws a different random
  * subset whenever a course's compatible pool is larger than the target,
  * with no separate "already shown" tracking needed.
+ *
+ * `formatCaps`: the most questions of each format the WHOLE exam may take
+ * from the pools (its target mix, lib/exam-formats.ts) — without it, a course
+ * rich in single-answer Studio QCMs would fill the exam with QCS alone.
+ * What a cap leaves out becomes shortfall, generated in the missing formats.
  */
-export function poolExamQuestions(courses: ExamPoolingCourseInput[], targetPerCourse: number): ExamPoolingResult {
+export function poolExamQuestions(courses: ExamPoolingCourseInput[], targetPerCourse: number, formatCaps?: FormatCounts): ExamPoolingResult {
   const pooled: ExamQuestion[] = [];
   const shortfallByCourse: Array<{ id: number; title: string; shortfall: number }> = [];
   let totalShortfall = 0;
+  const capsLeft = formatCaps ? { ...formatCaps } : null;
 
   for (const course of courses) {
     const qcmsColumn = course.qcms as { qcms?: unknown } | null;
@@ -148,7 +206,16 @@ export function poolExamQuestions(courses: ExamPoolingCourseInput[], targetPerCo
       .map((qcm) => convertIfCompatible(qcm, course.title))
       .filter((q): q is ExamQuestion => q !== null);
 
-    const taken = shuffle(compatible).slice(0, targetPerCourse);
+    const taken: ExamQuestion[] = [];
+    for (const question of shuffle(compatible)) {
+      if (taken.length >= targetPerCourse) break;
+      if (capsLeft) {
+        const format = questionFormat(question);
+        if (capsLeft[format] <= 0) continue;
+        capsLeft[format]--;
+      }
+      taken.push(question);
+    }
     pooled.push(...taken);
 
     const shortfall = Math.max(0, targetPerCourse - taken.length);

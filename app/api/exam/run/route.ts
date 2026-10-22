@@ -16,6 +16,7 @@ import { lookupExamVariations, insertExamVariation, recordExamVariationHit } fro
 import { poolExamQuestions, convertExamQuestionToHarvestableQcm, type ExamQuestion } from "@/lib/exam-pooling";
 import { lookupHarvestedQcms, storeHarvestedQcm } from "@/lib/exam-harvested-qcms";
 import { createSynthesisRunToken, sealRunPayload, verifyRunPayload, verifySynthesisRunToken } from "@/lib/synthesis-run-token";
+import { assignFormats, normalizeFormatCounts, questionFormat, splitByShares, subtractFormats, type FormatCounts } from "@/lib/exam-formats";
 import {
   EXAM_TARGET_TOTAL,
   MAX_EXAM_VARIATIONS,
@@ -74,6 +75,8 @@ interface ExamJob {
   count: number;
   /** [index, of]: the job covers that slice of its single course's text. */
   segment: [number, number] | null;
+  /** How many questions of each format (lib/exam-formats.ts) the job asks for — planned from the exam-level mix. */
+  formats?: FormatCounts;
 }
 
 interface RunParams {
@@ -347,6 +350,9 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
 
   try {
     const target = finalTarget(courses.length);
+    // The exam's format mix (QCS / QCM / combinaisons): reused questions only
+    // fill their own format's share, generation covers the rest.
+    const formatTargets = splitByShares(target);
     const ids = courses.map((c) => c.id);
     let pooled: ExamQuestion[] = [];
     let needs: { id: number; count: number }[];
@@ -357,7 +363,8 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
       const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / courses.length));
       const pooling = poolExamQuestions(
         courses.map((c) => ({ id: c.id, title: c.title, qcms: c.qcms, harvestedQcms: harvested.get(c.id) })),
-        targetPerCourse
+        targetPerCourse,
+        formatTargets
       );
       pooled = pooling.pooled.slice(0, MAX_FINAL_QUESTIONS);
       const caps = new Map(pooling.shortfallByCourse.map((s) => [s.id, s.shortfall]));
@@ -367,7 +374,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
         caps
       );
     }
-    const jobs = planJobs(needs);
+    const jobs = assignFormats(planJobs(needs), subtractFormats(formatTargets, pooled.map(questionFormat)));
 
     if (jobs.length === 0) {
       // Fully covered by already-generated questions: finished right here.
@@ -404,7 +411,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
 
 function parseJob(raw: unknown, allowed: Set<number>): ExamJob | null {
   if (!raw || typeof raw !== "object") return null;
-  const { courseIds, count, segment } = raw as Record<string, unknown>;
+  const { courseIds, count, segment, formats } = raw as Record<string, unknown>;
   if (!Array.isArray(courseIds) || courseIds.length === 0 || courseIds.length > JOB_MAX_COURSES) return null;
   if (!courseIds.every((id) => typeof id === "number" && allowed.has(id))) return null;
   if (typeof count !== "number" || !Number.isInteger(count) || count < 1 || count > 8) return null;
@@ -415,7 +422,8 @@ function parseJob(raw: unknown, allowed: Set<number>): ExamJob | null {
     if (typeof index !== "number" || typeof of !== "number" || !Number.isInteger(index) || !Number.isInteger(of) || of < 2 || of > JOB_MAX_SEGMENTS || index < 0 || index >= of) return null;
     seg = [index, of];
   }
-  return { courseIds: courseIds as number[], count, segment: seg };
+  // A re-queued job comes back with a smaller count: its tally is rescaled, never trusted as-is.
+  return { courseIds: courseIds as number[], count, segment: seg, formats: normalizeFormatCounts(formats, count) };
 }
 
 async function handleBatch(userId: string, params: RunParams, runToken: string, rawJob: unknown): Promise<NextResponse> {
@@ -442,7 +450,7 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
   }
 
   try {
-    const questions = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt);
+    const questions = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt, job.formats, Boolean(params.styleProfile));
     // Single-course, canonical questions feed that course's reusable pool.
     if (!params.isPersonalized && courses.length === 1) {
       for (const question of questions) void storeHarvestedQcm(courses[0], sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));

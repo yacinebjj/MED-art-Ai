@@ -5,6 +5,7 @@ import { buildExamBatchInstruction, buildExamStaticSystemPrompt, type ExamCourse
 import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
 import { parseJsonResponse } from "@/lib/course-generation-shared";
 import type { ExamQuestion } from "@/lib/exam-pooling";
+import { buildFormatDeck, normalizeFormatCounts, pickByFormats, tallyFormats, type FormatCounts } from "@/lib/exam-formats";
 
 /**
  * Server-side exam generation core, shared by the one-shot route
@@ -297,6 +298,21 @@ export function delay(ms: number): Promise<void> {
 }
 
 /**
+ * The exam JSON alone, before parseJsonResponse: from `{"questions"` to the
+ * last `}`. Drops what a model sometimes writes around it anyway (a sentence,
+ * a fence) and, on a reply cut off mid-question, the half-written tail —
+ * the complete questions before it then still parse, and the incomplete one
+ * fails ExamQuestionSchema instead of being kept with a truncated text. A
+ * reply without `{"questions"` is returned unchanged.
+ */
+export function examJsonText(raw: string): string {
+  const start = raw.search(/\{\s*"questions"\s*:/);
+  if (start < 0) return raw;
+  const end = raw.lastIndexOf("}");
+  return end > start ? raw.slice(start, end + 1) : raw.slice(start);
+}
+
+/**
  * Runs `fn` over every item, at most `limit` in flight at once. Duplicated
  * (not imported) from lib/studio-explication-client.ts's own identical
  * helper: that file is "use client" (browser-only), this is a server route,
@@ -380,7 +396,11 @@ export async function generateExamBatch(
   /** Epoch ms after which no new attempt starts (see EXAM_GENERATION_BUDGET_MS). */
   deadline?: number,
   /** Per-call ceiling (the client-orchestrated run gives a whole function invocation to one batch). */
-  callTimeoutMs: number = BATCH_CALL_TIMEOUT_MS
+  callTimeoutMs: number = BATCH_CALL_TIMEOUT_MS,
+  /** Format quota of this batch (lib/exam-formats.ts); the questions kept honor it first. */
+  formats?: FormatCounts,
+  /** Style-guided exam: the professor's distribution may replace the default quota. */
+  followStyle = false
 ): Promise<ExamQuestion[]> {
   const staticSystemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
   let lastError: unknown;
@@ -395,7 +415,7 @@ export async function generateExamBatch(
       break;
     }
     try {
-      const batchInstruction = buildExamBatchInstruction(batchIndex, totalBatches, questionsInThisBatch, isVariation, previousTopics);
+      const batchInstruction = buildExamBatchInstruction(batchIndex, totalBatches, questionsInThisBatch, isVariation, previousTopics, formats, followStyle);
       const raw = await callOpenRouter(
         [
           { role: "system", content: staticSystemPrompt },
@@ -434,7 +454,7 @@ export async function generateExamBatch(
         }
       );
 
-      const parsed = parseJsonResponse(raw);
+      const parsed = parseJsonResponse(examJsonText(raw));
       const rawQuestions: unknown[] =
         parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions)
           ? (parsed as { questions: unknown[] }).questions
@@ -462,7 +482,7 @@ export async function generateExamBatch(
       if (individuallyValid.length > bestPartial.length) bestPartial = individuallyValid;
 
       if (individuallyValid.length >= questionsInThisBatch) {
-        return individuallyValid.slice(0, questionsInThisBatch);
+        return pickByFormats(individuallyValid, formats, questionsInThisBatch);
       }
 
       console.error(
@@ -511,11 +531,16 @@ export async function generateShortfallQuestions(
   isVariation: boolean,
   poolTopics: string[],
   systemPromptOverride?: string,
-  deadline?: number
+  deadline?: number,
+  /** Formats these `totalNeeded` questions should have (lib/exam-formats.ts) — spread over the chunks below. */
+  formats?: FormatCounts,
+  /** Style-guided exam: the professor's distribution may replace the default quota. */
+  followStyle = false
 ): Promise<ExamQuestion[]> {
   const generated: ExamQuestion[] = [];
   const topics = [...poolTopics];
   let remaining = totalNeeded;
+  const deck = buildFormatDeck(normalizeFormatCounts(formats, totalNeeded));
   // ALL-STANDARD FRAMING: TOTAL_CLINICAL_QUESTIONS inside exam-prompts.ts is
   // 4 — any batchIndex/totalBatches pair above that always yields 0 clinical
   // questions for that chunk (see clinicalCountForBatch). Fixed at 5 for
@@ -538,8 +563,22 @@ export async function generateShortfallQuestions(
     // the `count` this chunk still needs and discarding the (tiny,
     // ~fraction-of-a-cent) surplus, is more robust
     // than trying to make the model reliably hit an arbitrary exact number.
-    const batchQuestions = await generateExamBatch(inputs, ALL_STANDARD_BATCH_INDEX, ALL_STANDARD_BATCH_INDEX, QUESTIONS_PER_BATCH, isVariation, topics, systemPromptOverride, deadline);
-    const taken = batchQuestions.slice(0, count);
+    // This chunk's formats, scaled up to the full batch actually requested.
+    const chunkFormats = tallyFormats(deck.slice(totalNeeded - remaining, totalNeeded - remaining + count));
+    const batchQuestions = await generateExamBatch(
+      inputs,
+      ALL_STANDARD_BATCH_INDEX,
+      ALL_STANDARD_BATCH_INDEX,
+      QUESTIONS_PER_BATCH,
+      isVariation,
+      topics,
+      systemPromptOverride,
+      deadline,
+      BATCH_CALL_TIMEOUT_MS,
+      normalizeFormatCounts(chunkFormats, QUESTIONS_PER_BATCH),
+      followStyle
+    );
+    const taken = pickByFormats(batchQuestions, chunkFormats, count);
     generated.push(...taken);
     topics.push(...taken.map((q) => q.weakPointTag));
     remaining -= count;
@@ -599,10 +638,14 @@ export async function generateExamJob(
   inputs: ExamCourseInput[],
   count: number,
   isVariation: boolean,
-  systemPromptOverride?: string
+  systemPromptOverride?: string,
+  /** Format quota of this job (lib/exam-formats.ts), planned from the exam-level mix. */
+  formats?: FormatCounts,
+  /** Style-guided exam: the professor's distribution may replace the default quota. */
+  followStyle = false
 ): Promise<ExamQuestion[]> {
   const systemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
-  const instruction = buildExamBatchInstruction(5, 5, count, isVariation, []);
+  const instruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle);
   const chain: { model: string; timeoutMs: number }[] = [
     { model: EXAM_MODEL, timeoutMs: 110_000 },
     { model: EXAM_FALLBACK_MODEL, timeoutMs: 80_000 },
@@ -618,21 +661,22 @@ export async function generateExamJob(
         {
           model: step.model,
           // ~350 tokens per QCM measured; generous headroom, never the old 16k.
-          maxTokens: 1_000 * count + 1_500,
+          // A combination question also carries five explained propositions.
+          maxTokens: 1_000 * count + 1_500 + 600 * (formats?.combinaison ?? 0),
           bypassMock: true,
           providerSort: "throughput",
           timeoutMs: step.timeoutMs,
           ...(isVariation ? { temperature: VARIATION_TEMPERATURE } : {}),
         }
       );
-      const parsed = parseJsonResponse(raw);
+      const parsed = parseJsonResponse(examJsonText(raw));
       const rawQuestions: unknown[] =
         parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions) ? (parsed as { questions: unknown[] }).questions : [];
       const valid = rawQuestions
         .map((q) => ExamQuestionSchema.safeParse(q))
         .filter((r): r is z.SafeParseSuccess<ExamQuestion> => r.success)
         .map((r) => r.data);
-      if (valid.length > 0) return valid.slice(0, count);
+      if (valid.length > 0) return pickByFormats(valid, formats, count);
       lastError = new Error("Aucun QCM valide dans la réponse.");
     } catch (error) {
       lastError = error;

@@ -31,6 +31,7 @@ import {
   type EligibleCourseRow,
 } from "@/lib/exam-generation";
 import { lookupHarvestedQcms, storeHarvestedQcm } from "@/lib/exam-harvested-qcms";
+import { assignFormats, questionFormat, splitByShares, subtractFormats } from "@/lib/exam-formats";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -315,6 +316,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // call itself is skipped on a cache or variation-pool hit.
   if (!cachedContent && !servedFromVariationPool) {
     const generationDeadline = Date.now() + EXAM_GENERATION_BUDGET_MS;
+    // The exam's format mix (QCS / QCM / combinaisons), lib/exam-formats.ts.
+    const formatTargets = splitByShares(EXAM_TARGET_TOTAL);
     try {
       if (isPersonalizedExam) {
         // STYLE-MIMICRY BRANCH (Examen Guidé par le Style Prof): pooling and
@@ -333,7 +336,16 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         const baseSystemPrompt = styleProfile ? buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile) : buildExamStaticSystemPrompt(courseInputs);
         const preferenceDirective = customPreferences ? buildExamPreferenceDirective(customPreferences) : "";
         const styleSystemPrompt = preferenceDirective ? `${baseSystemPrompt}\n\n${preferenceDirective}` : baseSystemPrompt;
-        const generatedQuestions = await generateShortfallQuestions(courseInputs, EXAM_TARGET_TOTAL, isVariation, [], styleSystemPrompt, generationDeadline);
+        const generatedQuestions = await generateShortfallQuestions(
+          courseInputs,
+          EXAM_TARGET_TOTAL,
+          isVariation,
+          [],
+          styleSystemPrompt,
+          generationDeadline,
+          formatTargets,
+          Boolean(styleProfile)
+        );
         const allQuestions = generatedQuestions.slice(0, 60);
 
         const result = ExamGenerationSchema.safeParse({ questions: allQuestions });
@@ -366,7 +378,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / eligibleCourses.length));
         const { pooled, shortfallByCourse } = poolExamQuestions(
           eligibleCourses.map((c) => ({ id: c.id, title: c.title, qcms: c.qcms, harvestedQcms: harvestedByCourseId.get(c.id) })),
-          targetPerCourse
+          targetPerCourse,
+          formatTargets
         );
         if (shortfallByCourse.length > 0) {
           console.log(`[exam/generate] Pool insuffisant pour ${shortfallByCourse.length} cours (fallback génération) :`, shortfallByCourse);
@@ -433,14 +446,15 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         const allTopicsSoFar = pooled.map((q) => q.weakPointTag);
         // MAP-REDUCE GROUPING — see EXAM_GENERATION_BUDGET_MS' comment: at most
         // one concurrent wave of calls, whatever the number of courses.
-        const shortfallUnits = planShortfallUnits(shortfallByCourse, eligibleCourses);
+        // Each unit also gets its share of the formats the pool did not cover.
+        const shortfallUnits = assignFormats(planShortfallUnits(shortfallByCourse, eligibleCourses), subtractFormats(formatTargets, pooled.map(questionFormat)));
         const shortfallResults = await mapWithConcurrencyLimit(shortfallUnits, MAX_CONCURRENT_COURSE_GENERATIONS, async (unit) => {
           // Single course: its share of the whole selection's budget (unchanged).
           // Group: the 40k budget is shared inside the group only.
           const courseInputs = unit.harvestCourseId !== null ? buildCourseInputs(unit.courses, eligibleCourses.length) : buildCourseInputs(unit.courses, unit.courses.length);
           const shortfall = { id: unit.harvestCourseId ?? unit.courses[0].id, title: unit.courses.map((c) => c.title).join(" + ") };
           try {
-            const courseQuestions = await generateShortfallQuestions(courseInputs, unit.count, isVariation, allTopicsSoFar, undefined, generationDeadline);
+            const courseQuestions = await generateShortfallQuestions(courseInputs, unit.count, isVariation, allTopicsSoFar, undefined, generationDeadline, unit.formats);
             // A grouped call cannot say which question belongs to which
             // course, so only single-course units feed the harvested pool.
             if (unit.harvestCourseId === null) return courseQuestions;
@@ -492,7 +506,15 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
           try {
             const topUpInputs = buildCourseInputs(eligibleCourses, eligibleCourses.length);
             const topUpTopics = [...allTopicsSoFar, ...generatedQuestions.map((q) => q.weakPointTag)];
-            const topUpQuestions = await generateShortfallQuestions(topUpInputs, gapCount, isVariation, topUpTopics, undefined, generationDeadline);
+            const topUpQuestions = await generateShortfallQuestions(
+              topUpInputs,
+              gapCount,
+              isVariation,
+              topUpTopics,
+              undefined,
+              generationDeadline,
+              subtractFormats(formatTargets, allQuestions.map(questionFormat))
+            );
             allQuestions = [...allQuestions, ...topUpQuestions].slice(0, 60);
           } catch (error) {
             console.warn("[exam/generate] Top-up de comblement échoué — examen servi avec le compte actuel:", errorMessage(error));

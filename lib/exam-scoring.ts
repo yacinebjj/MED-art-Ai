@@ -1,10 +1,16 @@
 /**
- * Server-side scoring for a completed exam attempt (app/api/exam/attempts/
- * route.ts) — the exact same "correct option = the one with isCorrect"
- * logic app/dashboard/module/[id]/exam/page.tsx already computes client-side
- * for the instant on-screen correction, factored out here so the SAVED
- * score/wrong-question list is always recomputed from the exam's own
- * canonical content, never trusted from the client's request body.
+ * Scoring for a completed exam attempt — shared by the server
+ * (app/api/exam/attempts/route.ts, where the SAVED score and wrong-question
+ * list are always recomputed from the exam's own canonical content, never
+ * trusted from the client's request body) and the exam page's instant
+ * on-screen correction, so the two can never disagree.
+ *
+ * One rule for every question format (lib/exam-formats.ts): the set of
+ * ticked labels must equal the set of options marked isCorrect — a single
+ * letter for a QCS or a combination question, all of them and nothing more
+ * for a QCM ("tout ou rien"). An answer is stored as a string: "B", or
+ * "A,C" for a QCM — so every attempt saved before the formats existed (a
+ * single letter) scores exactly as it always did.
  */
 
 export interface ExamOption {
@@ -14,11 +20,20 @@ export interface ExamOption {
   explanation: string;
 }
 
+export interface ExamProposition {
+  text: string;
+  isTrue: boolean;
+  explanation: string;
+}
+
 export interface ExamQuestion {
   id: string;
   vignette: string;
   options: ExamOption[];
   weakPointTag: string;
+  format?: string;
+  polarity?: string;
+  propositions?: ExamProposition[];
 }
 
 export interface WrongQuestionDetail {
@@ -33,7 +48,35 @@ export interface ExamAttemptResult {
   wrongQuestions: WrongQuestionDetail[];
 }
 
-/** Recomputes an attempt's score and wrong-question detail from the exam's own questions + the submitted answers. A question with no matching answer (unanswered) counts as wrong, same as the existing client-side logic. */
+const ANSWER_LABELS = ["A", "B", "C", "D", "E"];
+
+function cleanLabels(labels: string[]): string[] {
+  return Array.from(new Set(labels.map((label) => label.trim().toUpperCase()).filter((label) => ANSWER_LABELS.includes(label)))).sort();
+}
+
+/** A stored answer → the ticked labels, in A→E order: "B" → ["B"], "A,C" → ["A", "C"]; anything else → []. */
+export function parseAnswerLabels(answer: unknown): string[] {
+  return typeof answer === "string" ? cleanLabels(answer.split(",")) : [];
+}
+
+/** The stored form of a set of ticked labels ("A,C") — null when nothing is ticked. */
+export function serializeAnswerLabels(labels: string[]): string | null {
+  const clean = cleanLabels(labels);
+  return clean.length > 0 ? clean.join(",") : null;
+}
+
+export function correctAnswerLabels(question: { options: { label: string; isCorrect: boolean }[] }): string[] {
+  return cleanLabels(question.options.filter((option) => option.isCorrect).map((option) => option.label));
+}
+
+/** True only when the ticked set is exactly the set of options to tick. */
+export function isAnswerCorrect(question: { options: { label: string; isCorrect: boolean }[] }, answer: unknown): boolean {
+  const correct = correctAnswerLabels(question);
+  const given = parseAnswerLabels(answer);
+  return correct.length > 0 && given.length === correct.length && given.every((label, index) => label === correct[index]);
+}
+
+/** Recomputes an attempt's score and wrong-question detail from the exam's own questions + the submitted answers. An unanswered question counts as wrong, same as the client-side logic. */
 export function scoreExamAttempt(
   questions: ExamQuestion[],
   answers: Record<string, string | null | undefined>
@@ -42,19 +85,18 @@ export function scoreExamAttempt(
   const wrongQuestions: WrongQuestionDetail[] = [];
 
   for (const question of questions) {
-    const correctOption = question.options.find((option) => option.isCorrect);
-    const given = answers[question.id];
-
-    if (correctOption && given === correctOption.label) {
+    if (isAnswerCorrect(question, answers[question.id])) {
       score++;
       continue;
     }
 
+    const correctOptions = question.options.filter((option) => option.isCorrect);
     wrongQuestions.push({
       vignette: question.vignette,
-      correctAnswerText: correctOption
-        ? `${correctOption.label}. ${correctOption.text} — ${correctOption.explanation}`
-        : "(réponse non disponible)",
+      correctAnswerText:
+        correctOptions.length > 0
+          ? correctOptions.map((option) => `${option.label}. ${option.text} — ${option.explanation}`).join(" / ")
+          : "(réponse non disponible)",
       weakPointTag: question.weakPointTag,
     });
   }
