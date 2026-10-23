@@ -23,7 +23,8 @@ function resolveMimeType(file: File): string | null {
 
 interface ReferenceExamUploaderProps {
   styleProfile: ExamStyleProfile | null;
-  onStyleProfileChange: (profile: ExamStyleProfile | null) => void;
+  /** `seal`: issued by the server with the profile (lib/exam-style-seal.ts) — sent back with it so the exam can use its style's shared bank. */
+  onStyleProfileChange: (profile: ExamStyleProfile | null, seal?: string | null) => void;
   disabled?: boolean;
 }
 
@@ -94,7 +95,7 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
         fail(serverError ?? (outcome.status === 0 ? `L'analyse du style a été interrompue (${outcome.diagnostic}). Réessaie.` : "L'analyse du style a échoué. Réessaie."));
         return;
       }
-      onStyleProfileChange(outcome.data.styleProfile as ExamStyleProfile);
+      onStyleProfileChange(outcome.data.styleProfile as ExamStyleProfile, typeof outcome.data.styleProfileSeal === "string" ? outcome.data.styleProfileSeal : null);
     } catch {
       fail("L'analyse du style a échoué (problème réseau). Réessaie.");
     } finally {

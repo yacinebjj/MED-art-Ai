@@ -39,6 +39,7 @@ import { z } from "zod";
 import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
 import { normalizeText } from "@/lib/content-similarity";
 import { EXAM_FORMATS, QCM_MAX_CORRECT, questionFormat, type ExamFormat, type ExamPolarity, type FormatCounts } from "@/lib/exam-formats";
+import { CANONICAL_BANK_PROFILE } from "@/lib/exam-bank-profiles";
 import type { QcmItem } from "@/lib/types";
 
 export type ExamQuestion = z.infer<typeof ExamQuestionSchema>;
@@ -65,10 +66,13 @@ export function qcmItemKey(qcm: QcmItem): string {
 
 /** What a harvested row keeps of an exam question beyond the Studio QcmItem shape. Stored only in exam_harvested_qcms, which only this module reads. */
 export interface HarvestedExamMeta {
-  format: ExamFormat;
+  /** Absent on a question written without one (a legacy single-answer QCS). */
+  format?: ExamFormat;
   polarity?: ExamPolarity;
   propositions?: { text: string; isTrue: boolean; explanation: string }[];
   weakPointTag?: string;
+  /** The bank it was written for (lib/exam-bank-profiles.ts): only runs of the same profile reuse it. */
+  profile?: string;
 }
 
 export type HarvestableQcm = QcmItem & { exam?: HarvestedExamMeta };
@@ -76,12 +80,13 @@ export type HarvestableQcm = QcmItem & { exam?: HarvestedExamMeta };
 /** Only the known fields of a stored `exam` value — a malformed one can never override the question's own text or options. */
 function readHarvestedMeta(raw: unknown): Partial<HarvestedExamMeta> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const { format, polarity, propositions, weakPointTag } = raw as Record<string, unknown>;
+  const { format, polarity, propositions, weakPointTag, profile } = raw as Record<string, unknown>;
   return {
     ...(format !== undefined ? { format: format as ExamFormat } : {}),
     ...(polarity !== undefined ? { polarity: polarity as ExamPolarity } : {}),
     ...(propositions !== undefined ? { propositions: propositions as HarvestedExamMeta["propositions"] } : {}),
     ...(typeof weakPointTag === "string" && weakPointTag.trim().length >= 3 ? { weakPointTag } : {}),
+    ...(typeof profile === "string" ? { profile } : {}),
   };
 }
 
@@ -126,7 +131,13 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
   if (options.filter((o) => o.isCorrect).length !== qcm.reponsesCorrectes.length) return null;
 
   const meta = readHarvestedMeta((qcm as HarvestableQcm).exam);
-  const { weakPointTag: harvestedTag, ...formatFields } = meta ?? {};
+  const harvestedTag = meta?.weakPointTag;
+  // The bank tag (meta.profile) is the lookup's business, never part of the question.
+  const formatFields = {
+    ...(meta?.format !== undefined ? { format: meta.format } : {}),
+    ...(meta?.polarity !== undefined ? { polarity: meta.polarity } : {}),
+    ...(meta?.propositions !== undefined ? { propositions: meta.propositions } : {}),
+  };
   const candidate = {
     vignette: qcm.question,
     options,
@@ -149,11 +160,12 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
  * field that already supports more, per StudioQcmsSchema). QcmExplication
  * requires a "globale" field ExamQuestion has no direct equivalent of (no
  * whole-question summary) — reuses the correct option's own explanation
- * text rather than inventing a new fact. A question with a `format` also
- * keeps it (with its polarity, propositions and topic tag) under `exam`, so
- * pooling it again restores the very same question.
+ * text rather than inventing a new fact. A question keeps its format (with
+ * its polarity, propositions and topic tag) under `exam`, so pooling it again
+ * restores the very same question — and `exam.profile`, the bank it was
+ * written for (lib/exam-bank-profiles.ts; the canonical one by default).
  */
-export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: number): HarvestableQcm {
+export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: number, profile: string = CANONICAL_BANK_PROFILE): HarvestableQcm {
   const correctOption = question.options.find((o) => o.isCorrect);
   const explication = { globale: correctOption?.explanation ?? "" } as QcmItem["explication"];
   for (const option of question.options) {
@@ -165,16 +177,13 @@ export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: 
     options: question.options.map((o) => ({ label: o.label, text: o.text })),
     reponsesCorrectes: question.options.filter((o) => o.isCorrect).map((o) => o.label),
     explication,
-    ...(question.format
-      ? {
-          exam: {
-            format: question.format,
-            ...(question.polarity ? { polarity: question.polarity } : {}),
-            ...(question.propositions ? { propositions: question.propositions } : {}),
-            weakPointTag: question.weakPointTag,
-          },
-        }
-      : {}),
+    exam: {
+      ...(question.format ? { format: question.format } : {}),
+      ...(question.polarity ? { polarity: question.polarity } : {}),
+      ...(question.propositions ? { propositions: question.propositions } : {}),
+      weakPointTag: question.weakPointTag,
+      profile,
+    },
   };
 }
 

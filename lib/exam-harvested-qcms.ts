@@ -30,6 +30,7 @@
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { qcmItemKey } from "@/lib/exam-pooling";
+import { CANONICAL_BANK_PROFILE } from "@/lib/exam-bank-profiles";
 import type { QcmItem } from "@/lib/types";
 
 export interface HarvestCourse {
@@ -64,12 +65,17 @@ function isMissingColumn(error: { code?: string; message?: string }): boolean {
 
 type HarvestRow = { id?: string; course_id: number; content_hash?: string | null; qcm: unknown };
 
-/** One course's newest bank rows (by its id or its content); [] on a read failure — that course is then simply generated. */
-async function fetchCourseRows(course: HarvestCourse): Promise<HarvestRow[]> {
+/**
+ * One course's newest bank rows of `profile` (by its id or its content); []
+ * on a read failure — that course is then simply generated. The profile is
+ * filtered in the query (qcm.exam.profile), so another profile's rows never
+ * crowd this one out of the newest-rows window.
+ */
+async function fetchCourseRows(course: HarvestCourse, profile: string): Promise<HarvestRow[]> {
   const supabase = getSupabaseAdmin();
   const hash = bankContentHash(course);
   if (!contentHashColumnMissing) {
-    const query = supabase.from("exam_harvested_qcms").select("id, course_id, content_hash, qcm");
+    const query = supabase.from("exam_harvested_qcms").select("id, course_id, content_hash, qcm").eq("qcm->exam->>profile", profile);
     const { data, error } = await (hash ? query.or(`course_id.eq.${course.id},content_hash.eq.${hash}`) : query.eq("course_id", course.id))
       .order("created_at", { ascending: false })
       .limit(PER_COURSE_ROW_LIMIT);
@@ -84,6 +90,7 @@ async function fetchCourseRows(course: HarvestCourse): Promise<HarvestRow[]> {
     .from("exam_harvested_qcms")
     .select("id, course_id, qcm")
     .eq("course_id", course.id)
+    .eq("qcm->exam->>profile", profile)
     .order("created_at", { ascending: false })
     .limit(PER_COURSE_ROW_LIMIT);
   if (error) {
@@ -93,8 +100,14 @@ async function fetchCourseRows(course: HarvestCourse): Promise<HarvestRow[]> {
   return (data ?? []) as unknown as HarvestRow[];
 }
 
-/** Fail-open: any Supabase error resolves to an empty pool — a lookup failure must never block exam generation, only skip the optimization (the course's shortfall is simply generated fresh instead). */
-export async function lookupHarvestedQcms(courses: HarvestCourse[]): Promise<Map<number, QcmItem[]>> {
+/**
+ * The bank questions of `profile` (lib/exam-bank-profiles.ts — the canonical
+ * exam's by default) for each course. Fail-open: any Supabase error resolves
+ * to an empty pool — a lookup failure must never block exam generation, only
+ * skip the optimization (the course's shortfall is simply generated fresh
+ * instead).
+ */
+export async function lookupHarvestedQcms(courses: HarvestCourse[], profile: string = CANONICAL_BANK_PROFILE): Promise<Map<number, QcmItem[]>> {
   const byCourseId = new Map<number, QcmItem[]>();
   if (!isSupabaseConfigured() || courses.length === 0) return byCourseId;
 
@@ -103,7 +116,7 @@ export async function lookupHarvestedQcms(courses: HarvestCourse[]): Promise<Map
     let next = 0;
     await Promise.all(
       Array.from({ length: Math.min(LOOKUP_CONCURRENCY, courses.length) }, async () => {
-        for (let index = next++; index < courses.length; index = next++) rowsByCourse[index] = await fetchCourseRows(courses[index]);
+        for (let index = next++; index < courses.length; index = next++) rowsByCourse[index] = await fetchCourseRows(courses[index], profile);
       })
     );
 

@@ -6,6 +6,7 @@ import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
 import { parseJsonResponse } from "@/lib/course-generation-shared";
 import type { ExamQuestion } from "@/lib/exam-pooling";
 import { readSourceCourse } from "@/lib/exam-question-bank";
+import { DEFAULT_EXAM_PREFERENCES, buildExamPreferenceDirective } from "@/lib/exam-preferences";
 import { buildFormatDeck, normalizeFormatCounts, pickByFormats, tallyFormats, type FormatCounts } from "@/lib/exam-formats";
 
 /**
@@ -15,6 +16,19 @@ import { buildFormatDeck, normalizeFormatCounts, pickByFormats, tallyFormats, ty
  */
 
 export type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
+
+/**
+ * The canonical (default) exam's system prompt: the static exam prompt plus
+ * the directives of DEFAULT_EXAM_PREFERENCES ("Examen facultaire ·
+ * Équilibré · Approfondi") — byte for byte what a run with those preferences
+ * was always sent. Every generation without its own prompt (both routes'
+ * canonical path) uses it; personalized runs pass their own.
+ */
+export function canonicalExamSystemPrompt(inputs: ExamCourseInput[]): string {
+  const base = buildExamStaticSystemPrompt(inputs);
+  const directive = buildExamPreferenceDirective(DEFAULT_EXAM_PREFERENCES);
+  return directive ? `${base}\n\n${directive}` : base;
+}
 
 /** PostgREST "function not found" (RPC not deployed on this database yet). */
 export function isMissingRpcError(error: { code?: string; message?: string } | null): boolean {
@@ -403,7 +417,7 @@ export async function generateExamBatch(
   /** Style-guided exam: the professor's distribution may replace the default quota. */
   followStyle = false
 ): Promise<ExamQuestion[]> {
-  const staticSystemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
+  const staticSystemPrompt = systemPromptOverride ?? canonicalExamSystemPrompt(inputs);
   let lastError: unknown;
   // Tracks the most valid questions seen across every attempt — see this
   // function's own final comment for why the last attempt now returns this
@@ -654,7 +668,7 @@ export async function generateExamJob(
   followStyle = false,
   askSource = false
 ): Promise<ExamJobResult> {
-  const systemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
+  const systemPrompt = systemPromptOverride ?? canonicalExamSystemPrompt(inputs);
   const batchInstruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle);
   const instruction = askSource ? `${batchInstruction}\n\n${buildExamSourceAttributionInstruction(inputs.length)}` : batchInstruction;
   const chain: { model: string; timeoutMs: number }[] = [

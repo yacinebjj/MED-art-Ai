@@ -9,7 +9,7 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveExam, refundExam } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
-import { ExamPreferencesSchema, buildExamPreferenceDirective, isDefaultExamPreferences, type ExamPreferences } from "@/lib/exam-preferences";
+import { ExamPreferencesSchema, isDefaultExamPreferences, personalizedPreferenceDirective, type ExamPreferences } from "@/lib/exam-preferences";
 
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
 import { lookupExamVariations, insertExamVariation, recordExamVariationHit } from "@/lib/exam-content-variations";
@@ -334,7 +334,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // this, it's gated by the same reserveGeneration check above).
         const courseInputs = buildCourseInputs(eligibleCourses, eligibleCourses.length);
         const baseSystemPrompt = styleProfile ? buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile) : buildExamStaticSystemPrompt(courseInputs);
-        const preferenceDirective = customPreferences ? buildExamPreferenceDirective(customPreferences) : "";
+        const preferenceDirective = customPreferences ? personalizedPreferenceDirective(customPreferences, Boolean(styleProfile)) : "";
         const styleSystemPrompt = preferenceDirective ? `${baseSystemPrompt}\n\n${preferenceDirective}` : baseSystemPrompt;
         const generatedQuestions = await generateShortfallQuestions(
           courseInputs,

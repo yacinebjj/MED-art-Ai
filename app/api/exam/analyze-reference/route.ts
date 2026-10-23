@@ -22,6 +22,7 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { parseJsonResponse } from "@/lib/course-generation-shared";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
+import { sealStyleProfile } from "@/lib/exam-style-seal";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -423,7 +424,8 @@ export async function POST(request: NextRequest) {
       Promise.resolve()
         .then(analyze)
         .then((styleProfile) => {
-          send({ type: "result", success: true, styleProfile });
+          // The seal lets this exact profile feed its archetype's shared question bank (lib/exam-style-seal.ts).
+          send({ type: "result", success: true, styleProfile, styleProfileSeal: sealStyleProfile(user.id, styleProfile) });
         })
         .catch(async (error) => {
           await refundGeneration(user.id).catch(() => {});

@@ -18,6 +18,8 @@ export interface ExamRunRequest {
   variation: boolean;
   preferences: ExamPreferences;
   styleProfile?: ExamStyleProfile | null;
+  /** Issued with the profile by the analysis (lib/exam-style-seal.ts). */
+  styleProfileSeal?: string | null;
 }
 
 export interface ExamRunProgress {
@@ -86,7 +88,7 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
     courseIds: request.courseIds,
     variation: request.variation,
     preferences: request.preferences,
-    ...(request.styleProfile ? { styleProfile: request.styleProfile } : {}),
+    ...(request.styleProfile ? { styleProfile: request.styleProfile, ...(request.styleProfileSeal ? { styleProfileSeal: request.styleProfileSeal } : {}) } : {}),
   };
   onProgress({ done: 0, total: 0, phase: "plan" });
 

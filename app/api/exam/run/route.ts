@@ -10,12 +10,14 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveExam, refundExam } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
-import { ExamPreferencesSchema, buildExamPreferenceDirective, isDefaultExamPreferences, type ExamPreferences } from "@/lib/exam-preferences";
+import { ExamPreferencesSchema, isDefaultExamPreferences, personalizedPreferenceDirective, type ExamPreferences } from "@/lib/exam-preferences";
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
 import { lookupExamVariations, insertExamVariation, recordExamVariationHit } from "@/lib/exam-content-variations";
 import { poolExamQuestions, convertExamQuestionToHarvestableQcm, examQuestionKey, type ExamQuestion } from "@/lib/exam-pooling";
 import { lookupHarvestedQcms, storeHarvestedQcms } from "@/lib/exam-harvested-qcms";
 import { examRepeatsSeenQuestion, loadSeenQuestionKeys, verifySourceCourse } from "@/lib/exam-question-bank";
+import { bankProfileFor, styleFormatShares } from "@/lib/exam-bank-profiles";
+import { verifyStyleProfileSeal } from "@/lib/exam-style-seal";
 import { createSynthesisRunToken, sealRunPayload, verifyRunPayload, verifySynthesisRunToken } from "@/lib/synthesis-run-token";
 import { assignFormats, normalizeFormatCounts, questionFormat, splitByShares, subtractFormats, type FormatCounts } from "@/lib/exam-formats";
 import {
@@ -57,13 +59,16 @@ import {
  * Every step is bound to the run token (user, module and a digest of the
  * request parameters), so batch calls cannot be made outside a reserved run.
  *
- * SHARED QUESTION BANK (lib/exam-question-bank.ts): every canonical question
- * a batch generates is filed under its source course — jobs over several
- * courses included — so the plan of ANY later exam covering that course
- * (another student, another selection) pools it at 0 tokens and generates
- * only the per-course shortfall. A student is never given a question again
- * that one of their recent exams of this module already had: the plan draws
- * other bank questions, or generates new ones that deepen the bank.
+ * SHARED QUESTION BANK (lib/exam-question-bank.ts): every question a batch
+ * of a bank-profile run generates (the canonical exam, or a sealed
+ * reference-exam archetype — lib/exam-bank-profiles.ts) is filed under its
+ * source course — jobs over several courses included — so the plan of ANY
+ * later exam of the same profile covering that course (another student,
+ * another selection) pools it at 0 tokens and generates only the per-course
+ * shortfall. A student is never given a question again that one of their
+ * recent exams of this module already had: the plan draws other bank
+ * questions, or generates new ones that deepen the bank. Sur-mesure
+ * (custom-preference) exams are generated from scratch, without any bank.
  */
 
 export const runtime = "nodejs";
@@ -108,7 +113,10 @@ interface RunParams {
   isVariation: boolean;
   styleProfile?: ExamStyleProfile;
   customPreferences?: ExamPreferences;
+  /** Its own prompt (reference-exam style and/or custom preferences): never the canonical exam cache. */
   isPersonalized: boolean;
+  /** The shared bank it pools from and files into (lib/exam-bank-profiles.ts); null = sur-mesure, no bank. */
+  bankProfile: string | null;
   tokenType: string;
 }
 
@@ -118,8 +126,8 @@ function bad(error: string, status = 400): NextResponse {
   return NextResponse.json({ success: false, error }, { status });
 }
 
-function parseParams(body: Record<string, unknown>): ParsedParams {
-  const { moduleId, courseIds, variation, styleProfile: rawStyle, preferences: rawPreferences } = body;
+function parseParams(body: Record<string, unknown>, userId: string): ParsedParams {
+  const { moduleId, courseIds, variation, styleProfile: rawStyle, styleProfileSeal, preferences: rawPreferences } = body;
   if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) return { ok: false, response: bad("'moduleId' est requis et doit être un nombre.") };
   if (!Array.isArray(courseIds) || courseIds.length === 0 || courseIds.length > 200 || !courseIds.every((id) => typeof id === "number" && Number.isFinite(id))) {
     return { ok: false, response: bad("'courseIds' est requis (tableau d'identifiants non vide).") };
@@ -138,14 +146,28 @@ function parseParams(body: Record<string, unknown>): ParsedParams {
   }
   const ids = Array.from(new Set(courseIds as number[])).sort((a, b) => a - b);
   const isVariation = variation === true;
+  // A reference-exam profile is browser-sent prompt text: only the exact
+  // profile the analysis sealed for THIS student may use (and write into) its
+  // archetype's shared bank — any other is generated fresh, without a bank.
+  const bankProfile =
+    styleProfile && !verifyStyleProfileSeal(userId, styleProfile, styleProfileSeal) ? null : bankProfileFor({ styleProfile, hasCustomPreferences: Boolean(customPreferences) });
   const digest = crypto
     .createHash("sha256")
-    .update(JSON.stringify({ ids, isVariation, styleProfile: styleProfile ?? null, preferences: customPreferences ?? null }))
+    .update(JSON.stringify({ ids, isVariation, styleProfile: styleProfile ?? null, preferences: customPreferences ?? null, bankProfile }))
     .digest("base64url")
     .slice(0, 22);
   return {
     ok: true,
-    params: { moduleId, courseIds: ids, isVariation, styleProfile, customPreferences, isPersonalized: Boolean(styleProfile || customPreferences), tokenType: `exam:${digest}` },
+    params: {
+      moduleId,
+      courseIds: ids,
+      isVariation,
+      styleProfile,
+      customPreferences,
+      isPersonalized: Boolean(styleProfile || customPreferences),
+      bankProfile,
+      tokenType: `exam:${digest}`,
+    },
   };
 }
 
@@ -363,7 +385,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
   // except that a stored exam is never served to a student who was already
   // given one of its questions: they get bank questions they have not seen.
   const contentHash = computeExamContentHash(courses);
-  const seen = params.isPersonalized ? new Set<string>() : await loadSeenQuestionKeys(supabase, userId, params.moduleId);
+  const seen = params.bankProfile ? await loadSeenQuestionKeys(supabase, userId, params.moduleId) : new Set<string>();
   let existingVariationCount = 0;
   if (!params.isPersonalized) {
     if (!params.isVariation) {
@@ -388,24 +410,30 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     const target = finalTarget(courses.length);
     // The exam's format mix (QCS / QCM / combinaisons): reused questions only
     // fill their own format's share, generation covers the rest.
-    const formatTargets = splitByShares(target);
+    // A reference exam's own QCS / QCM / combinaison split when its profile states one.
+    const styleShares = params.styleProfile ? styleFormatShares(params.styleProfile) : null;
+    const formatTargets = styleShares ? splitByShares(target, styleShares) : splitByShares(target);
     const ids = courses.map((c) => c.id);
     let pooled: ExamQuestion[] = [];
     let needs: { id: number; count: number }[];
     let depthById: Map<number, number> | null = null;
-    if (params.isPersonalized) {
+    if (!params.bankProfile) {
+      // Sur-mesure: generated from scratch.
       needs = distribute(ids, target, new Map());
     } else {
-      // The shared bank (every student's canonical questions, per course
-      // content) + the student's own Studio QCMs — minus what they were given.
-      const harvested = await lookupHarvestedQcms(courses);
+      // The shared bank of this run's profile (every student's questions
+      // written under the same prompt, per course content) — plus, for the
+      // canonical exam only, the student's own Studio QCMs — minus what they
+      // were already given.
+      const bankProfile = params.bankProfile;
+      const harvested = await lookupHarvestedQcms(courses, bankProfile);
       depthById = new Map(courses.map((c) => [c.id, harvested.get(c.id)?.length ?? 0]));
       const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / courses.length));
       // Each course's share of the exam, round-robin like generation: every
       // course is covered before any gets a second question, pooled or not.
       const quotas = new Map(distribute(ids, target, new Map(ids.map((id) => [id, targetPerCourse]))).map((share) => [share.id, share.count]));
       const pooling = poolExamQuestions(
-        courses.map((c) => ({ id: c.id, title: c.title, qcms: c.qcms, harvestedQcms: harvested.get(c.id) })),
+        courses.map((c) => ({ id: c.id, title: c.title, qcms: params.isPersonalized ? null : c.qcms, harvestedQcms: harvested.get(c.id) })),
         targetPerCourse,
         formatTargets,
         { exclude: seen, quotas }
@@ -500,21 +528,22 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
   let systemPrompt: string | undefined;
   if (params.isPersonalized) {
     const base = params.styleProfile ? buildExamStyleAdaptedSystemPrompt(inputs, params.styleProfile) : buildExamStaticSystemPrompt(inputs);
-    const directive = params.customPreferences ? buildExamPreferenceDirective(params.customPreferences) : "";
+    const directive = params.customPreferences ? personalizedPreferenceDirective(params.customPreferences, Boolean(params.styleProfile)) : "";
     systemPrompt = directive ? `${base}\n\n${directive}` : base;
   }
 
   try {
-    // Several courses in one canonical job: each question names its source course.
-    const askSource = !params.isPersonalized && courses.length > 1;
+    // Several courses in one job that feeds a bank: each question names its source course.
+    const bankProfile = params.bankProfile;
+    const askSource = bankProfile !== null && courses.length > 1;
     const { questions, sources } = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt, job.formats, Boolean(params.styleProfile), askSource);
-    // Canonical questions feed the shared bank, each under the course it was
-    // written from (`inputs` and the prompt list the courses in `courses`
-    // order); a question no course can be verified for stays out of the bank.
-    if (!params.isPersonalized) {
+    // Canonical and archetype questions feed their shared bank, each under the
+    // course it was written from (`inputs` and the prompt list the courses in
+    // `courses` order); a question no course can be verified for stays out.
+    if (bankProfile) {
       const entries = questions.flatMap((question, index) => {
         const source = verifySourceCourse(question, sources[index], inputs);
-        return source === null ? [] : [{ course: courses[source], qcm: sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)) }];
+        return source === null ? [] : [{ course: courses[source], qcm: sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0, bankProfile)) }];
       });
       await withinTimeout(storeHarvestedQcms(entries), BANK_WRITE_TIMEOUT_MS);
     }
@@ -562,7 +591,7 @@ async function handleAssemble(userId: string, params: RunParams, runToken: strin
   // Never twice in one exam, and never a question this student was already
   // given — even one a model happened to write again (pooled ones were
   // already left out at plan time).
-  const alreadyGiven = params.isPersonalized ? new Set<string>() : await loadSeenQuestionKeys(supabase, userId, params.moduleId);
+  const alreadyGiven = params.bankProfile ? await loadSeenQuestionKeys(supabase, userId, params.moduleId) : new Set<string>();
   const keys = new Set<string>();
   const merged = [...pooled, ...generated].filter((q) => {
     const key = examQuestionKey(q);
@@ -614,7 +643,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     } catch (error) {
       return bad(`Corps de requête JSON invalide : ${errorMessage(error)}`);
     }
-    const parsedParams = parseParams(body);
+    const parsedParams = parseParams(body, user.id);
     if (!parsedParams.ok) return parsedParams.response;
     const params = parsedParams.params;
 

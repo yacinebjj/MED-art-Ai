@@ -1,11 +1,13 @@
 /**
  * SHARED QUESTION BANK — the per-course side of the Examen de Module
- * (app/api/exam/run). Every validated question a canonical (non-personalized)
- * exam generates is filed under the course it was written from, in
+ * (app/api/exam/run). Every validated question an exam with a bank profile
+ * (lib/exam-bank-profiles.ts: the canonical exam, or a sealed reference-exam
+ * archetype) generates is filed under the course it was written from, in
  * exam_harvested_qcms (lib/exam-harvested-qcms.ts), keyed by that course's
- * content: any later exam that includes the course — any student, any
- * selection of courses — reuses it at 0 tokens, and only what the bank cannot
- * cover is generated (then filed in turn, so the bank deepens with use).
+ * content and tagged with the profile: any later exam of the same profile
+ * that includes the course — any student, any selection of courses — reuses
+ * it at 0 tokens, and only what the bank cannot cover is generated (then
+ * filed in turn, so the bank deepens with use). Sur-mesure exams have no bank.
  *
  * This module holds the two decisions that keep that bank clean:
  *  - ATTRIBUTION: a job over several courses must say which course each

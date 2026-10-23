@@ -56,7 +56,8 @@ import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
-import { ExamConfigurator } from "@/components/course/workspace/exam/ExamConfigurator";
+import { ExamConfigurator, examRunCaption, examRunKind } from "@/components/course/workspace/exam/ExamConfigurator";
+import { EXAM_STYLE_ARCHETYPE_LABELS, classifyExamStyle } from "@/lib/exam-bank-profiles";
 import { type ExamTimerMode } from "@/components/course/workspace/exam/ExamTimer";
 import { GenerationConfirmDialog } from "@/components/billing/GenerationConfirmDialog";
 import { usePaywall } from "@/components/billing/PaywallProvider";
@@ -64,7 +65,7 @@ import { notifyUsageChanged, remaining as remainingOf, useUsage } from "@/hooks/
 import { PAID_LIMITS } from "@/lib/pricing";
 import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
 import { useStoredPreference } from "@/components/cyber/hooks";
-import { DEFAULT_EXAM_PREFERENCES, EXAM_DIFFICULTIES, EXAM_EXPLANATION_DEPTHS, EXAM_QUESTION_FOCUS, type ExamPreferences } from "@/lib/exam-preferences";
+import { DEFAULT_EXAM_PREFERENCES, EXAM_DIFFICULTIES, EXAM_EXPLANATION_DEPTHS, EXAM_PREFERENCE_LABELS, EXAM_QUESTION_FOCUS, type ExamPreferences } from "@/lib/exam-preferences";
 import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
@@ -164,10 +165,21 @@ export default function ExamGeneratorPage() {
   // beyond this component's own state — a page refresh simply forgets it,
   // same as every other in-progress selection on this page.
   const [styleProfile, setStyleProfile] = useState<ExamStyleProfile | null>(null);
-  // Exam customization — remembered on this device.
-  const [difficulty, setDifficulty] = useStoredPreference("medart:exam-difficulty", DEFAULT_EXAM_PREFERENCES.difficulty, EXAM_DIFFICULTIES);
-  const [questionFocus, setQuestionFocus] = useStoredPreference("medart:exam-focus", DEFAULT_EXAM_PREFERENCES.questionFocus, EXAM_QUESTION_FOCUS);
-  const [explanationDepth, setExplanationDepth] = useStoredPreference("medart:exam-explanations", DEFAULT_EXAM_PREFERENCES.explanationDepth, EXAM_EXPLANATION_DEPTHS);
+  // Issued by the server with the profile: sent back with it, it lets the exam
+  // use its style's shared question bank (lib/exam-style-seal.ts).
+  const [styleProfileSeal, setStyleProfileSeal] = useState<string | null>(null);
+  function handleStyleProfileChange(profile: ExamStyleProfile | null, seal?: string | null) {
+    setStyleProfile(profile);
+    setStyleProfileSeal(profile ? seal ?? null : null);
+  }
+  // Exam customization — remembered on this device. ":v2" since the standard
+  // exam became Examen facultaire · Équilibré · Approfondi: a value saved
+  // under the old default would now read as sur-mesure and skip the shared
+  // bank, so every student starts again on the standard exam.
+  const [difficulty, setDifficulty] = useStoredPreference("medart:exam-difficulty:v2", DEFAULT_EXAM_PREFERENCES.difficulty, EXAM_DIFFICULTIES);
+  const [questionFocus, setQuestionFocus] = useStoredPreference("medart:exam-focus:v2", DEFAULT_EXAM_PREFERENCES.questionFocus, EXAM_QUESTION_FOCUS);
+  const [explanationDepth, setExplanationDepth] = useStoredPreference("medart:exam-explanations:v2", DEFAULT_EXAM_PREFERENCES.explanationDepth, EXAM_EXPLANATION_DEPTHS);
+  // Display only: never part of the generation request.
   const [timerMode, setTimerMode] = useStoredPreference<ExamTimerMode>("medart:exam-timer", "chrono", ["chrono", "countdown"] as const);
   const preferences: ExamPreferences = { difficulty, questionFocus, explanationDepth };
   function handlePreferencesChange(next: ExamPreferences) {
@@ -381,7 +393,7 @@ export default function ExamGeneratorPage() {
       // no single request has to outlive Vercel's limit, whatever the
       // number of selected courses.
       setGenerationProgress(null);
-      const { ok, body } = await runExamGeneration({ moduleId, courseIds, variation, preferences, styleProfile }, setGenerationProgress);
+      const { ok, body } = await runExamGeneration({ moduleId, courseIds, variation, preferences, styleProfile, styleProfileSeal }, setGenerationProgress);
       // Server truth for the "Régénérer" quota, synced whenever the API
       // includes it — on the SUCCESS path (a fresh regeneration was just
       // reserved) and on the 403 cap-reached error path alike (see
@@ -680,6 +692,13 @@ export default function ExamGeneratorPage() {
   // Compact course-list + button combo used ONLY by the mobile "Sources"
   // tab — desktop keeps its own bigger, decorative idleContent card below
   // instead (unchanged), since desktop already has the room to spare.
+  // Archetype of the attached reference exam — the same classification the
+  // server uses to pick that style's shared bank (lib/exam-bank-profiles.ts).
+  const styleArchetypeLabel = styleProfile ? EXAM_STYLE_ARCHETYPE_LABELS[classifyExamStyle(styleProfile)] : null;
+  // What one click on « Générer l'examen » produces, shown under the button and while generating.
+  const runKind = examRunKind(preferences, Boolean(styleProfile));
+  const runCaption = examRunCaption(runKind, styleArchetypeLabel);
+  const runChipLabel = runKind === "standard" ? "Examen facultaire" : runKind === "style" ? "Style de référence" : EXAM_PREFERENCE_LABELS.difficulty[preferences.difficulty];
   const examConfigurator = (
     <ExamConfigurator
       preferences={preferences}
@@ -689,6 +708,7 @@ export default function ExamGeneratorPage() {
       selectedCount={selectedCourseIds.size}
       totalCourses={courses?.length ?? 0}
       hasStyleProfile={Boolean(styleProfile)}
+      styleArchetypeLabel={styleArchetypeLabel}
       disabled={isGenerating}
     />
   );
@@ -700,7 +720,7 @@ export default function ExamGeneratorPage() {
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3.5 text-sm font-bold text-foreground">
           <span className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-cyan-400" />
-            Personnaliser l&apos;examen
+            Réglages de l&apos;examen
           </span>
           <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
         </summary>
@@ -715,7 +735,11 @@ export default function ExamGeneratorPage() {
         {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Générer l&apos;examen
       </Button>
-      {selectedCourseIds.size === 0 && <p className="mt-2 text-center text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
+      {selectedCourseIds.size === 0 ? (
+        <p className="mt-2 text-center text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>
+      ) : (
+        <p className="mt-2 text-center text-[11px] text-muted-foreground">{runCaption}</p>
+      )}
     </div>
   );
 
@@ -739,7 +763,7 @@ export default function ExamGeneratorPage() {
         <div>
           <p className="cyber-kicker">Atelier d&apos;examen</p>
           <h3 className="cyber-title mt-1 text-2xl font-black">Prêt à te tester ?</h3>
-          <p className="mt-1 max-w-md text-sm text-muted-foreground">Choisis tes cours à gauche, règle ton examen ici, puis lance une épreuve clinique complète, corrigée et expliquée.</p>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">Choisis tes cours à gauche, puis lance en un clic l&apos;examen standard&nbsp;: une épreuve facultaire complète, corrigée et expliquée.</p>
         </div>
       </div>
 
@@ -756,7 +780,11 @@ export default function ExamGeneratorPage() {
           <Sparkles className="h-4 w-4" />
           Générer l&apos;examen
         </Button>
-        {selectedCourseIds.size === 0 && <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
+        {selectedCourseIds.size === 0 ? (
+          <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">{runCaption}</p>
+        )}
       </div>
     </motion.div>
   );
@@ -792,7 +820,7 @@ export default function ExamGeneratorPage() {
           <>
             <TelemetryChip icon={ListChecks}>{selectedCourseIds.size || activeExam?.selectedCourses.length || 0} cours</TelemetryChip>
             <TelemetryChip icon={FileQuestion}>40 à 60 questions · QCS, QCM, combinaisons</TelemetryChip>
-            <TelemetryChip icon={Sparkles}>{(() => { const d = preferences.difficulty; return d === "debutant" ? "Débutant" : d === "examen_blanc" ? "Examen blanc" : "Intermédiaire"; })()}</TelemetryChip>
+            <TelemetryChip icon={Sparkles}>{runChipLabel}</TelemetryChip>
           </>
         }
       />
@@ -1351,7 +1379,7 @@ export default function ExamGeneratorPage() {
             {/* Panneau Gauche — Sources + Historique (desktop) */}
             <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-80")}>
               {courseHeaderBlock}
-              <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={setStyleProfile} disabled={isGenerating} />
+              <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={handleStyleProfileChange} disabled={isGenerating} />
               {/* min-h-0 — a flex child with overflow-y-auto silently
                   refuses to actually clip/scroll without it (flex items
                   default to min-height: auto, so they grow to fit content
@@ -1384,7 +1412,7 @@ export default function ExamGeneratorPage() {
               <>
                 {generationErrorBanner && <div className="px-3 pt-3">{generationErrorBanner}</div>}
                 {courseHeaderBlock}
-                <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={setStyleProfile} disabled={isGenerating} />
+                <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={handleStyleProfileChange} disabled={isGenerating} />
                 <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">{courseListContent}</div>
                 {generateButtonBlock}
               </>
