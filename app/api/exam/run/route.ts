@@ -13,8 +13,9 @@ import { quotaBlockedResponse } from "@/lib/quota-response";
 import { ExamPreferencesSchema, buildExamPreferenceDirective, isDefaultExamPreferences, type ExamPreferences } from "@/lib/exam-preferences";
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
 import { lookupExamVariations, insertExamVariation, recordExamVariationHit } from "@/lib/exam-content-variations";
-import { poolExamQuestions, convertExamQuestionToHarvestableQcm, type ExamQuestion } from "@/lib/exam-pooling";
-import { lookupHarvestedQcms, storeHarvestedQcm } from "@/lib/exam-harvested-qcms";
+import { poolExamQuestions, convertExamQuestionToHarvestableQcm, examQuestionKey, type ExamQuestion } from "@/lib/exam-pooling";
+import { lookupHarvestedQcms, storeHarvestedQcms } from "@/lib/exam-harvested-qcms";
+import { examRepeatsSeenQuestion, loadSeenQuestionKeys, verifySourceCourse } from "@/lib/exam-question-bank";
 import { createSynthesisRunToken, sealRunPayload, verifyRunPayload, verifySynthesisRunToken } from "@/lib/synthesis-run-token";
 import { assignFormats, normalizeFormatCounts, questionFormat, splitByShares, subtractFormats, type FormatCounts } from "@/lib/exam-formats";
 import {
@@ -55,6 +56,14 @@ import {
  *
  * Every step is bound to the run token (user, module and a digest of the
  * request parameters), so batch calls cannot be made outside a reserved run.
+ *
+ * SHARED QUESTION BANK (lib/exam-question-bank.ts): every canonical question
+ * a batch generates is filed under its source course — jobs over several
+ * courses included — so the plan of ANY later exam covering that course
+ * (another student, another selection) pools it at 0 tokens and generates
+ * only the per-course shortfall. A student is never given a question again
+ * that one of their recent exams of this module already had: the plan draws
+ * other bank questions, or generates new ones that deepen the bank.
  */
 
 export const runtime = "nodejs";
@@ -69,6 +78,18 @@ const JOB_INPUT_CHARS = 24_000;
 const MAX_FINAL_QUESTIONS = 60;
 /** Batch calls one run may make (jobs + silent retries), per server instance. */
 const RUN_BATCH_LIMIT = { limit: 120, windowMs: 30 * 60_000 };
+/** Filing a batch's questions in the bank never holds back its answer (questions already paid for) longer than this. */
+const BANK_WRITE_TIMEOUT_MS = 5_000;
+
+/** `promise`, or undefined once `ms` have passed — the timer is cleared either way. */
+async function withinTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), ms)))]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 interface ExamJob {
   courseIds: number[];
@@ -77,6 +98,8 @@ interface ExamJob {
   segment: [number, number] | null;
   /** How many questions of each format (lib/exam-formats.ts) the job asks for — planned from the exam-level mix. */
   formats?: FormatCounts;
+  /** Per course (same order as courseIds): questions the shared bank already holds for it — see jobInputs. */
+  depths?: number[];
 }
 
 interface RunParams {
@@ -186,28 +209,35 @@ function distribute(courseIds: number[], total: number, caps: Map<number, number
   return courseIds.map((id) => ({ id, count: counts.get(id)! }));
 }
 
-function jobInputs(courses: EligibleCourseRow[], segment: [number, number] | null): ExamCourseInput[] {
+/**
+ * The course text each job reads. `depthById` (the shared bank's question
+ * count per course, from the plan): a course the bank already covers is read
+ * from a further window of its text — depth 0 is the opening, exactly as
+ * before — so as the bank deepens its questions spread over the whole course
+ * instead of piling up on its first pages.
+ */
+function jobInputs(courses: EligibleCourseRow[], segment: [number, number] | null, depthById: Map<number, number> | null): ExamCourseInput[] {
   const cap = Math.max(500, Math.floor(JOB_INPUT_CHARS / Math.max(1, courses.length)));
   return courses.map((course) => {
     let text = course.explication ?? course.raw_text;
     let title = course.title;
+    const depth = depthById?.get(course.id) ?? 0;
     if (segment) {
       // A slice is never shorter than MIN_SEGMENT_CHARS: a short course is
       // cut into fewer slices, and jobs sharing a slice are told to vary.
       const [index, of] = segment;
       const slices = Math.max(1, Math.min(of, Math.floor(text.length / MIN_SEGMENT_CHARS)));
-      const slice = index % slices;
+      const slice = (index + depth) % slices;
       const size = Math.ceil(text.length / slices);
       if (slices > 1) text = text.slice(slice * size, (slice + 1) * size);
       title = slices > 1 ? `${course.title} (partie ${slice + 1}/${slices})` : course.title;
       if (of > slices) title += ` — série ${index + 1}/${of} : choisis des notions différentes des autres séries`;
+    } else if (depth > 0 && text.length > cap) {
+      const windows = Math.ceil(text.length / cap);
+      text = text.slice(Math.min((depth % windows) * cap, text.length - cap));
     }
     return { title, text: text.slice(0, cap) };
   });
-}
-
-function questionKey(q: ExamQuestion): string {
-  return q.vignette.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
 /** Per-instance run state: a run is assembled OR refunded, never both. */
@@ -244,7 +274,9 @@ async function saveExam(
 ): Promise<NextResponse> {
   const selectedCourses = courses.map((course) => ({ id: course.id, title: course.title }));
   if (!source.cached && !params.isVariation && !params.isPersonalized) void storeExamCache(source.contentHash, content, selectedCourses);
-  if (params.isVariation && !source.fromVariationPool && !params.isPersonalized) {
+  // The shared variation pool stays capped: a student who has seen every
+  // stored variation gets a fresh exam, which is not added as a 21st.
+  if (params.isVariation && !source.fromVariationPool && !params.isPersonalized && source.variationIndex <= MAX_EXAM_VARIATIONS) {
     const insert = await insertExamVariation(source.contentHash, source.variationIndex, content);
     if (insert.conflict) console.warn("[exam/run] Conflit d'insertion de variation — contenu servi quand même.");
   }
@@ -327,21 +359,25 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     return saved;
   };
 
-  // Shared cache / variation pool — identical rules to the one-shot route.
+  // Shared cache / variation pool — identical rules to the one-shot route,
+  // except that a stored exam is never served to a student who was already
+  // given one of its questions: they get bank questions they have not seen.
   const contentHash = computeExamContentHash(courses);
+  const seen = params.isPersonalized ? new Set<string>() : await loadSeenQuestionKeys(supabase, userId, params.moduleId);
   let existingVariationCount = 0;
   if (!params.isPersonalized) {
     if (!params.isVariation) {
       const cached = await lookupExamCache(contentHash);
-      if (cached) {
+      if (cached && !examRepeatsSeenQuestion(cached, seen)) {
         void recordExamCacheHit(contentHash);
         return saveServedExam(cached, { cached: true, fromVariationPool: false, contentHash, variationIndex: 0 });
       }
     } else {
       const { existing } = await lookupExamVariations(contentHash);
       existingVariationCount = existing.length;
-      if (existing.length >= MAX_EXAM_VARIATIONS) {
-        const picked = existing[Math.floor(Math.random() * existing.length)];
+      const unseen = existing.filter((variation) => !examRepeatsSeenQuestion(variation.content, seen));
+      if (existing.length >= MAX_EXAM_VARIATIONS && unseen.length > 0) {
+        const picked = unseen[Math.floor(Math.random() * unseen.length)];
         void recordExamVariationHit(picked.id);
         return saveServedExam(picked.content, { cached: false, fromVariationPool: true, contentHash, variationIndex: 0 });
       }
@@ -356,15 +392,23 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     const ids = courses.map((c) => c.id);
     let pooled: ExamQuestion[] = [];
     let needs: { id: number; count: number }[];
+    let depthById: Map<number, number> | null = null;
     if (params.isPersonalized) {
       needs = distribute(ids, target, new Map());
     } else {
+      // The shared bank (every student's canonical questions, per course
+      // content) + the student's own Studio QCMs — minus what they were given.
       const harvested = await lookupHarvestedQcms(courses);
+      depthById = new Map(courses.map((c) => [c.id, harvested.get(c.id)?.length ?? 0]));
       const targetPerCourse = Math.max(1, Math.ceil(EXAM_TARGET_TOTAL / courses.length));
+      // Each course's share of the exam, round-robin like generation: every
+      // course is covered before any gets a second question, pooled or not.
+      const quotas = new Map(distribute(ids, target, new Map(ids.map((id) => [id, targetPerCourse]))).map((share) => [share.id, share.count]));
       const pooling = poolExamQuestions(
         courses.map((c) => ({ id: c.id, title: c.title, qcms: c.qcms, harvestedQcms: harvested.get(c.id) })),
         targetPerCourse,
-        formatTargets
+        formatTargets,
+        { exclude: seen, quotas }
       );
       pooled = pooling.pooled.slice(0, MAX_FINAL_QUESTIONS);
       const caps = new Map(pooling.shortfallByCourse.map((s) => [s.id, s.shortfall]));
@@ -374,19 +418,23 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
         caps
       );
     }
-    const jobs = assignFormats(planJobs(needs), subtractFormats(formatTargets, pooled.map(questionFormat)));
+    const planned = assignFormats(planJobs(needs), subtractFormats(formatTargets, pooled.map(questionFormat)));
+    const depths = depthById;
+    const jobs = depths ? planned.map((job) => ({ ...job, depths: job.courseIds.map((id) => depths.get(id) ?? 0) })) : planned;
 
     if (jobs.length === 0) {
-      // Fully covered by already-generated questions: finished right here.
+      // Fully covered by already-generated questions: finished right here —
+      // and, like a served cache hit, given back if it cannot be saved.
       const result = ExamGenerationSchema.safeParse({ questions: pooled });
       if (result.success) {
-        markRun(runToken, "assembled");
-        return saveExam(supabase, userId, params, courses, toExamContent(result.data.questions), {
+        const saved = await saveServedExam(toExamContent(result.data.questions), {
           cached: false,
           fromVariationPool: false,
           contentHash,
           variationIndex: existingVariationCount + 1,
         });
+        if (saved.status < 500) markRun(runToken, "assembled");
+        return saved;
       }
     }
 
@@ -411,7 +459,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
 
 function parseJob(raw: unknown, allowed: Set<number>): ExamJob | null {
   if (!raw || typeof raw !== "object") return null;
-  const { courseIds, count, segment, formats } = raw as Record<string, unknown>;
+  const { courseIds, count, segment, formats, depths } = raw as Record<string, unknown>;
   if (!Array.isArray(courseIds) || courseIds.length === 0 || courseIds.length > JOB_MAX_COURSES) return null;
   if (!courseIds.every((id) => typeof id === "number" && allowed.has(id))) return null;
   if (typeof count !== "number" || !Number.isInteger(count) || count < 1 || count > 8) return null;
@@ -422,8 +470,14 @@ function parseJob(raw: unknown, allowed: Set<number>): ExamJob | null {
     if (typeof index !== "number" || typeof of !== "number" || !Number.isInteger(index) || !Number.isInteger(of) || of < 2 || of > JOB_MAX_SEGMENTS || index < 0 || index >= of) return null;
     seg = [index, of];
   }
+  // Bank depths only choose which part of the student's OWN course text a job
+  // reads (jobInputs): anything malformed is ignored and the opening is read.
+  const validDepths =
+    Array.isArray(depths) && depths.length === courseIds.length && depths.every((depth) => typeof depth === "number" && Number.isInteger(depth) && depth >= 0 && depth <= 100_000)
+      ? (depths as number[])
+      : undefined;
   // A re-queued job comes back with a smaller count: its tally is rescaled, never trusted as-is.
-  return { courseIds: courseIds as number[], count, segment: seg, formats: normalizeFormatCounts(formats, count) };
+  return { courseIds: courseIds as number[], count, segment: seg, formats: normalizeFormatCounts(formats, count), ...(validDepths ? { depths: validDepths } : {}) };
 }
 
 async function handleBatch(userId: string, params: RunParams, runToken: string, rawJob: unknown): Promise<NextResponse> {
@@ -441,7 +495,8 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
   }
   if (courses.length === 0) return bad("Cours introuvables pour ce lot.", 404);
 
-  const inputs = jobInputs(courses, job.segment);
+  const depths = job.depths;
+  const inputs = jobInputs(courses, job.segment, depths ? new Map(job.courseIds.map((id, index) => [id, depths[index]])) : null);
   let systemPrompt: string | undefined;
   if (params.isPersonalized) {
     const base = params.styleProfile ? buildExamStyleAdaptedSystemPrompt(inputs, params.styleProfile) : buildExamStaticSystemPrompt(inputs);
@@ -450,10 +505,18 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
   }
 
   try {
-    const questions = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt, job.formats, Boolean(params.styleProfile));
-    // Single-course, canonical questions feed that course's reusable pool.
-    if (!params.isPersonalized && courses.length === 1) {
-      for (const question of questions) void storeHarvestedQcm(courses[0], sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)));
+    // Several courses in one canonical job: each question names its source course.
+    const askSource = !params.isPersonalized && courses.length > 1;
+    const { questions, sources } = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt, job.formats, Boolean(params.styleProfile), askSource);
+    // Canonical questions feed the shared bank, each under the course it was
+    // written from (`inputs` and the prompt list the courses in `courses`
+    // order); a question no course can be verified for stays out of the bank.
+    if (!params.isPersonalized) {
+      const entries = questions.flatMap((question, index) => {
+        const source = verifySourceCourse(question, sources[index], inputs);
+        return source === null ? [] : [{ course: courses[source], qcm: sanitizeForPostgres(convertExamQuestionToHarvestableQcm(question, 0)) }];
+      });
+      await withinTimeout(storeHarvestedQcms(entries), BANK_WRITE_TIMEOUT_MS);
     }
     return NextResponse.json({ success: true, questions, seal: sealRunPayload(runToken, JSON.stringify(questions)) });
   } catch (error) {
@@ -495,11 +558,16 @@ async function handleAssemble(userId: string, params: RunParams, runToken: strin
     generated.push(...opened);
   }
 
-  const seen = new Set<string>();
+  const supabase = getSupabaseAdmin();
+  // Never twice in one exam, and never a question this student was already
+  // given — even one a model happened to write again (pooled ones were
+  // already left out at plan time).
+  const alreadyGiven = params.isPersonalized ? new Set<string>() : await loadSeenQuestionKeys(supabase, userId, params.moduleId);
+  const keys = new Set<string>();
   const merged = [...pooled, ...generated].filter((q) => {
-    const key = questionKey(q);
-    if (seen.has(key)) return false;
-    seen.add(key);
+    const key = examQuestionKey(q);
+    if (keys.has(key) || alreadyGiven.has(key)) return false;
+    keys.add(key);
     return true;
   });
   const result = ExamGenerationSchema.safeParse({ questions: merged.slice(0, MAX_FINAL_QUESTIONS) });
@@ -507,7 +575,6 @@ async function handleAssemble(userId: string, params: RunParams, runToken: strin
     return NextResponse.json({ success: false, error: "Pas encore assez de questions valides.", count: merged.length }, { status: 422 });
   }
 
-  const supabase = getSupabaseAdmin();
   let courses: EligibleCourseRow[];
   try {
     courses = await loadCourses(supabase, userId, params.moduleId, params.courseIds, false);

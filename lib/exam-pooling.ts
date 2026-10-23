@@ -37,10 +37,31 @@
 
 import { z } from "zod";
 import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
-import { QCM_MAX_CORRECT, questionFormat, type ExamFormat, type ExamPolarity, type FormatCounts } from "@/lib/exam-formats";
+import { normalizeText } from "@/lib/content-similarity";
+import { EXAM_FORMATS, QCM_MAX_CORRECT, questionFormat, type ExamFormat, type ExamPolarity, type FormatCounts } from "@/lib/exam-formats";
 import type { QcmItem } from "@/lib/types";
 
 export type ExamQuestion = z.infer<typeof ExamQuestionSchema>;
+
+/**
+ * Identity of a question: its statement, its options (A→E) and its numbered
+ * propositions, whatever their case, punctuation or spacing. The statement
+ * alone is not enough — a combination question's is often generic
+ * ("Parmi les propositions suivantes…") and shared by different questions.
+ * Reads an exam question (or a stored exam's question) as it comes, so a
+ * malformed legacy value never throws.
+ */
+export function examQuestionKey(question: { vignette: string; options?: unknown; propositions?: unknown }): string {
+  const options = (Array.isArray(question.options) ? [...question.options] : []) as { label?: unknown; text?: unknown }[];
+  options.sort((a, b) => (String(a?.label ?? "") < String(b?.label ?? "") ? -1 : String(a?.label ?? "") > String(b?.label ?? "") ? 1 : 0));
+  const propositions = (Array.isArray(question.propositions) ? question.propositions : []) as { text?: unknown }[];
+  return normalizeText([question.vignette, ...options.map((option) => String(option?.text ?? "")), ...propositions.map((proposition) => String(proposition?.text ?? ""))].join(" "));
+}
+
+/** examQuestionKey of a QcmItem-shaped row (Studio QCM / harvested question): the same key its exam conversion gets. */
+export function qcmItemKey(qcm: QcmItem): string {
+  return examQuestionKey({ vignette: qcm.question, options: qcm.options, propositions: (qcm as HarvestableQcm).exam?.propositions });
+}
 
 /** What a harvested row keeps of an exam question beyond the Studio QcmItem shape. Stored only in exam_harvested_qcms, which only this module reads. */
 export interface HarvestedExamMeta {
@@ -186,14 +207,33 @@ export interface ExamPoolingResult {
  * from the pools (its target mix, lib/exam-formats.ts) — without it, a course
  * rich in single-answer Studio QCMs would fill the exam with QCS alone.
  * What a cap leaves out becomes shortfall, generated in the missing formats.
+ *
+ * `exclude`: keys (examQuestionKey) of questions the student was already
+ * given (lib/exam-question-bank.ts) — never pooled again; what they leave
+ * missing becomes shortfall, so the bank deepens instead of repeating itself.
+ * A question is also never taken twice in one exam (the same statement can
+ * reach two selected courses that hold the same content).
+ * `quotas`: per course id, how many questions that course gets in this exam
+ * (replaces `targetPerCourse`) — lets the caller spread the exam over every
+ * selected course even when the first courses' pools could fill it alone.
+ * With quotas, how many questions of each format each course gives is solved
+ * exactly (planFormatAllocation): the most questions the pools can supply
+ * under the exam's format caps, so a rich pool fills the exam's exact mix.
+ * Without quotas, the original course-by-course fill is kept unchanged.
  */
-export function poolExamQuestions(courses: ExamPoolingCourseInput[], targetPerCourse: number, formatCaps?: FormatCounts): ExamPoolingResult {
+export function poolExamQuestions(
+  courses: ExamPoolingCourseInput[],
+  targetPerCourse: number,
+  formatCaps?: FormatCounts,
+  options: { exclude?: ReadonlySet<string>; quotas?: ReadonlyMap<number, number> } = {}
+): ExamPoolingResult {
   const pooled: ExamQuestion[] = [];
   const shortfallByCourse: Array<{ id: number; title: string; shortfall: number }> = [];
   let totalShortfall = 0;
-  const capsLeft = formatCaps ? { ...formatCaps } : null;
+  const takenKeys = new Set<string>();
 
-  for (const course of courses) {
+  // Per course, in random order: every compatible question not excluded, each statement once.
+  const poolByCourse = courses.map((course) => {
     const qcmsColumn = course.qcms as { qcms?: unknown } | null;
     const rawQcms = Array.isArray(qcmsColumn?.qcms) ? (qcmsColumn!.qcms as QcmItem[]) : [];
     // Harvested QCMs (see lib/exam-harvested-qcms.ts) are already QcmItem-
@@ -204,26 +244,105 @@ export function poolExamQuestions(courses: ExamPoolingCourseInput[], targetPerCo
 
     const compatible = candidates
       .map((qcm) => convertIfCompatible(qcm, course.title))
-      .filter((q): q is ExamQuestion => q !== null);
+      .filter((q): q is ExamQuestion => q !== null && !options.exclude?.has(examQuestionKey(q)));
+    const keys = new Set<string>();
+    return shuffle(compatible).filter((question) => {
+      const key = examQuestionKey(question);
+      if (keys.has(key)) return false;
+      keys.add(key);
+      return true;
+    });
+  });
 
+  const quotas = courses.map((course) => options.quotas?.get(course.id) ?? targetPerCourse);
+  const allocation = options.quotas ? planFormatAllocation(poolByCourse.map((pool) => tallyQuestionFormats(pool)), quotas, formatCaps ?? null) : null;
+  const capsLeft = formatCaps ? { ...formatCaps } : null;
+
+  courses.forEach((course, index) => {
+    const quota = quotas[index];
+    const wanted = allocation ? { ...allocation[index] } : null;
     const taken: ExamQuestion[] = [];
-    for (const question of shuffle(compatible)) {
-      if (taken.length >= targetPerCourse) break;
-      if (capsLeft) {
-        const format = questionFormat(question);
+    for (const question of poolByCourse[index]) {
+      if (taken.length >= quota) break;
+      const key = examQuestionKey(question);
+      if (takenKeys.has(key)) continue;
+      const format = questionFormat(question);
+      if (wanted) {
+        if (wanted[format] <= 0) continue;
+        wanted[format]--;
+      } else if (capsLeft) {
         if (capsLeft[format] <= 0) continue;
         capsLeft[format]--;
       }
+      takenKeys.add(key);
       taken.push(question);
     }
     pooled.push(...taken);
 
-    const shortfall = Math.max(0, targetPerCourse - taken.length);
+    const shortfall = Math.max(0, quota - taken.length);
     if (shortfall > 0) {
       shortfallByCourse.push({ id: course.id, title: course.title, shortfall });
       totalShortfall += shortfall;
     }
-  }
+  });
 
   return { pooled, totalShortfall, shortfallByCourse };
+}
+
+function tallyQuestionFormats(questions: ExamQuestion[]): FormatCounts {
+  const counts: FormatCounts = { qcs: 0, qcm: 0, combinaison: 0 };
+  for (const question of questions) counts[questionFormat(question)]++;
+  return counts;
+}
+
+/**
+ * How many questions of each format each course should give: the largest
+ * total the pools can supply, with at most `quotas[i]` from course i, at most
+ * `available[i][format]` of a format from course i, and at most `caps[format]`
+ * of a format in the whole exam (no caps: unlimited). A max-flow from courses
+ * to formats (Edmonds–Karp on a graph of courses + 3 formats — at most a few
+ * hundred nodes), so no course-by-course order can strand a format: a course
+ * rich in combinations gives them when the exam still needs combinations.
+ */
+export function planFormatAllocation(available: FormatCounts[], quotas: number[], caps: FormatCounts | null): FormatCounts[] {
+  const courseCount = available.length;
+  const source = 0;
+  const sink = courseCount + EXAM_FORMATS.length + 1;
+  const size = sink + 1;
+  const formatNode = (f: number) => courseCount + 1 + f;
+  const capacity = Array.from({ length: size }, () => new Array<number>(size).fill(0));
+  const flow = Array.from({ length: size }, () => new Array<number>(size).fill(0));
+  for (let i = 0; i < courseCount; i++) {
+    capacity[source][1 + i] = Math.max(0, quotas[i]);
+    EXAM_FORMATS.forEach((format, f) => (capacity[1 + i][formatNode(f)] = available[i][format]));
+  }
+  EXAM_FORMATS.forEach((format, f) => (capacity[formatNode(f)][sink] = caps ? Math.max(0, caps[format]) : Number.MAX_SAFE_INTEGER));
+
+  for (;;) {
+    const parent = new Array<number>(size).fill(-1);
+    parent[source] = source;
+    const queue = [source];
+    for (let head = 0; head < queue.length && parent[sink] < 0; head++) {
+      const u = queue[head];
+      for (let v = 0; v < size; v++) {
+        if (parent[v] < 0 && capacity[u][v] - flow[u][v] > 0) {
+          parent[v] = u;
+          queue.push(v);
+        }
+      }
+    }
+    if (parent[sink] < 0) break;
+    let bottleneck = Number.MAX_SAFE_INTEGER;
+    for (let v = sink; v !== source; v = parent[v]) bottleneck = Math.min(bottleneck, capacity[parent[v]][v] - flow[parent[v]][v]);
+    for (let v = sink; v !== source; v = parent[v]) {
+      flow[parent[v]][v] += bottleneck;
+      flow[v][parent[v]] -= bottleneck;
+    }
+  }
+
+  return available.map((_, i) => {
+    const counts: FormatCounts = { qcs: 0, qcm: 0, combinaison: 0 };
+    EXAM_FORMATS.forEach((format, f) => (counts[format] = Math.max(0, flow[1 + i][formatNode(f)])));
+    return counts;
+  });
 }

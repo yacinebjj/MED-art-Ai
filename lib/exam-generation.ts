@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { callOpenRouter, OpenRouterError, EXAM_FALLBACK_MODEL, EXAM_MODEL } from "@/lib/ai/openrouter";
-import { buildExamBatchInstruction, buildExamStaticSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
+import { buildExamBatchInstruction, buildExamSourceAttributionInstruction, buildExamStaticSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
 import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
 import { parseJsonResponse } from "@/lib/course-generation-shared";
 import type { ExamQuestion } from "@/lib/exam-pooling";
+import { readSourceCourse } from "@/lib/exam-question-bank";
 import { buildFormatDeck, normalizeFormatCounts, pickByFormats, tallyFormats, type FormatCounts } from "@/lib/exam-formats";
 
 /**
@@ -626,6 +627,12 @@ export function friendlyOpenRouterErrorMessage(error: OpenRouterError): string {
   return error.message;
 }
 
+/** A job's questions, with the 0-based index (into the job's inputs) of the course each one says it comes from, null when it did not say. */
+export interface ExamJobResult {
+  questions: ExamQuestion[];
+  sources: (number | null)[];
+}
+
 /**
  * ONE exam job for the client-orchestrated run (app/api/exam/run): asks for
  * exactly `count` QCMs and returns as soon as a model delivers — EXAM_MODEL
@@ -633,6 +640,8 @@ export function friendlyOpenRouterErrorMessage(error: OpenRouterError): string {
  * No in-request retry loop: a short answer is returned as-is and the
  * browser re-queues only the missing questions (re-sending a whole batch
  * for one missing QCM is what multiplied time and cost before).
+ * `askSource`: a job over several courses whose questions go to the shared
+ * bank — each question is asked to name its source course.
  */
 export async function generateExamJob(
   inputs: ExamCourseInput[],
@@ -642,10 +651,12 @@ export async function generateExamJob(
   /** Format quota of this job (lib/exam-formats.ts), planned from the exam-level mix. */
   formats?: FormatCounts,
   /** Style-guided exam: the professor's distribution may replace the default quota. */
-  followStyle = false
-): Promise<ExamQuestion[]> {
+  followStyle = false,
+  askSource = false
+): Promise<ExamJobResult> {
   const systemPrompt = systemPromptOverride ?? buildExamStaticSystemPrompt(inputs);
-  const instruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle);
+  const batchInstruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle);
+  const instruction = askSource ? `${batchInstruction}\n\n${buildExamSourceAttributionInstruction(inputs.length)}` : batchInstruction;
   const chain: { model: string; timeoutMs: number }[] = [
     { model: EXAM_MODEL, timeoutMs: 110_000 },
     { model: EXAM_FALLBACK_MODEL, timeoutMs: 80_000 },
@@ -672,11 +683,17 @@ export async function generateExamJob(
       const parsed = parseJsonResponse(examJsonText(raw));
       const rawQuestions: unknown[] =
         parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions) ? (parsed as { questions: unknown[] }).questions : [];
-      const valid = rawQuestions
-        .map((q) => ExamQuestionSchema.safeParse(q))
-        .filter((r): r is z.SafeParseSuccess<ExamQuestion> => r.success)
-        .map((r) => r.data);
-      if (valid.length > 0) return pickByFormats(valid, formats, count);
+      // The schema drops "sourceCourse": read it from the raw question, kept beside the validated one.
+      const sourceOf = new Map<ExamQuestion, number | null>();
+      for (const rawQuestion of rawQuestions) {
+        const result = ExamQuestionSchema.safeParse(rawQuestion);
+        if (result.success) sourceOf.set(result.data, readSourceCourse(rawQuestion, inputs.length));
+      }
+      const valid = Array.from(sourceOf.keys());
+      if (valid.length > 0) {
+        const questions = pickByFormats(valid, formats, count);
+        return { questions, sources: questions.map((question) => sourceOf.get(question) ?? null) };
+      }
       lastError = new Error("Aucun QCM valide dans la réponse.");
     } catch (error) {
       lastError = error;

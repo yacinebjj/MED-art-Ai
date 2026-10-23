@@ -182,6 +182,18 @@ export function buildExamBatchInstruction(
 }
 
 /**
+ * Appended to the user turn of a MULTI-course job of the client-orchestrated
+ * run only (app/api/exam/run, non-personalized): each question names the
+ * course it is written from, so it can be filed under that course in the
+ * shared question bank (lib/exam-question-bank.ts verifies every claim before
+ * filing). ExamQuestionSchema drops the field — a stored exam never carries it.
+ * Numbers match formatCoursesBlock's « --- Cours N : ... --- » headers.
+ */
+export function buildExamSourceAttributionInstruction(courseCount: number): string {
+  return `ATTRIBUTION OBLIGATOIRE : chaque question porte sur UN SEUL des ${courseCount} cours fournis. Ajoute à chaque question le champ "sourceCourse" : le numéro de ce cours (de 1 à ${courseCount}), tel qu'indiqué dans « --- Cours N : ... --- ».`;
+}
+
+/**
  * Vision system prompt for app/api/exam/analyze-reference/route.ts — the
  * ONLY call site. Extracts the "ADN de style" of a student-uploaded
  * reference exam (old partiel, correction type) so it can later be cloned
