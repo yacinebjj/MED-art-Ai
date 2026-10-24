@@ -3,13 +3,12 @@ import { requirePaidPlan } from "@/lib/subscription";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { OpenRouterError } from "@/lib/ai/openrouter";
-import { buildExamStaticSystemPrompt, buildExamStyleAdaptedSystemPrompt } from "@/lib/ai/exam-prompts";
+import { buildExamStyleAdaptedSystemPrompt } from "@/lib/ai/exam-prompts";
 import { ExamGenerationSchema, ExamStyleProfileSchema, type ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveExam, refundExam } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
-import { ExamPreferencesSchema, isDefaultExamPreferences, personalizedPreferenceDirective, type ExamPreferences } from "@/lib/exam-preferences";
 
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
 import { lookupExamVariations, insertExamVariation, recordExamVariationHit } from "@/lib/exam-content-variations";
@@ -149,12 +148,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { moduleId, courseIds, variation, styleProfile: rawStyleProfile, preferences: rawPreferences } = (body ?? {}) as {
+  const { moduleId, courseIds, variation, styleProfile: rawStyleProfile } = (body ?? {}) as {
     moduleId?: unknown;
     courseIds?: unknown;
     variation?: unknown;
     styleProfile?: unknown;
-    preferences?: unknown;
   };
 
   if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) {
@@ -179,19 +177,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     styleProfile = styleParse.data;
   }
 
-  // Student customization (difficulty, question focus, explanation depth).
-  // Defaults = the canonical exam (cache + pooling unchanged); anything else
-  // is generated fresh with an extra directive, exactly like a style-guided
-  // exam — never served from or written to the cross-student caches.
-  let customPreferences: ExamPreferences | undefined;
-  if (rawPreferences !== undefined) {
-    const preferencesParse = ExamPreferencesSchema.safeParse(rawPreferences);
-    if (!preferencesParse.success) {
-      return NextResponse.json({ success: false, error: "'preferences' est invalide." }, { status: 400 });
-    }
-    if (!isDefaultExamPreferences(preferencesParse.data)) customPreferences = preferencesParse.data;
-  }
-  const isPersonalizedExam = Boolean(styleProfile || customPreferences);
+  // No student settings: without a style profile this is the canonical exam
+  // (a `preferences` field sent by an older page is ignored).
+  const isPersonalizedExam = Boolean(styleProfile);
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -319,7 +307,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // The exam's format mix (QCS / QCM / combinaisons), lib/exam-formats.ts.
     const formatTargets = splitByShares(EXAM_TARGET_TOTAL);
     try {
-      if (isPersonalizedExam) {
+      if (styleProfile) {
         // STYLE-MIMICRY BRANCH (Examen Guidé par le Style Prof): pooling and
         // harvesting are bypassed entirely — reusing an already-generated
         // Studio QCM would silently dilute the "clone chirurgical" the
@@ -333,9 +321,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // one — accepted per product direction (v1 has no separate quota for
         // this, it's gated by the same reserveGeneration check above).
         const courseInputs = buildCourseInputs(eligibleCourses, eligibleCourses.length);
-        const baseSystemPrompt = styleProfile ? buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile) : buildExamStaticSystemPrompt(courseInputs);
-        const preferenceDirective = customPreferences ? personalizedPreferenceDirective(customPreferences, Boolean(styleProfile)) : "";
-        const styleSystemPrompt = preferenceDirective ? `${baseSystemPrompt}\n\n${preferenceDirective}` : baseSystemPrompt;
+        const styleSystemPrompt = buildExamStyleAdaptedSystemPrompt(courseInputs, styleProfile);
         const generatedQuestions = await generateShortfallQuestions(
           courseInputs,
           EXAM_TARGET_TOTAL,

@@ -4,13 +4,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { OpenRouterError } from "@/lib/ai/openrouter";
-import { buildExamStaticSystemPrompt, buildExamStyleAdaptedSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
+import { buildExamStyleAdaptedSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
 import { ExamGenerationSchema, ExamQuestionSchema, ExamStyleProfileSchema, type ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { reserveExam, refundExam } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
-import { ExamPreferencesSchema, isDefaultExamPreferences, personalizedPreferenceDirective, type ExamPreferences } from "@/lib/exam-preferences";
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
 import { lookupExamVariations, insertExamVariation, recordExamVariationHit } from "@/lib/exam-content-variations";
 import { poolExamQuestions, convertExamQuestionToHarvestableQcm, examQuestionKey, type ExamQuestion } from "@/lib/exam-pooling";
@@ -67,8 +66,11 @@ import {
  * another selection) pools it at 0 tokens and generates only the per-course
  * shortfall. A student is never given a question again that one of their
  * recent exams of this module already had: the plan draws other bank
- * questions, or generates new ones that deepen the bank. Sur-mesure
- * (custom-preference) exams are generated from scratch, without any bank.
+ * questions, or generates new ones that deepen the bank.
+ *
+ * NO STUDENT SETTINGS: every exam is the canonical one (DEFAULT_EXAM_PREFERENCES,
+ * lib/exam-generation.ts canonicalExamSystemPrompt) or follows a reference
+ * exam's style. A `preferences` field sent by an older page is ignored.
  */
 
 export const runtime = "nodejs";
@@ -112,10 +114,9 @@ interface RunParams {
   courseIds: number[];
   isVariation: boolean;
   styleProfile?: ExamStyleProfile;
-  customPreferences?: ExamPreferences;
-  /** Its own prompt (reference-exam style and/or custom preferences): never the canonical exam cache. */
+  /** Its own prompt (a reference-exam style): never the canonical exam cache. */
   isPersonalized: boolean;
-  /** The shared bank it pools from and files into (lib/exam-bank-profiles.ts); null = sur-mesure, no bank. */
+  /** The shared bank it pools from and files into (lib/exam-bank-profiles.ts); null = a reference-exam profile without a valid seal, no bank. */
   bankProfile: string | null;
   tokenType: string;
 }
@@ -127,7 +128,7 @@ function bad(error: string, status = 400): NextResponse {
 }
 
 function parseParams(body: Record<string, unknown>, userId: string): ParsedParams {
-  const { moduleId, courseIds, variation, styleProfile: rawStyle, styleProfileSeal, preferences: rawPreferences } = body;
+  const { moduleId, courseIds, variation, styleProfile: rawStyle, styleProfileSeal } = body;
   if (typeof moduleId !== "number" || !Number.isFinite(moduleId)) return { ok: false, response: bad("'moduleId' est requis et doit être un nombre.") };
   if (!Array.isArray(courseIds) || courseIds.length === 0 || courseIds.length > 200 || !courseIds.every((id) => typeof id === "number" && Number.isFinite(id))) {
     return { ok: false, response: bad("'courseIds' est requis (tableau d'identifiants non vide).") };
@@ -138,22 +139,16 @@ function parseParams(body: Record<string, unknown>, userId: string): ParsedParam
     if (!parsed.success) return { ok: false, response: bad("'styleProfile' est invalide.") };
     styleProfile = parsed.data;
   }
-  let customPreferences: ExamPreferences | undefined;
-  if (rawPreferences !== undefined && rawPreferences !== null) {
-    const parsed = ExamPreferencesSchema.safeParse(rawPreferences);
-    if (!parsed.success) return { ok: false, response: bad("'preferences' est invalide.") };
-    if (!isDefaultExamPreferences(parsed.data)) customPreferences = parsed.data;
-  }
   const ids = Array.from(new Set(courseIds as number[])).sort((a, b) => a - b);
   const isVariation = variation === true;
   // A reference-exam profile is browser-sent prompt text: only the exact
   // profile the analysis sealed for THIS student may use (and write into) its
   // archetype's shared bank — any other is generated fresh, without a bank.
-  const bankProfile =
-    styleProfile && !verifyStyleProfileSeal(userId, styleProfile, styleProfileSeal) ? null : bankProfileFor({ styleProfile, hasCustomPreferences: Boolean(customPreferences) });
+  const bankProfile = styleProfile && !verifyStyleProfileSeal(userId, styleProfile, styleProfileSeal) ? null : bankProfileFor(styleProfile);
   const digest = crypto
     .createHash("sha256")
-    .update(JSON.stringify({ ids, isVariation, styleProfile: styleProfile ?? null, preferences: customPreferences ?? null, bankProfile }))
+    // `preferences: null` keeps the digest of standard and reference-exam runs planned before student settings were removed, so they finish across a deploy.
+    .update(JSON.stringify({ ids, isVariation, styleProfile: styleProfile ?? null, preferences: null, bankProfile }))
     .digest("base64url")
     .slice(0, 22);
   return {
@@ -163,8 +158,7 @@ function parseParams(body: Record<string, unknown>, userId: string): ParsedParam
       courseIds: ids,
       isVariation,
       styleProfile,
-      customPreferences,
-      isPersonalized: Boolean(styleProfile || customPreferences),
+      isPersonalized: Boolean(styleProfile),
       bankProfile,
       tokenType: `exam:${digest}`,
     },
@@ -418,7 +412,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     let needs: { id: number; count: number }[];
     let depthById: Map<number, number> | null = null;
     if (!params.bankProfile) {
-      // Sur-mesure: generated from scratch.
+      // A reference-exam profile without a valid seal: generated from scratch.
       needs = distribute(ids, target, new Map());
     } else {
       // The shared bank of this run's profile (every student's questions
@@ -525,12 +519,8 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
 
   const depths = job.depths;
   const inputs = jobInputs(courses, job.segment, depths ? new Map(job.courseIds.map((id, index) => [id, depths[index]])) : null);
-  let systemPrompt: string | undefined;
-  if (params.isPersonalized) {
-    const base = params.styleProfile ? buildExamStyleAdaptedSystemPrompt(inputs, params.styleProfile) : buildExamStaticSystemPrompt(inputs);
-    const directive = params.customPreferences ? personalizedPreferenceDirective(params.customPreferences, Boolean(params.styleProfile)) : "";
-    systemPrompt = directive ? `${base}\n\n${directive}` : base;
-  }
+  // The professor's style, or (undefined) the canonical prompt — generateExamJob's default.
+  const systemPrompt = params.styleProfile ? buildExamStyleAdaptedSystemPrompt(inputs, params.styleProfile) : undefined;
 
   try {
     // Several courses in one job that feeds a bank: each question names its source course.

@@ -56,7 +56,7 @@ import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
 import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
-import { ExamConfigurator, examRunCaption, examRunKind } from "@/components/course/workspace/exam/ExamConfigurator";
+import { ExamConfigurator } from "@/components/course/workspace/exam/ExamConfigurator";
 import { EXAM_STYLE_ARCHETYPE_LABELS, classifyExamStyle } from "@/lib/exam-bank-profiles";
 import { type ExamTimerMode } from "@/components/course/workspace/exam/ExamTimer";
 import { GenerationConfirmDialog } from "@/components/billing/GenerationConfirmDialog";
@@ -65,7 +65,6 @@ import { notifyUsageChanged, remaining as remainingOf, useUsage } from "@/hooks/
 import { PAID_LIMITS } from "@/lib/pricing";
 import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
 import { useStoredPreference } from "@/components/cyber/hooks";
-import { DEFAULT_EXAM_PREFERENCES, EXAM_DIFFICULTIES, EXAM_EXPLANATION_DEPTHS, EXAM_PREFERENCE_LABELS, EXAM_QUESTION_FOCUS, type ExamPreferences } from "@/lib/exam-preferences";
 import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
@@ -172,21 +171,9 @@ export default function ExamGeneratorPage() {
     setStyleProfile(profile);
     setStyleProfileSeal(profile ? seal ?? null : null);
   }
-  // Exam customization — remembered on this device. ":v2" since the standard
-  // exam became Examen facultaire · Équilibré · Approfondi: a value saved
-  // under the old default would now read as sur-mesure and skip the shared
-  // bank, so every student starts again on the standard exam.
-  const [difficulty, setDifficulty] = useStoredPreference("medart:exam-difficulty:v2", DEFAULT_EXAM_PREFERENCES.difficulty, EXAM_DIFFICULTIES);
-  const [questionFocus, setQuestionFocus] = useStoredPreference("medart:exam-focus:v2", DEFAULT_EXAM_PREFERENCES.questionFocus, EXAM_QUESTION_FOCUS);
-  const [explanationDepth, setExplanationDepth] = useStoredPreference("medart:exam-explanations:v2", DEFAULT_EXAM_PREFERENCES.explanationDepth, EXAM_EXPLANATION_DEPTHS);
-  // Display only: never part of the generation request.
+  // The student's only setting — display only: never part of the generation
+  // request. Every exam is the standard one or follows the reference exam.
   const [timerMode, setTimerMode] = useStoredPreference<ExamTimerMode>("medart:exam-timer", "chrono", ["chrono", "countdown"] as const);
-  const preferences: ExamPreferences = { difficulty, questionFocus, explanationDepth };
-  function handlePreferencesChange(next: ExamPreferences) {
-    setDifficulty(next.difficulty);
-    setQuestionFocus(next.questionFocus);
-    setExplanationDepth(next.explanationDepth);
-  }
 
   const [savedExams, setSavedExams] = useState<SavedExam[]>([]);
   const [activeExamId, setActiveExamId] = useState<string | null>(null);
@@ -393,7 +380,7 @@ export default function ExamGeneratorPage() {
       // no single request has to outlive Vercel's limit, whatever the
       // number of selected courses.
       setGenerationProgress(null);
-      const { ok, body } = await runExamGeneration({ moduleId, courseIds, variation, preferences, styleProfile, styleProfileSeal }, setGenerationProgress);
+      const { ok, body } = await runExamGeneration({ moduleId, courseIds, variation, styleProfile, styleProfileSeal }, setGenerationProgress);
       // Server truth for the "Régénérer" quota, synced whenever the API
       // includes it — on the SUCCESS path (a fresh regeneration was just
       // reserved) and on the 403 cap-reached error path alike (see
@@ -695,14 +682,10 @@ export default function ExamGeneratorPage() {
   // Archetype of the attached reference exam — the same classification the
   // server uses to pick that style's shared bank (lib/exam-bank-profiles.ts).
   const styleArchetypeLabel = styleProfile ? EXAM_STYLE_ARCHETYPE_LABELS[classifyExamStyle(styleProfile)] : null;
-  // What one click on « Générer l'examen » produces, shown under the button and while generating.
-  const runKind = examRunKind(preferences, Boolean(styleProfile));
-  const runCaption = examRunCaption(runKind, styleArchetypeLabel);
-  const runChipLabel = runKind === "standard" ? "Examen facultaire" : runKind === "style" ? "Style de référence" : EXAM_PREFERENCE_LABELS.difficulty[preferences.difficulty];
+  // The exam being generated, shown while generating.
+  const runChipLabel = styleProfile ? "Style de référence" : "Examen facultaire";
   const examConfigurator = (
     <ExamConfigurator
-      preferences={preferences}
-      onPreferencesChange={handlePreferencesChange}
       timerMode={timerMode}
       onTimerModeChange={setTimerMode}
       selectedCount={selectedCourseIds.size}
@@ -735,11 +718,7 @@ export default function ExamGeneratorPage() {
         {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Générer l&apos;examen
       </Button>
-      {selectedCourseIds.size === 0 ? (
-        <p className="mt-2 text-center text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>
-      ) : (
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">{runCaption}</p>
-      )}
+      {selectedCourseIds.size === 0 && <p className="mt-2 text-center text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
     </div>
   );
 
@@ -780,11 +759,7 @@ export default function ExamGeneratorPage() {
           <Sparkles className="h-4 w-4" />
           Générer l&apos;examen
         </Button>
-        {selectedCourseIds.size === 0 ? (
-          <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>
-        ) : (
-          <p className="text-[11px] text-muted-foreground">{runCaption}</p>
-        )}
+        {selectedCourseIds.size === 0 && <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
       </div>
     </motion.div>
   );

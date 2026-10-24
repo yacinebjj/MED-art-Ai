@@ -7,7 +7,8 @@
  * content and tagged with the profile: any later exam of the same profile
  * that includes the course — any student, any selection of courses — reuses
  * it at 0 tokens, and only what the bank cannot cover is generated (then
- * filed in turn, so the bank deepens with use). Sur-mesure exams have no bank.
+ * filed in turn, so the bank deepens with use). A reference-exam profile
+ * without a valid seal has no bank.
  *
  * This module holds the two decisions that keep that bank clean:
  *  - ATTRIBUTION: a job over several courses must say which course each

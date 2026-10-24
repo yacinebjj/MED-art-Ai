@@ -8,8 +8,9 @@ import type { FormatCounts } from "@/lib/exam-formats";
  * exam always gets questions written for that profile (a "Régénérer" of the
  * canonical exam writes into the canonical bank too — same prompt, asked for
  * novelty):
- *  - CANONICAL_BANK_PROFILE: the default exam (DEFAULT_EXAM_PREFERENCES,
- *    "Examen facultaire · Équilibré · Approfondi"). Versioned: bump it when
+ *  - CANONICAL_BANK_PROFILE: the standard exam — every exam without a
+ *    reference exam (DEFAULT_EXAM_PREFERENCES, "Examen facultaire ·
+ *    Équilibré · Approfondi"; students have no settings). Versioned: bump it when
  *    the canonical prompt changes, so questions written under the previous
  *    one are never served as the new exam (as the exam cache key is bumped in
  *    lib/exam-content-cache.ts).
@@ -19,8 +20,7 @@ import type { FormatCounts } from "@/lib/exam-formats";
  *    generation of whatever the bank cannot cover, and its stated format split
  *    (styleFormatShares) sets the exam's QCS / QCM / combinaison mix. Only a
  *    profile sealed by the analysis for that student (lib/exam-style-seal.ts)
- *    may use an archetype bank.
- *  - custom preferences ("sur-mesure"): no bank — generated from scratch.
+ *    may use an archetype bank; an unsealed one is generated from scratch.
  */
 export const CANONICAL_BANK_PROFILE = "faculte-v1";
 
@@ -147,11 +147,7 @@ export function styleFormatShares(profile: ExamStyleProfile): FormatCounts | nul
   return shares.qcs + shares.qcm + shares.combinaison > 0 ? shares : null;
 }
 
-/**
- * The bank a run uses: none for custom preferences (sur-mesure), the
- * archetype's for a reference-exam run, the canonical one otherwise.
- */
-export function bankProfileFor(run: { styleProfile?: ExamStyleProfile; hasCustomPreferences: boolean }): string | null {
-  if (run.hasCustomPreferences) return null;
-  return run.styleProfile ? styleBankProfile(classifyExamStyle(run.styleProfile)) : CANONICAL_BANK_PROFILE;
+/** The bank a run uses: its archetype's for a reference-exam run, the canonical one otherwise. */
+export function bankProfileFor(styleProfile?: ExamStyleProfile): string {
+  return styleProfile ? styleBankProfile(classifyExamStyle(styleProfile)) : CANONICAL_BANK_PROFILE;
 }

@@ -1,5 +1,4 @@
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
-import type { ExamPreferences } from "@/lib/exam-preferences";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { remainingFormatCounts, type FormatCounts } from "@/lib/exam-formats";
 
@@ -16,7 +15,6 @@ export interface ExamRunRequest {
   moduleId: number;
   courseIds: number[];
   variation: boolean;
-  preferences: ExamPreferences;
   styleProfile?: ExamStyleProfile | null;
   /** Issued with the profile by the analysis (lib/exam-style-seal.ts). */
   styleProfileSeal?: string | null;
@@ -87,7 +85,6 @@ export async function runExamGeneration(request: ExamRunRequest, onProgress: (p:
     moduleId: request.moduleId,
     courseIds: request.courseIds,
     variation: request.variation,
-    preferences: request.preferences,
     ...(request.styleProfile ? { styleProfile: request.styleProfile, ...(request.styleProfileSeal ? { styleProfileSeal: request.styleProfileSeal } : {}) } : {}),
   };
   onProgress({ done: 0, total: 0, phase: "plan" });

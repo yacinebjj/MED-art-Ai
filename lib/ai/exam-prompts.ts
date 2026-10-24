@@ -184,7 +184,7 @@ export function buildExamBatchInstruction(
 /**
  * Appended to the user turn of a MULTI-course job of the client-orchestrated
  * run (app/api/exam/run) whose questions feed a shared bank — the canonical
- * exam and sealed reference-exam (archetype) runs, never sur-mesure ones:
+ * exam and sealed reference-exam (archetype) runs, never an unsealed one:
  * each question names the course it is written from, so it can be filed
  * under that course (lib/exam-question-bank.ts verifies every claim before
  * filing). ExamQuestionSchema drops the field — a stored exam never carries it.

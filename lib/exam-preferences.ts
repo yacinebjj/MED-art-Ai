@@ -1,11 +1,11 @@
 /**
- * "Générateur d'Examen" customization — shared by the page (controls) and the
- * exam routes (prompt directives). The default preferences ARE the canonical
- * exam ("Examen facultaire · Équilibré · Approfondi"): their directives are
- * part of every default exam's prompt (canonicalExamSystemPrompt,
- * lib/exam-generation.ts), and only that exam is served from the shared
- * question bank and the exam cache. Any other combination ("sur-mesure") is
- * generated fresh, like a style-guided exam.
+ * The "Générateur d'Examen" exam profile. Students have no settings: the
+ * default preferences ARE the exam ("Examen facultaire · Équilibré ·
+ * Approfondi"), and their directives are part of the prompt of every exam
+ * without a reference exam (canonicalExamSystemPrompt, lib/exam-generation.ts)
+ * — the exam served from the shared question bank and the exam cache. The
+ * other values and their directive texts stay defined: the profile is
+ * changed here, never by a request.
  */
 import { z } from "zod";
 
@@ -27,7 +27,7 @@ export type ExamPreferences = z.infer<typeof ExamPreferencesSchema>;
 /**
  * The canonical exam (product decision, 2026-10-23 — was intermédiaire /
  * équilibré / standard, which had no directive): its two directives below are
- * applied to every default exam. Changing it changes the canonical prompt —
+ * applied to every exam without a reference exam. Changing it changes the canonical prompt —
  * bump CANONICAL_BANK_PROFILE (lib/exam-bank-profiles.ts) and the exam cache
  * key (lib/exam-content-cache.ts) with it.
  */
@@ -36,20 +36,6 @@ export const DEFAULT_EXAM_PREFERENCES: ExamPreferences = {
   questionFocus: "equilibre",
   explanationDepth: "approfondie",
 };
-
-export function isDefaultExamPreferences(preferences: ExamPreferences): boolean {
-  return (
-    preferences.difficulty === DEFAULT_EXAM_PREFERENCES.difficulty &&
-    preferences.questionFocus === DEFAULT_EXAM_PREFERENCES.questionFocus &&
-    preferences.explanationDepth === DEFAULT_EXAM_PREFERENCES.explanationDepth
-  );
-}
-
-export const EXAM_PREFERENCE_LABELS = {
-  difficulty: { debutant: "Débutant", intermediaire: "Intermédiaire", examen_blanc: "Examen blanc facultaire" },
-  questionFocus: { equilibre: "Équilibré", cas_cliniques: "Cas cliniques", connaissances: "Connaissances" },
-  explanationDepth: { concise: "Concise", standard: "Standard", approfondie: "Approfondie" },
-} as const;
 
 const DIFFICULTY_DIRECTIVES: Record<ExamDifficulty, string> = {
   debutant:
@@ -73,28 +59,6 @@ const EXPLANATION_DIRECTIVES: Record<ExamExplanationDepth, string> = {
   approfondie:
     "EXPLICATIONS APPROFONDIES : pour CHAQUE option, 2 à 4 phrases — le mécanisme ou la règle qui la rend juste ou fausse, et le piège qu'elle représente — afin que la correction serve de vraie fiche de révision.",
 };
-
-/**
- * The preference block of a personalized exam. Without a reference exam: the
- * full selection (what the student sees selected is what they get). With
- * one: only the settings the student CHANGED from the standard exam are added
- * to the professor's style — the standard exam's own directives (examen
- * blanc, approfondie) never ride along with a single tweak, exactly as when
- * the standard exam had no directive.
- */
-export function personalizedPreferenceDirective(preferences: ExamPreferences, withReferenceStyle: boolean): string {
-  if (!withReferenceStyle) return buildExamPreferenceDirective(preferences);
-  const changed = (["difficulty", "questionFocus", "explanationDepth"] as const).filter((field) => preferences[field] !== DEFAULT_EXAM_PREFERENCES[field]);
-  return buildDirectiveBlock(
-    changed.map((field) =>
-      field === "difficulty"
-        ? DIFFICULTY_DIRECTIVES[preferences.difficulty]
-        : field === "questionFocus"
-          ? FOCUS_DIRECTIVES[preferences.questionFocus]
-          : EXPLANATION_DIRECTIVES[preferences.explanationDepth]
-    )
-  );
-}
 
 function buildDirectiveBlock(directives: string[]): string {
   const parts = directives.filter(Boolean);
