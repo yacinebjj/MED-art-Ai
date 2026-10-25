@@ -74,7 +74,9 @@ function PomodoroWidget() {
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.92 }}
           transition={{ duration: 0.15 }}
-          className="glass-card flex items-center gap-1.5 rounded-2xl px-2.5 py-1 shadow-soft sm:gap-2"
+          // Phones: the idle chrono lives in Réviser → Pomodoro (see the chip above); here it shows
+          // only while running, compact (time + pause), so the page title stays readable.
+          className={cn("glass-card flex items-center gap-1.5 rounded-2xl px-2.5 py-1 shadow-soft sm:gap-2", !isActive && "max-sm:hidden")}
         >
           {/* Pulses only while the timer is actually running — a
               permanently-pulsing icon reads as ambient urgency, which is
@@ -103,7 +105,7 @@ function PomodoroWidget() {
             title="Réinitialiser"
             aria-label="Réinitialiser le chrono"
             className={cn(
-              "rounded-lg p-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground",
+              "rounded-lg p-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground max-sm:hidden",
               ICON_BUTTON_FOCUS
             )}
           >
@@ -116,7 +118,7 @@ function PomodoroWidget() {
             title="Masquer le chrono"
             aria-label="Masquer le chrono"
             className={cn(
-              "rounded-lg border-l border-border p-1 pl-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground",
+              "rounded-lg border-l border-border p-1 pl-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground max-sm:hidden",
               ICON_BUTTON_FOCUS
             )}
           >

@@ -17,6 +17,8 @@ export const NAV_TRANSLATIONS = {
   groups: { fr: "Groupes de Révision", en: "Study Groups" },
   notes: { fr: "Mes notes", en: "My Notes" },
   billing: { fr: "Abonnement", en: "Subscription" },
+  groupPurchase: { fr: "Achat groupé", en: "Group purchase" },
+  refunds: { fr: "Remboursements", en: "Refunds" },
   settings: { fr: "Paramètres", en: "Settings" },
   more: { fr: "Plus", en: "More" },
   home: { fr: "Accueil", en: "Home" },

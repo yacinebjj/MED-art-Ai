@@ -205,9 +205,10 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
         )}
         // A floating pill takes the safe area as its OFFSET, not as internal
         // padding (which would stretch the pill itself by ~34px under the
-        // home indicator).
+        // home indicator). Height and offset are the --dock-* tokens
+        // (app/globals.css) the shell's bottom clearance is computed from.
         style={{
-          bottom: "max(0.75rem, env(safe-area-inset-bottom))",
+          bottom: "var(--dock-offset)",
           left: "max(0.75rem, env(safe-area-inset-left))",
           right: "max(0.75rem, env(safe-area-inset-right))",
         }}
@@ -250,7 +251,7 @@ function TabButton({
   tourTarget?: string;
 }) {
   const className =
-    "relative flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-3xl py-2 text-[11px] font-medium transition-transform duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+    "relative flex min-h-[var(--dock-height)] flex-1 flex-col items-center justify-center gap-1 rounded-3xl py-2 text-[11px] font-medium transition-transform duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
   const inner = (
     <>
       {active && (

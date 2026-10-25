@@ -55,7 +55,10 @@ const ROUTE_TITLE_KEYS: Record<string, Parameters<typeof t>[0]> = {
 function resolvePageTitleKey(pathname: string): Parameters<typeof t>[0] | null {
   if (ROUTE_TITLE_KEYS[pathname]) return ROUTE_TITLE_KEYS[pathname];
   if (pathname.startsWith("/dashboard/groups/")) return "groups";
-  // Promo / Groupe tracker and the refunds admin live under billing.
+  // The Promo / Groupe tracker and the refunds admin are their own pages: on
+  // phones the topbar is their only title (CyberHeader drops its own there).
+  if (pathname.startsWith("/dashboard/billing/pool/")) return "groupPurchase";
+  if (pathname.startsWith("/dashboard/admin/refunds")) return "refunds";
   if (pathname.startsWith("/dashboard/billing/") || pathname.startsWith("/dashboard/admin/")) return "billing";
   return null;
 }
@@ -157,7 +160,14 @@ export default function DashboardShellLayout({
   }, [pathname]);
 
   function handleMainScroll(event: React.UIEvent<HTMLElement>) {
-    const scrollTop = event.currentTarget.scrollTop;
+    const { scrollTop, clientHeight, scrollHeight } = event.currentTarget;
+    // At the very end of the page the dock comes back: the room kept free
+    // for it (--dock-clearance) is never left showing as an empty band.
+    if (scrollTop + clientHeight >= scrollHeight - SCROLL_HIDE_THRESHOLD_PX) {
+      setNavHidden(false);
+      lastScrollTopRef.current = scrollTop;
+      return;
+    }
     const delta = scrollTop - lastScrollTopRef.current;
     if (Math.abs(delta) < SCROLL_HIDE_THRESHOLD_PX) return;
     // Never hide the dock just because the page is already pinned near the
@@ -211,13 +221,16 @@ export default function DashboardShellLayout({
           <Sidebar />
         </div>
 
+        {/* Below lg <main> reaches the screen's side edges on phones and its
+            bottom edge everywhere: pages scroll under the floating dock
+            instead of being cut off by a strip of padding above it. */}
         <div
           className={cn(
-            "flex h-full min-w-0 flex-1 flex-col gap-2 p-2 sm:gap-3 sm:p-3 lg:pl-0",
+            "flex h-full min-w-0 flex-1 flex-col gap-2 pt-2 sm:gap-3 sm:px-3 sm:pt-3 lg:p-3 lg:pl-0",
             isChromelessOnMobile && "max-lg:gap-0 max-lg:p-0"
           )}
         >
-          <Topbar title={pageTitle} className={isChromelessOnMobile ? "max-lg:hidden" : undefined} />
+          <Topbar title={pageTitle} className={cn("max-sm:mx-2", isChromelessOnMobile && "max-lg:hidden")} />
 
           <main
             id="main-content"
@@ -235,15 +248,12 @@ export default function DashboardShellLayout({
               className={cn(
                 needsFixedHeight && "h-full",
                 // Bottom clearance for the floating mobile dock (MobileBottomNav,
-                // `lg:hidden`) — must extend all the way to that same `lg`
-                // breakpoint (not drop early at `sm`, which used to leave a real
-                // gap on tablets/landscape phones where the dock is still
-                // visible but this padding had already shrunk), and must add
-                // safe-area on top of the static value rather than instead of
-                // it — a fixed px number alone is enough on most phones but
-                // falls short on the ones with a home-indicator inset.
+                // `lg:hidden`): exactly its footprint, safe area included
+                // (--dock-clearance, app/globals.css), all the way to that same
+                // `lg` breakpoint — the dock is still there on tablets and
+                // landscape phones. Pages never add their own on top of it.
                 !isFullBleed && WIDE_ROUTES.includes(pathname) && "2xl:max-w-[1600px]",
-                !isFullBleed && "mx-auto w-full max-w-7xl px-2 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-1 sm:px-4 lg:px-8 lg:pb-6"
+                !isFullBleed && "mx-auto w-full max-w-7xl px-3 pb-[var(--dock-clearance)] pt-1 sm:px-4 lg:px-8 lg:pb-6"
               )}
             >
               <PageTransition className={needsFixedHeight ? "block h-full" : undefined}>{children}</PageTransition>

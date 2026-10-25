@@ -2816,7 +2816,8 @@ export default function ModuleWorkspacePage() {
                     sectionMasteryPct={sectionMasteryPct}
                   />
                   </div>
-                  <section aria-label="MedArt Lab" className="space-y-2 px-3 pb-24 pt-1">
+                  {/* The tab bar below is in the flow (MobileWorkspaceTabBar), not over this list: no clearance, just air. */}
+                  <section aria-label="MedArt Lab" className="space-y-2 px-3 pb-6 pt-1">
                     <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">MedArt Lab</p>
                     <div className="grid grid-cols-2 gap-2">
                       {LAB_TOOLS.map((tool) => {

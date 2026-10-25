@@ -403,8 +403,8 @@ function NotesPageContent() {
 
       <NoteEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
 
-      {/* pb-28 on mobile clears the floating bottom nav; desktop has none. */}
-      <div className="mt-4 flex shrink-0 flex-col gap-3 pb-28 sm:pb-0">
+      {/* The shell already ends this page above the floating bottom nav (--dock-clearance). */}
+      <div className="mt-4 flex shrink-0 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-semibold text-slate-500">
           <span className="flex items-center gap-1">
             <Type className="h-3 w-3 text-cyan-300/70" />

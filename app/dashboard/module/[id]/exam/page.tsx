@@ -970,7 +970,9 @@ export default function ExamGeneratorPage() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain p-4 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:p-6"
+      // Bottom: the fixed submit bar below (1rem + a 3rem button + 1rem + the safe area) plus 0.75rem of
+      // air — at every width: `sm:p-6` alone used to put the last question behind that bar.
+      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4 sm:p-6 sm:pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
     >
       {testingInnerContent}
     </motion.div>

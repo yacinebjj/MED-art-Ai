@@ -140,27 +140,43 @@
 }
 
 /**
- * Mobile-wide text-size bump (Point 7) — deliberately NOT a root `html {
- * font-size }` change: Tailwind's spacing scale (p-4, gap-2, h-9, ...) is
- * ALSO rem-based, so bumping the root would inflate padding/margins/icon
- * boxes right along with text, overflowing the tightly-packed mobile chrome
- * (bottom nav, compact cards) this app already has. Targets only the actual
- * text-size utility classes instead, and deliberately sits OUTSIDE any
- * `@layer` block — Tailwind's utilities (`@tailwind utilities` above) live
- * inside the cascade layers system, and un-layered rules always win over
- * layered ones regardless of selector order, so this reliably overrides
- * `.text-xs`/`.text-sm`/etc. without needing `!important` or fighting
- * specificity. Scoped to below Tailwind's own `md` breakpoint (768px) so
- * desktop/tablet typography is completely untouched.
+ * MOBILE DOCK GEOMETRY — the one source of truth for the floating bottom nav
+ * (components/layout/MobileBottomNav.tsx draws itself from these) and for
+ * every scroll area that runs under it. Such an area leaves exactly
+ * --dock-clearance free at its end: the pill, its lift off the bottom edge
+ * (the home-indicator inset on phones that have one) and one dock-gap of air
+ * — not a fixed allowance that left an empty band above the pill.
+ */
+:root {
+  --dock-height: 3.5rem;
+  --dock-offset: max(0.75rem, env(safe-area-inset-bottom));
+  --dock-clearance: calc(var(--dock-height) + var(--dock-offset) + 0.75rem);
+}
+
+/**
+ * MOBILE TYPE SCALE — every text-size utility below md (768px), the
+ * pixel-sized micro labels included (text-[10px], text-[11px]…, ~430 uses
+ * that used to keep their desktop size on phones). Deliberately NOT a root
+ * `html { font-size }` change: Tailwind's spacing scale (p-4, gap-2, h-9…) is
+ * rem-based too, so that would inflate padding and icon boxes along with the
+ * text. Tailwind 3 emits its base utilities before this point in the file
+ * and its responsive variants (sm:, md:…) after it, so at equal specificity
+ * these rules beat the base size, and an element's own `sm:` size still
+ * beats them from 640px up.
+ * A micro label inside a small fixed box (a counter badge, a step dot:
+ * h-3…h-6 / w-3…w-6) keeps its size: the box would not grow with it. That
+ * exclusion raises those three rules' specificity, so between 640px and
+ * 767px they also step aside explicitly for an element's own `sm:` size.
+ * Desktop and tablet typography (md+) is untouched.
  */
 @media (max-width: 767px) {
   .text-xs {
-    font-size: 0.8125rem; /* 13px, up from 12px */
-    line-height: 1.25rem;
+    font-size: 0.875rem; /* 14px, up from 12px */
+    line-height: 1.3rem;
   }
   .text-sm {
-    font-size: 0.9375rem; /* 15px, up from 14px */
-    line-height: 1.4rem;
+    font-size: 1rem; /* 16px, up from 14px */
+    line-height: 1.5rem;
   }
   .text-base {
     font-size: 1.0625rem; /* 17px, up from 16px */
@@ -173,6 +189,37 @@
   .text-xl {
     font-size: 1.3125rem; /* 21px, up from 20px */
     line-height: 1.8rem;
+  }
+  .text-\[12px\] {
+    font-size: 0.875rem; /* 14px */
+  }
+  .text-\[13px\] {
+    font-size: 0.9375rem; /* 15px */
+  }
+  .text-\[15px\] {
+    font-size: 1rem; /* 16px */
+  }
+}
+@media (max-width: 639px) {
+  .text-\[9px\]:not(.h-3, .h-4, .h-5, .h-6, .w-3, .w-4, .w-5, .w-6) {
+    font-size: 0.6875rem; /* 11px */
+  }
+  .text-\[10px\]:not(.h-3, .h-4, .h-5, .h-6, .w-3, .w-4, .w-5, .w-6) {
+    font-size: 0.75rem; /* 12px */
+  }
+  .text-\[11px\]:not(.h-3, .h-4, .h-5, .h-6, .w-3, .w-4, .w-5, .w-6) {
+    font-size: 0.8125rem; /* 13px */
+  }
+}
+@media (min-width: 640px) and (max-width: 767px) {
+  .text-\[9px\]:not(.h-3, .h-4, .h-5, .h-6, .w-3, .w-4, .w-5, .w-6, [class*="sm:text-"]) {
+    font-size: 0.6875rem;
+  }
+  .text-\[10px\]:not(.h-3, .h-4, .h-5, .h-6, .w-3, .w-4, .w-5, .w-6, [class*="sm:text-"]) {
+    font-size: 0.75rem;
+  }
+  .text-\[11px\]:not(.h-3, .h-4, .h-5, .h-6, .w-3, .w-4, .w-5, .w-6, [class*="sm:text-"]) {
+    font-size: 0.8125rem;
   }
 }
 
@@ -603,9 +650,9 @@ textarea,
   }
 }
 
-/* iOS Safari zooms on focus below 16px — and the mobile bump above makes
-   `.text-sm` 15px. `.text-base` and up are already >= 16px there, so they
-   keep their own size. */
+/* iOS Safari zooms on focus below 16px — and fields often carry `.text-xs` or
+   a pixel size the mobile type scale above keeps under 16px. `.text-base` and
+   up are already >= 16px there, so they keep their own size. */
 @media (max-width: 767px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl),
   textarea:not(.text-base):not(.text-lg):not(.text-xl):not(.text-2xl),

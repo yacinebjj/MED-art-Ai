@@ -118,6 +118,17 @@
   }
 }
 
+/* Phones: a glass card keeps a 1rem inset whatever roomier padding it asks
+   for on larger screens, so its content gets the width (cards set p-5…p-8
+   unconditionally; their sm: padding still applies from 640px up). */
+@media (max-width: 639px) {
+  .cyber-glass.p-5,
+  .cyber-glass.p-6,
+  .cyber-glass.p-8 {
+    padding: 1rem;
+  }
+}
+
 .cyber-glass-hover {
   transition:
     border-color 0.25s ease,
@@ -223,6 +234,13 @@
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: rgb(103 232 249 / 0.85);
+}
+
+/* Phones: the same step as the mobile type scale's 10px labels (app/globals.css). */
+@media (max-width: 767px) {
+  .cyber-kicker {
+    font-size: 12px;
+  }
 }
 
 /* ── Micro-particles / ripples ───────────────────────────────────────── */

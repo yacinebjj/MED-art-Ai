@@ -42,8 +42,9 @@ export function CyberStage({
 }) {
   return (
     // Phones/small tablets: edge-to-edge (cancels the shell's side gutter, no rounded frame) —
-    // the whole screen width goes to the content. Framed card from md: up.
-    <div className={cn("cyber-stage text-foreground max-sm:-mx-2 sm:max-md:-mx-4 max-md:rounded-none max-md:border-x-0 md:rounded-[1.75rem]", className)} style={{ ...accentVars(accent), ...style }}>
+    // the whole screen width goes to the content, inset 0.75rem on phones whatever padding the
+    // page asks for on larger screens. Framed card from md: up.
+    <div className={cn("cyber-stage text-foreground max-sm:-mx-3 max-sm:px-3 sm:max-md:-mx-4 max-md:rounded-none max-md:border-x-0 md:rounded-[1.75rem]", className)} style={{ ...accentVars(accent), ...style }}>
       {children}
     </div>
   );
@@ -79,7 +80,12 @@ export const CyberPanel = forwardRef<HTMLDivElement, CyberPanelProps>(function C
   );
 });
 
-/** Page header: neon icon chip, gradient title, subtitle, actions on the right. */
+/**
+ * Page header: neon icon chip, gradient title, subtitle, actions on the right.
+ * Below md the shell's Topbar already names the page, so the chip, kicker and
+ * title are not repeated there: only the subtitle and the actions remain
+ * (nothing at all when the page passes neither).
+ */
 export function CyberHeader({
   icon: Icon,
   kicker,
@@ -96,16 +102,16 @@ export function CyberHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center justify-between gap-4", className)}>
+    <div className={cn("flex flex-wrap items-center justify-between gap-4", !subtitle && !actions && "max-md:hidden", className)}>
       <div className="flex min-w-0 items-center gap-3.5">
-        <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 via-sky-500 to-violet-600 text-white shadow-[0_0_28px_rgba(34,211,238,0.45)]">
+        <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 via-sky-500 to-violet-600 text-white shadow-[0_0_28px_rgba(34,211,238,0.45)] max-md:hidden">
           <span aria-hidden className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/25" />
           <Icon className="h-5 w-5" />
         </span>
         <div className="min-w-0">
-          {kicker && <p className="cyber-kicker">{kicker}</p>}
-          <h1 className="cyber-title truncate text-xl font-black tracking-tight sm:text-2xl">{title}</h1>
-          {subtitle && <p className="mt-0.5 text-xs text-slate-400 sm:text-sm">{subtitle}</p>}
+          {kicker && <p className="cyber-kicker max-md:hidden">{kicker}</p>}
+          <h1 className="cyber-title truncate text-xl font-black tracking-tight max-md:hidden sm:text-2xl">{title}</h1>
+          {subtitle && <p className="mt-0.5 text-xs text-slate-400 max-md:mt-0 sm:text-sm">{subtitle}</p>}
         </div>
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

@@ -971,11 +971,10 @@ export default function ModuleWorkspacePage() {
           height instead, and the parent's own overflow-hidden hard-clips
           anything taller than the visible space with NO scrollbar and NO
           way to reach it — this is the real reason results were reported as
-          invisible on mobile, not a missing bottom-nav offset. pb bumped to
-          a safe-area-aware ~9rem (well above the previous py-6/py-8) so
-          every result and its trailing content is reachable with room to
-          spare, not just barely fit. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pt-2 md:px-10">
+          invisible on mobile, not a missing bottom-nav offset. Nothing
+          floats over this panel, so its bottom padding only has to keep the
+          last line above the home indicator (safe area) with some air. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pt-2 md:px-10">
         {outputBody}
       </div>
     </div>
