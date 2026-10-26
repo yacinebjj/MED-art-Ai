@@ -657,13 +657,14 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
       visibility: position ? ("visible" as const) : ("hidden" as const),
     };
 
-    const entrance = reduceMotion
-      ? {}
-      : {
-          initial: { opacity: 0, y: 6, scale: 0.97 },
-          animate: { opacity: 1, y: 0, scale: 1 },
-          transition: { type: "spring" as const, stiffness: 460, damping: 32, mass: 0.7 },
-        };
+    // Calm motion (reduced motion) keeps the same rise on a glide instead of the spring: nothing pops, nothing bounces.
+    const entrance = {
+      initial: { opacity: 0, y: 6, scale: 0.97 },
+      animate: { opacity: 1, y: 0, scale: 1 },
+      transition: reduceMotion
+        ? { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const }
+        : { type: "spring" as const, stiffness: 460, damping: 32, mass: 0.7 },
+    };
 
     const glowLine = <span aria-hidden className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent" />;
 
@@ -778,9 +779,9 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
           {tray !== "none" && (
             <motion.div
               key={tray}
-              initial={reduceMotion ? false : { opacity: 0, y: -4 }}
+              initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
+              exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.16, ease: "easeOut" }}
               className="border-t border-white/[0.06] bg-black/20 px-3 py-3"
             >

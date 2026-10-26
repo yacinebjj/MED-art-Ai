@@ -26,7 +26,7 @@
    behind; the panel then fades in over it while its header and page rise a
    few pixels. On close (`data-closing`) it fades back out before the caller
    unmounts it. Plain values, no app tokens: this folder depends on nothing
-   outside it. Reduced motion: fades only. */
+   outside it. Reduced motion keeps the same gentle rise (nothing bounces). */
 @keyframes cv-fade-in {
   from {
     opacity: 0;
@@ -61,11 +61,5 @@
 .course-viewer[data-closing="true"] {
   pointer-events: none;
   animation: cv-fade-out 220ms cubic-bezier(0.4, 0, 1, 1) forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .course-viewer > * {
-    animation-name: cv-fade-in;
-  }
 }
 

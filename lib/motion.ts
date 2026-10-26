@@ -35,10 +35,10 @@ function springSoft(): string {
 }
 
 /**
- * Calm motion (prefers-reduced-motion): things still fade in and out — nothing
- * ever pops — but nothing travels, zooms or bounces. Android's "Remove
- * animations", animations turned off in its developer options, and iOS Reduce
- * Motion all set this.
+ * Calm motion (prefers-reduced-motion): the same moves, gentler — nothing
+ * bounces and page moves travel half as far, but nothing pops either (see
+ * CALM MOTION in app/globals.css). Android's "Remove animations", animations
+ * turned off in its developer options, and iOS Reduce Motion all set this.
  */
 export function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -156,16 +156,17 @@ export function useRouteIntent(): RouteIntent | null {
 /**
  * The new page's entrance, played on its container by the Web Animations API
  * before its first paint. Opacity arrives quickly; the movement settles on the
- * soft spring.
+ * soft spring — in calm motion, half as far on a glide (no overshoot, no zoom).
  */
 export function playRouteEnter(element: HTMLElement, kind: RouteMotionKind): void {
   if (typeof element.animate !== "function") return;
   element.getAnimations().forEach((animation) => animation.cancel());
   element.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 340, easing: EASE_GLIDE });
-  if (prefersReducedMotion()) return;
+  const calm = prefersReducedMotion();
+  const travel = calm ? 0.5 : 1;
   const from: Keyframe =
     kind === "peer"
-      ? { translate: "0 10px", scale: "0.98" }
-      : { translate: `${kind === "forward" ? 36 : -36}px 0`, scale: "1" };
-  element.animate([from, { translate: "0 0", scale: "1" }], { duration: 640, easing: springSoft() });
+      ? { translate: `0 ${10 * travel}px`, scale: calm ? "1" : "0.98" }
+      : { translate: `${(kind === "forward" ? 36 : -36) * travel}px 0`, scale: "1" };
+  element.animate([from, { translate: "0 0", scale: "1" }], { duration: calm ? 480 : 640, easing: calm ? EASE_GLIDE : springSoft() });
 }

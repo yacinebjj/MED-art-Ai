@@ -227,8 +227,8 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
         aria-label="Navigation"
         className={cn(
           "glass-chrome shadow-glass dark:shadow-glass-dark fixed inset-x-3 bottom-3 z-40 flex items-stretch justify-around rounded-[1.75rem] px-1 lg:hidden",
-          // Calm motion (reduced motion): the dock fades away and back instead of sliding.
-          "transition-[transform,opacity] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-opacity",
+          // Slides away and back on every device, calm motion included (app/globals.css).
+          "transition-[transform,opacity] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)]",
           hidden ? "pointer-events-none translate-y-[calc(100%+4rem)] opacity-0" : "translate-y-0 opacity-100"
         )}
         // A floating pill takes the safe area as its OFFSET, not as internal

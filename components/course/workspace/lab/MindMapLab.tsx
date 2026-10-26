@@ -1958,9 +1958,10 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, error }: MindMapViewer
             <motion.div
               ref={drawerRef}
               key="detail"
-              initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+              // A short rise and fade: calm motion (reduced motion) keeps it, so the drawer never pops.
+              initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={reduceMotion ? undefined : { opacity: 0, y: 14 }}
+              exit={{ opacity: 0, y: 14 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="absolute inset-x-2 bottom-2 z-20 max-h-[60%] overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-card backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/95 sm:inset-x-auto sm:bottom-3 sm:right-3 sm:w-[21rem]"
             >

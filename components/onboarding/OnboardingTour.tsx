@@ -466,7 +466,7 @@ function TourLayer({ onDone }: { onDone: () => void }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: reduceMotion ? 0 : 0.25 }}
+      transition={{ duration: 0.25 }}
     >
       {/* Swallows every click/tap: a guided tour never navigates away mid-step. */}
       <div className="absolute inset-0" onPointerDown={(event) => event.preventDefault()} />
@@ -518,7 +518,8 @@ function TourLayer({ onDone }: { onDone: () => void }) {
         style={cardStyle}
         initial={cardInitial}
         animate={cardAnimate}
-        transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 210, damping: 24 }}
+        // Calm motion (reduced motion): the card glides between steps instead of jumping, without the spring's bounce.
+        transition={reduceMotion ? { duration: 0.32, ease: [0.22, 1, 0.36, 1] } : { type: "spring", stiffness: 210, damping: 24 }}
       >
         <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full opacity-40 blur-3xl" style={{ background: finale ? "rgba(251,191,36,0.6)" : current.glow }} />
 
@@ -527,7 +528,7 @@ function TourLayer({ onDone }: { onDone: () => void }) {
             <motion.div
               key="finale"
               className="relative text-center"
-              initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.25 }}
@@ -553,7 +554,7 @@ function TourLayer({ onDone }: { onDone: () => void }) {
             <motion.div
               key={current.id}
               className="relative"
-              initial={reduceMotion ? false : { opacity: 0, x: 18 }}
+              initial={{ opacity: 0, x: 18 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -18 }}
               transition={{ duration: 0.2 }}

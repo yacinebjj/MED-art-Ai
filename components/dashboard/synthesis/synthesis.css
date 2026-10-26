@@ -79,18 +79,8 @@
   }
 }
 
-/* Calm motion (app/globals.css): cards still fade in, without the rise; the border light doesn't spin. */
-@keyframes syn-fade {
-  from {
-    opacity: 0;
-  }
-}
-
+/* Calm motion (app/globals.css): cards keep their short rise; only the decorative border light stops spinning. */
 @media (prefers-reduced-motion: reduce) {
-  .syn-card {
-    animation-name: syn-fade !important;
-  }
-
   .syn-card::before {
     animation: none !important;
   }

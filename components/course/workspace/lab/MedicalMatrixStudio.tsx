@@ -631,7 +631,6 @@ function MatrixView({ entry, courseTitle, onAskInChat, error }: MatrixViewProps)
   const { matrix, generatedAt } = entry;
   const meta = KIND_META[matrix.kind];
   const MetaIcon = meta.icon;
-  const reduceMotion = useReducedMotion();
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortState | null>(null);
@@ -900,7 +899,8 @@ function MatrixView({ entry, courseTitle, onAskInChat, error }: MatrixViewProps)
                     <motion.tr
                       key={row.index}
                       className="group"
-                      initial={entranceDone || reduceMotion ? false : { opacity: 0 }}
+                      // A fade only, so calm motion (reduced motion) keeps it too.
+                      initial={entranceDone ? false : { opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.25, delay: Math.min(position, 16) * 0.03 }}
                     >
@@ -1170,7 +1170,8 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
                 <motion.span
                   layoutId={`${segmentId}-indicator`}
                   className="absolute inset-0 -z-10 rounded-xl bg-white shadow-soft dark:bg-slate-800"
-                  transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 34 }}
+                  // Calm motion (reduced motion): the same glide without the spring's bounce.
+                  transition={reduceMotion ? { duration: 0.28, ease: [0.22, 1, 0.36, 1] } : { type: "spring", stiffness: 420, damping: 34 }}
                 />
               )}
               <OptionIcon className="h-4 w-4 shrink-0" />
@@ -1191,9 +1192,9 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
           id={`${segmentId}-panel`}
           role="tabpanel"
           aria-labelledby={`${segmentId}-tab-${kind}`}
-          initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+          initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
+          exit={{ opacity: 0, y: -4 }}
           transition={{ duration: 0.18, ease: "easeOut" }}
           className="min-w-0"
         >

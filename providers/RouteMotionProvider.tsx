@@ -2,9 +2,9 @@
 
 import { useContext, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { MotionConfig } from "framer-motion";
 import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { announceNavigation, settleRouteIntent } from "@/lib/motion";
+import { installDetailsMotion } from "@/lib/details-motion";
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -17,9 +17,12 @@ const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : us
  * redirect alike — long before the new page has loaded (lib/motion.ts,
  * announceNavigation). Everything else passes through untouched.
  *
- * MotionConfig reducedMotion="user": under prefers-reduced-motion,
- * framer-motion keeps opacity and color animations and drops the
- * transforms — the same calm motion app/globals.css applies to CSS.
+ * Every native <details> under it unfolds and folds back
+ * (lib/details-motion.ts).
+ *
+ * framer-motion is deliberately left at its default under reduced motion:
+ * calm motion keeps spatial movement (app/globals.css), and the components
+ * that animate something decorative check useReducedMotion() themselves.
  */
 export function RouteMotionProvider({ children }: { children: ReactNode }) {
   const router = useContext(AppRouterContext);
@@ -46,11 +49,12 @@ export function RouteMotionProvider({ children }: { children: ReactNode }) {
     settleRouteIntent();
   }, [pathname]);
 
-  const content = <MotionConfig reducedMotion="user">{children}</MotionConfig>;
+  useEffect(() => installDetailsMotion(), []);
+
   // Browser only. Nothing navigates during server rendering, and the server
   // build resolves this context import to a different copy than the one Next
   // renders with: providing it there only trips React's "multiple renderers"
   // warning. The extra provider renders no DOM, so hydration is unaffected.
-  if (typeof window === "undefined") return content;
-  return <AppRouterContext.Provider value={motionRouter}>{content}</AppRouterContext.Provider>;
+  if (typeof window === "undefined") return <>{children}</>;
+  return <AppRouterContext.Provider value={motionRouter}>{children}</AppRouterContext.Provider>;
 }

@@ -415,10 +415,11 @@ function AnalogyCard({ section, rtl, fontClass, kit, labels, language, expanded,
         {open && (
           <motion.div
             key="body"
-            initial={reduceMotion ? false : { height: 0, opacity: 0 }}
+            initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 260, damping: 30 }}
+            exit={{ height: 0, opacity: 0 }}
+            // Calm motion (reduced motion): the same unfold on a glide — never a snap.
+            transition={reduceMotion ? { duration: 0.32, ease: [0.22, 1, 0.36, 1] } : { type: "spring", stiffness: 260, damping: 30 }}
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 sm:px-5 sm:pb-5">
@@ -853,10 +854,11 @@ export function AnalogyCanvas({ courseId, markdown, fallback }: { courseId: numb
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={focusSection.id}
-              initial={reduceMotion ? false : { opacity: 0, x: rtl ? -40 : 40 }}
+              // Calm motion (reduced motion): a shorter slide on a glide instead of the spring.
+              initial={{ opacity: 0, x: (rtl ? -40 : 40) * (reduceMotion ? 0.5 : 1) }}
               animate={{ opacity: 1, x: 0 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: rtl ? 40 : -40 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              exit={{ opacity: 0, x: (rtl ? 40 : -40) * (reduceMotion ? 0.5 : 1) }}
+              transition={reduceMotion ? { duration: 0.28, ease: [0.22, 1, 0.36, 1] } : { type: "spring", stiffness: 300, damping: 30 }}
             >
               <AnalogyCard
                 section={focusSection}
