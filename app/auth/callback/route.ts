@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { sanitizeRedirectPath } from "@/lib/safe-redirect";
+import { sendWelcomeEmailOnce } from "@/lib/email/notifications";
 
 export const runtime = "nodejs";
 
@@ -62,8 +63,11 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // A confirmed sign-up lands here: welcome the new student (once per
+      // account, never throws, bounded in time — see lib/email/notifications.ts).
+      if (!isRecovery && data.user) await sendWelcomeEmailOnce(data.user.id, origin);
       return NextResponse.redirect(`${origin}${next}`);
     }
     console.error("Auth callback: exchangeCodeForSession failed", error);

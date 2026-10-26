@@ -185,6 +185,10 @@ export function RegisterForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ specialtyId, academicYearId }),
       });
+      // Welcome email: fire-and-forget (keepalive survives the navigation
+      // below), never blocks the sign-up. Confirmation-link sign-ups are
+      // welcomed by /auth/callback instead; either way, once per account.
+      void fetch("/api/emails/welcome", { method: "POST", keepalive: true }).catch(() => {});
       setIsLoading(false);
       router.push(next);
       router.refresh();

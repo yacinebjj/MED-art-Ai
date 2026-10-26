@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reconcileUserPayments } from "@/lib/chargily-settlement";
@@ -17,7 +17,7 @@ const RECONCILE_RATE_LIMIT = { limit: 40, windowMs: 5 * 60 * 1000 };
  * payment never waits on its webhook alone. Safe to call any number of times:
  * activation goes through the webhook's own once-only claim.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ error: "Tu dois être connecté(e) pour continuer." }, { status: 401 });
@@ -31,6 +31,7 @@ export async function POST() {
     );
   }
 
-  const result = await reconcileUserPayments(user.id);
+  // The origin is only used for the links in a thank-you email (APP_URL wins when set).
+  const result = await reconcileUserPayments(user.id, request.nextUrl.origin);
   return NextResponse.json({ success: true, ...result });
 }

@@ -3,6 +3,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { activateSubscription } from "@/lib/subscription";
 import { isPlanId } from "@/lib/pricing";
 import { createLeaderSeats, recordPoolPayment } from "@/lib/billing-pools";
+import { sendPaymentThankYouEmail } from "@/lib/email/notifications";
 
 /**
  * Settling a Chargily payment, shared by the two ways this app learns that a
@@ -208,7 +209,7 @@ async function closePendingPayment(checkoutId: string, status: "failed" | "cance
   if (error) console.error(`[chargily-settlement] could not close pending payment ${checkoutId}:`, error.message);
 }
 
-async function reconcileCheckout(userId: string, checkoutId: string, createdAt: string): Promise<CheckoutOutcome> {
+async function reconcileCheckout(userId: string, checkoutId: string, createdAt: string, origin: string): Promise<CheckoutOutcome> {
   const current = await getChargilyCheckout(checkoutId);
   // Chargily unreachable right now: nothing is decided, ask again later.
   if (!current.ok) return "pending";
@@ -230,6 +231,9 @@ async function reconcileCheckout(userId: string, checkoutId: string, createdAt: 
         return "pending";
       }
       console.log(`[chargily-settlement] checkout ${checkout.id} found paid at Chargily — activated without its webhook.`);
+      // Settled by THIS call (claim + fulfilment above): thank the payer once,
+      // exactly as the webhook would have. Never throws, never releases the claim.
+      await sendPaymentThankYouEmail(checkout, origin);
       return "activated";
     }
     case "failed":
@@ -251,9 +255,10 @@ async function reconcileCheckout(userId: string, checkoutId: string, createdAt: 
 
 /**
  * Asks Chargily about this student's most recent pending payments and settles
- * the paid ones exactly as the webhook would. Never throws.
+ * the paid ones exactly as the webhook would. Never throws. `origin` is the
+ * app's address for the links in the thank-you email (APP_URL wins when set).
  */
-export async function reconcileUserPayments(userId: string): Promise<ReconcileResult> {
+export async function reconcileUserPayments(userId: string, origin = ""): Promise<ReconcileResult> {
   const result: ReconcileResult = { activated: 0, pending: 0, latestStatus: null };
   if (!isSupabaseConfigured()) return result;
   try {
@@ -271,7 +276,7 @@ export async function reconcileUserPayments(userId: string): Promise<ReconcileRe
       return result;
     }
     const rows = (data ?? []) as { chargily_checkout_id: string; created_at: string }[];
-    const outcomes = await Promise.all(rows.map((row) => reconcileCheckout(userId, row.chargily_checkout_id, row.created_at)));
+    const outcomes = await Promise.all(rows.map((row) => reconcileCheckout(userId, row.chargily_checkout_id, row.created_at, origin)));
     for (const outcome of outcomes) {
       if (outcome === "activated") result.activated++;
       else if (outcome === "pending") result.pending++;

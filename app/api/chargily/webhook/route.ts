@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyChargilySignature, type ChargilyCheckout } from "@/lib/chargily";
 import { claimCheckoutAsPaid, fulfillPaidCheckout, releasePaidClaim, updatePaymentStatus } from "@/lib/chargily-settlement";
+import { sendPaymentThankYouEmail } from "@/lib/email/notifications";
 
 export const runtime = "nodejs";
 
@@ -42,6 +43,8 @@ export async function POST(request: NextRequest) {
 
   const eventType = payload.type ?? payload.event ?? "";
   const checkout = payload.data ?? (payload as unknown as ChargilyCheckout);
+  // Set only once THIS delivery has claimed and fulfilled the payment.
+  let settledCheckout: ChargilyCheckout | null = null;
 
   try {
     switch (eventType) {
@@ -59,6 +62,7 @@ export async function POST(request: NextRequest) {
           break;
         }
         await fulfillPaidCheckout(checkout);
+        settledCheckout = checkout;
         break;
       }
 
@@ -80,6 +84,11 @@ export async function POST(request: NextRequest) {
     if (eventType === "checkout.paid" && checkout?.id) await releasePaidClaim(checkout.id);
     return NextResponse.json({ error: "Traitement du webhook échoué." }, { status: 500 });
   }
+
+  // Outside the try/catch above on purpose: the payment is settled by now,
+  // and nothing about its email (which never throws anyway) may release that
+  // claim. Once per payment: a redelivery never gets past the claim.
+  if (settledCheckout) await sendPaymentThankYouEmail(settledCheckout, request.nextUrl.origin);
 
   return NextResponse.json({ received: true });
 }
