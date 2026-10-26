@@ -41,10 +41,29 @@ let warnedNotConfigured = false;
 export function isEmailConfigured(): boolean {
   if (process.env.RESEND_API_KEY?.trim()) return true;
   if (!warnedNotConfigured) {
-    console.warn("[email] RESEND_API_KEY is not set in this deployment — no email is sent. Add it in Vercel (Production), then redeploy.");
+    console.warn(
+      `[email] RESEND_API_KEY is not set in this deployment — no email is sent. ${deploymentFacts()}. ` +
+        "Add it to the Vercel project serving the site (Settings → Environment Variables, Production ticked), then redeploy.",
+    );
     warnedNotConfigured = true;
   }
   return false;
+}
+
+/**
+ * Which deployment is talking, and the variable names it does have that look
+ * like the key — names only, never values — so a key saved in another
+ * project or environment, after the build, or under another name, shows up
+ * in this one log line.
+ */
+function deploymentFacts(): string {
+  const similar = Object.keys(process.env).filter((name) => /resend|mail/i.test(name));
+  return [
+    `Vercel environment: ${process.env.VERCEL_ENV ?? "unknown"}`,
+    `deployment: ${process.env.VERCEL_URL ?? "unknown"}`,
+    `commit: ${(process.env.VERCEL_GIT_COMMIT_SHA ?? "unknown").slice(0, 7)}`,
+    `similar variables: ${similar.length > 0 ? similar.join(", ") : "none"}`,
+  ].join(" · ");
 }
 
 /** EMAIL_FROM as typed in Vercel, minus surrounding quotes; a bare address gets the "MedArt AI" name. */
