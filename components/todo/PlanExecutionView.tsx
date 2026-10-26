@@ -381,29 +381,39 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
         </div>
       )}
 
+      {/* Each view (and, for the read-only views, each module filter) is its
+          own keyed block: switching settles the new one in (motion-swap,
+          app/globals.css) instead of swapping it in a single frame. The list
+          keeps its key across filters so open task rows keep their state. */}
       {tasks.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/50 px-6 py-12 text-center">
+        <div key="empty" className="motion-swap flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/50 px-6 py-12 text-center">
           <GlassArt name="todo" size={96} className="h-20 w-20 animate-float motion-reduce:animate-none sm:h-24 sm:w-24" />
           <p className="text-sm text-muted-foreground">{tTodo("emptyStateText", language)}</p>
         </div>
       ) : view === "timeline" ? (
-        <TimelineView tasks={visibleTasks} today={today} onToggle={toggleTask} />
+        <div key={`timeline:${activeFilter}`} className="motion-swap">
+          <TimelineView tasks={visibleTasks} today={today} onToggle={toggleTask} />
+        </div>
       ) : view === "kanban" ? (
-        <KanbanView tasks={visibleTasks} today={today} onToggle={toggleTask} />
+        <div key={`kanban:${activeFilter}`} className="motion-swap">
+          <KanbanView tasks={visibleTasks} today={today} onToggle={toggleTask} />
+        </div>
       ) : view === "grid" ? (
-        <GridView tasks={visibleTasks} today={today} onToggle={toggleTask} />
+        <div key={`grid:${activeFilter}`} className="motion-swap">
+          <GridView tasks={visibleTasks} today={today} onToggle={toggleTask} />
+        </div>
       ) : (
-        <div className="space-y-4">
+        <div key="list" className="motion-swap space-y-4">
           {/* HERO — Aujourd'hui, toujours visible en premier */}
           <div className="relative overflow-hidden rounded-3xl border border-cyan-400/30 cyber-surface-hero p-4 shadow-[0_0_50px_-20px_rgba(34,211,238,0.55)] sm:p-6">
             {todayTotal === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-6 text-center">
+              <div key="rest" className="motion-swap flex flex-col items-center gap-2 py-6 text-center">
                 <Coffee className="h-8 w-8 text-primary/70" />
                 <p className="text-sm font-bold text-foreground">{tTodo("restDayTitle", language)}</p>
                 <p className="max-w-sm text-xs text-muted-foreground">{tTodo("restDayBody", language)}</p>
               </div>
             ) : (
-              <>
+              <div key="today">
                 <div className="relative flex items-center gap-4">
                   <ProgressRing
                     completed={todayCompleted}
@@ -429,7 +439,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
                     <TaskRow key={task.id} variant="hero" reorderable {...rowProps(task, { showAiButton: true })} />
                   ))}
                 </Reorder.Group>
-              </>
+              </div>
             )}
           </div>
 

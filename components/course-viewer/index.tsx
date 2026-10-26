@@ -9,13 +9,15 @@
  * handling) and it imports nothing from components/ui or hooks/, so changes
  * elsewhere in the app can't break it. See CourseViewer.tsx for the design.
  *
- * Usage — mount while open, unmount to close:
+ * Usage — mount while open, unmount to close (the viewer plays its exit
+ * before it calls onClose):
  *   {course && <CourseViewer title={…} fileUrl={…} rawText={…} onClose={() => setCourse(null)} />}
  *
  * The heavy parts (pdf.js, the PPTX engine) are code-split and only download
  * when a file of that type is opened; this entry point itself is tiny.
  */
 
+import { useCallback, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { loadWithRetry } from "./load-with-retry";
 import type { CourseViewerProps } from "./types";
@@ -59,15 +61,51 @@ function CourseViewerUnavailable({ title, fileUrl, onClose }: CourseViewerProps)
   );
 }
 
+// Transparent: the backdrop below already darkens the screen.
 function CourseViewerLoading() {
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-neutral-900" style={{ zIndex: 9995 }} role="status" aria-label="Ouverture du cours">
+    <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 9995 }} role="status" aria-label="Ouverture du cours">
       <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/15 border-t-white/70" />
     </div>
   );
 }
 
-export const CourseViewer = dynamic<CourseViewerProps>(() => loadCourseViewer().catch(() => CourseViewerUnavailable), {
+const LazyCourseViewer = dynamic<CourseViewerProps>(() => loadCourseViewer().catch(() => CourseViewerUnavailable), {
   ssr: false,
   loading: CourseViewerLoading,
 });
+
+// The viewer's exit (cv-fade-out, course-viewer.css) and the backdrop's.
+const EXIT_MS = 220;
+
+/**
+ * A dark backdrop fades in at once and stays under the loader and then the
+ * viewer, so neither the first frame nor the loader → viewer switch can
+ * flash the page behind. Closing plays the exit first; the caller's
+ * `onClose` (which unmounts all of this) runs when it has finished.
+ */
+export function CourseViewer({ onClose, ...props }: CourseViewerProps) {
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    window.setTimeout(() => onCloseRef.current(), EXIT_MS);
+  }, []);
+
+  return (
+    <>
+      <div
+        aria-hidden
+        data-closing={closing}
+        className="fixed inset-0 bg-neutral-900 animate-in fade-in-0 duration-300 data-[closing=true]:pointer-events-none data-[closing=true]:animate-out data-[closing=true]:fade-out-0 data-[closing=true]:duration-200 data-[closing=true]:fill-mode-forwards"
+        style={{ zIndex: 9994 }}
+      />
+      <LazyCourseViewer {...props} onClose={requestClose} closing={closing} />
+    </>
+  );
+}

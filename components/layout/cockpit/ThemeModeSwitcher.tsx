@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 import { useTheme } from "next-themes";
 import { Check, Moon, MoonStar, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EASE_GLIDE, prefersReducedMotion } from "@/lib/motion";
 import { useLanguage } from "@/providers/LanguageProvider";
 import {
   DropdownMenu,
@@ -61,7 +63,7 @@ export function NightModeOverlay() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 z-[2000] bg-[rgb(255_140_40/0.08)]"
+      className="pointer-events-none fixed inset-0 z-[2000] bg-[rgb(255_140_40/0.08)] animate-in fade-in-0 duration-700"
       style={{ boxShadow: "inset 0 0 0 100vmax rgb(0 0 0 / 0.12)" }}
     />
   );
@@ -80,16 +82,54 @@ export const THEME_MODE_ICONS = { light: Sun, dark: Moon, night: MoonStar } as c
 const ICONS = THEME_MODE_ICONS;
 const LABELS = THEME_MODE_LABELS;
 
-/** Current light / dark / medical-night mode and a setter (next-themes + the night flag). */
-export function useThemeMode(): { current: Mode; select: (mode: Mode) => void } {
+/**
+ * Current light / dark / medical-night mode and a setter (next-themes + the
+ * night flag). Switching spreads the new theme out in a circle from the
+ * control that asked for it (`from`) — the View Transitions API,
+ * `.theme-reveal` in app/globals.css. Calm motion keeps the API's plain
+ * cross-fade; browsers without it switch at once, as before.
+ */
+export function useThemeMode(): { current: Mode; select: (mode: Mode, from?: Element | null) => void } {
   const { resolvedTheme, setTheme } = useTheme();
   const night = useNightMode();
   const current: Mode = resolvedTheme === "dark" ? (night ? "night" : "dark") : "light";
-  function select(mode: Mode) {
-    setTheme(mode === "light" ? "light" : "dark");
-    writeNight(mode === "night");
+  function select(mode: Mode, from?: Element | null) {
+    const apply = () => {
+      setTheme(mode === "light" ? "light" : "dark");
+      writeNight(mode === "night");
+    };
+    if (mode === current || typeof document.startViewTransition !== "function") {
+      apply();
+      return;
+    }
+    revealTheme(apply, from);
   }
   return { current, select };
+}
+
+function revealTheme(apply: () => void, from?: Element | null) {
+  const root = document.documentElement;
+  const rect = from?.getBoundingClientRect();
+  const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+  const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+  const calm = prefersReducedMotion();
+  if (!calm) root.classList.add("theme-reveal");
+  // next-themes applies its class in an effect: flushSync runs the render and
+  // that effect before the browser captures the new state.
+  const transition = document.startViewTransition(() => flushSync(apply));
+  if (!calm) {
+    transition.ready
+      .then(() => {
+        root.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+          { duration: 640, easing: EASE_GLIDE, pseudoElement: "::view-transition-new(root)" }
+        );
+      })
+      .catch(() => {});
+  }
+  const cleanUp = () => root.classList.remove("theme-reveal");
+  transition.finished.then(cleanUp, cleanUp);
 }
 
 export function ThemeModeSwitcher({ className }: { className?: string }) {
@@ -120,7 +160,7 @@ export function ThemeModeSwitcher({ className }: { className?: string }) {
         {(Object.keys(LABELS) as Mode[]).map((mode) => {
           const ItemIcon = ICONS[mode];
           return (
-            <DropdownMenuItem key={mode} onSelect={() => select(mode)}>
+            <DropdownMenuItem key={mode} onSelect={(event) => select(mode, event.currentTarget as Element | null)}>
               <ItemIcon className={cn("h-4 w-4", mode === "night" && "text-amber-500")} />
               <span className="flex-1">{LABELS[mode][language]}</span>
               {current === mode && <Check className="h-3.5 w-3.5 text-primary-500" />}

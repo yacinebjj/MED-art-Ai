@@ -94,8 +94,9 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
         ) : null
       }
     >
+      {/* Editing ↔ countdown ↔ empty: each settles in (motion-swap, app/globals.css); the day count has its own rise. */}
       {editing ? (
-        <form onSubmit={save} className="space-y-2">
+        <form onSubmit={save} className="motion-swap space-y-2">
           <input
             value={draftLabel}
             onChange={(e) => setDraftLabel(e.target.value)}
@@ -170,7 +171,7 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
           </div>
         </>
       ) : (
-        <div className="flex flex-1 flex-col justify-between gap-3">
+        <div className="motion-swap flex flex-1 flex-col justify-between gap-3">
           <p className="text-xs leading-relaxed text-muted-foreground">{tCockpit("examEmpty", language)}</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={startEdit} className="rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 px-3 py-1.5 text-xs font-bold text-white shadow-md shadow-rose-500/25 transition-all hover:-translate-y-0.5">

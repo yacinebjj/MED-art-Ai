@@ -258,16 +258,18 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
           </span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+          {/* Each card mounts fresh (keyed by card): the bar grows from where the previous card left it. */}
           <motion.div
             className="h-full w-full origin-left rounded-full bg-gradient-to-r from-cyan-400 via-sky-400 to-violet-500 shadow-[0_0_12px_rgba(34,211,238,0.6)]"
-            initial={false}
+            initial={{ scaleX: index / Math.max(total, 1) }}
             animate={{ scaleX: progressPct / 100 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>
       </div>
 
-      <div className="relative">
+      {/* card-deal (app/globals.css): the next card is dealt in — after a swipe flings the last one off the table. */}
+      <div className="card-deal relative">
         {/* Swipe layer — carries the drag/exit transform in isolation from the overlay. */}
         <div
           onTouchStart={handleTouchStart}

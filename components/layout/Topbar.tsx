@@ -295,7 +295,7 @@ export function Topbar({ title, className }: { title: string; className?: string
             {(Object.keys(THEME_MODE_LABELS) as ThemeMode[]).map((mode) => {
               const ModeIcon = THEME_MODE_ICONS[mode];
               return (
-                <DropdownMenuItem key={mode} onSelect={() => themeMode.select(mode)} className="sm:hidden">
+                <DropdownMenuItem key={mode} onSelect={(event) => themeMode.select(mode, event.currentTarget as Element | null)} className="sm:hidden">
                   <ModeIcon className={cn("h-4 w-4", mode === "night" && "text-amber-500")} />
                   <span className="flex-1">{THEME_MODE_LABELS[mode][language]}</span>
                   {themeMode.current === mode && <span className="h-1.5 w-1.5 rounded-full bg-primary-500" />}

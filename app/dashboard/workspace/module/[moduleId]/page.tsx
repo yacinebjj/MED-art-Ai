@@ -855,7 +855,8 @@ export default function ModuleWorkspacePage() {
           // FR/AR + listen (Dictionnaire), category boards (Mots-clés) — with
           // search, priority/course/category filters and exports. It only
           // reads the generated Markdown; the content itself is unchanged.
-          <motion.div key="output" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
+          // Keyed by the history entry: picking another result fades the old one out and the new one in.
+          <motion.div key={`output:${activeHistoryId ?? "live"}`} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
             <SynthesisExplorer
               markdown={output}
               kind={history.find((h) => h.id === activeHistoryId)?.type ?? null}
@@ -1032,7 +1033,9 @@ export default function ModuleWorkspacePage() {
             </main>
           </>
         ) : mobileTab === "sources" ? (
-          <div className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
+          // Keyed per tab: both are .cyber-glass divs in one slot, so without
+          // keys React would reuse the panel and its entrance would never replay.
+          <div key="sources" className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
             {sourcesHeader}
             <div className="shrink-0 px-3 pt-3">{renderSummaryOptions(false)}</div>
             {selectAllRow}
@@ -1040,7 +1043,7 @@ export default function ModuleWorkspacePage() {
             {generateButtonsRow}
           </div>
         ) : (
-          <div className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
+          <div key="results" className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
             {history.length > 0 ? (
               historySection
             ) : isGenerating ? null : (

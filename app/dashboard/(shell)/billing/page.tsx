@@ -910,7 +910,8 @@ function BillingPageContent() {
           {!loaded ? (
             <div className="h-40 animate-pulse rounded-2xl bg-white/[0.04]" />
           ) : (
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+            // motion-swap (app/globals.css): settles in where the placeholder pulsed.
+            <div className="motion-swap flex flex-col gap-5 sm:flex-row sm:items-center">
               <NeonRing
                 value={ringValue}
                 size={128}
@@ -979,7 +980,8 @@ function BillingPageContent() {
             <BillingCycleToggle value={cycle} onChange={setCycle} />
           </div>
           {error && <ErrorNotice message={error} className="mt-4" />}
-          <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
+          {/* Keyed by cycle: every card is a new plan after a switch, so the grid settles in anew (motion-swap). */}
+          <div key={cycle} className="motion-swap mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
             {plansForCycle.map((plan) => (
               <PlanCard
                 key={plan.id}

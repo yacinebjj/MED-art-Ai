@@ -40,7 +40,7 @@ const FALLBACK_NOTICE: Record<"pdf" | "pptx" | "crash", string> = {
  *
  * Mount it only while open; unmounting closes it.
  */
-export function CourseViewer({ title, fileUrl, rawText, onClose }: CourseViewerProps) {
+export function CourseViewer({ title, fileUrl, rawText, onClose, closing = false }: CourseViewerProps) {
   const [mounted, setMounted] = useState(false);
   const [failure, setFailure] = useState<keyof typeof FALLBACK_NOTICE | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -123,6 +123,7 @@ export function CourseViewer({ title, fileUrl, rawText, onClose }: CourseViewerP
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
+      data-closing={closing}
       className="course-viewer fixed inset-0 flex flex-col bg-neutral-900"
       style={{ zIndex: VIEWER_Z_INDEX }}
     >

@@ -8,11 +8,15 @@ import { BrandLoader } from "@/components/ui/BrandLoader";
  * for however long it took to fetch that route's JS/RSC payload, instead of
  * instant feedback. This alone doesn't make data fetching faster — it makes
  * the wait feel like zero instead of like a stall.
+ * The loader fades in after a beat (`route-pending`, app/globals.css), so a
+ * quick load never flashes it.
  */
 export default function DashboardLoading() {
   return (
     <div className="flex h-full min-h-[50vh] w-full items-center justify-center">
-      <BrandLoader />
+      <div className="route-pending">
+        <BrandLoader />
+      </div>
     </div>
   );
 }

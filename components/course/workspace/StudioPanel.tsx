@@ -907,12 +907,16 @@ export function StudioPanel({
 
       <div className="relative flex-1 overflow-hidden">
         <div className={cn("h-full overflow-y-auto", openedSection && detailBg)}>
+          {/* Keyed views: the section view and the browse grid are both divs
+              in one slot, so without keys React would reuse one for the other
+              and the grid's motion-swap entrance (app/globals.css) would never
+              play when the student comes back to it. */}
           {openedSection ? (
             isSectionExpanded ? null : (
               // text-select-stable — see its own comment in app/globals.css:
               // fixes a sub-pixel blur on text selection under this panel's
               // own Framer Motion (motion.*) ancestors' transform.
-              <div ref={containerRef} data-selectable className="text-select-stable p-2 md:p-4">
+              <div key="section" ref={containerRef} data-selectable className="text-select-stable p-2 md:p-4">
                 {children}
               </div>
             )
@@ -931,7 +935,7 @@ export function StudioPanel({
               </motion.div>
             )
           ) : (
-            <div className={cn("space-y-3 p-2 pb-20 md:space-y-6 md:p-4 md:pb-24", isCollapsed && "px-2")}>
+            <div key="browse" className={cn("motion-swap space-y-3 p-2 pb-20 md:space-y-6 md:p-4 md:pb-24", isCollapsed && "px-2")}>
               <div className={cn("grid gap-1.5 md:gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-2")}>
                 {sections.map((section) => {
                   const Icon = section.icon;
@@ -1336,8 +1340,9 @@ export function StudioPanel({
               <p className="px-4 pt-3 text-sm font-semibold text-foreground">Nouvelle note</p>
             )}
 
+            {/* Écrire ↔ Aperçu: each side settles in instead of swapping in one frame. */}
             {isNotePreview ? (
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              <div className="motion-swap min-h-0 flex-1 overflow-y-auto px-4 py-3">
                 {noteContent.trim() ? (
                   <div ref={notePreviewRef} className={cn(isDarkTheme ? DARK_PROSE_CLASSES : PROSE_CLASSES, "prose-base md:prose-base max-w-none md:max-w-none")}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDarkTheme ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
@@ -1361,7 +1366,7 @@ export function StudioPanel({
                 }}
                 placeholder={tStudio("notePlaceholder", language)}
                 autoFocus
-                className="text-reading min-h-0 flex-1 resize-none bg-transparent p-4 text-foreground outline-none placeholder:text-muted-foreground"
+                className="text-reading min-h-0 flex-1 resize-none bg-transparent p-4 text-foreground outline-none animate-in fade-in-0 duration-300 placeholder:text-muted-foreground"
               />
             )}
 

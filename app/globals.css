@@ -465,22 +465,91 @@
   }
 }
 
-/* Respect the OS-level "reduce motion" preference. The aurora/mesh backdrops
-   (animate-mesh-pulse, aurora-breathe, sidebar-wave) and the app's various
-   fade-in/float/shimmer micro-interactions all opt out through this single
-   media query rather than needing a `motion-safe:` prefix hand-added to every
-   animation utility on every component. No visible effect for the vast
-   majority of users; for anyone with vestibular/motion sensitivity it
-   collapses every animation and transition to effectively instant, in line
-   with this app's "confort visuel, zéro fatigue" goal. */
+/* ---------------------------------------------------------------------
+   MOTION TOKENS — the physics every animation in the app is cut from (the
+   JavaScript half lives in lib/motion.ts).
+
+   --ease-glide   quick start, long soft landing: fades, small arrivals.
+   --ease-exit    accelerates away: everything that leaves.
+   --ease-spring  damped spring (damping 0.82, ~1% overshoot): pages and
+                  dialogs — a mass that settles, not a curve that stops.
+   --ease-bloom   livelier spring (damping 0.68, ~5%): menus, the dock.
+   --ease-sheet   critically damped spring: bottom sheets — heavy, no
+                  bounce (an overshoot would lift them off the screen edge).
+   The springs are real damped-spring step responses sampled into
+   linear(); browsers without linear() keep the cubic-bezier fallbacks.
+
+   --motion-travel and --motion-zoom multiply every distance and every
+   scale change in the keyframes below. Calm motion sets both to 0.
+   --------------------------------------------------------------------- */
+:root {
+  --ease-glide: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.22, 1.08, 0.36, 1);
+  --ease-bloom: cubic-bezier(0.34, 1.32, 0.64, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-travel: 1;
+  --motion-zoom: 1;
+}
+
+@supports (animation-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: linear(0, 0.0251, 0.0882, 0.1737, 0.2705, 0.3703, 0.4674, 0.5581, 0.6402, 0.7127, 0.7751, 0.8279, 0.8717, 0.9073, 0.9357, 0.9579, 0.9749, 0.9876, 0.9967, 1.003, 1.0072, 1.0096, 1.0108, 1.0111, 1.0108, 1.0101, 1.0091, 1.008, 1.0069, 1.0058, 1.0048, 1.0039, 1.0031, 1.0024, 1.0019, 1.0014, 1);
+    --ease-bloom: linear(0, 0.0298, 0.1053, 0.2087, 0.3259, 0.4463, 0.562, 0.668, 0.7612, 0.8402, 0.9047, 0.9554, 0.9936, 1.0208, 1.0387, 1.0491, 1.0537, 1.0539, 1.051, 1.0461, 1.0401, 1.0336, 1.0271, 1.021, 1.0156, 1.0109, 1.007, 1.0038, 1.0014, 0.9996, 0.9984, 0.9976, 0.9972, 0.9971, 0.9971, 0.9973, 0.9976, 0.998, 0.9983, 0.9987, 1);
+    --ease-sheet: linear(0, 0.0344, 0.1144, 0.215, 0.3207, 0.4228, 0.5164, 0.5993, 0.671, 0.732, 0.7831, 0.8254, 0.8601, 0.8884, 0.9113, 0.9297, 0.9445, 0.9562, 0.9656, 0.973, 0.9789, 0.9835, 0.9871, 0.99, 0.9922, 0.9939, 0.9953, 0.9964, 0.9972, 0.9978, 0.9983, 0.9987, 1);
+  }
+}
+
+/* CALM MOTION — the OS-level "reduce motion" preference: iOS Reduce Motion,
+   Android's "Remove animations", animations switched off in Android's
+   developer options or by a battery saver. This used to collapse every
+   animation and transition to 0.01ms, so on those phones every page, menu
+   and sheet popped in and out in a single frame. Reducing motion means no
+   movement, not no transition — the platforms themselves swap their slides
+   and zooms for cross-fades. Here, likewise, everything still fades in and
+   out, but nothing travels, zooms, bounces or loops for decoration.
+   Progress spinners and skeleton pulses are feedback, not decoration: they
+   keep going. framer-motion follows the same rule through
+   <MotionConfig reducedMotion="user"> (providers/RouteMotionProvider.tsx). */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-travel: 0;
+    --motion-zoom: 0;
+  }
+
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* tailwindcss-animate (animate-in / animate-out): the fade stays, the slide and the zoom go. */
+  .animate-in,
+  .animate-out {
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-enter-scale: 1 !important;
+    --tw-enter-rotate: 0 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    --tw-exit-scale: 1 !important;
+    --tw-exit-rotate: 0 !important;
+  }
+
+  .animate-bounce,
+  .animate-ping,
+  .animate-float,
+  .animate-mascot-wave,
+  .animate-flame-flicker,
+  .animate-dash-flow,
+  .animate-aurora-breathe,
+  .animate-sidebar-wave,
+  .animate-mesh-pulse,
+  .animate-ring-pulse,
+  .animate-shimmer,
+  .avatar-halo::before,
+  .avatar-halo::after {
+    animation: none !important;
   }
 }
 
@@ -710,24 +779,15 @@ textarea,
   -webkit-tap-highlight-color: transparent;
 }
 /* Landing hero entrance — pure CSS, so it runs from the first paint of the
-   server HTML instead of waiting for JavaScript to hydrate. */
+   server HTML instead of waiting for JavaScript to hydrate. Calm motion: a fade only. */
 @keyframes hero-rise {
   from {
     opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
+    translate: 0 calc(12px * var(--motion-travel));
   }
 }
 .hero-rise {
-  animation: hero-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero-rise {
-    animation: none;
-  }
+  animation: hero-rise 0.5s var(--ease-glide) both;
 }
 
 /* The touch half of the tap-flash rule above. `:not(:focus-visible)` raises
@@ -810,167 +870,505 @@ textarea,
   transform: translate(-50%, -50%);
 }
 
-/* Bottom-sheet entrance for mobile sheets (Dialog, group drawers). */
-@keyframes sheet-slide-up {
-  from {
-    transform: translate3d(0, 100%, 0);
-  }
-  to {
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes sheet-slide-down {
-  to {
-    transform: translate3d(0, 100%, 0);
-  }
-}
-
 /* ---------------------------------------------------------------------
-   MOTION SYSTEM — one unhurried language for everything that appears.
-   Entrances glide (quick start, long soft landing: cubic-bezier(0.22, 1,
-   0.36, 1)) over 0.3–0.5s; exits are shorter and accelerate away. Opacity
-   and the standalone `translate` / `scale` properties only — never
-   `transform`, which components own (dialog centering, Tailwind translate
-   utilities, framer-motion). The prefers-reduced-motion rule above
-   collapses all of it to instant.
+   MOTION SYSTEM — one physical language for everything that appears,
+   cut from the MOTION TOKENS above. House rules:
+   - Nothing pops. Entrances fade in quickly while they travel on a
+     spring; exits are shorter and accelerate away.
+   - Opacity and the standalone `translate` / `scale` properties only —
+     never `transform`, which components own (dialog centering, Tailwind
+     translate utilities, the sheet's swipe gesture, framer-motion). These
+     run on the compositor: they keep their frame rate while React is busy
+     mounting the very page or dialog that is appearing.
+   - Every distance is multiplied by --motion-travel and every scale change
+     by --motion-zoom, so calm motion keeps the fades and nothing else.
    --------------------------------------------------------------------- */
 
-/* Dialog (components/ui/Dialog.tsx): the overlay fades instead of popping;
-   on close Radix keeps the dialog mounted until its exit animation ends. */
-@keyframes dialog-overlay-in {
+@keyframes motion-fade-in {
   from {
     opacity: 0;
   }
 }
 
-@keyframes dialog-overlay-out {
+@keyframes motion-fade-out {
   to {
     opacity: 0;
+  }
+}
+
+/* Routes (lib/motion.ts). The current page steps back the moment a
+   navigation starts, before the next page has loaded: the shell's pages in
+   their stage (components/layout/PageTransition.tsx), the other dashboard
+   areas as a whole (app/dashboard/template.tsx). Nothing transitions at
+   rest, so when the new page lands and the attribute goes, nothing snaps
+   back: the new page's own entrance (Web Animations API) takes over. */
+.route-stage[data-route-leave],
+.route-area[data-route-leave] {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 180ms var(--ease-exit),
+    translate 220ms var(--ease-exit),
+    scale 220ms var(--ease-exit);
+}
+
+.route-stage[data-route-leave="peer"],
+.route-area[data-route-leave="peer"] {
+  scale: calc(1 - 0.015 * var(--motion-zoom));
+}
+
+.route-stage[data-route-leave="forward"],
+.route-area[data-route-leave="forward"] {
+  translate: calc(-24px * var(--motion-travel)) 0;
+}
+
+.route-stage[data-route-leave="back"],
+.route-area[data-route-leave="back"] {
+  translate: calc(24px * var(--motion-travel)) 0;
+}
+
+/* A dashboard area opening (app/dashboard/template.tsx) — a module's
+   workspace, an exam, the shell coming back — opens like an app. */
+@keyframes route-area-zoom {
+  from {
+    scale: calc(1 - 0.03 * var(--motion-zoom));
+  }
+}
+
+.route-area {
+  animation:
+    motion-fade-in 320ms var(--ease-glide) backwards,
+    route-area-zoom 700ms var(--ease-spring) backwards;
+}
+
+/* Loading states (loading.tsx files): invisible for a beat, then they fade
+   in — a page that lands quickly never flashes a skeleton or a loader. */
+.route-pending {
+  animation: motion-fade-in 320ms var(--ease-glide) 240ms backwards;
+}
+
+/* A navigation still loading after 220ms: a light sweeps along the top
+   edge (components/layout/RouteProgress.tsx) — the launch loader's bar. */
+.route-progress {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  left: 0;
+  right: 0;
+  z-index: 2147482000;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms var(--ease-glide);
+}
+
+.route-progress[data-active="true"] {
+  opacity: 1;
+  transition-delay: 220ms;
+}
+
+.route-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #22d3ee, #0ea5e9, #8b5cf6);
+  box-shadow: 0 0 12px rgb(34 211 238 / 0.7);
+  translate: -100% 0;
+}
+
+.route-progress[data-active="true"] .route-progress-bar {
+  animation: route-progress-sweep 1.1s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes route-progress-sweep {
+  to {
+    translate: 250% 0;
+  }
+}
+
+/* Every glass surface (cards, panels) settles in when it appears — after a
+   load, a tab switch, a filter. Elements running their own animation
+   (skeleton pulses, animate-in…) keep it. */
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    translate: 0 calc(8px * var(--motion-travel));
+  }
+}
+
+.glass-card:not([class*="animate-"]),
+.cyber-glass:not([class*="animate-"]) {
+  animation: surface-in 500ms var(--ease-spring) backwards;
+}
+
+/* A page's top-level sections rise in one after another when they appear —
+   on arrival, and again when the page swaps a skeleton for its content.
+   After the surface rule (same specificity), so a section that is itself a
+   glass card follows the cascade. */
+@keyframes section-rise {
+  from {
+    opacity: 0;
+    translate: 0 calc(14px * var(--motion-travel));
+  }
+}
+
+.page-reveal > * > *:not([class*="animate-"]) {
+  animation: section-rise 600ms var(--ease-spring) backwards;
+}
+
+.page-reveal > * > *:nth-child(2):not([class*="animate-"]) {
+  animation-delay: 60ms;
+}
+
+.page-reveal > * > *:nth-child(3):not([class*="animate-"]) {
+  animation-delay: 120ms;
+}
+
+.page-reveal > * > *:nth-child(4):not([class*="animate-"]) {
+  animation-delay: 180ms;
+}
+
+.page-reveal > * > *:nth-child(n + 5):not([class*="animate-"]) {
+  animation-delay: 240ms;
+}
+
+/* The next flashcard is dealt onto the table (components/study/
+   FlipFlashcard.tsx, one mount per card): it rises and grows into place on
+   the lively spring. */
+@keyframes card-deal {
+  from {
+    translate: 0 calc(18px * var(--motion-travel));
+    scale: calc(1 - 0.05 * var(--motion-zoom));
+  }
+}
+
+.card-deal {
+  animation:
+    motion-fade-in 220ms var(--ease-glide),
+    card-deal 560ms var(--ease-bloom);
+}
+
+/* An in-page view switch (a tab, a mode, an editor replacing a list): the
+   swapped block carries `motion-swap` and a React key that changes with the
+   view, so each new view settles in like a section. */
+.motion-swap {
+  animation: section-rise 520ms var(--ease-spring) backwards;
+}
+
+/* Native disclosures (<details>): the content settles in as it opens; where
+   the browser can animate to a height of auto (::details-content), the box
+   also unfolds and folds back instead of snapping. */
+details[open] > :not(summary) {
+  animation: section-rise 420ms var(--ease-spring) backwards;
+}
+
+/* Two nested blocks, not one `and` condition: autoprefixer crashes on
+   `(…) and selector(…)` ("Unknown node type in node creation"). */
+@supports selector(::details-content) {
+  @supports (interpolate-size: allow-keywords) {
+    details {
+      interpolate-size: allow-keywords;
+    }
+
+    details::details-content {
+      block-size: 0;
+      overflow: clip;
+      transition:
+        block-size 380ms var(--ease-glide),
+        content-visibility 380ms allow-discrete;
+    }
+
+    details[open]::details-content {
+      block-size: auto;
+    }
+  }
+}
+
+/* Dialogs (components/ui/Dialog.tsx, the paywall): the backdrop fades while
+   the dialog rises out of it on the soft spring; on close Radix keeps both
+   mounted until their exit ends. */
+@keyframes dialog-rise {
+  from {
+    scale: calc(1 - 0.06 * var(--motion-zoom));
+    translate: 0 calc(18px * var(--motion-travel));
   }
 }
 
 @keyframes dialog-out {
   to {
     opacity: 0;
-    scale: 0.96;
-    translate: 0 8px;
+    scale: calc(1 - 0.04 * var(--motion-zoom));
+    translate: 0 calc(10px * var(--motion-travel));
   }
 }
 
 .dialog-overlay[data-state="open"] {
-  animation: dialog-overlay-in 320ms ease-out;
+  animation: motion-fade-in 380ms var(--ease-glide);
 }
 
 .dialog-overlay[data-state="closed"] {
-  animation: dialog-overlay-out 240ms ease-in forwards;
+  animation: motion-fade-out 280ms var(--ease-exit) forwards;
+}
+
+.dialog-content[data-state="open"] {
+  animation:
+    motion-fade-in 240ms var(--ease-glide),
+    dialog-rise 620ms var(--ease-spring);
 }
 
 .dialog-content[data-state="closed"] {
-  animation: dialog-out 220ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: dialog-out 220ms var(--ease-exit) forwards;
 }
 
-@media (prefers-reduced-motion: no-preference) and (max-width: 639px) {
-  .sheet-enter {
-    animation: sheet-slide-up 420ms cubic-bezier(0.32, 0.72, 0, 1);
+/* Below sm a dialog is a bottom sheet: it rises from the screen edge with
+   weight — the critically damped spring, no bounce — and falls back on
+   close. After the dialog rules, which it replaces there. */
+@keyframes sheet-rise {
+  from {
+    translate: 0 calc(100% * var(--motion-travel));
+  }
+}
+
+@keyframes sheet-drop {
+  to {
+    translate: 0 calc(100% * var(--motion-travel));
+  }
+}
+
+@media (max-width: 639px) {
+  .sheet-enter[data-state="open"] {
+    animation:
+      motion-fade-in 200ms var(--ease-glide),
+      sheet-rise 640ms var(--ease-sheet);
   }
 
-  /* After the rule above: the sheet slides back down when it closes. */
   .sheet-enter[data-state="closed"] {
-    animation: sheet-slide-down 280ms cubic-bezier(0.32, 0, 0.67, 0) forwards;
+    animation:
+      sheet-drop 320ms cubic-bezier(0.32, 0, 0.67, 0) forwards,
+      motion-fade-out 320ms var(--ease-exit) forwards;
   }
 }
 
-/* Menus, selects and tooltips (Radix popper content): the same glide instead
-   of tailwindcss-animate's 150ms pop. One attribute more specific than the
-   data-state classes those components carry, so this timing wins and their
-   fade / zoom / slide keyframes stay. */
-[data-radix-popper-content-wrapper] > [data-side][data-state="open"],
+/* A bar that appears on the bottom edge (the exam's progress bar) rises
+   from it the way a sheet does. */
+.edge-rise {
+  animation:
+    motion-fade-in 240ms var(--ease-glide),
+    sheet-rise 560ms var(--ease-sheet);
+}
+
+/* The paywall (components/billing/PaywallModal.tsx): a full-screen Content
+   holding one card — a sheet on phones, a dialog from sm up. The Content
+   fades on close (Radix waits for it) and the card leaves with it. */
+.paywall-content[data-state="closed"] {
+  pointer-events: none;
+  animation: motion-fade-out 300ms var(--ease-exit) forwards;
+}
+
+.paywall-content[data-state="open"] > .paywall-card {
+  animation:
+    motion-fade-in 240ms var(--ease-glide),
+    dialog-rise 620ms var(--ease-spring);
+}
+
+.paywall-content[data-state="closed"] > .paywall-card {
+  animation: dialog-out 220ms var(--ease-exit) forwards;
+}
+
+@media (max-width: 639px) {
+  .paywall-content[data-state="open"] > .paywall-card {
+    animation:
+      motion-fade-in 200ms var(--ease-glide),
+      sheet-rise 640ms var(--ease-sheet);
+  }
+
+  .paywall-content[data-state="closed"] > .paywall-card {
+    animation: sheet-drop 300ms cubic-bezier(0.32, 0, 0.67, 0) forwards;
+  }
+}
+
+/* Menus, selects and tooltips (Radix popper content) bloom out of the
+   button that opened them — Radix's computed transform origin — on the
+   lively spring, and fold back quicker. One attribute more specific than
+   the tailwindcss-animate classes those components carry. */
+@keyframes popper-bloom {
+  from {
+    scale: calc(1 - 0.1 * var(--motion-zoom));
+    translate: calc(var(--popper-dx, 0px) * var(--motion-travel)) calc(var(--popper-dy, 0px) * var(--motion-travel));
+  }
+}
+
+@keyframes popper-out {
+  to {
+    opacity: 0;
+    scale: calc(1 - 0.05 * var(--motion-zoom));
+  }
+}
+
+[data-radix-popper-content-wrapper] > [data-side] {
+  transform-origin: var(--radix-popper-transform-origin);
+}
+
+[data-radix-popper-content-wrapper] > [data-side="bottom"] {
+  --popper-dy: -8px;
+}
+
+[data-radix-popper-content-wrapper] > [data-side="top"] {
+  --popper-dy: 8px;
+}
+
+[data-radix-popper-content-wrapper] > [data-side="left"] {
+  --popper-dx: 8px;
+}
+
+[data-radix-popper-content-wrapper] > [data-side="right"] {
+  --popper-dx: -8px;
+}
+
+[data-radix-popper-content-wrapper] > [data-side][data-state="open"] {
+  animation:
+    motion-fade-in 200ms var(--ease-glide),
+    popper-bloom 520ms var(--ease-bloom);
+}
+
+/* Tooltips (their open states are delayed-open / instant-open): the same
+   origin, a quieter arrival — a hint shouldn't bounce. */
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    scale: calc(1 - 0.04 * var(--motion-zoom));
+    translate: calc(var(--popper-dx, 0px) * 0.5 * var(--motion-travel)) calc(var(--popper-dy, 0px) * 0.5 * var(--motion-travel));
+  }
+}
+
 [data-radix-popper-content-wrapper] > [data-side][data-state="delayed-open"],
 [data-radix-popper-content-wrapper] > [data-side][data-state="instant-open"] {
-  animation-duration: 300ms;
-  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation: tooltip-in 280ms var(--ease-glide);
 }
 
 [data-radix-popper-content-wrapper] > [data-side][data-state="closed"] {
-  animation-duration: 180ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  animation: popper-out 170ms var(--ease-exit) forwards;
 }
 
-/* Every glass surface (cards, panels) settles in when it appears — after a
-   load, a tab switch, a filter — instead of popping onto the screen.
-   Elements running their own animation (skeleton pulses, animate-in…) keep it. */
-@keyframes surface-in {
+/* ...and their items cascade in behind the bloom. */
+@keyframes popper-item-in {
   from {
     opacity: 0;
-    translate: 0 8px;
+    translate: 0 calc(5px * var(--motion-travel));
   }
 }
 
-.glass-card:not([class*="animate-"]),
-.cyber-glass:not([class*="animate-"]) {
-  animation: surface-in 460ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+[data-radix-popper-content-wrapper] > [role="menu"][data-state="open"] > *,
+[data-radix-popper-content-wrapper] [data-radix-select-viewport] > * {
+  animation: popper-item-in 380ms var(--ease-glide) backwards;
 }
 
-/* A new page (components/layout/PageTransition.tsx): its top-level sections
-   rise in one after another. Only when the page mounts — nothing inside a
-   page replays. After the surface rule, so a section that is itself a glass
-   card follows the cascade. */
-@keyframes section-rise {
-  from {
-    opacity: 0;
-    translate: 0 14px;
+[data-radix-popper-content-wrapper] > [role="menu"][data-state="open"] > :nth-child(2),
+[data-radix-popper-content-wrapper] [data-radix-select-viewport] > :nth-child(2) {
+  animation-delay: 20ms;
+}
+
+[data-radix-popper-content-wrapper] > [role="menu"][data-state="open"] > :nth-child(3),
+[data-radix-popper-content-wrapper] [data-radix-select-viewport] > :nth-child(3) {
+  animation-delay: 40ms;
+}
+
+[data-radix-popper-content-wrapper] > [role="menu"][data-state="open"] > :nth-child(4),
+[data-radix-popper-content-wrapper] [data-radix-select-viewport] > :nth-child(4) {
+  animation-delay: 60ms;
+}
+
+[data-radix-popper-content-wrapper] > [role="menu"][data-state="open"] > :nth-child(5),
+[data-radix-popper-content-wrapper] [data-radix-select-viewport] > :nth-child(5) {
+  animation-delay: 80ms;
+}
+
+[data-radix-popper-content-wrapper] > [role="menu"][data-state="open"] > :nth-child(n + 6),
+[data-radix-popper-content-wrapper] [data-radix-select-viewport] > :nth-child(n + 6) {
+  animation-delay: 100ms;
+}
+
+/* The dock (components/layout/MobileBottomNav.tsx): one highlight pill for
+   the whole bar glides to the tapped tab on the lively spring, and the
+   tapped icon lifts a hair. Calm motion: a short glide, no lift. */
+.dock-indicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0.25rem;
+  width: calc((100% - 0.5rem) / var(--dock-count, 5));
+  translate: calc(var(--dock-index, 0) * 100%) 0;
+  transition:
+    translate 560ms var(--ease-bloom),
+    opacity 240ms var(--ease-glide);
+  pointer-events: none;
+}
+
+.dock-indicator[data-visible="false"] {
+  opacity: 0;
+}
+
+.dock-tab-icon {
+  transition:
+    translate 460ms var(--ease-bloom),
+    scale 460ms var(--ease-bloom),
+    color 300ms var(--ease-glide);
+}
+
+[data-active="true"] > .dock-tab-icon {
+  translate: 0 calc(-1.5px * var(--motion-travel));
+  scale: calc(1 + 0.08 * var(--motion-zoom));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-indicator {
+    transition:
+      translate 200ms var(--ease-glide),
+      opacity 240ms var(--ease-glide);
   }
 }
 
-.page-reveal > * > *:not([class*="animate-"]) {
-  animation: section-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
-}
-
-.page-reveal > * > *:nth-child(2):not([class*="animate-"]) {
-  animation-delay: 70ms;
-}
-
-.page-reveal > * > *:nth-child(3):not([class*="animate-"]) {
-  animation-delay: 140ms;
-}
-
-.page-reveal > * > *:nth-child(4):not([class*="animate-"]) {
-  animation-delay: 210ms;
-}
-
-.page-reveal > * > *:nth-child(n + 5):not([class*="animate-"]) {
-  animation-delay: 280ms;
+/* Theme switch (components/layout/cockpit/ThemeModeSwitcher.tsx): the new
+   theme spreads out in a circle from the control that asked for it — a View
+   Transition with its default cross-fade turned off, the circle drawn from
+   JavaScript. Calm motion keeps the cross-fade (no class, no circle). */
+html.theme-reveal::view-transition-old(root),
+html.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
 /* Full-screen readers (components/ui/FullscreenViewerModal.tsx) glide up in
-   and drop away out, instead of appearing and vanishing in one frame. */
+   and drop away out. */
 @keyframes viewer-in {
   from {
-    opacity: 0;
-    translate: 0 24px;
+    translate: 0 calc(28px * var(--motion-travel));
+    scale: calc(1 - 0.02 * var(--motion-zoom));
   }
 }
 
 @keyframes viewer-out {
   to {
     opacity: 0;
-    translate: 0 16px;
+    translate: 0 calc(16px * var(--motion-travel));
   }
 }
 
 .viewer-enter {
-  animation: viewer-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation:
+    motion-fade-in 280ms var(--ease-glide),
+    viewer-in 620ms var(--ease-spring);
 }
 
 .viewer-exit {
-  animation: viewer-out 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: viewer-out 240ms var(--ease-exit) forwards;
 }
 
-/* The assistant on phones is portaled full screen, outside PageTransition:
-   it fades in over the page it was opened from. */
+/* The assistant on phones is portaled full screen, outside the route
+   stage: it fades in over the page it was opened from. */
 .copilot-enter {
-  animation: dialog-overlay-in 360ms ease-out;
+  animation: motion-fade-in 360ms var(--ease-glide);
 }
 
 /* MedArt Assistant streaming: each newly arrived word fades in. Opacity only —

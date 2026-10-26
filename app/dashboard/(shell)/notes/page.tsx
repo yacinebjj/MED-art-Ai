@@ -558,13 +558,17 @@ function NotesPageContent() {
             </div>
 
             <div className="cyber-scrollbar mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+              {/* Loader after a beat (route-pending), then each state settles in
+                  (motion-swap, app/globals.css). The list's AnimatePresence
+                  mounts with it, so it doesn't animate the first cards itself:
+                  the whole list rises in instead. */}
               {loading ? (
-                <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+                <div className="route-pending flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
                   <BrandLoader className="h-6 w-6" />
                   {tNotes("loading", language)}
                 </div>
               ) : notes.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 px-3 py-10 text-center">
+                <div className="motion-swap flex flex-col items-center gap-3 px-3 py-10 text-center">
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-400/10 text-cyan-200 ring-1 ring-inset ring-cyan-400/30">
                     <NotebookPen className="h-5 w-5" />
                   </div>
@@ -574,8 +578,9 @@ function NotesPageContent() {
                   </div>
                 </div>
               ) : filteredNotes.length === 0 ? (
-                <p className="px-3 py-10 text-center text-xs text-slate-500">{tNotes("noSearchResults", language)}</p>
+                <p className="motion-swap px-3 py-10 text-center text-xs text-slate-500">{tNotes("noSearchResults", language)}</p>
               ) : (
+                <div className="motion-swap space-y-2">
                 <AnimatePresence initial={false}>
                   {filteredNotes.map((note) => {
                     const plain = plainById.get(note.id) ?? "";
@@ -595,6 +600,7 @@ function NotesPageContent() {
                     );
                   })}
                 </AnimatePresence>
+                </div>
               )}
             </div>
           </CyberPanel>
@@ -615,7 +621,7 @@ function NotesPageContent() {
           className={cn("h-full min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6", !selectedId && "hidden md:flex", selectedId && "flex")}
         >
           {!selectedNote ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+            <div className="motion-swap flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
               <div className="relative flex items-center justify-center">
                 <span aria-hidden className="cyber-breathe absolute inset-2 rounded-full bg-[radial-gradient(closest-side,rgba(34,211,238,0.22),transparent)]" />
                 <GlassArt name="notes" size={128} className="relative h-28 w-28 animate-float motion-reduce:animate-none" />

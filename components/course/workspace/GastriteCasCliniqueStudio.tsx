@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
   Stethoscope,
@@ -244,9 +244,14 @@ function Accordion({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(!!defaultOpen);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // Closed, the body stays mounted (so it can fold away) but out of reach of focus and assistive tech.
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.inert = !open;
+  }, [open]);
   return (
     <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
-      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between gap-3 p-4 text-left">
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center justify-between gap-3 p-4 text-left">
         <div className="flex items-center gap-3">
           <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0", ACTE_COLOR_CHIP[color])}>
             <Icon className="w-4 h-4" />
@@ -255,7 +260,15 @@ function Accordion({
         </div>
         <ChevronDown className={cn("w-5 h-5 text-slate-400 transition-transform duration-300 shrink-0", open && "rotate-180")} />
       </button>
-      {open && <div className="px-4 pb-4 space-y-3">{children}</div>}
+      {/* grid-template-rows 0fr ↔ 1fr: unfolds and folds back, no height measuring (same as the to-do's SectionAccordion). */}
+      <div
+        className={cn("grid transition-[grid-template-rows,opacity] duration-300 ease-out", open ? "opacity-100" : "opacity-0")}
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+      >
+        <div ref={bodyRef} className="min-h-0 overflow-hidden">
+          <div className="px-4 pb-4 space-y-3">{children}</div>
+        </div>
+      </div>
     </div>
   );
 }

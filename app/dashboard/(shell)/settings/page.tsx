@@ -299,13 +299,14 @@ function SettingsHub() {
         </div>
       </div>
 
+      {/* The loader only shows after a beat (route-pending); the form settles in (motion-swap) — app/globals.css. */}
       {!ready ? (
-        <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-slate-400">
+        <div className="route-pending flex flex-col items-center justify-center gap-2 py-16 text-sm text-slate-400">
           <BrandLoader className="h-6 w-6" />
           Chargement de ton profil...
         </div>
       ) : (
-        <form className="space-y-5" onSubmit={handleSubmit}>
+        <form className="motion-swap space-y-5" onSubmit={handleSubmit}>
           {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
 
           <div>

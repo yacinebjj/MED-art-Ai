@@ -6,6 +6,8 @@ import { ChunkErrorRecovery } from "@/components/pwa/ChunkErrorRecovery";
 import { PaywallProvider } from "@/components/billing/PaywallProvider";
 import { DeviceGuard } from "@/components/security/DeviceGuard";
 import { OnboardingProvider } from "@/lib/onboarding/onboarding-context";
+import { RouteMotionProvider } from "@/providers/RouteMotionProvider";
+import { RouteProgress } from "@/components/layout/RouteProgress";
 
 /**
  * Root layout for everything under /dashboard/**. Deliberately minimal —
@@ -20,14 +22,17 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthProvider>
-      <PomodoroAuthSync />
-      <PomodoroAnnouncer />
-      <LanguageStoreHydrator />
-      <ChunkErrorRecovery />
-      <PaywallProvider>
-        <OnboardingProvider>{children}</OnboardingProvider>
-        <DeviceGuard />
-      </PaywallProvider>
+      <RouteMotionProvider>
+        <PomodoroAuthSync />
+        <PomodoroAnnouncer />
+        <LanguageStoreHydrator />
+        <ChunkErrorRecovery />
+        <RouteProgress />
+        <PaywallProvider>
+          <OnboardingProvider>{children}</OnboardingProvider>
+          <DeviceGuard />
+        </PaywallProvider>
+      </RouteMotionProvider>
     </AuthProvider>
   );
 }

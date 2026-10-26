@@ -2,10 +2,8 @@
 
 import { ComponentPropsWithoutRef, ElementRef, forwardRef, useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { motion } from "framer-motion";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -30,26 +28,21 @@ const DISMISS_VELOCITY_PX_PER_MS = 0.5;
 const SHEET_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
 /**
- * The spring entrance lives on a NESTED motion.div, not on
- * DialogPrimitive.Content itself: Framer Motion's animated x/y/scale compile
- * to a single inline `transform`, which would silently clobber the
- * `-translate-x-1/2 -translate-y-1/2` Tailwind classes Content uses for
- * centering (inline style always wins over a class targeting the same
- * property) — nesting keeps Content's centering transform and the motion
- * div's spring transform on two separate elements so neither overwrites the
- * other. Radix mounts Content fresh on every open, which is all `initial` ->
- * `animate` needs to replay the spring each time. The close is CSS: on
- * `data-state="closed"` the .dialog-content / .sheet-enter rules
- * (app/globals.css) run a short exit animation, and Radix keeps Content and
- * the overlay mounted until it ends — no more instant vanish. The centered
- * exit animates `opacity` and the standalone `scale` property only, never
- * `transform`, so the centering stays put while it fades.
+ * Entrance and exit are CSS (the .dialog-overlay / .dialog-content /
+ * .sheet-enter rules, app/globals.css MOTION SYSTEM): the dialog rises out
+ * of its backdrop on a soft spring, the sheet rises from the screen edge on
+ * a heavy, bounce-free one, and on `data-state="closed"` Radix keeps Content
+ * and the overlay mounted until their exit animation ends. They animate
+ * opacity and the standalone `translate` / `scale` properties only — never
+ * `transform`, so the `-translate-x-1/2 -translate-y-1/2` centering stays
+ * put. CSS animations run on the compositor: the entrance keeps its frame
+ * rate while React mounts the dialog's content (the framer-motion spring
+ * this replaced ran on the main thread and lost exactly those frames).
  *
  * Below `sm` (unless `sheetOnMobile={false}`) Content is a bottom sheet
  * instead. Its layout comes from `max-sm:` classes, not JS, so it never
  * flashes centered first; the swipe gesture writes Content's inline
- * transform directly, which is safe because the sheet has no centering
- * transform to clobber.
+ * transform directly, which composes with the animated `translate`.
  */
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
@@ -60,9 +53,6 @@ export const DialogContent = forwardRef<
     sheetOnMobile?: boolean;
   }
 >(({ className, overlayClassName, onOverlayClick, sheetOnMobile = true, children, ...props }, forwardedRef) => {
-  const isMobile = useMediaQuery("(max-width: 639px)");
-  const isSheet = sheetOnMobile && isMobile;
-
   const contentRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
@@ -150,25 +140,15 @@ export const DialogContent = forwardRef<
         {...props}
       >
         {/* Mostly unstyled (no width/border/padding here) so it never fights
-            the sizing/chrome classes callers pass via `className` above,
-            which stay on Content itself exactly as before this animation was
-            added. `flex h-full min-h-0 flex-col` is the one addition: it lets
-            a caller's own flex-height content (e.g. a full-screen viewer's
-            full-screen layout) actually stretch to fill Content — without it,
-            this div's height falls back to fitting its children instead of
-            Content's explicit height. It's a no-op for every other caller,
-            since Content only has an explicit height when the caller sets
-            one; otherwise Content sizes to content and percentage heights
-            here just resolve to auto. */}
-        {/* The app's glide (app/globals.css MOTION SYSTEM): unhurried, no bounce. */}
-        <motion.div
-          className="flex h-full min-h-0 flex-col"
-          initial={isSheet ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 14 }}
-          animate={isSheet ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
-          transition={isSheet ? { duration: 0.32, ease: "easeOut" } : { duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
-        >
-          {children}
-        </motion.div>
+            the sizing/chrome classes callers pass via `className` above.
+            `flex h-full min-h-0 flex-col` lets a caller's own flex-height
+            content (e.g. a full-screen viewer's full-screen layout) actually
+            stretch to fill Content — without it, this div's height falls back
+            to fitting its children instead of Content's explicit height. It's
+            a no-op for every other caller, since Content only has an explicit
+            height when the caller sets one; otherwise Content sizes to
+            content and percentage heights here just resolve to auto. */}
+        <div className="flex h-full min-h-0 flex-col">{children}</div>
         {sheetOnMobile && <div aria-hidden className="h-[env(safe-area-inset-bottom)] shrink-0 sm:hidden" />}
         {sheetOnMobile && (
           // Centered and narrower than the sheet so it never covers the close button.

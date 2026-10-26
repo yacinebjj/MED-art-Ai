@@ -805,8 +805,9 @@ export function AnalogyCanvas({ courseId, markdown, fallback }: { courseId: numb
         </div>
       )}
 
+      {/* Each view settles in when the tablist switches to it (motion-swap, app/globals.css). */}
       {view === "cards" && (
-        <div className="space-y-3">
+        <div className="motion-swap space-y-3">
           {sections.map((section) => (
             <AnalogyCard
               key={section.id}
@@ -833,7 +834,7 @@ export function AnalogyCanvas({ courseId, markdown, fallback }: { courseId: numb
       )}
 
       {view === "focus" && focusSection && (
-        <div className="space-y-3">
+        <div className="motion-swap space-y-3">
           {/* Segmented progress: one segment per analogy, green when mastered. */}
           <div dir={rtl ? "rtl" : "ltr"} className="flex gap-1">
             {sections.map((section, i) => (
@@ -898,7 +899,11 @@ export function AnalogyCanvas({ courseId, markdown, fallback }: { courseId: numb
         </div>
       )}
 
-      {view === "table" && <TableView sections={sections} rtl={rtl} fontClass={fontClass} kit={kit} labels={labels} language={language} onOpen={openFromTable} />}
+      {view === "table" && (
+        <div className="motion-swap">
+          <TableView sections={sections} rtl={rtl} fontClass={fontClass} kit={kit} labels={labels} language={language} onOpen={openFromTable} />
+        </div>
+      )}
     </div>
   );
 }

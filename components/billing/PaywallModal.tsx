@@ -1,7 +1,7 @@
 "use client";
 
+import { useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { motion } from "framer-motion";
 import { ArrowLeft, CalendarClock, Check, GraduationCap, Info, Lock, Sparkles, User, Users, UsersRound, X } from "lucide-react";
 import type { PaywallReason, UsageSnapshot } from "@/lib/subscription";
 import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, PROMO_SIZE, formatDZD } from "@/lib/pricing";
@@ -261,10 +261,17 @@ function QuotaContent({ view, usage, onClose, onChoosePlan }: { view: PaywallRea
 /**
  * Full-screen paywall / limit screen. Trial variants are blocking (no close
  * button, no Escape, no outside click); quota variants are dismissible.
+ *
+ * Motion is the app's dialog language (app/globals.css, .paywall-card): a
+ * bottom sheet rising from the screen edge on phones, a card rising out of
+ * the backdrop from sm up; on close Radix keeps it mounted while it leaves.
  */
 export function PaywallModal({ view, usage, locked, onChoosePlan, onBackToCourse, onClose }: PaywallModalProps) {
   const open = view !== null;
   const dismissible = view !== null && !isTrialView(view) && !locked;
+  // `view` is already null while the modal plays its exit: the card keeps showing the last one.
+  const [shownView, setShownView] = useState<PaywallView | null>(view);
+  if (view !== null && view !== shownView) setShownView(view);
 
   return (
     <DialogPrimitive.Root
@@ -274,7 +281,7 @@ export function PaywallModal({ view, usage, locked, onChoosePlan, onBackToCourse
       }}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-[200] bg-slate-950/60 backdrop-blur-xl" />
+        <DialogPrimitive.Overlay className="dialog-overlay fixed inset-0 z-[200] bg-slate-950/60 backdrop-blur-xl" />
         <DialogPrimitive.Content
           onEscapeKeyDown={(event) => {
             if (!dismissible) event.preventDefault();
@@ -289,21 +296,16 @@ export function PaywallModal({ view, usage, locked, onChoosePlan, onBackToCourse
             // The card sits inside a full-screen Content: a click on the empty area around it is the "backdrop".
             if (dismissible && event.target === event.currentTarget) onClose();
           }}
-          className="fixed inset-0 z-[201] flex items-end justify-center overflow-y-auto overscroll-contain p-0 focus:outline-none sm:items-center sm:p-6"
+          className="paywall-content fixed inset-0 z-[201] flex items-end justify-center overflow-y-auto overscroll-contain p-0 focus:outline-none sm:items-center sm:p-6"
         >
-          {view !== null && (
-            <motion.div
-              initial={{ opacity: 0, y: 24, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ type: "spring", stiffness: 280, damping: 28 }}
-              className="relative my-auto w-full max-w-md rounded-t-[1.75rem] border border-border bg-card px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-7 shadow-card sm:rounded-3xl sm:px-7 sm:pb-7"
-            >
-              {view === "trial_exhausted" || isTrialView(view) || locked ? (
-                <TrialContent view={view} usage={usage} locked={locked} onChoosePlan={onChoosePlan} onBackToCourse={onBackToCourse} />
+          {shownView !== null && (
+            <div className="paywall-card relative my-auto w-full max-w-md rounded-t-[1.75rem] border border-border bg-card px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-7 shadow-card sm:rounded-3xl sm:px-7 sm:pb-7">
+              {shownView === "trial_exhausted" || isTrialView(shownView) || locked ? (
+                <TrialContent view={shownView} usage={usage} locked={locked} onChoosePlan={onChoosePlan} onBackToCourse={onBackToCourse} />
               ) : (
-                <QuotaContent view={view} usage={usage} onClose={onClose} onChoosePlan={onChoosePlan} />
+                <QuotaContent view={shownView} usage={usage} onClose={onClose} onChoosePlan={onChoosePlan} />
               )}
-            </motion.div>
+            </div>
           )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

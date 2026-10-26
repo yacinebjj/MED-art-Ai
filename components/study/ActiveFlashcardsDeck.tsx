@@ -820,11 +820,13 @@ export function ActiveFlashcardsDeck() {
 
   if (!current) {
     // End of a batch — never a dead end: the next batch is (being) prepared.
+    // Keyed apart from the deck's panel below: same spot in the tree, so
+    // without keys React would reuse the panel and its entrance never replays.
     return (
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-        <CyberPanel laser className="animate-in fade-in-0 duration-300">
+        <CyberPanel key="batch-end" laser className="animate-in fade-in-0 duration-300">
           {header}
-          <div className="flex flex-col items-center gap-3 px-6 pb-12 pt-8 text-center">
+          <div className="motion-swap flex flex-col items-center gap-3 px-6 pb-12 pt-8 text-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 text-slate-950 shadow-[0_0_30px_rgba(52,211,153,0.45)]">
               <Trophy className="h-6 w-6" />
             </span>
@@ -888,7 +890,7 @@ export function ActiveFlashcardsDeck() {
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-      <CyberPanel className="animate-in fade-in-0 duration-300">
+      <CyberPanel key="deck" className="animate-in fade-in-0 duration-300">
         {header}
         <div className="space-y-3 p-4 sm:p-6">
           <FlipFlashcard

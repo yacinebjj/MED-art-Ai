@@ -94,7 +94,8 @@ function NovaOrb() {
 function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
   return (
     // Clears the floating glass header and composer (their measured heights, see the chat column).
-    <div className="relative flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-none px-3 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:gap-8 sm:px-4 sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
+    // motion-swap: rises in when it replaces a conversation ("Nouvelle conversation").
+    <div className="motion-swap relative flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-none px-3 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:gap-8 sm:px-4 sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
       <NovaOrb />
       <div className="max-w-xl space-y-3">
         <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-4xl">
@@ -1260,7 +1261,9 @@ export default function AssistantPage() {
         {isEmpty ? (
           <EmptyState firstName={firstName} onSelectPrompt={(text) => void sendMessage(text)} />
         ) : (
-          <div className="relative min-h-0 w-full max-w-full flex-1">
+          // motion-swap: the thread rises in where the welcome screen was (its
+          // AnimatePresence mounts with it, so the bubbles' own entrance is skipped).
+          <div className="motion-swap relative min-h-0 w-full max-w-full flex-1">
             {/* The thread: overflow-x-hidden + overscroll-x-none + touch-action
                 pan-y(+pinch-zoom) means a long token, a wide table or a stray
                 horizontal swipe can never move the page sideways. Tables and
@@ -1327,14 +1330,17 @@ export default function AssistantPage() {
           )}
         >
           <div className="mx-auto w-full max-w-3xl">
+            {/* Comes back with a fade when the keyboard closes (motion-swap, app/globals.css). */}
             {!keyboardOpen && (
-              <QuickActionBar
-                mode={mode}
-                onSelectMode={handleSelectMode}
-                prefs={prefs}
-                onChangePrefs={updatePrefs}
-                disabled={isTyping || isListening}
-              />
+              <div className="motion-swap">
+                <QuickActionBar
+                  mode={mode}
+                  onSelectMode={handleSelectMode}
+                  prefs={prefs}
+                  onChangePrefs={updatePrefs}
+                  disabled={isTyping || isListening}
+                />
+              </div>
             )}
 
             <div className="px-3 sm:px-4">
@@ -1495,7 +1501,7 @@ export default function AssistantPage() {
                       enterKeyHint="send"
                       aria-label={tAssistant("composerPlaceholder", language)}
                       placeholder={composerPlaceholder}
-                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out placeholder:truncate placeholder:text-muted-foreground focus:ring-0"
+                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out animate-in fade-in-0 placeholder:truncate placeholder:text-muted-foreground focus:ring-0"
                     />
                   )}
 

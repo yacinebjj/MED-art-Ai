@@ -2519,8 +2519,12 @@ export default function ModuleWorkspacePage() {
       onNoteTitleChange={setNoteTitle}
       noteSourceLink={activeCourse ? { label: activeCourse.title, href: `/dashboard/module/${moduleId}?course=${activeCourse.id}` } : null}
     >
+      {/* Every branch is keyed: they share one slot, and without keys React
+          would reuse the same div, so its animate-fade-in would never replay
+          when a loader gives way to the content. The progressive Explication
+          and the finished one share a key — the student is already reading it. */}
       {isSwitchingCourse ? (
-        <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
+        <div key="switching" className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
           <BrandLoader className="h-6 w-6" />
           <p className="text-sm text-muted-foreground">Chargement du cours...</p>
         </div>
@@ -2531,7 +2535,7 @@ export default function ModuleWorkspacePage() {
         openedSection === "explication" && explicationProgress?.previewMarkdown && explicationProgress.courseId === activeCourse?.id ? (
           // PROGRESSIVE DISPLAY: every part is readable the moment it is
           // ready (in order), while the following parts keep generating.
-          <div className="animate-fade-in">
+          <div key={`explication:${activeCourse?.id ?? ""}`} className="animate-fade-in">
             <div className="mb-3 flex items-center gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2">
               <BrandLoader className="h-4 w-4 shrink-0" />
               <ExplicationGeneratingLabel className="text-xs font-semibold text-foreground" progress={explicationProgress} />
@@ -2539,7 +2543,7 @@ export default function ModuleWorkspacePage() {
             <ExplicationReader markdown={explicationProgress.previewMarkdown} />
           </div>
         ) : (
-        <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
+        <div key="generating" className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
           <BrandLoader className="h-6 w-6" />
           {/* Podcast Audio genuinely takes ~1-4 min (a script-writing call
               plus one streamed ~10-15 min narration) — a rotating,
@@ -2555,7 +2559,7 @@ export default function ModuleWorkspacePage() {
         </div>
         )
       ) : openedSection && activeCourse && getSectionValue(activeCourse, openedSection) ? (
-        <div className="animate-fade-in">
+        <div key={`${openedSection}:${activeCourse.id}`} className="animate-fade-in">
           {openedSection === "explication" && (
             <ExplicationReader
               key={activeCourse.id}
@@ -2635,7 +2639,7 @@ export default function ModuleWorkspacePage() {
           </Suspense>
         </div>
       ) : openedSection && !activeCourse ? (
-        <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-2 py-20 text-center">
+        <div key="no-source" className="animate-fade-in flex h-full flex-col items-center justify-center gap-2 py-20 text-center">
           <p className="text-sm font-medium text-foreground">Ajoute une source pour générer ce contenu</p>
           <p className="max-w-sm text-xs text-muted-foreground">
             Importe un PDF dans le panneau Sources à gauche, puis reclique sur « {openedSectionLabel} ».
@@ -2651,6 +2655,15 @@ export default function ModuleWorkspacePage() {
   );
   const showSourcesPane = !isZen && !isSplitScreen;
   const showStudioPane = !isZen;
+  // Phones: the one pane on screen (Zen keeps the chat whatever the tab).
+  const mobilePaneKey =
+    isZen || mobileTab === "chat"
+      ? "chat"
+      : mobileTab === "sources"
+        ? "sources"
+        : openedSection || openedLabTool || isNoteOpen
+          ? "studio-detail"
+          : "studio-browse";
 
   const sourcesPanelProps = {
     courses,
@@ -2784,13 +2797,14 @@ export default function ModuleWorkspacePage() {
         >
           {/* Edge-to-edge on phones: the whole width goes to Sources / Chat / Studio. */}
           <div className={cn(panelShellClasses, "min-h-0 flex-1 rounded-none border-x-0 shadow-none")}>
-            {mobileTab === "sources" && !isZen && <ModuleSourcesPanel variant="mobile" {...sourcesPanelProps} />}
-            {(mobileTab === "chat" || isZen) && mobileChatPanel}
-            {mobileTab === "studio" &&
-              !isZen &&
-              (openedSection || openedLabTool || isNoteOpen ? (
-                studioPanel
-              ) : (
+            {/* One keyed pane per tab (and per Studio browse / detail view):
+                each switch replays motion-swap (app/globals.css) instead of
+                swapping the whole screen in a single frame. */}
+            <div key={mobilePaneKey} className="motion-swap flex min-h-0 flex-1 flex-col">
+            {mobilePaneKey === "sources" && <ModuleSourcesPanel variant="mobile" {...sourcesPanelProps} />}
+            {mobilePaneKey === "chat" && mobileChatPanel}
+            {mobilePaneKey === "studio-detail" && studioPanel}
+            {mobilePaneKey === "studio-browse" && (
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                   <div className="shrink-0">
                   <MobileStudioCards
@@ -2836,7 +2850,8 @@ export default function ModuleWorkspacePage() {
                     </button>
                   </section>
                 </div>
-              ))}
+              )}
+            </div>
           </div>
 
           {/* Hidden while the chat composer is focused (keyboard open) and in Zen mode. */}

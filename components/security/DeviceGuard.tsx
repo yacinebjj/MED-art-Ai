@@ -100,8 +100,8 @@ export function DeviceGuard() {
   const others = state.devices.filter((device) => !device.current);
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="device-limit-title" className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-3xl border border-border bg-background p-5 shadow-2xl sm:p-6">
+    <div role="dialog" aria-modal="true" aria-labelledby="device-limit-title" className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 animate-in fade-in-0 duration-300">
+      <div className="motion-swap w-full max-w-md rounded-3xl border border-border bg-background p-5 shadow-2xl sm:p-6">
         <h2 id="device-limit-title" className="text-lg font-bold text-foreground">
           Limite de {state.max} appareils atteinte
         </h2>

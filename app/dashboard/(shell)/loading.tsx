@@ -12,7 +12,15 @@ import { DashboardSkeleton } from "@/components/dashboard/os/DashboardSkeleton";
  * arrived — the "click, nothing happens" stall. With this file the Sidebar
  * and Topbar stay put and the content area switches to a skeleton on the
  * very next frame.
+ *
+ * `route-pending` (app/globals.css): the skeleton only fades in after a
+ * beat, so a page that lands quickly goes straight from the old page's exit
+ * to its own entrance, without a skeleton flashing in between.
  */
 export default function ShellLoading() {
-  return <DashboardSkeleton />;
+  return (
+    <div className="route-pending">
+      <DashboardSkeleton />
+    </div>
+  );
 }

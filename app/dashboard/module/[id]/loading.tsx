@@ -4,7 +4,10 @@ import { BrandLoader } from "@/components/ui/BrandLoader";
 export default function ModuleWorkspaceLoading() {
   return (
     <div className="flex h-dvh w-full items-center justify-center bg-white dark:bg-slate-950">
-      <BrandLoader />
+      {/* Fades in after a beat (app/globals.css): a quick load never flashes it. */}
+      <div className="route-pending">
+        <BrandLoader />
+      </div>
     </div>
   );
 }

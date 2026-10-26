@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { motion } from "framer-motion";
 import {
   Brain,
   ChevronRight,
@@ -19,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
+import { useRouteIntent } from "@/lib/motion";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
@@ -161,7 +161,7 @@ function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  onClick={() => themeMode.select(mode)}
+                  onClick={(event) => themeMode.select(mode, event.currentTarget)}
                   className={cn(
                     "press-feedback flex h-14 flex-col items-center justify-center gap-1 rounded-2xl border text-xs font-semibold",
                     active
@@ -200,16 +200,25 @@ function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
  * each tab is a full flex-1 column at least 56px tall. The 5th slot is the
  * student's own avatar: it opens the account sheet (bottom sheet) instead of
  * a tiny dropdown anchored to the screen edge.
+ *
+ * One highlight pill for the whole bar (.dock-indicator, app/globals.css)
+ * glides to the tapped tab on a spring — on the tap itself: the route intent
+ * (lib/motion.ts) names the destination before its page has loaded. A CSS
+ * transition, so the glide keeps its frame rate while the new page mounts.
  */
 export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
   const pathname = usePathname();
+  const intent = useRouteIntent();
   const { language } = useLanguage();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Navigating away (from the sheet or the browser) always closes it.
   useEffect(() => setMenuOpen(false), [pathname]);
 
-  const isMenuActive = MENU_ROUTES.some((p) => pathname.startsWith(p));
+  // Where the student is going lights up now; where they are stays the page's aria-current.
+  const shownPathname = intent?.pathname ?? pathname;
+  const isMenuActive = MENU_ROUTES.some((p) => shownPathname.startsWith(p));
+  const highlightIndex = menuOpen || isMenuActive ? TABS.length : TABS.findIndex((tab) => tab.isActive(shownPathname));
 
   return (
     <>
@@ -218,7 +227,8 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
         aria-label="Navigation"
         className={cn(
           "glass-chrome shadow-glass dark:shadow-glass-dark fixed inset-x-3 bottom-3 z-40 flex items-stretch justify-around rounded-[1.75rem] px-1 lg:hidden",
-          "motion-safe:transition-[transform,opacity] motion-safe:duration-300 motion-safe:[transition-timing-function:cubic-bezier(0.22,1,0.36,1)]",
+          // Calm motion (reduced motion): the dock fades away and back instead of sliding.
+          "transition-[transform,opacity] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-opacity",
           hidden ? "pointer-events-none translate-y-[calc(100%+4rem)] opacity-0" : "translate-y-0 opacity-100"
         )}
         // A floating pill takes the safe area as its OFFSET, not as internal
@@ -231,12 +241,25 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
           right: "max(0.75rem, env(safe-area-inset-right))",
         }}
       >
-        {TABS.map((tab) => {
-          const isActive = tab.isActive(pathname);
-          return (
-            <TabButton key={tab.href} icon={tab.icon} label={TAB_LABELS[tab.key][language]} active={isActive} href={tab.href} tourTarget={tab.key === "assistant" ? "chat" : undefined} />
-          );
-        })}
+        <span
+          aria-hidden
+          className="dock-indicator"
+          data-visible={highlightIndex >= 0}
+          style={{ "--dock-index": Math.max(0, highlightIndex), "--dock-count": TABS.length + 1 } as CSSProperties}
+        >
+          <span className="absolute inset-1 rounded-[1.4rem] bg-primary-500/15 dark:bg-primary-400/15" />
+        </span>
+        {TABS.map((tab, index) => (
+          <TabButton
+            key={tab.href}
+            icon={tab.icon}
+            label={TAB_LABELS[tab.key][language]}
+            active={index === highlightIndex}
+            current={tab.isActive(pathname)}
+            href={tab.href}
+            tourTarget={tab.key === "assistant" ? "chat" : undefined}
+          />
+        ))}
         <TabButton
           visual={
             <StudentAvatar
@@ -263,6 +286,7 @@ function TabButton({
   visual,
   label,
   active,
+  current = false,
   href,
   onClick,
   tourTarget,
@@ -271,7 +295,10 @@ function TabButton({
   /** Drawn instead of an icon (the account tab's avatar). */
   visual?: ReactNode;
   label: string;
+  /** Highlighted — the tab the student is on, or just tapped. */
   active: boolean;
+  /** The page actually on screen (aria-current). */
+  current?: boolean;
   href?: string;
   onClick?: () => void;
   /** Onboarding tour anchor (data-tour) on phones. */
@@ -281,30 +308,28 @@ function TabButton({
     "relative flex min-h-[var(--dock-height)] flex-1 flex-col items-center justify-center gap-1 rounded-3xl py-2 text-[11px] font-medium transition-transform duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
   const inner = (
     <>
-      {active && (
-        <motion.span
-          layoutId="bottom-nav-active-pill"
-          className="absolute inset-1 rounded-[1.4rem] bg-primary-500/15 dark:bg-primary-400/15"
-          transition={{ type: "spring", stiffness: 500, damping: 40 }}
-        />
-      )}
       {visual ? (
-        <span className="relative z-10 flex h-[22px] items-center">{visual}</span>
+        <span className="dock-tab-icon relative z-10 flex h-[22px] items-center">{visual}</span>
       ) : (
-        Icon && <Icon className={cn("relative z-10 h-[22px] w-[22px]", active ? "text-primary-600 dark:text-primary-300" : "text-muted-foreground")} strokeWidth={active ? 2.4 : 2} />
+        Icon && (
+          <Icon
+            className={cn("dock-tab-icon relative z-10 h-[22px] w-[22px]", active ? "text-primary-600 dark:text-primary-300" : "text-muted-foreground")}
+            strokeWidth={active ? 2.4 : 2}
+          />
+        )
       )}
-      <span className={cn("relative z-10 leading-none", active ? "font-bold text-primary-700 dark:text-primary-300" : "text-muted-foreground")}>{label}</span>
+      <span className={cn("relative z-10 leading-none transition-colors duration-300", active ? "font-bold text-primary-700 dark:text-primary-300" : "text-muted-foreground")}>{label}</span>
     </>
   );
   if (href) {
     return (
-      <Link href={href} prefetch aria-current={active ? "page" : undefined} onClick={() => haptic(6)} data-tour={tourTarget} className={className}>
+      <Link href={href} prefetch aria-current={current ? "page" : undefined} onClick={() => haptic(6)} data-active={active} data-tour={tourTarget} className={className}>
         {inner}
       </Link>
     );
   }
   return (
-    <button type="button" onClick={onClick} aria-haspopup="dialog" className={className}>
+    <button type="button" onClick={onClick} aria-haspopup="dialog" data-active={active} className={className}>
       {inner}
     </button>
   );

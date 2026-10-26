@@ -29,6 +29,7 @@ import { motion } from "framer-motion";
 import { Logo } from "./Logo";
 import { AnimatedBrandMark } from "./AnimatedBrandMark";
 import { cn } from "@/lib/utils";
+import { useRouteIntent } from "@/lib/motion";
 import { useAuth } from "@/providers/AuthProvider";
 import { useSidebarState } from "@/providers/SidebarProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
@@ -292,7 +293,9 @@ function NavSections({ collapsed, pathname, tab, language }: { collapsed: boolea
 
 /** Reads ?tab= (Flashcards vs Pomodoro highlight). Behind Suspense: useSearchParams in a shared layout would otherwise opt every page out of static rendering. */
 function NavSectionsWithTab(props: { collapsed: boolean; pathname: string; language: Language }) {
-  const tab = useSearchParams().get("tab");
+  const currentTab = useSearchParams().get("tab");
+  const intent = useRouteIntent();
+  const tab = intent ? new URLSearchParams(intent.href.split("?")[1] ?? "").get("tab") : currentTab;
   return <NavSections {...props} tab={tab} />;
 }
 
@@ -468,7 +471,10 @@ function SyncStatus({ collapsed, language }: { collapsed: boolean; language: Lan
  * work on a specific course.
  */
 export function Sidebar() {
-  const pathname = usePathname();
+  // The row the student just clicked lights up on the click itself (route intent, lib/motion.ts), not once its page has loaded.
+  const intent = useRouteIntent();
+  const currentPathname = usePathname();
+  const pathname = intent?.pathname ?? currentPathname;
   const router = useRouter();
   const { profile, signOut } = useAuth();
   const { isDesktopSidebarOpen, isRailCollapsed, toggleRail } = useSidebarState();

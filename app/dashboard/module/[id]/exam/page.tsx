@@ -1382,7 +1382,9 @@ export default function ExamGeneratorPage() {
             </main>
           </>
         ) : mobileTab === "sources" ? (
-          <div className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
+          // Keyed per tab: both panels share one slot, so without keys React
+          // would reuse the panel and its glass entrance would never replay.
+          <div key="sources" className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
             {examState === "generating" ? (
               <AnimatePresence mode="wait">{generatingContent}</AnimatePresence>
             ) : (
@@ -1396,7 +1398,7 @@ export default function ExamGeneratorPage() {
             )}
           </div>
         ) : (
-          <div className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
+          <div key="results" className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
             {savedExams.length > 0 && (
               <div className="max-h-40 shrink-0 overflow-y-auto border-b border-border p-2">{savedExamsContent}</div>
             )}
@@ -1434,7 +1436,7 @@ export default function ExamGeneratorPage() {
           had the backdrop-filter containing-block problem — only its
           z-index needed to move. */}
       {examState === "testing" && (isDesktopOrTablet || mobileTab === "results") && (
-        <div className="glass-chrome fixed inset-x-0 bottom-0 z-[110] flex items-center justify-between gap-3 border-x-0 border-b-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
+        <div className="edge-rise glass-chrome fixed inset-x-0 bottom-0 z-[110] flex items-center justify-between gap-3 border-x-0 border-b-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
           <div className="hidden items-center gap-3 sm:flex">
             <Button
               variant="outline"

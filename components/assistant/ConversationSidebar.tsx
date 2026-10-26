@@ -255,8 +255,11 @@ export function ConversationSidebar({
         )}
 
         <div className="mt-3 flex-1 overflow-y-auto px-2 pb-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* Empty, no results and each date group settle in when they appear
+              (motion-swap, app/globals.css) — a group's AnimatePresence mounts
+              with it, so it doesn't animate its first rows itself. */}
           {!hasAnyConversations ? (
-            <div className="flex flex-col items-center gap-2.5 px-3 py-10 text-center">
+            <div className="motion-swap flex flex-col items-center gap-2.5 px-3 py-10 text-center">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                 <MessagesSquare className="h-5 w-5" />
               </div>
@@ -267,7 +270,7 @@ export function ConversationSidebar({
               </p>
             </div>
           ) : hasNoResults ? (
-            <div className="flex flex-col items-center gap-2.5 px-3 py-10 text-center">
+            <div className="motion-swap flex flex-col items-center gap-2.5 px-3 py-10 text-center">
               <Search className="h-5 w-5 text-muted-foreground/60" />
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Aucun résultat pour «&nbsp;{query}&nbsp;»
@@ -285,7 +288,7 @@ export function ConversationSidebar({
               const items = grouped.get(group);
               if (!items || items.length === 0) return null;
               return (
-                <div key={group} className="mb-3">
+                <div key={group} className="motion-swap mb-3">
                   <p className="sticky top-0 z-10 bg-inherit px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80 backdrop-blur-sm">
                     {group}
                   </p>

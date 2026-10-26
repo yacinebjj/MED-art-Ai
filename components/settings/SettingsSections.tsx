@@ -315,7 +315,7 @@ export function AppearanceSection() {
               <button
                 key={mode}
                 type="button"
-                onClick={() => select(mode)}
+                onClick={(event) => select(mode, event.currentTarget)}
                 aria-pressed={active}
                 className={cn(
                   "group flex items-center gap-3 rounded-2xl border p-3 text-left transition-[border-color,box-shadow] sm:flex-col sm:items-stretch",

@@ -6,4 +6,6 @@ export interface CourseViewerProps {
   /** Server-extracted text: shown for pasted-text courses and whenever the file can't be rendered. */
   rawText: string;
   onClose: () => void;
+  /** Set by the entry point (index.tsx) while the viewer plays its exit, just before it is unmounted. */
+  closing?: boolean;
 }

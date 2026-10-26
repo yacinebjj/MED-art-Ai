@@ -89,7 +89,7 @@ export function VoiceMeter({ stream, label }: { stream: MediaStream | null; labe
   }, [stream]);
 
   return (
-    <div className="flex h-11 min-w-0 flex-1 items-center gap-3 pl-2 pr-1" role="status" aria-live="polite" aria-label={label}>
+    <div className="flex h-11 min-w-0 flex-1 items-center gap-3 pl-2 pr-1 animate-in fade-in-0 slide-in-from-left-2 duration-300" role="status" aria-live="polite" aria-label={label}>
       <span aria-hidden className="relative flex h-2 w-2 shrink-0">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
         <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
