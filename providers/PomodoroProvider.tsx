@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { fetchSyncNamespace, putSyncDoc, type SyncedValue } from "@/lib/user-sync";
 import { hydrateLocalActivityFromServer } from "@/lib/dashboard/local-activity";
+import { haptic } from "@/lib/haptics";
 import { isPomodoroAudioUnlocked, playPomodoroChime, unlockPomodoroAudio } from "@/lib/pomodoro/chime";
 import {
   POMODORO_PHASE_EVENT,
@@ -248,12 +249,27 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   }, [isActive, bucket, syncFocusLog]);
 
   // تشغيل العداد وتحديث التخزين المحلي في الخلفية بشكل متزامن
+  // The clock follows real time, not timer ticks. A hidden tab's timers are
+  // throttled (down to one run a minute in Chrome after 5 minutes) and a
+  // suspended phone page runs none: counting +1 per tick made the session
+  // crawl there, and the break — with its chime — came hours late, if ever.
+  // Each tick, and the page coming back on screen, adds every whole second
+  // that really elapsed (monotonic clock: a changed system time can't jump it).
   useEffect(() => {
     if (!isActive) return;
     let uncommitted = 0;
-    const interval = setInterval(() => {
+    let lastTick = performance.now();
+    let carryMs = 0;
+    function advance() {
+      const now = performance.now();
+      // Never backwards, whatever the clock does: a negative step would stall the session.
+      carryMs += Math.max(0, now - lastTick);
+      lastTick = now;
+      const elapsed = Math.floor(carryMs / 1000);
+      if (elapsed < 1) return;
+      carryMs -= elapsed * 1000;
       setSeconds((prev) => {
-        const next = prev + 1;
+        const next = prev + elapsed;
         try {
           localStorage.setItem(keysFor(bucket).seconds, next.toString());
         } catch {
@@ -263,22 +279,25 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
       });
       const day = localDayKey(new Date());
       const log = focusLogRef.current;
-      focusLogRef.current = pruneFocusLog({ ...log, [day]: (log[day] ?? 0) + 1 });
-      uncommitted += 1;
+      focusLogRef.current = pruneFocusLog({ ...log, [day]: (log[day] ?? 0) + elapsed });
+      uncommitted += elapsed;
       if (uncommitted >= FOCUS_LOG_COMMIT_EVERY_S) {
         uncommitted = 0;
         commitFocusLog();
       }
-    }, 1000);
-    // A backgrounded / closed tab never loses the last few seconds.
-    function handleHide() {
-      if (document.visibilityState === "hidden") commitFocusLog();
     }
-    document.addEventListener("visibilitychange", handleHide);
+    const interval = setInterval(advance, 1000);
+    // A backgrounded / closed tab never loses the last few seconds; back on
+    // screen, the clock catches up at once instead of on the next tick.
+    function handleVisibility() {
+      if (document.visibilityState === "hidden") commitFocusLog();
+      else advance();
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("pagehide", commitFocusLog);
     return () => {
       clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleHide);
+      document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("pagehide", commitFocusLog);
       commitFocusLog();
     };
@@ -323,9 +342,10 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const phaseKey = phase ? `${phase.cycleIndex}:${phase.mode}` : null;
   const isComplete = phase?.isComplete ?? false;
 
-  /** Chime now (any page), and tell the toasts (POMODORO_PHASE_EVENT — app/dashboard/layout.tsx shows them). */
+  /** Chime now (any page) with a buzz on phones that vibrate, and tell the toasts (POMODORO_PHASE_EVENT — app/dashboard/layout.tsx shows them). */
   const announce = useCallback((cue: PomodoroCue, cycle: number, at: PomodoroTiming) => {
     playPomodoroChime(cue);
+    haptic(cue === "focus" ? [120, 70, 120] : [180, 90, 180, 90, 260]);
     const detail: PomodoroPhaseEventDetail = { cue, cycle, timing: at };
     window.dispatchEvent(new CustomEvent(POMODORO_PHASE_EVENT, { detail }));
   }, []);

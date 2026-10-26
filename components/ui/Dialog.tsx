@@ -160,11 +160,12 @@ export const DialogContent = forwardRef<
             since Content only has an explicit height when the caller sets
             one; otherwise Content sizes to content and percentage heights
             here just resolve to auto. */}
+        {/* The app's glide (app/globals.css MOTION SYSTEM): unhurried, no bounce. */}
         <motion.div
           className="flex h-full min-h-0 flex-col"
-          initial={isSheet ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 8 }}
+          initial={isSheet ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 14 }}
           animate={isSheet ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
-          transition={isSheet ? { duration: 0.2 } : { type: "spring", stiffness: 300, damping: 30 }}
+          transition={isSheet ? { duration: 0.32, ease: "easeOut" } : { duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
         >
           {children}
         </motion.div>

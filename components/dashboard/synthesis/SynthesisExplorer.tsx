@@ -306,7 +306,7 @@ function SectionCard({
       </header>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} className="overflow-hidden">
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden">
             <div className="border-t border-black/5 px-3 pb-5 pt-3 text-[15px] sm:px-6 dark:border-white/[0.06]">
               <MedicalMarkdown markdown={normalizeCallouts(section.body)} decorate={decorate} />
             </div>
@@ -338,24 +338,25 @@ function DictionaryCard({
 }) {
   const deco = (text: string) => (decorate ? decorate(text) : text);
   return (
-    <article className="syn-card flex flex-col" data-open={open} style={accentStyle(index)}>
+    <article className="syn-card flex min-w-0 flex-col" data-open={open} style={accentStyle(index)}>
       <button type="button" onClick={onToggle} aria-expanded={open} className="flex items-start gap-3 px-4 pb-2 pt-4 text-left">
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
-            <span className="text-[15px] font-black leading-snug text-slate-900 dark:text-white">{deco(entry.term)}</span>
+            <span className="min-w-0 text-[15px] font-black leading-snug text-slate-900 [overflow-wrap:anywhere] dark:text-white">{deco(entry.term)}</span>
             <PriorityBadge priority={entry.priority} />
           </span>
           <span className="mt-1 block truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400">{entry.course}</span>
         </span>
         <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-slate-400 transition-transform", open && "rotate-180")} />
       </button>
-      <p className={cn("px-4 text-sm leading-relaxed text-slate-700 dark:text-slate-300", !open && "line-clamp-2")}>{deco(stripInlineMarkdown(entry.fr))}</p>
+      <p className={cn("px-4 text-sm leading-relaxed text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300", !open && "line-clamp-2")}>{deco(stripInlineMarkdown(entry.fr))}</p>
       <AnimatePresence initial={false}>
         {open && entry.ar && (
           <motion.p
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
             dir="rtl"
             lang="ar"
             className="mx-4 mt-3 overflow-hidden rounded-xl bg-emerald-500/[0.08] px-3 py-2 text-[15px] leading-loose text-emerald-900 dark:text-emerald-100"
@@ -405,7 +406,7 @@ function KeywordChip({ item, decorate, open, onToggle }: { item: KeywordItem; de
         )}
       >
         <span className="flex items-start gap-2">
-          <span className="min-w-0 flex-1 text-[13px] font-bold leading-snug text-slate-900 dark:text-white">{decorate ? decorate(item.keyword) : item.keyword}</span>
+          <span className="min-w-0 flex-1 text-[13px] font-bold leading-snug text-slate-900 [overflow-wrap:anywhere] dark:text-white">{decorate ? decorate(item.keyword) : item.keyword}</span>
           {item.priority !== "standard" && <PriorityBadge priority={item.priority} />}
         </span>
         {item.explanation && <span className={cn("mt-1 block text-xs leading-relaxed text-slate-600 dark:text-slate-400", !open && "line-clamp-1")}>{decorate ? decorate(item.explanation) : item.explanation}</span>}
@@ -550,7 +551,7 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
   const KindIcon = kind === "medical_dictionary" ? BookOpenText : kind === "keywords_table" ? Tags : Sheet;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 max-w-full flex-col gap-4">
       {/* Command bar — hides on scroll down, returns on scroll up (effect above). */}
       <div
         ref={barRef}
@@ -616,7 +617,7 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
           </IconAction>
         </div>
 
-        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none]">
+        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto overscroll-x-none pb-0.5 [scrollbar-width:none]">
           {kind !== "global_summary" &&
             (["essentiel", "important", "standard"] as Priority[]).map((p) => (
               <Chip key={p} active={priorities.has(p)} onClick={() => togglePriority(p)}>
@@ -674,7 +675,7 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
           <>
             {dictEntries.length > 0 ? (
               // items-start: a card opening (its Arabic line animates in) no longer stretches its row neighbour along every frame.
-              <div className="grid items-start gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+              <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                 {dictEntries.map((entry) => (
                   <DictionaryCard
                     key={entry.id}
@@ -724,7 +725,7 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
                       <h3 className="min-w-0 flex-1 truncate text-[15px] font-black text-slate-900 dark:text-white">{courseName}</h3>
                       <span className="text-[11px] font-bold text-slate-500">{forCourse.length} mots-clés</span>
                     </header>
-                    <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {cats.map((cat) => (
                         <section key={cat} className="rounded-2xl bg-black/[0.025] p-3 dark:bg-white/[0.025]">
                           <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-violet-600 dark:text-violet-300">{cat}</p>

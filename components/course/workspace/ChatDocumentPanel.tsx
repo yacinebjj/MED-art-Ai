@@ -557,7 +557,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           const isLast = index === messages.length - 1;
           if (message.role === "user") {
             return (
-              <div key={message.id} className="animate-in fade-in slide-in-from-bottom-2 flex items-start gap-2.5 duration-300 ease-out">
+              <div key={message.id} className="animate-in fade-in slide-in-from-bottom-4 flex items-start gap-2.5 duration-500 ease-out">
                 <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklab,var(--foreground)_90%,transparent)] text-[10px] font-bold text-background">Q</span>
                 <p className="min-w-0 whitespace-pre-wrap break-words text-base font-semibold leading-[1.6] tracking-tight text-foreground md:text-[17px]">
                   {message.content}
@@ -571,7 +571,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           const showToolbar = cleanContent.length > 0 && !isStreaming;
 
           return (
-            <div key={message.id} className="group animate-in fade-in slide-in-from-bottom-2 space-y-2 duration-300 ease-out">
+            <div key={message.id} className="group animate-in fade-in slide-in-from-bottom-4 space-y-2 duration-500 ease-out">
               {useRichRenderer ? (
                 <ChatRichMarkdown
                   content={cleanContent}

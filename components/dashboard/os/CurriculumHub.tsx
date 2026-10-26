@@ -30,7 +30,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import dynamic from "next/dynamic";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
@@ -167,20 +167,10 @@ const ModuleCard = memo(function ModuleCard({
               >
                 <MoreVertical className="h-4 w-4" />
               </DropdownMenuTrigger>
-              {/* Essentials only. Flashcards stay switchable per UE (toolbar above), in
-                  Settings and in the Study page's course picker. */}
+              {/* Only the destructive action stays behind the menu: statistics and the
+                  résumé are tiles below. Flashcards stay switchable per UE (toolbar above),
+                  in Settings and in the Study page's course picker. */}
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
-                  <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                  {tCockpit("menuStats", language)}
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href={`/dashboard/workspace/module/${mod.id}`}>
-                    <BookOpenText className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-                    {tCockpit("menuSummary", language)}
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
                   <Trash2 className="h-4 w-4" />
                   {tCockpit("menuDeleteSources", language)}
@@ -236,31 +226,51 @@ const ModuleCard = memo(function ModuleCard({
           </div>
         </div>
 
-        {/* Quick actions — always shown, at every width: three distinct tiles. */}
-        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="mt-3 grid grid-cols-3 gap-2">
-          <Link
-            href={href}
-            className={cn(ACTION_TILE, "border-primary-500/25 bg-primary-500/10 text-primary-700 hover:bg-primary-500/20 dark:border-primary-400/25 dark:text-primary-300")}
-          >
-            <BookOpen className="h-4 w-4" />
-            {tCockpit("actionCourses", language)}
-          </Link>
-          <button
-            type="button"
-            disabled={launching}
-            onClick={() => onLaunchFlashcards(mod.id)}
-            className={cn(ACTION_TILE, "border-violet-500/25 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 disabled:opacity-60 dark:border-violet-400/25 dark:text-violet-300")}
-          >
-            {launching ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
-            {tCockpit("actionFlash", language)}
-          </button>
-          <Link
-            href={`/dashboard/module/${mod.id}/exam`}
-            className={cn(ACTION_TILE, "border-rose-500/25 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:border-rose-400/25 dark:text-rose-300")}
-          >
-            <FileQuestion className="h-4 w-4" />
-            {tCockpit("actionQcm", language)}
-          </Link>
+        {/* Quick actions — always shown, at every width: the three study tiles,
+            then the module's statistics and résumé, in the same tile style. */}
+        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="mt-3 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <Link
+              href={href}
+              className={cn(ACTION_TILE, "border-primary-500/25 bg-primary-500/10 text-primary-700 hover:bg-primary-500/20 dark:border-primary-400/25 dark:text-primary-300")}
+            >
+              <BookOpen className="h-4 w-4" />
+              {tCockpit("actionCourses", language)}
+            </Link>
+            <button
+              type="button"
+              disabled={launching}
+              onClick={() => onLaunchFlashcards(mod.id)}
+              className={cn(ACTION_TILE, "border-violet-500/25 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 disabled:opacity-60 dark:border-violet-400/25 dark:text-violet-300")}
+            >
+              {launching ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+              {tCockpit("actionFlash", language)}
+            </button>
+            <Link
+              href={`/dashboard/module/${mod.id}/exam`}
+              className={cn(ACTION_TILE, "border-rose-500/25 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:border-rose-400/25 dark:text-rose-300")}
+            >
+              <FileQuestion className="h-4 w-4" />
+              {tCockpit("actionQcm", language)}
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setStatsOpen(true)}
+              className={cn(ACTION_TILE, "border-sky-500/25 bg-sky-500/10 text-sky-700 hover:bg-sky-500/20 dark:border-sky-400/25 dark:text-sky-300")}
+            >
+              <TrendingUp className="h-4 w-4" />
+              {tCockpit("actionStats", language)}
+            </button>
+            <Link
+              href={`/dashboard/workspace/module/${mod.id}`}
+              className={cn(ACTION_TILE, "border-amber-500/25 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:border-amber-400/25 dark:text-amber-300")}
+            >
+              <BookOpenText className="h-4 w-4" />
+              {tCockpit("actionSummary", language)}
+            </Link>
+          </div>
         </div>
       </div>
 

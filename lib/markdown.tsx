@@ -181,15 +181,20 @@ export const DARK_MARKDOWN_COMPONENTS: Components = createMarkdownComponents(
  * modest headings, tight-but-airy vertical rhythm, and normal list bullets
  * (not the forced ✓-icon-per-item study styling). Callouts/tables/bold keep
  * their identity via CHAT_MARKDOWN_COMPONENTS below.
+ *
+ * Reading size: 17px body with a 1.8 line height at every width — the same
+ * measure as the MedArt Assistant (components/assistant/StreamedMarkdown.tsx).
+ * `prose-sm` used to put replies at 14px on phones. Headings scale in `em`
+ * from that one size.
  */
 export const CHAT_PROSE_CLASSES = [
-  "prose prose-slate font-sans prose-sm md:prose-base max-w-none",
+  "prose prose-slate font-sans text-[17px] leading-[1.8] max-w-none",
   "prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-slate-900",
-  "prose-h1:text-lg prose-h1:mt-0 prose-h1:mb-2",
-  "prose-h2:text-base prose-h2:mt-5 prose-h2:mb-2",
-  "prose-h3:text-sm prose-h3:mt-4 prose-h3:mb-1.5 prose-h3:text-slate-700",
-  "prose-p:my-2.5 prose-p:leading-[1.7]",
-  "prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-li:leading-[1.7]",
+  "prose-h1:text-[1.3em] prose-h1:mt-0 prose-h1:mb-2",
+  "prose-h2:text-[1.15em] prose-h2:mt-6 prose-h2:mb-2",
+  "prose-h3:text-[1.05em] prose-h3:mt-5 prose-h3:mb-1.5 prose-h3:text-slate-700",
+  "prose-p:my-3 prose-p:leading-[1.8]",
+  "prose-ul:my-2.5 prose-ol:my-2.5 prose-li:my-1.5 prose-li:leading-[1.8]",
   "prose-a:font-medium prose-a:text-blue-600",
   "prose-strong:font-semibold prose-strong:text-slate-900",
   "prose-hr:my-4 prose-hr:border-slate-200",
@@ -198,13 +203,13 @@ export const CHAT_PROSE_CLASSES = [
 ].join(" ");
 
 export const DARK_CHAT_PROSE_CLASSES = [
-  "prose prose-invert font-sans prose-sm md:prose-base max-w-none",
+  "prose prose-invert font-sans text-[17px] leading-[1.8] max-w-none",
   "prose-headings:font-semibold prose-headings:tracking-tight",
-  "prose-h1:text-lg prose-h1:mt-0 prose-h1:mb-2",
-  "prose-h2:text-base prose-h2:mt-5 prose-h2:mb-2",
-  "prose-h3:text-sm prose-h3:mt-4 prose-h3:mb-1.5 prose-h3:text-cyan-300",
-  "prose-p:my-2.5 prose-p:leading-[1.7]",
-  "prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-li:leading-[1.7]",
+  "prose-h1:text-[1.3em] prose-h1:mt-0 prose-h1:mb-2",
+  "prose-h2:text-[1.15em] prose-h2:mt-6 prose-h2:mb-2",
+  "prose-h3:text-[1.05em] prose-h3:mt-5 prose-h3:mb-1.5 prose-h3:text-cyan-300",
+  "prose-p:my-3 prose-p:leading-[1.8]",
+  "prose-ul:my-2.5 prose-ol:my-2.5 prose-li:my-1.5 prose-li:leading-[1.8]",
   "prose-a:font-medium prose-a:text-cyan-400",
   "prose-strong:font-semibold",
   "prose-hr:my-4 prose-hr:border-white/10",
@@ -236,7 +241,7 @@ function createChatMarkdownComponents(
     },
     table: ({ children }) => (
       <div className={cn("my-4 overflow-x-auto rounded-lg border shadow-sm", tableWrapperClass)}>
-        <table className="m-0 w-full text-sm">{children}</table>
+        <table className="m-0 w-full text-[0.9em]">{children}</table>
       </div>
     ),
     strong: ({ children }) => <strong className={badgeClass}>{children}</strong>,

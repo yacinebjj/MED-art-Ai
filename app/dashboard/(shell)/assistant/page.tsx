@@ -195,9 +195,9 @@ const ChatBubble = memo(function ChatBubble({
 
     return (
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, ease: "easeOut" }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         className="flex w-full min-w-0 justify-end"
       >
         <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
@@ -247,9 +247,9 @@ const ChatBubble = memo(function ChatBubble({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22, ease: "easeOut" }}
+      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
       className="flex w-full min-w-0 flex-col items-start"
     >
       {/* Edge-to-edge on phones: no avatar column, so the reply uses the whole
@@ -1179,6 +1179,8 @@ export default function AssistantPage() {
       // lg it is a rounded panel beside the sidebar.
       className={cn(
         "copilot-canvas flex w-full max-w-full overflow-hidden overscroll-none lg:h-full lg:rounded-3xl lg:border",
+        // Portaled on phones, outside the page transition: it fades in over the page it was opened from.
+        isPhoneLayout && "copilot-enter",
         // `inset-0` (like the group chat room, proven on real phones) — the
         // surface fills the layout viewport with no JS and no `dvh`
         // dependency, so it can never render at zero size.

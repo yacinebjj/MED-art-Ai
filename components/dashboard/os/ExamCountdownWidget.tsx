@@ -85,7 +85,7 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
       icon={CalendarClock}
       iconClassName="from-rose-500 to-pink-500"
       title={tCockpit("examTitle", language)}
-      glow="hover:shadow-rose-500/15"
+      glow="[@media(hover:hover)]:hover:shadow-rose-500/15"
       action={
         !fromPlan && !editing ? (
           <button type="button" onClick={startEdit} aria-label={tCockpit("examEdit", language)} className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">

@@ -31,19 +31,22 @@ export function OsCard({
   action?: ReactNode;
   children: ReactNode;
   className?: string;
-  /** Hover glow tint (literal class), e.g. "hover:shadow-orange-500/15". */
+  /** Hover glow tint (literal class, real-hover devices only), e.g. "[@media(hover:hover)]:hover:shadow-orange-500/15". */
   glow?: string;
 }) {
   return (
     <motion.section
       variants={CARD_ENTRANCE}
       className={cn(
-        "glass-card group/card relative flex flex-col overflow-hidden rounded-3xl border border-white/30 p-4 shadow-glass transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl dark:border-white/[0.06] dark:shadow-glass-dark sm:p-5",
+        "glass-card group/card relative isolate flex flex-col overflow-hidden rounded-3xl border border-white/30 p-4 shadow-glass transition-[transform,box-shadow] duration-300 dark:border-white/[0.06] dark:shadow-glass-dark sm:p-5 [@media(hover:hover)]:hover:-translate-y-0.5 [@media(hover:hover)]:hover:shadow-xl",
         glow,
         className
       )}
     >
-      <div aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br from-white/40 to-transparent opacity-0 blur-2xl transition-opacity duration-500 group-hover/card:opacity-100 dark:from-white/10" />
+      {/* Hover sheen in its own clip layer, cut to the inner corner radius: a blurred child spills past `overflow-hidden` + rounded corners on mobile. Real hover only. */}
+      <span aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden rounded-[calc(1.5rem-1px)] [clip-path:inset(0_round_calc(1.5rem-1px))]">
+        <span className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br from-white/40 to-transparent opacity-0 blur-2xl transition-opacity duration-500 dark:from-white/10 [@media(hover:hover)]:group-hover/card:opacity-100" />
+      </span>
       <header className="relative mb-3 flex items-center gap-2.5">
         <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-md", iconClassName)}>
           <Icon className="h-4 w-4" />

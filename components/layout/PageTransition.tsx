@@ -2,6 +2,7 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 /**
  * ENTER-ONLY page transition: the new route mounts IMMEDIATELY and fades in.
@@ -16,6 +17,9 @@ import { usePathname } from "next/navigation";
  * was the "click → nothing happens until F5" freeze in the installed app.
  * No exit phase means nothing can ever block the router: the click shows
  * the new page (or its loading.tsx skeleton) on the very next frame.
+ *
+ * `page-reveal` (app/globals.css): on top of this glide, the page's own
+ * top-level sections rise in one after another.
  */
 export function PageTransition({ children, className }: { children: React.ReactNode; className?: string }) {
   const pathname = usePathname();
@@ -24,10 +28,10 @@ export function PageTransition({ children, className }: { children: React.ReactN
   return (
     <motion.div
       key={pathname}
-      initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+      initial={reduceMotion ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-      className={className}
+      transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+      className={cn("page-reveal", className)}
     >
       {children}
     </motion.div>

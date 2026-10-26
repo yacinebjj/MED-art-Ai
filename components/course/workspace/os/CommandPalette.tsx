@@ -167,8 +167,8 @@ export function CommandPalette({ open, onOpenChange, items, groupOrder, placehol
           className="fixed inset-0 z-[1000] flex items-start justify-center px-3 pt-[10vh]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          exit={{ opacity: 0, transition: { duration: 0.2, ease: "easeIn" } }}
+          transition={{ duration: 0.28, ease: "easeOut" }}
           onKeyDown={handleKeyDown}
         >
           <button
@@ -183,10 +183,10 @@ export function CommandPalette({ open, onOpenChange, items, groupOrder, placehol
             aria-modal="true"
             aria-label="Palette de commandes"
             data-command-palette
-            initial={{ opacity: 0, y: -12, scale: 0.97 }}
+            initial={{ opacity: 0, y: -16, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.98 }}
-            transition={{ type: "spring", stiffness: 520, damping: 34 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98, transition: { duration: 0.2, ease: [0.4, 0, 1, 1] } }}
+            transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
             className="relative flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-[color-mix(in_oklab,var(--card)_95%,transparent)] shadow-[0_24px_80px_-12px_rgb(2_6_23/0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/95"
           >
             <div className="flex items-center gap-3 border-b border-[color-mix(in_oklab,var(--border)_70%,transparent)] px-4">

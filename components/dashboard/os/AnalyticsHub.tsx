@@ -67,7 +67,7 @@ function StreakWidget({ userId }: { userId: string | null }) {
   }
 
   return (
-    <OsCard icon={Flame} iconClassName="from-orange-500 to-rose-500" title={tCockpit("streakTitle", language)} glow="hover:shadow-orange-500/15">
+    <OsCard icon={Flame} iconClassName="from-orange-500 to-rose-500" title={tCockpit("streakTitle", language)} glow="[@media(hover:hover)]:hover:shadow-orange-500/15">
       <div className="flex items-center gap-4">
         <div className="relative">
           {/* CSS keyframes (compositor), not an infinite framer-motion loop on the main thread. */}
@@ -150,7 +150,7 @@ function QcmWidget() {
   const overall = qcm.answeredTotal > 0 ? Math.round((qcm.correctTotal / qcm.answeredTotal) * 100) : null;
 
   return (
-    <OsCard icon={Target} iconClassName="from-primary-500 to-cyan-500" title={tCockpit("qcmTitle", language)} glow="hover:shadow-primary-500/15">
+    <OsCard icon={Target} iconClassName="from-primary-500 to-cyan-500" title={tCockpit("qcmTitle", language)} glow="[@media(hover:hover)]:hover:shadow-primary-500/15">
       <div className="flex items-center gap-4">
         <RadialGauge value={accuracy} gradient={["#14b8a6", "#06b6d4"]}>
           <span className="text-lg font-extrabold tabular-nums text-foreground">{accuracy === null ? "—" : `${accuracy}%`}</span>
@@ -196,7 +196,7 @@ function FlashcardWidget({ userId }: { userId: string | null }) {
   const activeModules = overview?.flashcardActiveModuleIds.length ?? null;
 
   return (
-    <OsCard icon={Brain} iconClassName="from-violet-500 to-fuchsia-500" title={tCockpit("flashTitle", language)} glow="hover:shadow-violet-500/15">
+    <OsCard icon={Brain} iconClassName="from-violet-500 to-fuchsia-500" title={tCockpit("flashTitle", language)} glow="[@media(hover:hover)]:hover:shadow-violet-500/15">
       {session && graded > 0 ? (
         <>
           <div className="flex items-end justify-between gap-2">
@@ -254,7 +254,7 @@ function FocusWidget() {
       icon={Clock3}
       iconClassName="from-sky-500 to-indigo-500"
       title={tCockpit("focusTitle", language)}
-      glow="hover:shadow-sky-500/15"
+      glow="[@media(hover:hover)]:hover:shadow-sky-500/15"
       action={
         isActive ? (
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">

@@ -45,12 +45,12 @@ interface LaunchTile {
 }
 
 const TILES: LaunchTile[] = [
-  { id: "case", icon: Stethoscope, titleKey: "lab_case-simulator", subtitleKey: "tileCaseSub", gradient: "from-rose-500 to-pink-500", glow: "hover:shadow-rose-500/20", tool: "case-simulator" },
-  { id: "matrix", icon: Table2, titleKey: "lab_matrix", subtitleKey: "tileMatrixSub", gradient: "from-violet-500 to-indigo-500", glow: "hover:shadow-violet-500/20", tool: "matrix" },
-  { id: "mindmap", icon: Network, titleKey: "lab_mindmap", subtitleKey: "tileMindmapSub", gradient: "from-cyan-500 to-sky-500", glow: "hover:shadow-cyan-500/20", tool: "mindmap" },
+  { id: "case", icon: Stethoscope, titleKey: "lab_case-simulator", subtitleKey: "tileCaseSub", gradient: "from-rose-500 to-pink-500", glow: "[@media(hover:hover)]:hover:shadow-rose-500/20", tool: "case-simulator" },
+  { id: "matrix", icon: Table2, titleKey: "lab_matrix", subtitleKey: "tileMatrixSub", gradient: "from-violet-500 to-indigo-500", glow: "[@media(hover:hover)]:hover:shadow-violet-500/20", tool: "matrix" },
+  { id: "mindmap", icon: Network, titleKey: "lab_mindmap", subtitleKey: "tileMindmapSub", gradient: "from-cyan-500 to-sky-500", glow: "[@media(hover:hover)]:hover:shadow-cyan-500/20", tool: "mindmap" },
   // Held back for V2 (lib/feature-flags.ts).
   ...(AUDIO_SMART_NOTES_ENABLED
-    ? [{ id: "audio", icon: Mic, titleKey: "navAudio", subtitleKey: "tileAudioSub", gradient: "from-orange-500 to-amber-500", glow: "hover:shadow-orange-500/20", href: AUDIO_SMART_NOTES_PAGE } satisfies LaunchTile]
+    ? [{ id: "audio", icon: Mic, titleKey: "navAudio", subtitleKey: "tileAudioSub", gradient: "from-orange-500 to-amber-500", glow: "[@media(hover:hover)]:hover:shadow-orange-500/20", href: AUDIO_SMART_NOTES_PAGE } satisfies LaunchTile]
     : []),
 ];
 
@@ -59,8 +59,14 @@ function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label:
   const Icon = tile.icon;
   const body = (
     <>
-      <div aria-hidden className={cn("pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br opacity-20 blur-2xl transition-opacity duration-500 group-hover:opacity-40", tile.gradient)} />
-      <span className={cn("relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg transition-transform duration-300 group-hover:rotate-[-6deg] group-hover:scale-110 sm:h-11 sm:w-11", tile.gradient)}>
+      {/* The colour glow lives in its own clip layer, cut to the card's inner
+          corner radius: a blurred child is composited on its own, and
+          `overflow-hidden` + rounded corners alone let it spill past the
+          corners (iOS Safari, Android Chrome — worst while the card scales on tap). */}
+      <span aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden rounded-[calc(1.5rem-1px)] [clip-path:inset(0_round_calc(1.5rem-1px))]">
+        <span className={cn("absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br opacity-20 blur-2xl transition-opacity duration-500 [@media(hover:hover)]:group-hover:opacity-40", tile.gradient)} />
+      </span>
+      <span className={cn("relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg transition-transform duration-300 sm:h-11 sm:w-11 [@media(hover:hover)]:group-hover:rotate-[-6deg] [@media(hover:hover)]:group-hover:scale-110", tile.gradient)}>
         <Icon className="h-6 w-6 sm:h-5 sm:w-5" />
       </span>
       <p className="relative mt-2.5 text-[13px] font-bold leading-tight text-foreground sm:mt-3 sm:text-sm">{tCockpit(tile.titleKey, language)}</p>
@@ -71,8 +77,10 @@ function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label:
       </span>
     </>
   );
+  // Lift and tinted glow answer a real mouse hover only: on a phone a tapped
+  // card used to keep both, a coloured halo spilling around its edges.
   const cardClass = cn(
-    "group relative flex h-full min-h-[7.5rem] flex-col items-center overflow-hidden rounded-3xl border border-white/30 p-3 text-center shadow-glass transition-all duration-300 hover:-translate-y-1 hover:shadow-xl active:scale-[0.97] dark:border-white/[0.06] dark:shadow-glass-dark glass-card sm:min-h-0 sm:items-start sm:p-4 sm:text-left",
+    "group relative isolate flex h-full min-h-[7.5rem] flex-col items-center overflow-hidden rounded-3xl border border-white/30 p-3 text-center shadow-glass transition-[transform,box-shadow] duration-300 active:scale-[0.97] dark:border-white/[0.06] dark:shadow-glass-dark glass-card sm:min-h-0 sm:items-start sm:p-4 sm:text-left [@media(hover:hover)]:hover:-translate-y-1 [@media(hover:hover)]:hover:shadow-xl",
     tile.glow
   );
 
@@ -149,7 +157,8 @@ function ResumeCard() {
       data-tour="explication"
       className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary-600 via-teal-600 to-violet-700 p-[1.5px] shadow-xl shadow-primary-500/20"
     >
-      <div className="relative h-full overflow-hidden rounded-[calc(1.5rem-1.5px)] bg-gradient-to-br from-primary-600/95 via-teal-700/95 to-violet-800/95 p-5 text-white">
+      {/* clip-path backs up overflow-hidden: the blurred glows below are composited on their own and would otherwise spill past the corners on mobile. */}
+      <div className="relative h-full overflow-hidden rounded-[calc(1.5rem-1.5px)] bg-gradient-to-br from-primary-600/95 via-teal-700/95 to-violet-800/95 p-5 text-white [clip-path:inset(0_round_calc(1.5rem-1.5px))]">
         <div aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
         <div aria-hidden className="pointer-events-none absolute -bottom-16 left-1/3 h-40 w-40 rounded-full bg-cyan-300/20 blur-3xl" />
         <p className="relative flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-white/70">

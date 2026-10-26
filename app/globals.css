@@ -826,10 +826,18 @@ textarea,
   }
 }
 
-/* Dialog (components/ui/Dialog.tsx) open/close: the overlay fades instead of
-   popping, and on close Radix keeps the dialog mounted until its exit
-   animation ends. The centered exit animates opacity and the standalone
-   `scale` property only — `transform` holds the dialog's centering. */
+/* ---------------------------------------------------------------------
+   MOTION SYSTEM — one unhurried language for everything that appears.
+   Entrances glide (quick start, long soft landing: cubic-bezier(0.22, 1,
+   0.36, 1)) over 0.3–0.5s; exits are shorter and accelerate away. Opacity
+   and the standalone `translate` / `scale` properties only — never
+   `transform`, which components own (dialog centering, Tailwind translate
+   utilities, framer-motion). The prefers-reduced-motion rule above
+   collapses all of it to instant.
+   --------------------------------------------------------------------- */
+
+/* Dialog (components/ui/Dialog.tsx): the overlay fades instead of popping;
+   on close Radix keeps the dialog mounted until its exit animation ends. */
 @keyframes dialog-overlay-in {
   from {
     opacity: 0;
@@ -846,30 +854,123 @@ textarea,
   to {
     opacity: 0;
     scale: 0.96;
+    translate: 0 8px;
   }
 }
 
 .dialog-overlay[data-state="open"] {
-  animation: dialog-overlay-in 220ms ease-out;
+  animation: dialog-overlay-in 320ms ease-out;
 }
 
 .dialog-overlay[data-state="closed"] {
-  animation: dialog-overlay-out 200ms ease-in forwards;
+  animation: dialog-overlay-out 240ms ease-in forwards;
 }
 
 .dialog-content[data-state="closed"] {
-  animation: dialog-out 160ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: dialog-out 220ms cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 
 @media (prefers-reduced-motion: no-preference) and (max-width: 639px) {
   .sheet-enter {
-    animation: sheet-slide-up 320ms cubic-bezier(0.32, 0.72, 0, 1);
+    animation: sheet-slide-up 420ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
   /* After the rule above: the sheet slides back down when it closes. */
   .sheet-enter[data-state="closed"] {
-    animation: sheet-slide-down 240ms cubic-bezier(0.32, 0, 0.67, 0) forwards;
+    animation: sheet-slide-down 280ms cubic-bezier(0.32, 0, 0.67, 0) forwards;
   }
+}
+
+/* Menus, selects and tooltips (Radix popper content): the same glide instead
+   of tailwindcss-animate's 150ms pop. One attribute more specific than the
+   data-state classes those components carry, so this timing wins and their
+   fade / zoom / slide keyframes stay. */
+[data-radix-popper-content-wrapper] > [data-side][data-state="open"],
+[data-radix-popper-content-wrapper] > [data-side][data-state="delayed-open"],
+[data-radix-popper-content-wrapper] > [data-side][data-state="instant-open"] {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-radix-popper-content-wrapper] > [data-side][data-state="closed"] {
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Every glass surface (cards, panels) settles in when it appears — after a
+   load, a tab switch, a filter — instead of popping onto the screen.
+   Elements running their own animation (skeleton pulses, animate-in…) keep it. */
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+.glass-card:not([class*="animate-"]),
+.cyber-glass:not([class*="animate-"]) {
+  animation: surface-in 460ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+/* A new page (components/layout/PageTransition.tsx): its top-level sections
+   rise in one after another. Only when the page mounts — nothing inside a
+   page replays. After the surface rule, so a section that is itself a glass
+   card follows the cascade. */
+@keyframes section-rise {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+  }
+}
+
+.page-reveal > * > *:not([class*="animate-"]) {
+  animation: section-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.page-reveal > * > *:nth-child(2):not([class*="animate-"]) {
+  animation-delay: 70ms;
+}
+
+.page-reveal > * > *:nth-child(3):not([class*="animate-"]) {
+  animation-delay: 140ms;
+}
+
+.page-reveal > * > *:nth-child(4):not([class*="animate-"]) {
+  animation-delay: 210ms;
+}
+
+.page-reveal > * > *:nth-child(n + 5):not([class*="animate-"]) {
+  animation-delay: 280ms;
+}
+
+/* Full-screen readers (components/ui/FullscreenViewerModal.tsx) glide up in
+   and drop away out, instead of appearing and vanishing in one frame. */
+@keyframes viewer-in {
+  from {
+    opacity: 0;
+    translate: 0 24px;
+  }
+}
+
+@keyframes viewer-out {
+  to {
+    opacity: 0;
+    translate: 0 16px;
+  }
+}
+
+.viewer-enter {
+  animation: viewer-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.viewer-exit {
+  animation: viewer-out 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* The assistant on phones is portaled full screen, outside PageTransition:
+   it fades in over the page it was opened from. */
+.copilot-enter {
+  animation: dialog-overlay-in 360ms ease-out;
 }
 
 /* MedArt Assistant streaming: each newly arrived word fades in. Opacity only —

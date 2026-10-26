@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpenCheck, Coffee, Flame, Minus, Pause, Play, Plus, RotateCcw, ShieldAlert, Timer, Trophy, Zap } from "lucide-react";
+import { BellRing, BookOpenCheck, Coffee, Flame, Minus, Pause, Play, Plus, RotateCcw, ShieldAlert, Timer, Trophy, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -29,6 +29,7 @@ import {
   readStoredPomodoroSettings,
   savePomodoroSettings,
 } from "@/lib/pomodoro/schedule";
+import { playPomodoroChime, preparePomodoroChimes, unlockPomodoroAudio } from "@/lib/pomodoro/chime";
 import { CyberPanel, NeonRing } from "@/components/cyber/primitives";
 import { useMagnetic, useRichEffects } from "@/components/cyber/hooks";
 import { AMBIENCES, AmbiencePanel, type AmbienceId } from "./pomodoro/AmbiencePanel";
@@ -325,6 +326,20 @@ export function StudyDashboard() {
               <DurationStepper label="Pause" icon={Coffee} value={settings.rest} unit="min" min={MIN_DURATION_MINUTES} max={MAX_DURATION_MINUTES} step={5} disabled={isRunning} onChange={(rest) => patchSettings({ rest })} />
               <DurationStepper label="Cycles" icon={Timer} value={settings.cycles} unit="x" min={MIN_CYCLES} max={MAX_CYCLES} disabled={isRunning} onChange={(cycles) => patchSettings({ cycles })} />
             </div>
+            {/* Plays the break chime on demand: the student checks the volume before a session — and
+                the tap itself unlocks sound for the chimes to come (lib/pomodoro/chime.ts). */}
+            <button
+              type="button"
+              onClick={() => {
+                void unlockPomodoroAudio()
+                  .then(() => preparePomodoroChimes())
+                  .then(() => playPomodoroChime("break"));
+              }}
+              className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 text-xs font-bold text-slate-300 transition-colors hover:border-cyan-400/40 hover:text-white active:scale-[0.98]"
+            >
+              <BellRing className="h-4 w-4 text-cyan-300" />
+              Tester la sonnerie
+            </button>
           </div>
         </CyberPanel>
 

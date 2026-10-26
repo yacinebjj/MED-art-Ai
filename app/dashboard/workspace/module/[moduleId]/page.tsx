@@ -855,7 +855,7 @@ export default function ModuleWorkspacePage() {
           // FR/AR + listen (Dictionnaire), category boards (Mots-clés) — with
           // search, priority/course/category filters and exports. It only
           // reads the generated Markdown; the content itself is unchanged.
-          <motion.div key="output" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
+          <motion.div key="output" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
             <SynthesisExplorer
               markdown={output}
               kind={history.find((h) => h.id === activeHistoryId)?.type ?? null}
@@ -974,7 +974,7 @@ export default function ModuleWorkspacePage() {
           invisible on mobile, not a missing bottom-nav offset. Nothing
           floats over this panel, so its bottom padding only has to keep the
           last line above the home indicator (safe area) with some air. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-2 lg:px-8">
+      <div className="min-h-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none px-1 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-2 lg:px-8">
         {outputBody}
       </div>
     </div>

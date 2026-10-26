@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+/** How long a closing viewer stays on screen for its exit animation (.viewer-exit, app/globals.css). */
+const EXIT_MS = 240;
 
 interface FullscreenViewerModalProps {
   open: boolean;
@@ -30,6 +33,17 @@ interface FullscreenViewerModalProps {
  * what CSS any parent panel applies, now or in the future.
  */
 export function FullscreenViewerModal({ open, onClose, title, children, contentClassName }: FullscreenViewerModalProps) {
+  // Glides in on open; on close it stays rendered just long enough to glide out.
+  const [rendered, setRendered] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      return;
+    }
+    const id = window.setTimeout(() => setRendered(false), EXIT_MS);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
@@ -47,7 +61,7 @@ export function FullscreenViewerModal({ open, onClose, title, children, contentC
     };
   }, [open, onClose]);
 
-  if (!open || typeof document === "undefined") return null;
+  if (!(open || rendered) || typeof document === "undefined") return null;
 
   return createPortal(
     // z-[100] — deliberately above every other fixed layer in the app
@@ -58,7 +72,12 @@ export function FullscreenViewerModal({ open, onClose, title, children, contentC
     // app/globals.css), not a guessed hex value: pure white in light mode,
     // near-black in dark, always fully opaque (no blur/transparency),
     // exactly like the note editor's own proven fullscreen Card.
-    <div className="fixed inset-0 z-[100] flex flex-col bg-background pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)]">
+    <div
+      className={cn(
+        "fixed inset-0 z-[100] flex flex-col bg-background pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)]",
+        open ? "viewer-enter" : "viewer-exit pointer-events-none"
+      )}
+    >
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
         <h2 className="min-w-0 flex-1 truncate text-base font-bold text-foreground">{title}</h2>
         <button
@@ -71,7 +90,7 @@ export function FullscreenViewerModal({ open, onClose, title, children, contentC
           <X className="h-5 w-5" />
         </button>
       </div>
-      <div className={cn("min-h-0 flex-1 overflow-y-auto pb-[calc(6rem+env(safe-area-inset-bottom))]", contentClassName)}>
+      <div className={cn("min-h-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none pb-[calc(6rem+env(safe-area-inset-bottom))]", contentClassName)}>
         {children}
       </div>
     </div>,

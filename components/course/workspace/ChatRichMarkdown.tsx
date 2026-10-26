@@ -246,7 +246,8 @@ export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, dark, 
               </span>
               <span className={`text-[11px] font-bold uppercase tracking-[0.08em] ${config.labelClass}`}>{config.label}</span>
             </div>
-            <div className="px-3 pb-2.5 pt-1.5 text-sm leading-relaxed [&_p]:my-1">{stripCalloutPrefix(props.children, config)}</div>
+            {/* Relative to the reply's own 17px body (lib/markdown.tsx), never a fixed small size. */}
+            <div className="px-3 pb-2.5 pt-1.5 text-[0.94em] leading-[1.7] [&_p]:my-1">{stripCalloutPrefix(props.children, config)}</div>
           </aside>
         );
       },

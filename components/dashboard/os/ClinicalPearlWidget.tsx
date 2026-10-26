@@ -43,7 +43,7 @@ export function ClinicalPearlWidget({ userId }: { userId: string | null }) {
       icon={Stethoscope}
       iconClassName="from-emerald-500 to-teal-500"
       title={tCockpit("pearlTitle", language)}
-      glow="hover:shadow-emerald-500/15"
+      glow="[@media(hover:hover)]:hover:shadow-emerald-500/15"
       action={<span className="truncate rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">{pearl.tag[language]}</span>}
     >
       <p className="text-sm font-semibold leading-snug text-foreground">{pearl.question[language]}</p>
