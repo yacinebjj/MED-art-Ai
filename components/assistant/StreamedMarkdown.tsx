@@ -223,7 +223,7 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, live }: { text: string
 //    string that would otherwise overflow.
 //  - min-w-0/max-w-full/w-full so no long token can ever widen the thread.
 const PROSE_CLASSES =
-  "prose w-full min-w-0 max-w-full break-words text-[16px] leading-[1.72] text-slate-800 dark:prose-invert dark:text-zinc-200 " +
+  "prose w-full min-w-0 max-w-full break-words text-[17px] leading-[1.8] text-slate-800 dark:prose-invert dark:text-zinc-200 " +
   "prose-headings:font-heading prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-slate-900 dark:prose-headings:text-zinc-50 " +
   "prose-h1:text-[1.35em] prose-h2:text-[1.2em] prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-[1.08em] prose-h4:mb-1.5 prose-h4:mt-4 prose-h4:text-[1em] " +
   "prose-p:my-2.5 prose-strong:font-semibold prose-strong:text-cyan-700 dark:prose-strong:text-cyan-300 " +

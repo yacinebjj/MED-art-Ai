@@ -56,6 +56,7 @@ import { QUICK_ACTIONS, QuickActionBar } from "@/components/assistant/QuickActio
 import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
 import { VoiceMeter } from "@/components/assistant/VoiceMeter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
 import { ASSISTANT_PREFILL_KEY } from "@/lib/dashboard/assistant-prefill";
 
@@ -92,18 +93,8 @@ function NovaOrb() {
 
 function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
   return (
-    <div className="relative flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-x-none px-3 py-8 text-center sm:gap-8 sm:px-4 sm:py-10">
-      <video
-        aria-hidden
-        autoPlay
-        muted
-        loop
-        playsInline
-        className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover opacity-10 blur-sm"
-      >
-        <source src="/ai-robot-doctor.mp4" type="video/mp4" />
-      </video>
-
+    // Clears the floating glass header and composer (their measured heights, see the chat column).
+    <div className="relative flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-none px-3 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:gap-8 sm:px-4 sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
       <NovaOrb />
       <div className="max-w-xl space-y-3">
         <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-4xl">
@@ -313,6 +304,8 @@ const ATTACHMENT_ITEMS = [
   { kind: "camera" as const, icon: Camera, label: "Prendre une photo" },
 ];
 
+type AttachmentKind = (typeof ATTACHMENT_ITEMS)[number]["kind"];
+
 // --- Image/document attachment envelopes -----------------------------------
 // ChatMessage (hooks/useAssistantConversations.ts, out of this mission's
 // file perimeter) types `content` as a plain string — it's also what's
@@ -521,6 +514,12 @@ export default function AssistantPage() {
   }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // The glass header (phones) and composer dock float over the thread; the
+  // chat column publishes their measured heights (layout effect below).
+  const chatColumnRef = useRef<HTMLDivElement>(null);
+  const phoneHeaderRef = useRef<HTMLDivElement>(null);
+  const composerDockRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
   // MediaRecorder-based dictation (replaces the old browser SpeechRecognition
   // path, which silently died whenever the browser's remote recognition
   // service was unreachable post-permission — see toggleListening below).
@@ -607,7 +606,13 @@ export default function AssistantPage() {
     const maxHeight = Math.min(180, Math.max(96, Math.round(visibleHeight * 0.3)));
     const previous = composerHeightRef.current || el.offsetHeight;
     el.style.height = "auto";
+    // Measured without the placeholder: an empty field's scrollHeight counts
+    // the placeholder's wrapped lines (two on a phone), so the empty composer
+    // stood two lines tall and snapped down on the first keystroke.
+    const placeholder = el.placeholder;
+    el.placeholder = "";
     const natural = el.scrollHeight;
+    el.placeholder = placeholder;
     const target = Math.min(natural, maxHeight);
     el.style.height = `${previous}px`;
     void el.offsetHeight; // commit the start height so the transition has something to animate from
@@ -652,6 +657,36 @@ export default function AssistantPage() {
     el.scrollTo({ top: el.scrollHeight, behavior: isTyping ? "auto" : "smooth" });
   }, [messages, isAtBottom, isTyping]);
 
+  useEffect(() => {
+    isAtBottomRef.current = isAtBottom;
+  }, [isAtBottom]);
+
+  // The thread reserves exactly what the floating glass header and composer
+  // cover — measured, never guessed: the composer grows with the text, the
+  // armed-mode chip and the image preview, and loses its quick-action row
+  // while the keyboard is up. Written straight onto the column as CSS
+  // variables, so a height change never re-renders this page. Re-attached
+  // when the surface remounts (phones portal it into <body>).
+  useLayoutEffect(() => {
+    const column = chatColumnRef.current;
+    if (!column) return;
+    const measured: [HTMLDivElement | null, string][] = [
+      [phoneHeaderRef.current, "--copilot-header-h"],
+      [composerDockRef.current, "--copilot-composer-h"],
+    ];
+    const publish = () => {
+      for (const [el, name] of measured) column.style.setProperty(name, `${el?.offsetHeight ?? 0}px`);
+      // Following along: the latest message stays right above the composer as it grows.
+      const thread = scrollContainerRef.current;
+      if (thread && isAtBottomRef.current) thread.scrollTop = thread.scrollHeight;
+    };
+    publish();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(publish);
+    for (const [el] of measured) if (el) observer.observe(el);
+    return () => observer.disconnect();
+  }, [isPhoneLayout]);
+
   /** Tracks proximity to the bottom of the scrollable message list — feeds both the auto-follow effect above and the floating "revenir en bas" button's visibility. A generous 150px threshold so it doesn't flicker on tiny scroll jitters. */
   function handleScroll() {
     const el = scrollContainerRef.current;
@@ -675,8 +710,9 @@ export default function AssistantPage() {
     };
   }, []);
 
+  // Desktop popover only: the phone/tablet bottom sheet (a Dialog) handles outside taps itself.
   useEffect(() => {
-    if (!isAttachmentMenuOpen) return;
+    if (!isAttachmentMenuOpen || isPhoneLayout) return;
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
       if (attachmentMenuRef.current?.contains(target) || attachmentButtonRef.current?.contains(target)) return;
@@ -684,7 +720,7 @@ export default function AssistantPage() {
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isAttachmentMenuOpen]);
+  }, [isAttachmentMenuOpen, isPhoneLayout]);
 
   useEffect(() => {
     if (!hydrated || !activeId) return;
@@ -1113,6 +1149,18 @@ export default function AssistantPage() {
     if (next) textareaRef.current?.focus();
   }
 
+  function attachmentLabel(kind: AttachmentKind, fallback: string): string {
+    return kind === "image" ? tAssistant("attachImage", language) : kind === "camera" ? tAssistant("attachCamera", language) : fallback;
+  }
+
+  /** Closes the menu or sheet and opens the matching native picker — still inside the tap, as iOS requires. */
+  function pickAttachment(kind: AttachmentKind) {
+    setIsAttachmentMenuOpen(false);
+    if (kind === "image") imageInputRef.current?.click();
+    else if (kind === "camera") cameraInputRef.current?.click();
+    else pdfInputRef.current?.click();
+  }
+
   const surface = (
     <div
       // Phones: a `fixed` surface pinned to the VISIBLE viewport — top/height
@@ -1123,13 +1171,14 @@ export default function AssistantPage() {
       //
       // overflow-hidden + w-full/max-w-full here and on every wrapper below is
       // the horizontal-sway lock: nothing inside can widen this surface.
+      // overscroll-none: the frame itself never rubber-bands (no "void").
       //
-      // bg-white/5 (light) / transparent (dark): the shell paints its aurora
-      // gradient behind every page in this route group, and an opaque
-      // background here would hide it (dark:bg-black/20 was tried and was
-      // still effectively opaque against the near-black dark aurora).
+      // .copilot-canvas (app/globals.css): the assistant's own clean, opaque
+      // background — no aurora, mesh grid or video behind the conversation
+      // (the shell doesn't mount its DNA canvas on this route either). From
+      // lg it is a rounded panel beside the sidebar.
       className={cn(
-        "flex w-full max-w-full overflow-hidden bg-white/5 dark:bg-transparent lg:h-full lg:backdrop-blur-sm",
+        "copilot-canvas flex w-full max-w-full overflow-hidden overscroll-none lg:h-full lg:rounded-3xl lg:border",
         // `inset-0` (like the group chat room, proven on real phones) — the
         // surface fills the layout viewport with no JS and no `dvh`
         // dependency, so it can never render at zero size.
@@ -1147,11 +1196,19 @@ export default function AssistantPage() {
         onDelete={handleDeleteConversation}
       />
 
-      <div className="flex w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-white/5 dark:bg-transparent lg:backdrop-blur-sm">
+      {/* The chat column. Its glass header (phones) and glass composer dock
+          float OVER the thread, which slides beneath them: their measured
+          heights live here as --copilot-header-h / --copilot-composer-h
+          (see the layout effect above), and the thread and empty state pad
+          by exactly that much. */}
+      <div ref={chatColumnRef} className="relative flex w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden">
         {/* Phone header — the shell hides its Topbar and bottom nav on this
             route below lg (see CHROMELESS_MOBILE_ROUTES), so this page owns
             the full screen and needs its own way back out. */}
-        <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-1.5 pb-1.5 pt-[calc(env(safe-area-inset-top)+0.375rem)] lg:hidden">
+        <div
+          ref={phoneHeaderRef}
+          className="glass-chrome absolute inset-x-0 top-0 z-20 flex items-center gap-1 rounded-none border-x-0 border-t-0 px-1.5 pb-1.5 pt-[calc(env(safe-area-inset-top)+0.375rem)] lg:hidden"
+        >
           <Link
             href="/dashboard"
             aria-label="Retour au tableau de bord"
@@ -1209,9 +1266,9 @@ export default function AssistantPage() {
             <div
               ref={scrollContainerRef}
               onScroll={handleScroll}
-              className="h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-x-none overscroll-y-contain [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
+              className="h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
             >
-              <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 px-3 py-4 sm:px-5 md:px-6 md:py-6">
+              <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 px-3 pb-[calc(var(--copilot-composer-h,0px)+1rem)] pt-[calc(var(--copilot-header-h,0px)+1rem)] sm:px-5 md:px-6 md:pb-[calc(var(--copilot-composer-h,0px)+1.5rem)] md:pt-[calc(var(--copilot-header-h,0px)+1.5rem)]">
                 <AnimatePresence initial={false}>
                   {messages.map((message, index) => (
                     <ChatBubble
@@ -1242,7 +1299,7 @@ export default function AssistantPage() {
                   exit={{ opacity: 0, y: 10, scale: 0.94 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
                   className={cn(
-                    "absolute bottom-3 left-1/2 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-glass transition-colors dark:shadow-glass-dark",
+                    "absolute bottom-[calc(var(--copilot-composer-h,0px)+0.75rem)] left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-glass transition-colors dark:shadow-glass-dark",
                     isTyping
                       ? "border-emerald-500/30 bg-emerald-500 text-white hover:bg-emerald-600"
                       : "border-border bg-popover/95 text-foreground hover:bg-accent"
@@ -1256,10 +1313,17 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* Bottom safe-area only while the keyboard is CLOSED: with it open the
+        {/* The composer dock: one full-width glass bar the thread slides under.
+            Bottom safe-area only while the keyboard is CLOSED: with it open the
             home indicator is hidden under the keyboard, and keeping that inset
             is exactly the "awkward gap above the keyboard". */}
-        <div className={cn("relative shrink-0 lg:pb-6", keyboardOpen ? "pb-2" : "pb-[max(0.5rem,env(safe-area-inset-bottom))]")}>
+        <div
+          ref={composerDockRef}
+          className={cn(
+            "glass-chrome absolute inset-x-0 bottom-0 z-20 rounded-none border-x-0 border-b-0 pt-1.5 lg:pb-5",
+            keyboardOpen ? "pb-2" : "pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+          )}
+        >
           <div className="mx-auto w-full max-w-3xl">
             {!keyboardOpen && (
               <QuickActionBar
@@ -1272,7 +1336,7 @@ export default function AssistantPage() {
             )}
 
             <div className="px-3 sm:px-4">
-              <div className="glass-panel relative flex w-full flex-col rounded-[26px] shadow-glass transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:shadow-glass-dark">
+              <div className="relative flex w-full flex-col rounded-[26px] border border-black/[0.08] bg-white/70 shadow-soft transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:border-white/10 dark:bg-white/[0.06]">
                 <AnimatePresence initial={false}>
                   {activeAction && (
                     <motion.div
@@ -1360,8 +1424,10 @@ export default function AssistantPage() {
                     <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageFileChosen} />
                     <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={handlePdfFileChosen} />
 
+                    {/* Desktop: a small popover above the button. Phones and tablets get
+                        the bottom sheet below instead (AttachmentSheet). */}
                     <AnimatePresence>
-                      {isAttachmentMenuOpen && (
+                      {isAttachmentMenuOpen && !isPhoneLayout && (
                         <motion.div
                           ref={attachmentMenuRef}
                           initial={{ opacity: 0, y: 8, scale: 0.96 }}
@@ -1370,29 +1436,46 @@ export default function AssistantPage() {
                           transition={{ duration: 0.15 }}
                           className="absolute bottom-full left-0 z-50 mb-2 w-60 overflow-hidden rounded-2xl border border-border bg-popover py-1 text-popover-foreground shadow-glass dark:shadow-glass-dark"
                         >
-                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }) => {
-                            const displayLabel =
-                              kind === "image" ? tAssistant("attachImage", language) : kind === "camera" ? tAssistant("attachCamera", language) : label;
-                            return (
-                              <button
-                                key={kind}
-                                type="button"
-                                onClick={() => {
-                                  setIsAttachmentMenuOpen(false);
-                                  if (kind === "image") imageInputRef.current?.click();
-                                  else if (kind === "camera") cameraInputRef.current?.click();
-                                  else pdfInputRef.current?.click();
-                                }}
-                                className="flex min-h-12 w-full cursor-pointer items-center gap-3 px-4 text-left text-[15px] text-foreground transition-colors active:bg-accent hover:bg-accent"
-                              >
-                                <Icon size={18} className="shrink-0 text-emerald-500" />
-                                <span className="flex-1">{displayLabel}</span>
-                              </button>
-                            );
-                          })}
+                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }) => (
+                            <button
+                              key={kind}
+                              type="button"
+                              onClick={() => pickAttachment(kind)}
+                              className="flex min-h-12 w-full cursor-pointer items-center gap-3 px-4 text-left text-[15px] text-foreground transition-colors active:bg-accent hover:bg-accent"
+                            >
+                              <Icon size={18} className="shrink-0 text-emerald-500" />
+                              <span className="flex-1">{attachmentLabel(kind, label)}</span>
+                            </button>
+                          ))}
                         </motion.div>
                       )}
                     </AnimatePresence>
+
+                    {/* Phones and tablets: the same choices as a bottom sheet that slides up
+                        (Dialog's mobile sheet — swipe down or tap outside to dismiss). */}
+                    <Dialog open={isAttachmentMenuOpen && isPhoneLayout} onOpenChange={setIsAttachmentMenuOpen}>
+                      <DialogContent className="p-0 sm:max-w-sm sm:p-0">
+                        <div className="px-4 pb-4 pr-12 pt-7">
+                          <DialogTitle className="text-base font-bold">{tAssistant("addAttachment", language)}</DialogTitle>
+                          <DialogDescription className="sr-only">{tAssistant("addAttachment", language)}</DialogDescription>
+                        </div>
+                        <div className="grid gap-1 px-2 pb-3">
+                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }) => (
+                            <button
+                              key={kind}
+                              type="button"
+                              onClick={() => pickAttachment(kind)}
+                              className="press-feedback flex min-h-14 w-full items-center gap-3 rounded-2xl px-2 text-left text-[15px] font-semibold text-foreground active:bg-accent"
+                            >
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                <Icon className="h-5 w-5" />
+                              </span>
+                              <span className="flex-1">{attachmentLabel(kind, label)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                   </div>
 
                   {isListening ? (
@@ -1410,7 +1493,7 @@ export default function AssistantPage() {
                       enterKeyHint="send"
                       aria-label={tAssistant("composerPlaceholder", language)}
                       placeholder={composerPlaceholder}
-                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out placeholder:text-muted-foreground focus:ring-0"
+                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out placeholder:truncate placeholder:text-muted-foreground focus:ring-0"
                     />
                   )}
 
@@ -1442,7 +1525,7 @@ export default function AssistantPage() {
                     aria-label={isListening ? tAssistant("stopDictation", language) : tAssistant("startDictation", language)}
                     className={cn(
                       "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
-                      isListening ? "bg-rose-500 text-white" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      isListening ? "bg-emerald-500 text-white shadow-[0_0_0_4px_rgba(16,185,129,0.18)]" : "text-muted-foreground hover:bg-accent hover:text-foreground",
                       (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40",
                       hasPrimaryAction && !isListening && "max-sm:hidden"
                     )}

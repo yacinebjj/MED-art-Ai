@@ -51,7 +51,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
   }
 
   return (
-    <header className="glass-panel relative z-20 flex h-14 shrink-0 items-center justify-between rounded-b-3xl px-2 py-1 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6 sm:py-2">
+    <header className="glass-chrome relative z-20 flex h-14 shrink-0 items-center justify-between rounded-b-3xl border-t-0 px-2 py-1 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6 sm:py-2">
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
         {/* Explicit back control — distinct from the logo below, which reads
             as branding rather than navigation to a hurried student. Neither

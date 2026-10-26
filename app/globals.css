@@ -154,6 +154,116 @@
 }
 
 /**
+ * SHELL TOPBAR GEOMETRY — components/layout/Topbar.tsx and the shell layout
+ * (app/dashboard/(shell)/layout.tsx) draw from these. Scrolling pages run
+ * under the glass bar: their content starts --topbar-clearance down, so
+ * nothing is hidden at rest and everything slides beneath the bar on scroll.
+ * Phones: a full-width bar flush with the top edge (status-bar inset
+ * included). From sm: the floating pill, 0.75rem off the top, then 0.75rem
+ * of air.
+ */
+:root {
+  --topbar-height: calc(3.5rem + env(safe-area-inset-top));
+  --topbar-clearance: var(--topbar-height);
+}
+
+@media (min-width: 640px) {
+  :root {
+    --topbar-height: 4rem;
+    --topbar-clearance: calc(var(--topbar-height) + 1.5rem);
+  }
+}
+
+@layer components {
+  /* GLASS CHROME — the one material for the bars pages scroll under (shell
+     Topbar, workspace topbar, mobile dock, Copilot header and composer): the
+     theme background at 70% over a strong blur, with a hairline edge. A
+     component class, so a bar's own border/radius/shadow utilities win. It
+     keeps its blur on touch screens too (see the (hover: none) rules). */
+  .glass-chrome {
+    background-color: rgb(255 255 255 / 0.7);
+    border: 1px solid rgb(15 23 42 / 0.08);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+  }
+
+  .dark .glass-chrome {
+    background-color: rgb(11 14 17 / 0.7);
+    border-color: rgb(255 255 255 / 0.08);
+  }
+
+  @supports (background-color: color-mix(in oklab, white 70%, transparent)) {
+    .glass-chrome,
+    .dark .glass-chrome {
+      background-color: color-mix(in oklab, var(--background) 70%, transparent);
+    }
+  }
+
+  /* The band above the floating Topbar pill (sm+, app/dashboard/(shell)/
+     layout.tsx): content scrolling up dissolves into the canvas there
+     instead of showing as a sharp sliver over the pill. It ends at the
+     pill's middle, so the dissolve finishes behind the glass. */
+  .shell-scroll-edge {
+    height: calc(0.75rem + var(--topbar-height) / 2);
+    background-image: linear-gradient(to bottom, #f8fafc, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent);
+    mask-image: linear-gradient(to bottom, #000 40%, transparent);
+  }
+
+  .dark .shell-scroll-edge {
+    background-image: linear-gradient(to bottom, #030712, transparent);
+  }
+
+  /* MedArt Assistant (app/dashboard/(shell)/assistant/page.tsx): its own
+     clean, opaque canvas — the theme background with a faint brand glow at
+     the top, no aurora, mesh grid or video behind the conversation. */
+  .copilot-canvas {
+    background-color: var(--background);
+    background-image: radial-gradient(120% 55% at 50% 0%, rgb(16 185 129 / 0.05), transparent 70%);
+  }
+
+  .dark .copilot-canvas {
+    background-image: radial-gradient(120% 55% at 50% 0%, rgb(16 185 129 / 0.08), transparent 70%);
+  }
+
+  /* Any active paid plan: the neon halo around the student's avatar
+     (components/layout/MobileBottomNav.tsx) — a slowly turning blue ring
+     and its soft glow. Transform-only animation on two small
+     pseudo-elements: compositor work, nothing to lay out or repaint. */
+  .avatar-halo {
+    isolation: isolate;
+  }
+
+  .avatar-halo::before,
+  .avatar-halo::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    border-radius: 9999px;
+    background-image: conic-gradient(from 0deg, #22d3ee, #3b82f6, #818cf8, #0ea5e9, #22d3ee);
+    animation: avatar-halo-spin 6s linear infinite;
+  }
+
+  .avatar-halo::before {
+    inset: -2px;
+  }
+
+  .avatar-halo::after {
+    inset: -4px;
+    filter: blur(6px);
+    opacity: 0.55;
+  }
+}
+
+@keyframes avatar-halo-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/**
  * MOBILE TYPE SCALE — every text-size utility below md (768px), the
  * pixel-sized micro labels included (text-[10px], text-[11px]…, ~430 uses
  * that used to keep their desktop size on phones). Deliberately NOT a root
@@ -558,6 +668,17 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* Every inner scroll area too (threads, source lists, panels, sheets): no
+   rubber-band or stretch at its ends — the elastic gap showed the page
+   behind it, the "void". After the utilities, so it also replaces their
+   `overscroll-contain`, which stops chaining but keeps the local bounce. */
+[class*="overflow-y-auto"],
+[class*="overflow-auto"],
+[class*="overflow-y-scroll"],
+[class*="overflow-scroll"] {
+  overscroll-behavior-y: none;
+}
+
 a,
 button,
 input,
@@ -609,8 +730,12 @@ textarea,
   }
 }
 
+/* The touch half of the tap-flash rule above. `:not(:focus-visible)` raises
+   it above Tailwind's `focus:ring-*` utilities, which the build emits AFTER
+   this file's rules at the same specificity — without it a tapped button
+   still flashed its ring. A real keyboard focus (iPad keyboard) keeps it. */
 @media (hover: none) and (pointer: coarse) {
-  :is(a, button, summary, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [tabindex]):focus {
+  :is(a, button, summary, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [tabindex]):focus:not(:focus-visible) {
     outline: none;
     --tw-ring-offset-shadow: 0 0 #0000;
     --tw-ring-shadow: 0 0 #0000;
@@ -624,8 +749,8 @@ textarea,
   *,
   *::before,
   *::after {
-    -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
   .glass-panel,
@@ -647,6 +772,16 @@ textarea,
 
   .dark .glass-card {
     background-color: rgb(30 41 59 / 0.82);
+  }
+
+  /* The exception: glass chrome keeps its real blur. Each bar is one small
+     surface over layers that no longer move on touch (the aurora is frozen
+     below and the WebGL DNA never mounts there — components/three/
+     DnaBackground.tsx), so the stutter that motivated this block can't come
+     back through it. A class beats `*` between two !important rules. */
+  .glass-chrome {
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
   }
 }
 
@@ -685,9 +820,55 @@ textarea,
   }
 }
 
+@keyframes sheet-slide-down {
+  to {
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+/* Dialog (components/ui/Dialog.tsx) open/close: the overlay fades instead of
+   popping, and on close Radix keeps the dialog mounted until its exit
+   animation ends. The centered exit animates opacity and the standalone
+   `scale` property only — `transform` holds the dialog's centering. */
+@keyframes dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-overlay-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-out {
+  to {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+.dialog-overlay[data-state="open"] {
+  animation: dialog-overlay-in 220ms ease-out;
+}
+
+.dialog-overlay[data-state="closed"] {
+  animation: dialog-overlay-out 200ms ease-in forwards;
+}
+
+.dialog-content[data-state="closed"] {
+  animation: dialog-out 160ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
 @media (prefers-reduced-motion: no-preference) and (max-width: 639px) {
   .sheet-enter {
     animation: sheet-slide-up 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  /* After the rule above: the sheet slides back down when it closes. */
+  .sheet-enter[data-state="closed"] {
+    animation: sheet-slide-down 240ms cubic-bezier(0.32, 0, 0.67, 0) forwards;
   }
 }
 

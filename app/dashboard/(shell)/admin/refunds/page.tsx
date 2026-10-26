@@ -194,7 +194,7 @@ export default function AdminRefundsPage() {
 
   if (state.kind === "forbidden") {
     return (
-      <CyberStage accent="rose" className="mx-auto max-w-2xl p-4 sm:p-6 lg:p-8">
+      <CyberStage accent="rose" className="mx-auto max-w-2xl">
         <CyberPanel className="p-6 text-center sm:p-8">
           <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
             <Lock className="h-6 w-6 text-rose-300" />
@@ -210,7 +210,7 @@ export default function AdminRefundsPage() {
   }
 
   return (
-    <CyberStage accent="emerald" className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">
+    <CyberStage accent="emerald" className="mx-auto max-w-5xl overflow-x-clip">
       <CyberHeader
         icon={Wallet}
         kicker="Administration"

@@ -146,7 +146,7 @@ export default function TodoPage() {
   }
 
   return (
-    <CyberStage accent="emerald" className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
+    <CyberStage accent="emerald" className="mx-auto max-w-5xl">
       <CyberHeader
         icon={ListTodo}
         kicker={language === "fr" ? "Planificateur IA" : "AI planner"}

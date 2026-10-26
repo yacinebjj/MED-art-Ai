@@ -1,28 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowRight, CreditCard, Gauge, Users, Zap } from "lucide-react";
+import { ArrowRight, CreditCard, Gauge, Users } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PricingTierCard } from "@/components/pricing/PricingTierCard";
 import { CohortVerificationFlow } from "@/components/pricing/CohortVerificationFlow";
-import { cn } from "@/lib/utils";
 import type { PoolView } from "@/lib/billing-pools";
-import {
-  formatDZD,
-  GROUP_SIZE,
-  groupLeaderTotalDZD,
-  POOL_DEADLINE_DAYS,
-  REFUND_DELAY_LABEL,
-  type BillingCycle,
-  type GroupPaymentMode,
-  type Plan,
-  type PlanId,
-} from "@/lib/pricing";
+import { formatDZD, GROUP_SIZE, POOL_DEADLINE_DAYS, REFUND_DELAY_LABEL, type BillingCycle, type Plan, type PlanId } from "@/lib/pricing";
 
 /** What a billing-page plan card asks the page to do. */
 export type PlanAction =
   | { type: "checkout"; plan: PlanId }
-  | { type: "leader"; plan: PlanId }
   | { type: "pool"; kind: "group" | "promo"; cycle: BillingCycle }
   | { type: "open"; code: string };
 
@@ -51,19 +38,13 @@ function formatFrenchDate(iso: string): string {
 
 const CYCLE_LABEL: Record<BillingCycle, string> = { monthly: "1 mois", quad: "4 mois", annual: "8 mois" };
 
-const MODE_OPTIONS: { id: GroupPaymentMode; icon: typeof Zap; title: string }[] = [
-  { id: "leader", icon: Zap, title: "Je paie pour les 5" },
-  { id: "pooled", icon: Users, title: "Chacun paie sa part" },
-];
-
 /**
  * Billing-page card for one tier at one cycle (monetization v2), built on the
- * shared PricingTierCard. Individuel → Chargily checkout; Groupe → the
- * student picks « Je paie pour les 5 » (leader checkout) or « Chacun paie sa
- * part » (pooled purchase); Groupe de 10 → pooled purchase, any duration.
+ * shared PricingTierCard. Individuel → Chargily checkout; Groupe and Groupe
+ * de 10 → pooled purchase, « Chacun paie sa part » (any duration). Groups a
+ * leader already paid for in one go keep working in « Tes groupes ».
  */
 export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction, openPool = null, activePlanEnd = null }: PlanCardProps) {
-  const [groupMode, setGroupMode] = useState<GroupPaymentMode>("leader");
   const busy = loadingKey !== null;
   const cycle: BillingCycle = plan.cycle ?? "monthly";
 
@@ -73,7 +54,7 @@ export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction, openPool =
   /** Shown instead of an action that cannot happen right now. */
   let blocked = false;
 
-  const startsPooledGroup = plan.tier === "promo" || (plan.tier === "group" && groupMode === "pooled");
+  const startsPooledGroup = plan.tier === "promo" || plan.tier === "group";
   const sameFormula = openPool !== null && openPool.kind === (plan.tier === "promo" ? "promo" : "group") && openPool.cycle === cycle;
   const myHoldLive =
     openPool !== null && openPool.me.status === "holding" && Boolean(openPool.me.holdExpiresAt) && new Date(openPool.me.holdExpiresAt ?? 0).getTime() > Date.now();
@@ -91,15 +72,9 @@ export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction, openPool =
     ctaNote = "Tu profites déjà de tout MedArt AI. Tu pourras lancer ou rejoindre un groupe dès la fin de ton abonnement.";
     blocked = true;
   } else if (plan.tier === "group") {
-    if (groupMode === "leader") {
-      action = { type: "leader", plan: plan.id };
-      ctaLabel = `Payer ${formatDZD(groupLeaderTotalDZD(plan))} pour les ${GROUP_SIZE}`;
-      ctaNote = "Paiement unique via Chargily. Tes 4 codes d'invitation apparaissent ensuite dans « Tes groupes ».";
-    } else {
-      action = { type: "pool", kind: "group", cycle };
-      ctaLabel = "Créer le groupe";
-      ctaNote = `Étape suivante : tu paies ta part (${formatDZD(plan.priceDZD)}), puis tu partages le lien. Un ami a déjà créé ton groupe ? Ouvre plutôt son lien.`;
-    }
+    action = { type: "pool", kind: "group", cycle };
+    ctaLabel = "Créer le groupe";
+    ctaNote = `Étape suivante : tu paies ta part (${formatDZD(plan.priceDZD)}), puis tu partages le lien. Un ami a déjà créé ton groupe ? Ouvre plutôt son lien.`;
   } else if (plan.tier === "promo") {
     action = { type: "pool", kind: "promo", cycle };
     ctaLabel = `Lancer le ${plan.label}`;
@@ -136,55 +111,20 @@ export function PlanCard({ plan, isCurrentPlan, loadingKey, onAction, openPool =
       }
     >
       {plan.tier === "group" && (
-        <fieldset>
-          <legend className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Qui paie ?</legend>
-          <div role="radiogroup" className="mt-2 grid grid-cols-1 gap-2">
-            {MODE_OPTIONS.map((option) => {
-              const selected = groupMode === option.id;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => setGroupMode(option.id)}
-                  className={cn(
-                    "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    selected ? "border-primary-500 bg-primary-50 dark:border-primary-400 dark:bg-primary-900/25" : "border-border bg-card hover:bg-accent"
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
-                      selected ? "border-primary-600 dark:border-primary-400" : "border-muted-foreground/50"
-                    )}
-                  >
-                    {selected && <span className="h-2 w-2 rounded-full bg-primary-600 dark:bg-primary-400" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-foreground">
-                      <option.icon className="h-3.5 w-3.5 text-primary-600 dark:text-primary-400" />
-                      {option.title}
-                      <span className="ml-auto tabular-nums">
-                        {option.id === "leader" ? formatDZD(groupLeaderTotalDZD(plan)) : `${formatDZD(plan.priceDZD)} / pers.`}
-                      </span>
-                    </span>
-                    <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
-                      {option.id === "leader"
-                        ? "Un seul paiement, activation immédiate, 4 codes d'invitation à partager."
-                        : `Jauge 1/${GROUP_SIZE} → ${GROUP_SIZE}/${GROUP_SIZE} : l'abonnement démarre pour les ${GROUP_SIZE} dès 5/5. Pas complet en ${POOL_DEADLINE_DAYS} jours ? Remboursement déclenché automatiquement, reçu sous ${REFUND_DELAY_LABEL}.`}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        <div className="rounded-xl border border-primary-500/40 bg-primary-50 p-3 dark:border-primary-400/40 dark:bg-primary-900/25">
+          <p className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-foreground">
+            <Users className="h-3.5 w-3.5 text-primary-600 dark:text-primary-400" />
+            Chacun paie sa part
+            <span className="ml-auto tabular-nums">{formatDZD(plan.priceDZD)} / pers.</span>
+          </p>
+          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+            {`Jauge 1/${GROUP_SIZE} → ${GROUP_SIZE}/${GROUP_SIZE} : l'abonnement démarre pour les ${GROUP_SIZE} dès 5/5. Pas complet en ${POOL_DEADLINE_DAYS} jours ? Remboursement déclenché automatiquement, reçu sous ${REFUND_DELAY_LABEL}.`}
+          </p>
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <Gauge className="h-3 w-3" />
             Exactement {GROUP_SIZE} personnes, ni plus ni moins.
           </p>
-        </fieldset>
+        </div>
       )}
       {plan.tier === "promo" && <CohortVerificationFlow href={null} />}
     </PricingTierCard>

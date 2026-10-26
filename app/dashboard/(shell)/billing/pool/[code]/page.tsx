@@ -653,7 +653,7 @@ function PoolTracker() {
 
   if (state.kind === "loading") {
     return (
-      <CyberStage className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
+      <CyberStage className="mx-auto max-w-5xl">
         <div className="h-12 w-64 animate-pulse rounded-2xl bg-white/[0.04]" />
         <div className="mt-6 grid gap-5 lg:grid-cols-[1.1fr_1fr]">
           <div className="h-[26rem] animate-pulse rounded-3xl bg-white/[0.04]" />
@@ -666,7 +666,7 @@ function PoolTracker() {
   if (state.kind === "error") {
     const notFound = state.status === 404 || state.status === 400;
     return (
-      <CyberStage accent="rose" className="mx-auto max-w-2xl p-4 sm:p-6 lg:p-8">
+      <CyberStage accent="rose" className="mx-auto max-w-2xl">
         <CyberPanel className="p-6 text-center sm:p-8">
           <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
             <AlertCircle className="h-6 w-6 text-rose-300" />
@@ -711,7 +711,7 @@ function PoolTracker() {
   const extraRefundsSent = extraRefunds.length > 0 && extraRefunds.every((r) => r.status === "refunded");
 
   return (
-    <CyberStage accent={currentPhase === "celebrate" ? "emerald" : "cyan"} className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">
+    <CyberStage accent={currentPhase === "celebrate" ? "emerald" : "cyan"} className="mx-auto max-w-5xl overflow-x-clip">
       <Link href="/dashboard/billing" className="mb-4 inline-flex min-h-9 items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white">
         <ArrowLeft className="h-3.5 w-3.5" />
         Abonnement

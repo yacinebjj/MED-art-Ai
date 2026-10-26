@@ -17,7 +17,8 @@ export const DialogOverlay = forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-black/40 backdrop-blur-md", className)}
+    // .dialog-overlay (app/globals.css): fades in and out with the dialog instead of popping.
+    className={cn("dialog-overlay fixed inset-0 z-50 bg-black/40 backdrop-blur-md", className)}
     {...props}
   />
 ));
@@ -36,10 +37,13 @@ const SHEET_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
  * centering (inline style always wins over a class targeting the same
  * property) — nesting keeps Content's centering transform and the motion
  * div's spring transform on two separate elements so neither overwrites the
- * other. Entrance-only (no `exit`/AnimatePresence): Radix mounts Content
- * fresh on every open, which is all `initial` -> `animate` needs to replay
- * the spring each time; the close transition is an instant unmount, same as
- * before this change.
+ * other. Radix mounts Content fresh on every open, which is all `initial` ->
+ * `animate` needs to replay the spring each time. The close is CSS: on
+ * `data-state="closed"` the .dialog-content / .sheet-enter rules
+ * (app/globals.css) run a short exit animation, and Radix keeps Content and
+ * the overlay mounted until it ends — no more instant vanish. The centered
+ * exit animates `opacity` and the standalone `scale` property only, never
+ * `transform`, so the centering stays put while it fades.
  *
  * Below `sm` (unless `sheetOnMobile={false}`) Content is a bottom sheet
  * instead. Its layout comes from `max-sm:` classes, not JS, so it never
@@ -137,7 +141,7 @@ export const DialogContent = forwardRef<
           // touched both screen edges with zero breathing room before
           // max-w-lg ever kicked in. This guarantees a 1rem gutter on each
           // side no matter how narrow the screen gets.
-          "fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-lg max-h-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain",
+          "dialog-content fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-lg max-h-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain",
           "rounded-2xl border border-border bg-card p-6 shadow-card focus:outline-none",
           sheetOnMobile &&
             "sheet-enter max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:w-full max-sm:max-w-none max-sm:max-h-[92dvh] max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:border-x-0 max-sm:border-b-0",

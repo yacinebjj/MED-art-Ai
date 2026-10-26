@@ -11,7 +11,6 @@ import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
   BookOpen,
-  Camera,
   Check,
   ClipboardCheck,
   Columns2,
@@ -792,15 +791,6 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
 
       {variant === "mobile" && (
         <div className="flex shrink-0 items-center gap-2 border-t border-border p-4">
-          <Button
-            variant="outline"
-            size="icon"
-            className="shrink-0 rounded-full"
-            aria-label="Scanner un document"
-            onClick={() => setUploadOpen(true)}
-          >
-            <Camera className="h-4 w-4" />
-          </Button>
           <Button className="flex-1 rounded-full" onClick={() => setUploadOpen(true)}>
             <Plus className="h-4 w-4" />
             {tModulePage("addSourceLabel", language)}

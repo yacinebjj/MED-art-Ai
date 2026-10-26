@@ -1,0 +1,64 @@
+/*
+ * Dashboard module card (CurriculumHub.tsx). Its 1.5px gradient ring is drawn
+ * as a masked RING only: the card's translucent glass never has a gradient
+ * fill behind it any more — the old full-box gradient bled through the
+ * glass, worst on hover, when it turned emerald/cyan/violet.
+ *
+ * Lift and neon ring answer a real hover only (and keyboard focus): on a
+ * phone a tapped card never stays lifted and lit. The lift uses `translate`,
+ * not `transform`, which Framer Motion writes inline on this element.
+ */
+.module-card {
+  transition:
+    translate 300ms ease,
+    box-shadow 300ms ease;
+}
+
+.module-card::before,
+.module-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.module-card::before {
+  background-image: linear-gradient(to bottom right, rgb(255 255 255 / 0.25), rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.25));
+}
+
+.dark .module-card::before {
+  background-image: linear-gradient(to bottom right, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.1));
+}
+
+.module-card::after {
+  background-image: linear-gradient(to bottom right, rgb(52 211 153 / 0.7), rgb(34 211 238 / 0.5), rgb(167 139 250 / 0.7));
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.module-card:has(:focus-visible)::after {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .module-card:hover {
+    translate: 0 -4px;
+    box-shadow:
+      0 20px 25px -5px rgb(16 185 129 / 0.15),
+      0 8px 10px -6px rgb(16 185 129 / 0.15);
+  }
+
+  .module-card:hover::after {
+    opacity: 1;
+  }
+}

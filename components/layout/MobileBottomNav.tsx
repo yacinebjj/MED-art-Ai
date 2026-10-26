@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { motion } from "framer-motion";
@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
-  Menu,
   NotebookPen,
   Settings,
   Sparkles,
@@ -38,7 +37,7 @@ const TAB_LABELS = {
   assistant: { fr: "Copilot", en: "Copilot" },
   study: { fr: "Réviser", en: "Review" },
   notes: { fr: "Notes", en: "Notes" },
-  more: { fr: "Menu", en: "Menu" },
+  more: { fr: "Profil", en: "Profile" },
 } satisfies Record<string, Record<Language, string>>;
 
 interface Tab {
@@ -72,6 +71,28 @@ const MENU_ITEMS: { href: string; icon: LucideIcon; labelKey: Parameters<typeof 
   { href: "/dashboard/settings", icon: Settings, labelKey: "navSettings", tint: "from-slate-500 to-slate-600" },
 ];
 
+/**
+ * The student's face for the account tab and the sheet header. Any active
+ * paid plan wraps it in the neon halo (.avatar-halo, app/globals.css). With a
+ * photo, the initial waits a beat before showing, so a cached photo appears
+ * directly instead of popping in over the letter.
+ */
+function StudentAvatar({ className, fallbackClassName, ringClassName }: { className: string; fallbackClassName?: string; ringClassName?: string }) {
+  const { profile } = useAuth();
+  const paidActive = useCockpitStore((state) => state.overview?.plan?.paidActive ?? false);
+  const initial = (profile?.fullName ?? "").trim().charAt(0).toUpperCase() || "E";
+  return (
+    <span className={cn("relative flex shrink-0 rounded-full", paidActive ? "avatar-halo" : ringClassName)}>
+      <Avatar className={className}>
+        {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} alt="" />}
+        <AvatarFallback delayMs={profile?.avatarUrl ? 600 : undefined} className={fallbackClassName}>
+          {initial}
+        </AvatarFallback>
+      </Avatar>
+    </span>
+  );
+}
+
 /** Account + secondary destinations + appearance, as a bottom sheet: every row is a full-width 56px target in the thumb zone. */
 function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const router = useRouter();
@@ -79,7 +100,6 @@ function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
   const { language } = useLanguage();
   const themeMode = useThemeMode();
   const plan = useCockpitStore((state) => state.overview?.plan ?? null);
-  const initial = (profile?.fullName ?? "").trim().charAt(0).toUpperCase() || "E";
 
   async function handleSignOut() {
     onOpenChange(false);
@@ -93,10 +113,7 @@ function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
       <DialogContent className="p-0 sm:p-0">
         <div className="px-4 pb-3 pr-12 pt-7">
           <div className="flex items-center gap-3">
-            <Avatar className="h-12 w-12">
-              {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} alt="" />}
-              <AvatarFallback>{initial}</AvatarFallback>
-            </Avatar>
+            <StudentAvatar className="h-12 w-12" />
             <div className="min-w-0 flex-1">
               <DialogTitle className="truncate text-base font-bold">{profile?.fullName || "Étudiant(e)"}</DialogTitle>
               <DialogDescription className="mt-0 truncate text-xs">
@@ -179,9 +196,10 @@ function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
 
 /**
  * Native-app-style bottom tab bar (< lg; Sidebar.tsx is desktop-only).
- * Floating pill offset above the iOS home indicator by the safe area; each
- * tab is a full flex-1 column at least 56px tall. The 5th slot opens the
- * Menu bottom sheet instead of a tiny dropdown anchored to the screen edge.
+ * Floating glass pill offset above the iOS home indicator by the safe area;
+ * each tab is a full flex-1 column at least 56px tall. The 5th slot is the
+ * student's own avatar: it opens the account sheet (bottom sheet) instead of
+ * a tiny dropdown anchored to the screen edge.
  */
 export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
   const pathname = usePathname();
@@ -199,7 +217,7 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
         aria-hidden={hidden}
         aria-label="Navigation"
         className={cn(
-          "glass-panel shadow-glass dark:shadow-glass-dark fixed inset-x-3 bottom-3 z-40 flex items-stretch justify-around rounded-[1.75rem] px-1 lg:hidden",
+          "glass-chrome shadow-glass dark:shadow-glass-dark fixed inset-x-3 bottom-3 z-40 flex items-stretch justify-around rounded-[1.75rem] px-1 lg:hidden",
           "motion-safe:transition-[transform,opacity] motion-safe:duration-200 motion-safe:ease-out",
           hidden ? "pointer-events-none translate-y-[calc(100%+4rem)] opacity-0" : "translate-y-0 opacity-100"
         )}
@@ -220,7 +238,13 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
           );
         })}
         <TabButton
-          icon={Menu}
+          visual={
+            <StudentAvatar
+              className="h-[26px] w-[26px]"
+              fallbackClassName="text-[11px]"
+              ringClassName={cn("ring-1", isMenuActive || menuOpen ? "ring-primary-500/70" : "ring-border")}
+            />
+          }
           label={TAB_LABELS.more[language]}
           active={isMenuActive || menuOpen}
           onClick={() => {
@@ -236,13 +260,16 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
 
 function TabButton({
   icon: Icon,
+  visual,
   label,
   active,
   href,
   onClick,
   tourTarget,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  /** Drawn instead of an icon (the account tab's avatar). */
+  visual?: ReactNode;
   label: string;
   active: boolean;
   href?: string;
@@ -261,7 +288,11 @@ function TabButton({
           transition={{ type: "spring", stiffness: 500, damping: 40 }}
         />
       )}
-      <Icon className={cn("relative z-10 h-[22px] w-[22px]", active ? "text-primary-600 dark:text-primary-300" : "text-muted-foreground")} strokeWidth={active ? 2.4 : 2} />
+      {visual ? (
+        <span className="relative z-10 flex h-[22px] items-center">{visual}</span>
+      ) : (
+        Icon && <Icon className={cn("relative z-10 h-[22px] w-[22px]", active ? "text-primary-600 dark:text-primary-300" : "text-muted-foreground")} strokeWidth={active ? 2.4 : 2} />
+      )}
       <span className={cn("relative z-10 leading-none", active ? "font-bold text-primary-700 dark:text-primary-300" : "text-muted-foreground")}>{label}</span>
     </>
   );

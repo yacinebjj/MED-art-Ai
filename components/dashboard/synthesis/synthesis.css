@@ -61,15 +61,22 @@
   transition: opacity 0.3s ease;
 }
 
-.syn-card:hover::before,
 .syn-card:focus-within::before,
 .syn-card[data-open="true"]::before {
   opacity: 1;
   animation: syn-spin 4s linear infinite;
 }
 
-.syn-card:hover {
-  box-shadow: 0 18px 44px -20px color-mix(in srgb, var(--syn-accent, #22d3ee) 55%, transparent);
+/* Real hover only: on a touch screen a tapped card never keeps a stuck glow. */
+@media (hover: hover) {
+  .syn-card:hover::before {
+    opacity: 1;
+    animation: syn-spin 4s linear infinite;
+  }
+
+  .syn-card:hover {
+    box-shadow: 0 18px 44px -20px color-mix(in srgb, var(--syn-accent, #22d3ee) 55%, transparent);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

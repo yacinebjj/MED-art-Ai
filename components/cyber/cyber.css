@@ -100,6 +100,21 @@
   mask-image: radial-gradient(ellipse at 50% 0%, #000 10%, transparent 75%);
 }
 
+/* Bare stage (CyberStage's default, components/cyber/primitives.tsx): the
+   kit's scope without the stage itself — no abyssal fill, frame or grid; the
+   page sits on the canvas beneath it (the shell's, a fullscreen viewer's).
+   Outranks the light-theme stage rules further down in both themes. */
+.cyber-stage.cyber-stage-bare,
+:root:not(.dark) .cyber-stage.cyber-stage-bare {
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.cyber-stage.cyber-stage-bare::before {
+  display: none;
+}
+
 /* ── Glass surfaces ──────────────────────────────────────────────────── */
 .cyber-glass {
   position: relative;
@@ -113,8 +128,8 @@
 @media (min-width: 768px) {
   .cyber-glass {
     background-color: rgb(15 23 42 / 0.55);
-    -webkit-backdrop-filter: blur(18px) saturate(140%);
     backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
   }
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import "./module-card.css";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -29,7 +30,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import dynamic from "next/dynamic";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
@@ -73,18 +74,20 @@ const STATUS_KEY = { "not-started": "statusNotStarted", "in-progress": "statusIn
 
 // ---------------------------------------------------------------------------
 
+/** The card's three quick actions: distinct tiles, each with its own tint and edge. */
+const ACTION_TILE =
+  "flex min-h-[3.25rem] flex-col items-center justify-center gap-1 rounded-2xl border px-1 py-2 text-[11px] font-bold leading-none transition-[background-color,transform] duration-150 active:scale-95";
+
 const ModuleCard = memo(function ModuleCard({
   entry,
   language,
   flashcardsActive,
-  onToggleFlashcards,
   onLaunchFlashcards,
   launching,
 }: {
   entry: ModuleEntry;
   language: Language;
   flashcardsActive: boolean;
-  onToggleFlashcards: (moduleId: number, next: boolean) => void;
   onLaunchFlashcards: (moduleId: number) => void;
   launching: boolean;
 }) {
@@ -124,7 +127,8 @@ const ModuleCard = memo(function ModuleCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.25 }}
-      className="group relative rounded-3xl bg-gradient-to-br from-white/25 via-white/5 to-white/25 p-[1.5px] transition-all duration-300 hover:-translate-y-1 hover:from-emerald-400/70 hover:via-cyan-400/50 hover:to-violet-400/70 hover:shadow-xl hover:shadow-emerald-500/15 dark:from-white/10 dark:to-white/10"
+      // .module-card (./module-card.css): the gradient ring, lift and neon hover.
+      className="module-card group relative rounded-3xl p-[1.5px]"
     >
       <div
         role="link"
@@ -163,6 +167,8 @@ const ModuleCard = memo(function ModuleCard({
               >
                 <MoreVertical className="h-4 w-4" />
               </DropdownMenuTrigger>
+              {/* Essentials only. Flashcards stay switchable per UE (toolbar above), in
+                  Settings and in the Study page's course picker. */}
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={() => setStatsOpen(true)}>
                   <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -174,10 +180,7 @@ const ModuleCard = memo(function ModuleCard({
                     {tCockpit("menuSummary", language)}
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onToggleFlashcards(mod.id, !flashcardsActive)}>
-                  <Brain className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                  {flashcardsActive ? tCockpit("menuFlashOff", language) : tCockpit("menuFlashOn", language)}
-                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
                   <Trash2 className="h-4 w-4" />
                   {tCockpit("menuDeleteSources", language)}
@@ -189,7 +192,7 @@ const ModuleCard = memo(function ModuleCard({
 
         {/* Identity */}
         <div className="mt-3 flex items-center gap-3">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/30 bg-gradient-to-br from-white/40 to-white/5 text-2xl shadow-inner transition-transform duration-300 group-hover:scale-110 group-hover:rotate-[-4deg] dark:border-white/10">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/30 bg-gradient-to-br from-white/40 to-white/5 text-2xl shadow-inner transition-transform duration-300 dark:border-white/10 [@media(hover:hover)]:group-hover:rotate-[-4deg] [@media(hover:hover)]:group-hover:scale-110">
             {getCartoonIllustration(mod.title)}
           </span>
           <div className="min-w-0">
@@ -233,27 +236,29 @@ const ModuleCard = memo(function ModuleCard({
           </div>
         </div>
 
-        {/* Quick actions — always visible on touch screens, revealed on hover/focus on desktop */}
-        <div
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-          className="mt-3 grid grid-cols-3 gap-1.5 transition-all duration-300 lg:pointer-events-none lg:translate-y-2 lg:opacity-0 lg:group-focus-within:pointer-events-auto lg:group-focus-within:translate-y-0 lg:group-focus-within:opacity-100 lg:group-hover:pointer-events-auto lg:group-hover:translate-y-0 lg:group-hover:opacity-100"
-        >
-          <Link href={href} className="flex flex-col items-center gap-0.5 rounded-xl bg-primary-500/10 px-1 py-1.5 text-[10px] font-bold text-primary-700 transition-colors hover:bg-primary-500/20 dark:text-primary-300">
-            <BookOpen className="h-3.5 w-3.5" />
+        {/* Quick actions — always shown, at every width: three distinct tiles. */}
+        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="mt-3 grid grid-cols-3 gap-2">
+          <Link
+            href={href}
+            className={cn(ACTION_TILE, "border-primary-500/25 bg-primary-500/10 text-primary-700 hover:bg-primary-500/20 dark:border-primary-400/25 dark:text-primary-300")}
+          >
+            <BookOpen className="h-4 w-4" />
             {tCockpit("actionCourses", language)}
           </Link>
           <button
             type="button"
             disabled={launching}
             onClick={() => onLaunchFlashcards(mod.id)}
-            className="flex flex-col items-center gap-0.5 rounded-xl bg-violet-500/10 px-1 py-1.5 text-[10px] font-bold text-violet-700 transition-colors hover:bg-violet-500/20 disabled:opacity-60 dark:text-violet-300"
+            className={cn(ACTION_TILE, "border-violet-500/25 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 disabled:opacity-60 dark:border-violet-400/25 dark:text-violet-300")}
           >
-            {launching ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
+            {launching ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
             {tCockpit("actionFlash", language)}
           </button>
-          <Link href={`/dashboard/module/${mod.id}/exam`} className="flex flex-col items-center gap-0.5 rounded-xl bg-rose-500/10 px-1 py-1.5 text-[10px] font-bold text-rose-700 transition-colors hover:bg-rose-500/20 dark:text-rose-300">
-            <FileQuestion className="h-3.5 w-3.5" />
+          <Link
+            href={`/dashboard/module/${mod.id}/exam`}
+            className={cn(ACTION_TILE, "border-rose-500/25 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:border-rose-400/25 dark:text-rose-300")}
+          >
+            <FileQuestion className="h-4 w-4" />
             {tCockpit("actionQcm", language)}
           </Link>
         </div>
@@ -301,7 +306,7 @@ export function CurriculumHubSkeleton() {
  * Curriculum 3.0 — every module of the student's year as one card with real
  * progress (mean QCM mastery of its courses, /api/dashboard/overview), course
  * and QCM metadata, exam-priority flag (modules of the study plan with the
- * nearest exam), hover quick actions, and a search / UE / status / sort toolbar.
+ * nearest exam), quick actions, and a search / UE / status / sort toolbar.
  */
 export function CurriculumHub({ data }: { data: CurriculumYearData }) {
   const router = useRouter();
@@ -407,8 +412,6 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
     },
     [toast, language, refresh]
   );
-
-  const toggleOne = useCallback((moduleId: number, next: boolean) => void toggleFlashcards([moduleId], next), [toggleFlashcards]);
 
   const launchFlashcards = useCallback(
     async (moduleId: number) => {
@@ -544,7 +547,6 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
                 entry={entry}
                 language={language}
                 flashcardsActive={activeFlashcardModuleIds.has(entry.module.id)}
-                onToggleFlashcards={toggleOne}
                 onLaunchFlashcards={launchFlashcards}
                 launching={launchingId === entry.module.id}
               />

@@ -116,7 +116,7 @@ function JoinLanding() {
 
   return (
     <div className="min-h-dvh px-3 py-6 sm:px-6 sm:py-10">
-      <CyberStage accent="violet" className="mx-auto max-w-xl rounded-[1.75rem] border p-5 max-md:rounded-[1.75rem] max-md:border-x max-sm:mx-0 max-sm:px-5 sm:max-md:mx-auto sm:p-8">
+      <CyberStage framed accent="violet" className="mx-auto max-w-xl rounded-[1.75rem] border p-5 max-md:rounded-[1.75rem] max-md:border-x max-sm:mx-0 max-sm:px-5 sm:max-md:mx-auto sm:p-8">
         <div className="flex justify-center">
           <Logo size="md" />
         </div>

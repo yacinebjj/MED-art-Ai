@@ -105,9 +105,10 @@ const CHROMELESS_MOBILE_ROUTES = ["/dashboard/assistant"];
 // on large screens (1080p / 4K) than the text-first pages.
 const WIDE_ROUTES = ["/dashboard"];
 
-// These pages sit on their own opaque Cyber-Medical stage: the 3D DNA behind
-// them would be rendered every frame for nothing, so it is not mounted there.
-const OPAQUE_STAGE_ROUTES = ["/dashboard/study", "/dashboard/notes", "/dashboard/todo"];
+// These pages paint their own opaque canvas over the whole frame (the
+// assistant's .copilot-canvas): the 3D DNA behind them would render every
+// frame for nothing, so it is not mounted there.
+const OWN_CANVAS_ROUTES = ["/dashboard/assistant"];
 
 /**
  * "Native-app" no-scroll viewport architecture: the shell's own root is a
@@ -142,6 +143,9 @@ export default function DashboardShellLayout({
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
   const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname) || isGroupChatRoomRoute(pathname);
   const isChromelessOnMobile = CHROMELESS_MOBILE_ROUTES.includes(pathname);
+  // Pages that scroll as a whole run under the glass Topbar; the ones that
+  // own their scrolling (full-bleed, fixed-height) start below it instead.
+  const scrollsUnderTopbar = !needsFixedHeight;
   const titleKey = resolvePageTitleKey(pathname);
   const pageTitle = titleKey ? t(titleKey, language) : "Espace Étudiant";
 
@@ -215,7 +219,8 @@ export default function DashboardShellLayout({
       </a>
       <div className="aurora-canvas-bg relative flex h-dvh w-full overflow-hidden">
         <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
-        {!OPAQUE_STAGE_ROUTES.includes(pathname) && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
+        {/* Pages sit on this same canvas — their cyber stages are bare now, see CyberStage. */}
+        {!OWN_CANVAS_ROUTES.includes(pathname) && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
 
         <div className="hidden shrink-0 lg:block lg:p-3">
           <Sidebar />
@@ -223,14 +228,24 @@ export default function DashboardShellLayout({
 
         {/* Below lg <main> reaches the screen's side edges on phones and its
             bottom edge everywhere: pages scroll under the floating dock
-            instead of being cut off by a strip of padding above it. */}
+            instead of being cut off by a strip of padding above it. It also
+            reaches the top edge: the glass Topbar floats over it (absolute,
+            --topbar-* geometry in app/globals.css) and scrolling pages slide
+            beneath the bar instead of being cut at its lower edge. */}
         <div
           className={cn(
-            "flex h-full min-w-0 flex-1 flex-col gap-2 pt-2 sm:gap-3 sm:px-3 sm:pt-3 lg:p-3 lg:pl-0",
-            isChromelessOnMobile && "max-lg:gap-0 max-lg:p-0"
+            "relative flex h-full min-w-0 flex-1 flex-col sm:px-3 lg:pb-3 lg:pl-0",
+            isChromelessOnMobile && "max-lg:p-0"
           )}
         >
-          <Topbar title={pageTitle} className={cn("max-sm:mx-2", isChromelessOnMobile && "max-lg:hidden")} />
+          <Topbar
+            title={pageTitle}
+            className={cn("absolute inset-x-0 top-0 sm:inset-x-3 sm:top-3 lg:left-0", isChromelessOnMobile && "max-lg:hidden")}
+          />
+          {/* From sm the bar is a floating pill: content rising toward the
+              top edge dissolves (blur + fade) instead of showing as a sharp
+              sliver above it. Phones need none — their bar is flush with the edge. */}
+          {scrollsUnderTopbar && <div aria-hidden className="shell-scroll-edge pointer-events-none absolute inset-x-3 top-0 z-20 hidden sm:block lg:left-0" />}
 
           <main
             id="main-content"
@@ -241,7 +256,10 @@ export default function DashboardShellLayout({
               // scrollable, so any page content wider than the screen (e.g. a
               // flashcard mid-swipe) made the whole page drift sideways.
               "relative min-h-0 flex-1 overflow-x-hidden overscroll-y-none focus:outline-none",
-              isFullBleed ? "overflow-hidden" : "overflow-y-auto"
+              isFullBleed ? "overflow-hidden" : "overflow-y-auto",
+              // Focus/anchor scrolling stops below the bar, not under it.
+              scrollsUnderTopbar ? "scroll-pt-[var(--topbar-clearance)]" : "pt-[var(--topbar-clearance)]",
+              isChromelessOnMobile && "max-lg:pt-0"
             )}
           >
             <div
@@ -253,7 +271,9 @@ export default function DashboardShellLayout({
                 // `lg` breakpoint — the dock is still there on tablets and
                 // landscape phones. Pages never add their own on top of it.
                 !isFullBleed && WIDE_ROUTES.includes(pathname) && "2xl:max-w-[1600px]",
-                !isFullBleed && "mx-auto w-full max-w-7xl px-3 pb-[var(--dock-clearance)] pt-1 sm:px-4 lg:px-8 lg:pb-6"
+                !isFullBleed && "mx-auto w-full max-w-7xl px-3 pb-[var(--dock-clearance)] sm:px-4 lg:px-8 lg:pb-6",
+                // Top: the bar's own footprint for pages that scroll under it.
+                !isFullBleed && (scrollsUnderTopbar ? "pt-[calc(var(--topbar-clearance)+0.25rem)]" : "pt-1")
               )}
             >
               <PageTransition className={needsFixedHeight ? "block h-full" : undefined}>{children}</PageTransition>

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, CreditCard, Gauge, Share2, Users, Wallet } from "lucide-react";
-import { formatDZD, GROUP_SIZE, groupLeaderTotalDZD, PLANS, POOL_DEADLINE_DAYS, REFUND_DELAY_LABEL, type BillingCycle, type PlanId } from "@/lib/pricing";
+import { ArrowRight, Gauge, Share2, Users, Wallet } from "lucide-react";
+import { formatDZD, GROUP_SIZE, PLANS, POOL_DEADLINE_DAYS, REFUND_DELAY_LABEL, type BillingCycle, type PlanId } from "@/lib/pricing";
 import { useLanguage } from "@/providers/LanguageProvider";
 
 interface GroupInviteFlowProps {
@@ -12,26 +12,26 @@ interface GroupInviteFlowProps {
 }
 
 /**
- * "Comment ça marche" for the Groupe tier — a plain explanation of the two
- * real payment options (lib/billing-pools.ts). Nothing here is simulated: the
- * invite code only exists after a real order, on the student's billing page.
+ * "Comment ça marche" for the Groupe tier — a plain explanation of its one
+ * payment option, « Chacun paie sa part » (pooled purchase, lib/billing-pools.ts).
+ * Nothing here is simulated: the invite link only exists after a real order,
+ * on the student's billing page.
  */
 export function GroupInviteFlow({ cycle, href = "/register" }: GroupInviteFlowProps) {
   const { language } = useLanguage();
   const fr = language === "fr";
   const plan = PLANS[`group_${cycle}` as PlanId];
   const share = formatDZD(plan.priceDZD);
-  const total = formatDZD(groupLeaderTotalDZD(plan));
 
   const steps = fr
     ? [
         { icon: Users, title: `Réunis ${GROUP_SIZE} amis`, text: `Exactement ${GROUP_SIZE} personnes, toi compris.` },
-        { icon: Wallet, title: "Choisis qui paie", text: "Une personne pour les 5, ou chacun sa part." },
+        { icon: Wallet, title: "Chacun paie sa part", text: `${share} par personne, chacun de son côté.` },
         { icon: Share2, title: "Partage le lien", text: "Ton lien d'invitation apparaît dans ton espace Abonnement." },
       ]
     : [
         { icon: Users, title: `Gather ${GROUP_SIZE} friends`, text: `Exactly ${GROUP_SIZE} people, you included.` },
-        { icon: Wallet, title: "Choose who pays", text: "One person for all 5, or everyone their share." },
+        { icon: Wallet, title: "Everyone pays their share", text: `${share} per person, each on their own.` },
         { icon: Share2, title: "Share the link", text: "Your invite link appears in your Billing space." },
       ];
 
@@ -54,19 +54,7 @@ export function GroupInviteFlow({ cycle, href = "/register" }: GroupInviteFlowPr
         ))}
       </ol>
 
-      <div className="mt-4 grid grid-cols-1 gap-2">
-        <div className="rounded-xl border border-border bg-card p-3">
-          <p className="flex items-center gap-1.5 text-xs font-bold text-foreground">
-            <CreditCard className="h-3.5 w-3.5 text-primary-600 dark:text-primary-400" />
-            {fr ? "« Je paie pour les 5 »" : "“I pay for all 5”"}
-            <span className="ml-auto tabular-nums">{total}</span>
-          </p>
-          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-            {fr
-              ? "Un seul paiement, activation immédiate pour toi, et 4 codes d'invitation pour tes amis."
-              : "One payment, active right away for you, plus 4 invite codes for your friends."}
-          </p>
-        </div>
+      <div className="mt-4">
         <div className="rounded-xl border border-border bg-card p-3">
           <p className="flex items-center gap-1.5 text-xs font-bold text-foreground">
             <Gauge className="h-3.5 w-3.5 text-primary-600 dark:text-primary-400" />

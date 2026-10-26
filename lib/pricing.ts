@@ -193,7 +193,7 @@ const TIER_META: Record<PricingTierId, TierMeta> = {
     cycles: ["monthly", "quad", "annual"],
     features: [
       `Tout Individuel, pour chacun des ${GROUP_SIZE}`,
-      `Un chef paie les ${GROUP_SIZE} places, ou chacun paie sa part`,
+      `Chacun paie sa part, remboursée automatiquement si le groupe n'est pas complet en ${POOL_DEADLINE_DAYS} jours`,
       `Activation dès que le groupe est complet (${GROUP_SIZE}/${GROUP_SIZE})`,
     ],
     featured: true,

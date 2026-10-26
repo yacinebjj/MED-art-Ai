@@ -1,5 +1,6 @@
 import { AuthProvider } from "@/providers/AuthProvider";
 import { PomodoroAuthSync } from "@/providers/PomodoroAuthSync";
+import { PomodoroAnnouncer } from "@/providers/PomodoroAnnouncer";
 import { LanguageStoreHydrator } from "@/components/course/workspace/AiLanguageSelect";
 import { ChunkErrorRecovery } from "@/components/pwa/ChunkErrorRecovery";
 import { PaywallProvider } from "@/components/billing/PaywallProvider";
@@ -20,6 +21,7 @@ export default function DashboardLayout({
   return (
     <AuthProvider>
       <PomodoroAuthSync />
+      <PomodoroAnnouncer />
       <LanguageStoreHydrator />
       <ChunkErrorRecovery />
       <PaywallProvider>

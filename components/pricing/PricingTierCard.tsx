@@ -6,7 +6,7 @@ import { Check, Sparkles, Users } from "lucide-react";
 import { MotionCard } from "@/components/ui/MotionCard";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
-import { computeSavingsPercent, formatDZD, groupLeaderTotalDZD, PAID_LIMITS, poolTotalDZD, type Plan } from "@/lib/pricing";
+import { computeSavingsPercent, formatDZD, PAID_LIMITS, poolTotalDZD, type Plan } from "@/lib/pricing";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 
@@ -127,11 +127,6 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
             {plan.tier === "promo" && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {fr ? `soit ${formatDZD(poolTotalDZD(plan))} pour les ${plan.seats} personnes` : `that is ${formatDZD(poolTotalDZD(plan))} for all ${plan.seats} people`}
-              </p>
-            )}
-            {plan.tier === "group" && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {fr ? `ou ${formatDZD(groupLeaderTotalDZD(plan))} en une fois si une personne paie les 5 places` : `or ${formatDZD(groupLeaderTotalDZD(plan))} at once if one person pays the 5 seats`}
               </p>
             )}
           </motion.div>

@@ -454,7 +454,7 @@ function NotesPageContent() {
   return (
     <CyberStage
       accent="violet"
-      className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden p-3 sm:p-5"
+      className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden"
       style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
     >
       <CyberHeader
@@ -644,7 +644,7 @@ function NotesPageContent() {
 
       {/* True fullscreen — a portal to document.body (PageTransition's transform would otherwise contain `fixed`). */}
       <FullscreenViewerModal open={isFullscreen && !!selectedNote} onClose={() => setIsFullscreen(false)} title={draftTitle || tNotes("titlePlaceholder", language)}>
-        <div className="cyber-stage min-h-full rounded-none border-0 p-4 sm:p-6" style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}>
+        <div className="cyber-stage cyber-stage-bare min-h-full p-4 sm:p-6" style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}>
           {editorContent}
         </div>
       </FullscreenViewerModal>

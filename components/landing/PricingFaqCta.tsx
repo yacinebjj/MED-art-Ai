@@ -107,7 +107,7 @@ const FAQ = [
   {
     fr: {
       q: `Comment marchent les formules Groupe de ${GROUP_SIZE} et Groupe de ${PROMO_SIZE} ?`,
-      a: `Groupe de ${GROUP_SIZE} : exactement ${GROUP_SIZE} personnes à ${formatDZD(PLANS.group_monthly.priceDZD)} par personne et par mois. Une personne peut payer les ${GROUP_SIZE} places d'un coup (activation immédiate), ou chacun paie sa part et l'abonnement démarre dès ${GROUP_SIZE}/${GROUP_SIZE}. Groupe de ${PROMO_SIZE} : exactement ${PROMO_SIZE} personnes, chacune paie sa part, dès ${formatDZD(PLANS.promo_monthly.priceDZD)} par personne et par mois (1 mois, 4 mois ou l'année). Si la jauge n'est pas pleine en ${POOL_DEADLINE_DAYS} jours, le remboursement est déclenché automatiquement et reçu sous ${REFUND_DELAY_LABEL}.`,
+      a: `Groupe de ${GROUP_SIZE} : exactement ${GROUP_SIZE} personnes à ${formatDZD(PLANS.group_monthly.priceDZD)} par personne et par mois. Chacun paie sa part et l'abonnement démarre pour les ${GROUP_SIZE} dès ${GROUP_SIZE}/${GROUP_SIZE}. Groupe de ${PROMO_SIZE} : exactement ${PROMO_SIZE} personnes, chacune paie sa part, dès ${formatDZD(PLANS.promo_monthly.priceDZD)} par personne et par mois (1 mois, 4 mois ou l'année). Si la jauge n'est pas pleine en ${POOL_DEADLINE_DAYS} jours, le remboursement est déclenché automatiquement et reçu sous ${REFUND_DELAY_LABEL}.`,
     },
     en: {
       q: `How do the Group of ${GROUP_SIZE} and Group of ${PROMO_SIZE} plans work?`,

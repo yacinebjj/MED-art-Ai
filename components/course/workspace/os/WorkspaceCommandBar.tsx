@@ -197,7 +197,7 @@ export function WorkspaceCommandBar({
   }
 
   return (
-    <header className="glass-panel relative z-20 flex h-14 shrink-0 items-center gap-2 rounded-b-3xl px-2 shadow-glass dark:shadow-glass-dark sm:px-4">
+    <header className="glass-chrome relative z-20 flex h-14 shrink-0 items-center gap-2 rounded-b-3xl border-t-0 px-2 shadow-glass dark:shadow-glass-dark sm:px-4">
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <Tooltip>
           <TooltipTrigger asChild>

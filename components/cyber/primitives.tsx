@@ -24,27 +24,39 @@ export function accentVars(accent: CyberAccent): CSSProperties {
 }
 
 /**
- * The abyssal dark canvas a page lives on. It is a `.dark` SUBTREE — every
- * token-based component inside (Button, Checkbox, Dialog content passed
- * through, …) resolves to its dark values — while the shell chrome and the
- * dashboard home keep the student's own theme untouched.
+ * The cyber kit's scope: cyber.css / cyber-light.css style everything inside
+ * `.cyber-stage` (glass panels, kickers, neon accents) and flip it with the
+ * student's theme. Shell pages sit straight on the shell's own canvas, like
+ * the dashboard home — no fill, frame or grid of their own (.cyber-stage-bare)
+ * and no padding: the shell's gutter is the page's. `framed` keeps the
+ * abyssal stage card, for a standalone page outside the shell (the invite page).
  */
 export function CyberStage({
   accent = "cyan",
+  framed = false,
   className,
   style,
   children,
 }: {
   accent?: CyberAccent;
+  framed?: boolean;
   className?: string;
   style?: CSSProperties;
   children: ReactNode;
 }) {
   return (
-    // Phones/small tablets: edge-to-edge (cancels the shell's side gutter, no rounded frame) —
-    // the whole screen width goes to the content, inset 0.75rem on phones whatever padding the
-    // page asks for on larger screens. Framed card from md: up.
-    <div className={cn("cyber-stage text-foreground max-sm:-mx-3 max-sm:px-3 sm:max-md:-mx-4 max-md:rounded-none max-md:border-x-0 md:rounded-[1.75rem]", className)} style={{ ...accentVars(accent), ...style }}>
+    <div
+      className={cn(
+        "cyber-stage text-foreground",
+        // Framed, phones/small tablets: edge-to-edge (cancels the shell's side gutter, no rounded
+        // frame), inset 0.75rem on phones whatever padding the page asks for. Card from md: up.
+        framed
+          ? "max-sm:-mx-3 max-sm:px-3 sm:max-md:-mx-4 max-md:rounded-none max-md:border-x-0 md:rounded-[1.75rem]"
+          : "cyber-stage-bare",
+        className
+      )}
+      style={{ ...accentVars(accent), ...style }}
+    >
       {children}
     </div>
   );

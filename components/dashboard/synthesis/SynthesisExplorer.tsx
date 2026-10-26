@@ -238,10 +238,31 @@ const ACCENTS: [string, string][] = [
   ["#2dd4bf", "#60a5fa"],
 ];
 
+/**
+ * A card's accent pair and entrance stagger, from its STABLE position in the
+ * full result (never its position in the filtered list): a changed
+ * animation-delay restarts a finished CSS animation, so filtered indices made
+ * every search keystroke replay the cards' rise (opacity back to 0) and
+ * shuffle their colors.
+ */
 function accentStyle(i: number): CSSProperties {
   const [a, b] = ACCENTS[i % ACCENTS.length];
   return { ["--syn-accent" as string]: a, ["--syn-accent-2" as string]: b, animationDelay: `${Math.min(i, 12) * 40}ms` };
 }
+
+/** The nearest ancestor that scrolls vertically (the output panel, or the fullscreen viewer). */
+function findScrollParent(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
+
+/** Scroll travel (px) in one direction before the command bar reacts — tiny wobbles never flip it. */
+const BAR_SCROLL_THRESHOLD_PX = 8;
+/** Near the top of the output, the bar always shows. */
+const BAR_ALWAYS_VISIBLE_PX = 80;
 
 function SectionCard({
   section,
@@ -286,7 +307,7 @@ function SectionCard({
       <AnimatePresence initial={false}>
         {open && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} className="overflow-hidden">
-            <div className="border-t border-black/5 px-4 pb-5 pt-3 text-[15px] sm:px-6 dark:border-white/[0.06]">
+            <div className="border-t border-black/5 px-3 pb-5 pt-3 text-[15px] sm:px-6 dark:border-white/[0.06]">
               <MedicalMarkdown markdown={normalizeCallouts(section.body)} decorate={decorate} />
             </div>
           </motion.div>
@@ -412,6 +433,8 @@ function KeywordChip({ item, decorate, open, onToggle }: { item: KeywordItem; de
 export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdown: string; kind?: SynthesisKind | null; title: string }) {
   const kind = kindProp ?? detectSynthesisKind(markdown);
   const rootRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHidden, setBarHidden] = useState(false);
   const [query, setQuery] = useState("");
   const [medical, setMedical] = useState(true);
   const [priorities, setPriorities] = useState<Set<Priority>>(new Set());
@@ -426,6 +449,38 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
   const dictionary = useMemo(() => (kind === "medical_dictionary" ? parseDictionary(markdown) : null), [kind, markdown]);
   const keywords = useMemo(() => (kind === "keywords_table" ? parseKeywords(markdown) : null), [kind, markdown]);
   const decorate = useMemo(() => buildDecorator(query, medical), [query, medical]);
+  // Stable card positions (see accentStyle): fiches in document order, terms A-Z, boards by course.
+  const sectionOrder = useMemo(() => new Map(sections.map((s, i) => [s.id, i])), [sections]);
+  const termOrder = useMemo(
+    () => new Map([...(dictionary?.entries ?? [])].sort((a, b) => a.term.localeCompare(b.term, "fr", { sensitivity: "base" })).map((e, i) => [e.id, i])),
+    [dictionary]
+  );
+
+  // Smart command bar: it slides away while the student reads downward and
+  // comes back on the first scroll up — always shown near the top, and while
+  // it has focus (a keyboard user tabbing into the search).
+  // Scroll events already arrive at most once per frame, and an unchanged
+  // value never re-renders, so the handler works straight on each one.
+  useEffect(() => {
+    const bar = barRef.current;
+    const scroller = bar ? findScrollParent(bar) : null;
+    if (!bar || !scroller) return;
+    let last = scroller.scrollTop;
+    const handleScroll = () => {
+      const top = scroller.scrollTop;
+      if (top < BAR_ALWAYS_VISIBLE_PX) {
+        last = top;
+        setBarHidden(false);
+        return;
+      }
+      const delta = top - last;
+      if (Math.abs(delta) < BAR_SCROLL_THRESHOLD_PX) return;
+      last = top;
+      setBarHidden(delta > 0 && !bar.contains(document.activeElement));
+    };
+    scroller.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     setQuery("");
@@ -496,8 +551,16 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Command bar */}
-      <div className="sticky top-0 z-20 -mx-1 rounded-2xl border border-black/10 bg-white/90 p-2.5 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.5)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b1016]/90" data-print-hide>
+      {/* Command bar — hides on scroll down, returns on scroll up (effect above). */}
+      <div
+        ref={barRef}
+        onFocusCapture={() => setBarHidden(false)}
+        className={cn(
+          "sticky top-0 z-20 rounded-2xl border border-black/10 bg-white/90 p-2.5 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.5)] backdrop-blur-xl transition-[transform,opacity] duration-300 ease-out dark:border-white/10 dark:bg-[#0b1016]/90 sm:-mx-1",
+          barHidden && "pointer-events-none -translate-y-[calc(100%+1rem)] opacity-0"
+        )}
+        data-print-hide
+      >
         <div className="flex flex-wrap items-center gap-2">
           <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 text-white sm:flex">
             <KindIcon className="h-4 w-4" />
@@ -591,11 +654,11 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
       <div ref={rootRef} className="flex flex-col gap-4">
         {kind === "global_summary" &&
           (visibleSections.length > 0 ? (
-            visibleSections.map((section, i) => (
+            visibleSections.map((section) => (
               <SectionCard
                 key={section.id}
                 section={section}
-                index={i}
+                index={sectionOrder.get(section.id) ?? 0}
                 open={isOpen(section.id)}
                 onToggle={() => toggle(section.id)}
                 decorate={decorate}
@@ -610,12 +673,13 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
         {kind === "medical_dictionary" && (
           <>
             {dictEntries.length > 0 ? (
-              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-                {dictEntries.map((entry, i) => (
+              // items-start: a card opening (its Arabic line animates in) no longer stretches its row neighbour along every frame.
+              <div className="grid items-start gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                {dictEntries.map((entry) => (
                   <DictionaryCard
                     key={entry.id}
                     entry={entry}
-                    index={i}
+                    index={termOrder.get(entry.id) ?? 0}
                     open={isOpen(entry.id)}
                     onToggle={() => toggle(entry.id)}
                     decorate={decorate}
@@ -649,7 +713,8 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
           (kwItems.length > 0 ? (
             (keywords?.courses ?? [])
               .filter((c) => kwItems.some((i) => i.course === c))
-              .map((courseName, ci) => {
+              .map((courseName) => {
+                const ci = (keywords?.courses ?? []).indexOf(courseName);
                 const forCourse = kwItems.filter((i) => i.course === courseName);
                 const cats = (keywords?.categories ?? []).filter((cat) => forCourse.some((i) => i.category === cat));
                 return (
@@ -659,7 +724,7 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
                       <h3 className="min-w-0 flex-1 truncate text-[15px] font-black text-slate-900 dark:text-white">{courseName}</h3>
                       <span className="text-[11px] font-bold text-slate-500">{forCourse.length} mots-clés</span>
                     </header>
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {cats.map((cat) => (
                         <section key={cat} className="rounded-2xl bg-black/[0.025] p-3 dark:bg-white/[0.025]">
                           <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-violet-600 dark:text-violet-300">{cat}</p>

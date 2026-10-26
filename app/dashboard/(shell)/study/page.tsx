@@ -66,7 +66,7 @@ function StudyPageContent() {
 
   return (
     // overflow-x-clip: FlipFlashcard's swipe flings the card past the page edge on grade.
-    <CyberStage accent={isFlashcards ? "cyan" : "violet"} className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">
+    <CyberStage accent={isFlashcards ? "cyan" : "violet"} className="mx-auto max-w-5xl overflow-x-clip">
       <CyberHeader
         icon={Sparkles}
         kicker={isFlashcards ? "Neuro-mémoire" : "Focus cockpit"}

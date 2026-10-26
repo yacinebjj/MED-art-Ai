@@ -377,7 +377,7 @@ function SettingsHub() {
   );
 
   return (
-    <CyberStage className="mx-auto max-w-4xl overflow-x-clip p-4 sm:p-6 lg:p-8">
+    <CyberStage className="mx-auto max-w-4xl overflow-x-clip">
       <CyberHeader
         icon={Settings2}
         kicker={fr ? "Centre de contrôle" : "Control center"}

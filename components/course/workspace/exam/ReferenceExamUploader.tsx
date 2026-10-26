@@ -121,15 +121,13 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
   const hasContent = fileName !== null;
 
   return (
-    <div className="border-b border-white/40 p-4 dark:border-white/10">
-      <h3 className="text-xs font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">Style de l&apos;examen (optionnel)</h3>
-      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Optionnel : Dépose un ancien examen ou une correction type de ton prof pour que l&apos;IA clone exactement son style, sa logique de pièges et sa
-        formulation de QCM
-      </p>
-
+    // A compact one-row card (it used to be a heading, a paragraph and a tall
+    // dropzone): the whole row is the drop target and the file picker; the
+    // full explanation is its tooltip.
+    <div className="border-b border-white/40 px-3 py-2.5 dark:border-white/10">
       {!hasContent ? (
         <label
+          title="Dépose un ancien examen ou une correction type de ton prof : l'IA reprend son style, sa logique de pièges et sa formulation de QCM."
           onDragOver={(e) => {
             e.preventDefault();
             setIsDragOver(true);
@@ -141,16 +139,21 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
             handleFiles(e.dataTransfer.files);
           }}
           className={cn(
-            "mt-3 flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border-2 border-dashed px-3 py-4 text-center transition-colors",
+            "flex cursor-pointer items-center gap-3 rounded-2xl border border-dashed px-3 py-2.5 transition-colors",
             isDragOver
               ? "border-primary-400 bg-primary-50/60 dark:bg-primary-950/30"
               : "border-gray-200/70 hover:bg-white/50 dark:border-neutral-700/70 dark:hover:bg-neutral-800/50",
             disabled && "pointer-events-none opacity-50"
           )}
         >
-          <FileUp className="h-5 w-5 text-gray-400 dark:text-gray-500" />
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Glisse un fichier ou clique pour parcourir</span>
-          <span className="text-[11px] text-gray-400 dark:text-gray-500">PDF, PNG ou JPG — max 10 Mo</span>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
+            <FileUp className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-bold text-foreground">Style de l&apos;examen</span>
+            <span className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">Optionnel · ancien examen du prof (PDF, PNG ou JPG, 10 Mo max)</span>
+          </span>
+          <span className="shrink-0 rounded-full border border-gray-200/70 px-2.5 py-1 text-[11px] font-semibold text-foreground dark:border-neutral-700/70">Importer</span>
           <input
             ref={inputRef}
             type="file"
@@ -161,32 +164,31 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
           />
         </label>
       ) : (
-        <div className="mt-3 rounded-xl border border-gray-200/70 bg-white/50 p-3 dark:border-neutral-700/70 dark:bg-neutral-800/50">
-          <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-xs font-medium text-gray-700 dark:text-gray-200">{fileName}</span>
-            <button
-              type="button"
-              onClick={handleClear}
-              aria-label="Retirer le fichier"
-              className="shrink-0 rounded-full p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-neutral-700 dark:hover:text-gray-300"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          {isAnalyzing ? (
-            <div className="mt-2 flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
-              <span>
-                Analyse du style en cours...
-                <span className="block text-[11px] text-gray-400 dark:text-gray-500">Jusqu&apos;à 1 à 2 minutes pour un document scanné.</span>
-              </span>
-            </div>
-          ) : styleProfile ? (
-            <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-primary-50 px-2 py-1.5 text-xs text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
-              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>Style détecté : {styleProfile.summary}</span>
-            </div>
-          ) : null}
+        <div className="flex items-center gap-3 rounded-2xl border border-gray-200/70 bg-white/50 px-3 py-2.5 dark:border-neutral-700/70 dark:bg-neutral-800/50">
+          <span
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+              styleProfile && !isAnalyzing ? "bg-primary-500/15 text-primary-600 dark:text-primary-300" : "bg-gray-500/10 text-muted-foreground"
+            )}
+          >
+            {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : styleProfile ? <CheckCircle2 className="h-4 w-4" /> : <FileUp className="h-4 w-4" />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-bold text-foreground">{fileName}</span>
+            {isAnalyzing ? (
+              <span className="block truncate text-[11px] text-muted-foreground">Analyse du style… jusqu&apos;à 1 à 2 min pour un scan</span>
+            ) : styleProfile ? (
+              <span className="line-clamp-2 text-[11px] text-primary-700 dark:text-primary-300">Style détecté : {styleProfile.summary}</span>
+            ) : null}
+          </span>
+          <button
+            type="button"
+            onClick={handleClear}
+            aria-label="Retirer le fichier"
+            className="touch-target relative shrink-0 rounded-full p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-neutral-700 dark:hover:text-gray-300"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 

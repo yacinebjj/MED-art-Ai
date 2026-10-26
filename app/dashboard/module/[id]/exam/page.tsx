@@ -823,7 +823,7 @@ export default function ExamGeneratorPage() {
       </div>
     ) : (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-2 sm:px-0">
         <div>
           <p className="cyber-kicker">Mode examen</p>
           <h2 className="cyber-title text-xl font-black">Épreuve Clinique</h2>
@@ -868,7 +868,7 @@ export default function ExamGeneratorPage() {
               if (info.offset.x < -80) goToQuestion(currentQuestionIndex + 1);
               else if (info.offset.x > 80) goToQuestion(currentQuestionIndex - 1);
             }}
-            className="cursor-grab touch-pan-y rounded-2xl border border-white/[0.08] cyber-surface-deep p-4 shadow-[0_20px_60px_-30px_rgba(34,211,238,0.5)] active:cursor-grabbing sm:p-6"
+            className="cursor-grab touch-pan-y rounded-2xl border border-white/[0.08] cyber-surface-deep p-3 shadow-[0_20px_60px_-30px_rgba(34,211,238,0.5)] active:cursor-grabbing sm:p-6"
           >
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <Badge variant="primary">Q{currentQuestionIndex + 1} / {questions.length}</Badge>
@@ -972,7 +972,7 @@ export default function ExamGeneratorPage() {
       transition={{ duration: 0.3 }}
       // Bottom: the fixed submit bar below (1rem + a 3rem button + 1rem + the safe area) plus 0.75rem of
       // air — at every width: `sm:p-6` alone used to put the last question behind that bar.
-      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4 sm:p-6 sm:pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
+      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4 sm:p-6 sm:pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
     >
       {testingInnerContent}
     </motion.div>
@@ -1304,7 +1304,7 @@ export default function ExamGeneratorPage() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain p-4 pb-[calc(3rem+env(safe-area-inset-bottom))] sm:p-6"
+      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-[calc(3rem+env(safe-area-inset-bottom))] pt-4 sm:p-6"
     >
       {resultsInnerContent}
     </motion.div>
@@ -1354,7 +1354,7 @@ export default function ExamGeneratorPage() {
         {isDesktopOrTablet ? (
           <>
             {/* Panneau Gauche — Sources + Historique (desktop) */}
-            <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-80")}>
+            <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-72 xl:w-80")}>
               {courseHeaderBlock}
               <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={handleStyleProfileChange} disabled={isGenerating} />
               {/* min-h-0 — a flex child with overflow-y-auto silently
@@ -1434,7 +1434,7 @@ export default function ExamGeneratorPage() {
           had the backdrop-filter containing-block problem — only its
           z-index needed to move. */}
       {examState === "testing" && (isDesktopOrTablet || mobileTab === "results") && (
-        <div className="glass-panel fixed inset-x-0 bottom-0 z-[110] flex items-center justify-between gap-3 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
+        <div className="glass-chrome fixed inset-x-0 bottom-0 z-[110] flex items-center justify-between gap-3 border-x-0 border-b-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-glass dark:shadow-glass-dark">
           <div className="hidden items-center gap-3 sm:flex">
             <Button
               variant="outline"

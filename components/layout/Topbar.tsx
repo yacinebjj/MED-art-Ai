@@ -234,7 +234,11 @@ export function Topbar({ title, className }: { title: string; className?: string
   return (
     <header
       className={cn(
-        "glass-panel z-20 flex h-14 shrink-0 items-center justify-between gap-3 rounded-2xl pl-3 pr-2 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-5",
+        // Glass chrome pages scroll under; height from --topbar-height (app/globals.css).
+        "glass-chrome z-30 flex h-[var(--topbar-height)] shrink-0 items-center justify-between gap-3 pl-3 pr-2",
+        // Phones: a full-width bar flush with the top edge — hairline at the bottom
+        // only, the status-bar inset inside it. From sm: the floating pill.
+        "rounded-none border-x-0 border-t-0 pt-[env(safe-area-inset-top)] sm:rounded-2xl sm:border sm:px-5 sm:pt-0 sm:shadow-glass sm:dark:shadow-glass-dark",
         className
       )}
     >

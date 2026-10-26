@@ -3,32 +3,36 @@
 /**
  * Pomodoro cockpit — connected globally with the Topbar via PomodoroProvider.
  *
- * The provider counts real elapsed seconds since the last reset; this view
- * derives the whole schedule from it (study → break → study … × cycles), so
- * phase changes happen on their own with a chime, and the session stops by
- * itself after the last cycle. Durations are a per-device preference.
+ * The provider counts real elapsed seconds since the last reset and runs the
+ * schedule for the whole app (lib/pomodoro/schedule.ts): phase changes chime
+ * and announce themselves, and the session stops by itself after the last
+ * cycle, on whatever page the student is. This view draws the same derived
+ * schedule and edits the durations — a per-device preference.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { BookOpenCheck, Coffee, Flame, Minus, Pause, Play, Plus, RotateCcw, ShieldAlert, Timer, Trophy, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { localDayKey, usePomodoro } from "@/providers/PomodoroProvider";
+import {
+  DEFAULT_POMODORO_TIMING,
+  MAX_CYCLES,
+  MAX_DURATION_MINUTES,
+  MIN_CYCLES,
+  MIN_DURATION_MINUTES,
+  clamp,
+  derivePomodoroPhase,
+  parsePomodoroTiming,
+  readStoredPomodoroSettings,
+  savePomodoroSettings,
+} from "@/lib/pomodoro/schedule";
 import { CyberPanel, NeonRing } from "@/components/cyber/primitives";
 import { useMagnetic, useRichEffects } from "@/components/cyber/hooks";
 import { AMBIENCES, AmbiencePanel, type AmbienceId } from "./pomodoro/AmbiencePanel";
 import { BreathingPanel } from "./pomodoro/BreathingPanel";
-
-const DEFAULT_STUDY_MINUTES = 50;
-const DEFAULT_BREAK_MINUTES = 10;
-const DEFAULT_CYCLES = 4;
-const MIN_DURATION_MINUTES = 5;
-const MAX_DURATION_MINUTES = 120;
-const MIN_CYCLES = 1;
-const MAX_CYCLES = 12;
-const SETTINGS_KEY = "medart:pomodoro-settings";
 
 const PRESETS = [
   { label: "Classique", study: 25, rest: 5, cycles: 4 },
@@ -43,9 +47,7 @@ interface PomodoroSettings {
   ambience: AmbienceId;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
+const DEFAULT_SETTINGS: PomodoroSettings = { ...DEFAULT_POMODORO_TIMING, ambience: "none" };
 
 function formatTime(totalSeconds: number): string {
   const safe = Math.max(0, totalSeconds);
@@ -63,22 +65,9 @@ function formatHoursMinutes(totalSeconds: number): string {
 }
 
 function loadSettings(): PomodoroSettings {
-  const fallback: PomodoroSettings = { study: DEFAULT_STUDY_MINUTES, rest: DEFAULT_BREAK_MINUTES, cycles: DEFAULT_CYCLES, ambience: "none" };
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(SETTINGS_KEY) ?? "null");
-    if (!parsed || typeof parsed !== "object") return fallback;
-    const raw = parsed as Record<string, unknown>;
-    const num = (v: unknown, min: number, max: number, def: number) => (typeof v === "number" && Number.isFinite(v) ? clamp(Math.round(v), min, max) : def);
-    const ambience = AMBIENCES.some((a) => a.id === raw.ambience) ? (raw.ambience as AmbienceId) : "none";
-    return {
-      study: num(raw.study, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES, fallback.study),
-      rest: num(raw.rest, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES, fallback.rest),
-      cycles: num(raw.cycles, MIN_CYCLES, MAX_CYCLES, fallback.cycles),
-      ambience,
-    };
-  } catch {
-    return fallback;
-  }
+  const raw = readStoredPomodoroSettings();
+  const ambience = raw && AMBIENCES.some((a) => a.id === raw.ambience) ? (raw.ambience as AmbienceId) : "none";
+  return { ...parsePomodoroTiming(raw), ambience };
 }
 
 function DurationStepper({
@@ -132,104 +121,25 @@ export function StudyDashboard() {
   const isWide = useMediaQuery("(min-width: 640px)");
   const startRef = useMagnetic<HTMLButtonElement>(0.2);
 
-  const { seconds, isActive: isRunning, toggleActive, resetTimer: globalReset, currentCycle, currentMode, setCurrentCycle, setCurrentMode, focusLog } = usePomodoro();
+  const { seconds, isActive: isRunning, toggleActive, resetTimer: globalReset, focusLog } = usePomodoro();
 
-  const [settings, setSettings] = useState<PomodoroSettings>({ study: DEFAULT_STUDY_MINUTES, rest: DEFAULT_BREAK_MINUTES, cycles: DEFAULT_CYCLES, ambience: "none" });
+  const [settings, setSettings] = useState<PomodoroSettings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [cheatWarningVisible, setCheatWarningVisible] = useState(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     setSettings(loadSettings());
     setSettingsLoaded(true);
   }, []);
 
+  // Saved, and handed to the provider's engine at once (it runs the schedule app-wide).
   useEffect(() => {
-    if (!settingsLoaded) return;
-    try {
-      window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch {
-      // Best-effort preference.
-    }
+    if (settingsLoaded) savePomodoroSettings(settings);
   }, [settings, settingsLoaded]);
 
-  // ── Schedule derived from the provider's real elapsed seconds ─────────
-  const studySec = settings.study * 60;
-  const breakSec = settings.rest * 60;
-  const cycleSec = studySec + breakSec;
-  const totalSec = cycleSec * settings.cycles;
-  const isComplete = seconds >= totalSec;
-  const elapsed = Math.min(seconds, totalSec);
-  const cycleIndex = Math.min(Math.floor(elapsed / cycleSec), settings.cycles - 1);
-  const positionInCycle = isComplete ? cycleSec : elapsed - cycleIndex * cycleSec;
-  const derivedMode = positionInCycle < studySec ? "study" : "break";
-  const phaseLength = derivedMode === "study" ? studySec : breakSec;
-  const phaseElapsed = derivedMode === "study" ? positionInCycle : positionInCycle - studySec;
-  const phaseRemaining = Math.max(0, phaseLength - phaseElapsed);
-  const phaseProgress = phaseLength > 0 ? phaseElapsed / phaseLength : 0;
+  // ── The same schedule the provider runs, drawn from its real elapsed seconds ─
+  const { isComplete, cycleIndex, mode: derivedMode, phaseRemaining, phaseProgress } = derivePomodoroPhase(seconds, settings);
   const isStudyMode = derivedMode === "study";
-
-  function playChime(frequencies: number[] = [880, 1108.73]) {
-    try {
-      const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return;
-      if (!audioContextRef.current) audioContextRef.current = new AudioCtx();
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") void ctx.resume();
-      frequencies.forEach((frequency, i) => {
-        const startAt = ctx.currentTime + i * 0.18;
-        const oscillator = ctx.createOscillator();
-        const gain = ctx.createGain();
-        oscillator.type = "sine";
-        oscillator.frequency.setValueAtTime(frequency, startAt);
-        gain.gain.setValueAtTime(0.001, startAt);
-        gain.gain.exponentialRampToValueAtTime(0.18, startAt + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.5);
-        oscillator.connect(gain);
-        gain.connect(ctx.destination);
-        oscillator.start(startAt);
-        oscillator.stop(startAt + 0.5);
-      });
-    } catch (error) {
-      console.warn("Notification sonore indisponible:", error);
-    }
-  }
-
-  // Keep the provider's shared cycle/mode (Topbar, banner) in step with the
-  // derived schedule, and announce real transitions while the timer runs.
-  const lastPhaseRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    const key = `${cycleIndex}:${derivedMode}`;
-    if (currentCycle !== cycleIndex + 1) setCurrentCycle(cycleIndex + 1);
-    if (currentMode !== derivedMode) setCurrentMode(derivedMode);
-    const previous = lastPhaseRef.current;
-    lastPhaseRef.current = key;
-    if (previous === null || previous === key || !isRunning) return;
-    playChime(derivedMode === "break" ? [880, 1108.73] : [659.25, 880]);
-    toast({
-      variant: "info",
-      title: derivedMode === "break" ? "Pause méritée ☕" : `Cycle ${cycleIndex + 1} — on repart !`,
-      description: derivedMode === "break" ? `${settings.rest} min pour souffler. Essaie le mode respiration.` : `${settings.study} min de concentration.`,
-    });
-    // Only phase changes matter here — not every tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cycleIndex, derivedMode, settingsLoaded]);
-
-  // The whole session is done: stop the clock once and celebrate.
-  const completionAnnouncedRef = useRef(false);
-  useEffect(() => {
-    if (!isComplete) {
-      completionAnnouncedRef.current = false;
-      return;
-    }
-    if (!isRunning || completionAnnouncedRef.current) return;
-    completionAnnouncedRef.current = true;
-    toggleActive();
-    playChime([523.25, 659.25, 783.99, 1046.5]);
-    toast({ variant: "success", title: "Session terminée 🏆", description: `${settings.cycles} cycle${settings.cycles > 1 ? "s" : ""} bouclé${settings.cycles > 1 ? "s" : ""}. Bravo !` });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isComplete, isRunning]);
 
   // Anti-cheat: pause automatically if the window loses focus during study mode.
   useEffect(() => {

@@ -974,7 +974,7 @@ export default function ModuleWorkspacePage() {
           invisible on mobile, not a missing bottom-nav offset. Nothing
           floats over this panel, so its bottom padding only has to keep the
           last line above the home indicator (safe area) with some air. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pt-2 md:px-10">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-2 lg:px-8">
         {outputBody}
       </div>
     </div>
@@ -1018,7 +1018,7 @@ export default function ModuleWorkspacePage() {
         {isDesktopOrTablet ? (
           <>
             {/* ── Sources sidebar (desktop) ───────────────────────────── */}
-            <aside className="cyber-glass flex max-h-[40vh] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-3xl md:h-auto md:max-h-none md:w-80">
+            <aside className="cyber-glass flex max-h-[40vh] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-3xl md:h-auto md:max-h-none md:w-72 xl:w-80">
               {sourcesHeader}
               {selectAllRow}
               {courseListPanel}
@@ -1052,7 +1052,7 @@ export default function ModuleWorkspacePage() {
       </div>
 
       <FullscreenViewerModal open={isOutputFullscreen} onClose={() => setIsOutputFullscreen(false)} title={outputTitle}>
-        <div className="px-4 pt-4 sm:px-6 md:px-10">{outputBody}</div>
+        <div className="px-3 pt-4 sm:px-6 lg:px-10">{outputBody}</div>
       </FullscreenViewerModal>
 
       <GenerationConfirmDialog

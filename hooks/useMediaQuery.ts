@@ -1,6 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
+
+// One MediaQueryList per query string: getSnapshot runs on every render.
+const mediaQueryLists = new Map<string, MediaQueryList>();
+
+function getMediaQueryList(query: string): MediaQueryList {
+  let mediaQueryList = mediaQueryLists.get(query);
+  if (!mediaQueryList) {
+    mediaQueryList = window.matchMedia(query);
+    mediaQueryLists.set(query, mediaQueryList);
+  }
+  return mediaQueryList;
+}
 
 /**
  * Picks between two structurally different layouts (e.g. a desktop 3-column
@@ -10,26 +22,25 @@ import { useEffect, useState } from "react";
  * component (chat history, markdown rendering, text-selection listeners)
  * placed inside either branch.
  *
- * Defaults to `false` before the first client effect runs (SSR/first paint
- * has no `window`), which means a fresh desktop load briefly evaluates as
- * "not matching" until this effect settles — an accepted, self-correcting
- * one-paint flash, the standard tradeoff for a `matchMedia`-based check with
- * no SSR-side viewport information.
+ * `false` on the server and while hydrating (no `window` there), corrected
+ * as soon as the page hydrates. Anything mounted later — a page reached by
+ * client navigation, a dialog opened on a phone — reads the real answer on
+ * its very first render: the old `useState(false)` + effect version rendered
+ * every such mount once with the wrong layout first (phone sheets started
+ * their opening animation as a centered dialog, then snapped).
  */
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false);
-
-  useEffect(() => {
-    const mediaQueryList = window.matchMedia(query);
-    setMatches(mediaQueryList.matches);
-
-    function handleChange(event: MediaQueryListEvent) {
-      setMatches(event.matches);
-    }
-
-    mediaQueryList.addEventListener("change", handleChange);
-    return () => mediaQueryList.removeEventListener("change", handleChange);
-  }, [query]);
-
-  return matches;
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const mediaQueryList = getMediaQueryList(query);
+      mediaQueryList.addEventListener("change", onChange);
+      return () => mediaQueryList.removeEventListener("change", onChange);
+    },
+    [query]
+  );
+  return useSyncExternalStore(
+    subscribe,
+    () => getMediaQueryList(query).matches,
+    () => false
+  );
 }

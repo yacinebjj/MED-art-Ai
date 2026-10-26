@@ -778,7 +778,7 @@ function BillingPageContent() {
         res = await fetch("/api/chargily/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(action.type === "leader" ? { plan: action.plan, mode: "leader" } : { plan: action.plan }),
+          body: JSON.stringify({ plan: action.plan }),
           signal: controller.signal,
         });
       } catch {
@@ -840,7 +840,7 @@ function BillingPageContent() {
   const plansForCycle = getPlansForCycle(cycle);
 
   return (
-    <CyberStage className="mx-auto max-w-5xl overflow-x-clip p-4 sm:p-6 lg:p-8">
+    <CyberStage className="mx-auto max-w-5xl overflow-x-clip">
       <CyberHeader
         icon={CreditCard}
         kicker="Ton abonnement"

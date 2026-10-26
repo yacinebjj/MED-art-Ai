@@ -47,7 +47,7 @@ interface MobileWorkspaceTabBarProps {
  */
 export const MobileWorkspaceTabBar = memo(function MobileWorkspaceTabBar({ active, onChange }: MobileWorkspaceTabBarProps) {
   return (
-    <nav className="glass-panel relative z-10 flex shrink-0 items-stretch justify-around gap-1 rounded-t-3xl px-1 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-1 shadow-glass dark:shadow-glass-dark">
+    <nav className="glass-chrome relative z-10 flex shrink-0 items-stretch justify-around gap-1 rounded-t-3xl border-b-0 px-1 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-1 shadow-glass dark:shadow-glass-dark">
       {TABS.map((tab) => {
         const Icon = tab.icon;
         const isActive = tab.id === active;

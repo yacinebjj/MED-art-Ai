@@ -3,8 +3,21 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { fetchSyncNamespace, putSyncDoc, type SyncedValue } from "@/lib/user-sync";
 import { hydrateLocalActivityFromServer } from "@/lib/dashboard/local-activity";
+import { isPomodoroAudioUnlocked, playPomodoroChime, unlockPomodoroAudio } from "@/lib/pomodoro/chime";
+import {
+  POMODORO_PHASE_EVENT,
+  POMODORO_SETTINGS_EVENT,
+  POMODORO_SETTINGS_KEY,
+  derivePomodoroPhase,
+  parsePomodoroTiming,
+  readStoredPomodoroSettings,
+  type PomodoroCue,
+  type PomodoroMode,
+  type PomodoroPhaseEventDetail,
+  type PomodoroTiming,
+} from "@/lib/pomodoro/schedule";
 
-export type PomodoroMode = "study" | "break";
+export type { PomodoroMode };
 
 interface PomodoroContextType {
   seconds: number;
@@ -16,22 +29,16 @@ interface PomodoroContextType {
   /** Called once the real signed-in user is known (see PomodoroAuthSync in providers/PomodoroAuthSync.tsx) — this Provider is mounted ABOVE AuthProvider in app/layout.tsx, so it has no way to read the current user itself. */
   setUserId: (userId: string | null) => void;
   /**
-   * Cycle/mode were previously local state INSIDE StudyDashboard.tsx (the
-   * Study Space page's own "Cycle X / Y" display) — meaning the Topbar
-   * widget's and PomodoroStudyBanner's own "Réinitialiser" buttons, which
-   * only ever called this Provider's resetTimer() directly, had no way to
-   * reach StudyDashboard's local state at all. Clicking either of those
-   * (both are simultaneously visible alongside StudyDashboard on the Study
-   * page) reset `seconds`/`isActive` but silently left "Cycle 3 / 4" (or
-   * "Pause" mode) exactly where it was — a real, reported bug: reset felt
-   * like it "didn't do anything" depending on which of the 3 reset buttons
-   * was clicked. Moved here so EVERY reset button shares one true state and
-   * resetTimer() below can reset all of it in one place.
+   * Where the schedule stands (lib/pomodoro/schedule.ts), derived HERE from
+   * `seconds` and the saved durations — this Provider is the Pomodoro
+   * engine for the whole app. Phase changes chime and announce themselves,
+   * and the session stops itself after the last cycle, whatever page is
+   * open: that used to live in StudyDashboard.tsx, so away from the Study
+   * page a break started silently and the clock never stopped. Every reset
+   * button resets `seconds`, which resets these with it.
    */
   currentCycle: number;
   currentMode: PomodoroMode;
-  setCurrentCycle: (cycle: number) => void;
-  setCurrentMode: (mode: PomodoroMode) => void;
   /**
    * Seconds actually spent with the timer RUNNING, per local calendar day
    * ("YYYY-MM-DD" → seconds), for this account on this device. Unlike
@@ -138,14 +145,17 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
-  const [currentCycle, setCurrentCycle] = useState(1);
-  const [currentMode, setCurrentMode] = useState<PomodoroMode>("study");
+  // The student's durations (saved by the Study page); null until read on the client.
+  const [timing, setTiming] = useState<PomodoroTiming | null>(null);
   const [focusLog, setFocusLog] = useState<FocusLog>({});
   // Authoritative in-memory focus log (see FOCUS_LOG_COMMIT_EVERY_S); `focusLog` state is its last published snapshot.
   const focusLogRef = useRef<FocusLog>({});
   // Updated synchronously in setUserId (before any effect cleanup runs), so a
   // sync started for one account never writes into another one.
   const bucketRef = useRef(ANONYMOUS_BUCKET);
+  // Last phase seen ("cycle:mode"); null = the next one is only recorded, never announced.
+  const lastPhaseKeyRef = useRef<string | null>(null);
+  const completionHandledRef = useRef(false);
 
   // استرجاع الحالة الحقيقية من localStorage عند تحميل التطبيق — يعاد أيضاً
   // في كل مرة يتغيّر فيها bucket (تبديل حساب على نفس الجهاز، أو تحديد هوية
@@ -161,7 +171,25 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     if (savedVisible !== null) setIsVisible(savedVisible === "true");
     focusLogRef.current = readFocusLog(keys.focusLog);
     setFocusLog(focusLogRef.current);
+    // Restored state is a position, not a transition: never chime for it.
+    lastPhaseKeyRef.current = null;
   }, [bucket]);
+
+  // Durations: read once, then again whenever the Study page saves them
+  // (POMODORO_SETTINGS_EVENT) or another tab does (storage event).
+  useEffect(() => {
+    const read = () => setTiming(parsePomodoroTiming(readStoredPomodoroSettings()));
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === POMODORO_SETTINGS_KEY) read();
+    };
+    read();
+    window.addEventListener(POMODORO_SETTINGS_EVENT, read);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(POMODORO_SETTINGS_EVENT, read);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   /** Publishes the in-memory focus log to React state and localStorage. */
   const commitFocusLog = useCallback(() => {
@@ -257,6 +285,9 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   }, [isActive, bucket, commitFocusLog]);
 
   const toggleActive = useCallback(() => {
+    // Almost always a tap on Start/Pause: the moment the browser lets the
+    // page unlock audio for the chimes to come (see lib/pomodoro/chime.ts).
+    void unlockPomodoroAudio();
     setIsActive((prev) => {
       const nextState = !prev;
       localStorage.setItem(keysFor(bucketRef.current).active, nextState.toString());
@@ -275,8 +306,6 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const resetTimer = useCallback(() => {
     setSeconds(0);
     setIsActive(false);
-    setCurrentCycle(1);
-    setCurrentMode("study");
     const keys = keysFor(bucketRef.current);
     localStorage.setItem(keys.seconds, "0");
     localStorage.setItem(keys.active, "false");
@@ -286,6 +315,68 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     bucketRef.current = userId ?? ANONYMOUS_BUCKET;
     setBucket(userId ?? ANONYMOUS_BUCKET);
   }, []);
+
+  // ── The engine: the schedule, derived from the real elapsed seconds ────
+  const phase = timing ? derivePomodoroPhase(seconds, timing) : null;
+  const currentCycle = phase ? phase.cycleIndex + 1 : 1;
+  const currentMode: PomodoroMode = phase?.mode ?? "study";
+  const phaseKey = phase ? `${phase.cycleIndex}:${phase.mode}` : null;
+  const isComplete = phase?.isComplete ?? false;
+
+  /** Chime now (any page), and tell the toasts (POMODORO_PHASE_EVENT — app/dashboard/layout.tsx shows them). */
+  const announce = useCallback((cue: PomodoroCue, cycle: number, at: PomodoroTiming) => {
+    playPomodoroChime(cue);
+    const detail: PomodoroPhaseEventDetail = { cue, cycle, timing: at };
+    window.dispatchEvent(new CustomEvent(POMODORO_PHASE_EVENT, { detail }));
+  }, []);
+
+  // A real phase change while the clock runs: study → break, break → study.
+  // Not the restart of a finished session (back to cycle 1's study).
+  useEffect(() => {
+    if (phaseKey === null || !timing) return;
+    const previous = lastPhaseKeyRef.current;
+    lastPhaseKeyRef.current = phaseKey;
+    if (previous === null || previous === phaseKey || !isActive || phaseKey === "0:study") return;
+    announce(currentMode === "break" ? "break" : "focus", currentCycle, timing);
+    // Only phase changes matter here — not every tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phaseKey]);
+
+  // The whole session is done: stop the clock once, whatever page is open.
+  useEffect(() => {
+    if (!isComplete) {
+      completionHandledRef.current = false;
+      return;
+    }
+    if (!isActive || !timing || completionHandledRef.current) return;
+    completionHandledRef.current = true;
+    setIsActive(false);
+    try {
+      localStorage.setItem(keysFor(bucketRef.current).active, "false");
+    } catch {
+      // Storage blocked: the clock is stopped in memory all the same.
+    }
+    announce("complete", timing.cycles, timing);
+  }, [isComplete, isActive, timing, announce]);
+
+  // A reload restored a running clock: no Start tap happened on this page
+  // yet, so the next tap or key press anywhere unlocks the chimes to come.
+  useEffect(() => {
+    if (!isActive || isPomodoroAudioUnlocked()) return;
+    const gestures = ["pointerdown", "pointerup", "touchend", "keydown", "click"] as const;
+    let done = false;
+    function stopListening() {
+      done = true;
+      for (const type of gestures) window.removeEventListener(type, handleGesture, true);
+    }
+    function handleGesture() {
+      void unlockPomodoroAudio().then((unlocked) => {
+        if (unlocked && !done) stopListening();
+      });
+    }
+    for (const type of gestures) window.addEventListener(type, handleGesture, true);
+    return stopListening;
+  }, [isActive]);
 
   const clock = useMemo(
     () => ({
@@ -298,8 +389,6 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
       setUserId,
       currentCycle,
       currentMode,
-      setCurrentCycle,
-      setCurrentMode,
     }),
     [seconds, isActive, isVisible, toggleActive, toggleVisible, resetTimer, setUserId, currentCycle, currentMode]
   );
