@@ -1,3 +1,4 @@
+import type { User } from "@supabase/supabase-js";
 import type { ChargilyCheckout } from "@/lib/chargily";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { PLANS, formatDZD, isPlanId } from "@/lib/pricing";
@@ -5,9 +6,10 @@ import { isEmailConfigured, sendEmail } from "./resend";
 import { firstNameOf, paymentThankYouEmail, welcomeEmail, type PaymentKind } from "./templates";
 
 /**
- * The app's automatic emails. Both entry points NEVER throw and never take
- * longer than NOTIFY_TIMEOUT_MS, so the sign-up redirect or the payment
- * webhook they run in can't be broken or held up by email.
+ * The app's automatic emails. Every entry point NEVER throws and is bounded
+ * in time (NOTIFY_TIMEOUT_MS; less for the dashboard's safety net), so the
+ * sign-up redirect, the payment webhook or the dashboard load they run in
+ * can't be broken or held up by email.
  */
 
 /**
@@ -20,16 +22,16 @@ const WELCOME_EMAILS_SINCE = Date.parse("2026-10-26T00:00:00.000Z");
 const WELCOME_SENT_FLAG = "welcome_email_sent_at";
 const NOTIFY_TIMEOUT_MS = 8000;
 
-async function bounded(task: () => Promise<void>, label: string): Promise<void> {
+async function bounded(task: () => Promise<void>, label: string, timeoutMs = NOTIFY_TIMEOUT_MS): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       task(),
       new Promise<void>((resolve) => {
         timer = setTimeout(() => {
-          console.warn(`[email] ${label}: gave up after ${NOTIFY_TIMEOUT_MS} ms`);
+          console.warn(`[email] ${label}: gave up after ${timeoutMs} ms`);
           resolve();
-        }, NOTIFY_TIMEOUT_MS);
+        }, timeoutMs);
       }),
     ]);
   } catch (error) {
@@ -50,7 +52,7 @@ function appUrl(origin: string): string {
  * idempotency key covers two triggers racing (the sign-up form and
  * /auth/callback). The flag is only set after Resend accepted the email.
  */
-export async function sendWelcomeEmailOnce(userId: string, origin: string): Promise<void> {
+export async function sendWelcomeEmailOnce(userId: string, origin: string, timeoutMs = NOTIFY_TIMEOUT_MS): Promise<void> {
   if (!userId || !isEmailConfigured() || !isSupabaseConfigured()) return;
   await bounded(async () => {
     const admin = getSupabaseAdmin();
@@ -73,7 +75,34 @@ export async function sendWelcomeEmailOnce(userId: string, origin: string): Prom
     });
     if (flagError) console.error(`[email] welcome sent to ${userId} but the flag was not saved:`, flagError.message);
     else console.log(`[email] welcome sent to ${userId}`);
-  }, `welcome ${userId}`);
+  }, `welcome ${userId}`, timeoutMs);
+}
+
+/** Leaves the sign-up's own trigger time to land before the safety net steps in. */
+const SAFETY_NET_GRACE_MS = 2 * 60_000;
+/** The safety net answers within this, so the dashboard's first request is never held up for long. */
+const SAFETY_NET_TIMEOUT_MS = 4000;
+/** A failed safety-net attempt is retried at most this often per server instance. */
+const SAFETY_NET_RETRY_MS = 10 * 60_000;
+const safetyNetAttemptAt = new Map<string, number>();
+
+/**
+ * The welcome email's safety net, run by GET /api/profile — the first request
+ * of every dashboard load. Welcomes the new students the sign-up triggers
+ * missed: a confirmation link opened in another browser, an email key or
+ * sender fixed only after they signed up. Decided from the user Auth just
+ * verified, so an account already welcomed, or older than the feature, costs
+ * nothing. Never throws.
+ */
+export async function sendWelcomeEmailIfMissed(user: User, origin: string): Promise<void> {
+  if (user.app_metadata?.[WELCOME_SENT_FLAG]) return;
+  const createdAt = Date.parse(user.created_at);
+  const now = Date.now();
+  if (!(createdAt >= WELCOME_EMAILS_SINCE) || now - createdAt < SAFETY_NET_GRACE_MS) return;
+  if (now - (safetyNetAttemptAt.get(user.id) ?? 0) < SAFETY_NET_RETRY_MS) return;
+  if (safetyNetAttemptAt.size >= 1000) safetyNetAttemptAt.clear();
+  safetyNetAttemptAt.set(user.id, now);
+  await sendWelcomeEmailOnce(user.id, origin, SAFETY_NET_TIMEOUT_MS);
 }
 
 /**

@@ -6,6 +6,7 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import type { StudentCurriculumProfile } from "@/types/academic";
 import { isMissingColumnError } from "@/lib/group-chat";
 import { isFlashcardPushInterval, normalizeFlashcardPushInterval } from "@/lib/push/cadence";
+import { sendWelcomeEmailIfMissed } from "@/lib/email/notifications";
 
 /**
  * The student's real curriculum choice (specialty_id / academic_year_id on
@@ -22,7 +23,7 @@ interface ProfileRow {
   curriculum_academic_years: { id: number; specialty_id: number; level: number; name: string } | null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -32,6 +33,11 @@ export async function GET() {
     return NextResponse.json({ error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
   }
 
+  // Every dashboard load starts here: the welcome email's safety net
+  // (lib/email/notifications.ts). Instant for an account already welcomed;
+  // otherwise it runs alongside the reads below and never throws.
+  const welcome = sendWelcomeEmailIfMissed(user, request.nextUrl.origin);
+
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("profiles")
@@ -40,6 +46,7 @@ export async function GET() {
     .maybeSingle<ProfileRow>();
 
   if (error) {
+    await welcome;
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -61,6 +68,7 @@ export async function GET() {
   // the cadence column only exists once 20261004_flashcard_push_cadence.sql ran.
   const reminders = await readReminderSettings(supabase, user.id);
 
+  await welcome;
   return NextResponse.json({ profile, reminders });
 }
 

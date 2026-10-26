@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { User } from "@supabase/supabase-js";
 import { checkDevice } from "@/lib/devices";
+import { EXPIRED_COOKIE, isDeadSessionError, isSessionCookieName } from "@/lib/supabase/dead-session";
 
 interface CookieToSet {
   name: string;
@@ -85,6 +86,27 @@ function rememberVerified(fingerprint: string, user: User): void {
   verifiedByCookieFingerprint.set(fingerprint, { user, expiresAt: Date.now() + VERIFIED_TTL_MS });
 }
 
+/**
+ * Deletes this request's session cookie (never the PKCE code verifier — see
+ * lib/supabase/dead-session.ts) so the browser stops presenting a dead
+ * session. Takes effect from route handlers; a Server Component can't set
+ * cookies, so there it's a no-op. Returns how many cookies were deleted.
+ */
+function deleteSessionCookies(): number {
+  const cookieStore = cookies();
+  let deleted = 0;
+  for (const { name } of cookieStore.getAll()) {
+    if (!isSessionCookieName(name)) continue;
+    try {
+      cookieStore.set(name, "", EXPIRED_COOKIE);
+      deleted++;
+    } catch {
+      return deleted;
+    }
+  }
+  return deleted;
+}
+
 function authCookieFingerprint(cookieStore: ReturnType<typeof cookies>): string | null {
   const authCookies = cookieStore.getAll().filter((c) => c.name.startsWith("sb-"));
   if (authCookies.length === 0) return null;
@@ -132,6 +154,16 @@ export async function getSessionUser(): Promise<User | null> {
     const supabase = createSessionClient();
     const { data, error } = await supabase.auth.getUser();
     if (!error) return data.user;
+
+    // A dead session (deleted account, signed out elsewhere, vanished refresh
+    // token) can't come back: no retry, and its cookie goes, or every request
+    // from that browser kept failing on it — twice, logged — for up to an hour.
+    if (isDeadSessionError(error)) {
+      if (deleteSessionCookies() > 0) {
+        console.warn(`[auth] Session morte pour ${shortId}... (${(error as { code?: string }).code ?? error.message}) — cookie de session effacé, requête rejetée avec 401.`);
+      }
+      return null;
+    }
 
     console.error(`[auth] Premier getUser() échoué pour ${shortId}... :`, error.message, `(code: ${(error as { code?: string }).code ?? "?"})`);
     await new Promise((resolve) => setTimeout(resolve, 300));

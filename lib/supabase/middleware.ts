@@ -1,5 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { EXPIRED_COOKIE, isDeadSessionError, isSessionCookieName } from "@/lib/supabase/dead-session";
 
 interface CookieToSet {
   name: string;
@@ -43,11 +45,38 @@ function hasAuthCookie(request: NextRequest): boolean {
   return request.cookies.getAll().some((cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("-auth-token"));
 }
 
-function redirectToLogin(request: NextRequest, pathname: string) {
+/**
+ * `sessionResponse` carries what getSession() just wrote: when the refresh
+ * token was dead it deleted the session cookie, and dropping that deletion
+ * here sent the dead cookie on to /login, which then failed on it again.
+ */
+function redirectToLogin(request: NextRequest, pathname: string, sessionResponse?: NextResponse) {
   const redirectUrl = request.nextUrl.clone();
   redirectUrl.pathname = "/login";
   redirectUrl.searchParams.set("next", pathname);
-  return NextResponse.redirect(redirectUrl);
+  const redirect = NextResponse.redirect(redirectUrl);
+  sessionResponse?.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+  return redirect;
+}
+
+/**
+ * Supabase Auth itself says the cookie's session is gone for good
+ * (lib/supabase/dead-session.ts). A slow or failed check is NOT dead: the
+ * cookie keeps its word, as with getSession() alone.
+ */
+async function isDeadSession(supabase: SupabaseClient): Promise<boolean> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const dead = await Promise.race([
+    supabase.auth
+      .getUser()
+      .then(({ error }) => error !== null && isDeadSessionError(error))
+      .catch(() => false),
+    new Promise<boolean>((resolve) => {
+      timeoutId = setTimeout(() => resolve(false), AUTH_CHECK_TIMEOUT_MS);
+    }),
+  ]);
+  if (timeoutId) clearTimeout(timeoutId);
+  return dead;
 }
 
 /**
@@ -148,10 +177,22 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (!authResult.signedIn && isProtected) {
-    return redirectToLogin(request, pathname);
+    return redirectToLogin(request, pathname, supabaseResponse);
   }
 
   if (authResult.signedIn && (pathname === "/login" || pathname === "/register")) {
+    // getSession() only read the cookie. Before sending this visitor away
+    // from the sign-in and sign-up forms, ask Auth whether the session still
+    // exists: a deleted account's cookie keeps reading as a session for up
+    // to an hour, and bouncing it to /dashboard — where every request fails —
+    // locked that browser out of both forms. One round trip, only here, only
+    // with a session cookie (a signed-in student rarely loads these pages).
+    if (await isDeadSession(supabase)) {
+      request.cookies.getAll().forEach(({ name }) => {
+        if (isSessionCookieName(name)) supabaseResponse.cookies.set(name, "", EXPIRED_COOKIE);
+      });
+      return supabaseResponse;
+    }
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/dashboard";
     redirectUrl.search = "";
