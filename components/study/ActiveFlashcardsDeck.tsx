@@ -767,7 +767,8 @@ export function ActiveFlashcardsDeck() {
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-200 ring-1 ring-inset ring-violet-400/30">
         <Layers className="h-5 w-5" />
       </span>
-      <div className="min-w-0 flex-1">
+      {/* 10rem floor: on a phone the two controls wrap below instead of squeezing the course title to a few letters. */}
+      <div className="min-w-[10rem] flex-1">
         <p className="text-sm font-black text-white">{tStudyTools("flashcardsActiveModulesTitle", language)}</p>
         <p className="truncate text-xs text-slate-400">
           {copy.batchLabel} {round}
@@ -823,7 +824,7 @@ export function ActiveFlashcardsDeck() {
     // Keyed apart from the deck's panel below: same spot in the tree, so
     // without keys React would reuse the panel and its entrance never replays.
     return (
-      <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
         <CyberPanel key="batch-end" laser className="animate-in fade-in-0 duration-300">
           {header}
           <div className="motion-swap flex flex-col items-center gap-3 px-6 pb-12 pt-8 text-center">
@@ -888,8 +889,11 @@ export function ActiveFlashcardsDeck() {
     );
   }
 
+  // minmax(0,1fr), never a bare auto/1fr column: those grow to the panel's widest
+  // unbreakable line (the header's nowrap course title), which pushed the whole
+  // deck — card, nav and rating buttons — past the screen's right edge on phones.
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <CyberPanel key="deck" className="animate-in fade-in-0 duration-300">
         {header}
         <div className="space-y-3 p-4 sm:p-6">
