@@ -1,8 +1,8 @@
 /**
  * Every AI-generation route already sends back a `Retry-After` header (in
  * seconds) on a 429 — see lib/rate-limit.ts's retryAfterSeconds, used by
- * app/api/studio/generate, app/api/studio/regenerate,
- * app/api/study/remediation-plan/generate, app/api/modules/[id]/global-summary,
+ * app/api/studio/generate, app/api/study/remediation-plan/generate,
+ * app/api/modules/[id]/global-summary,
  * etc. The frontend previously only ever showed the generic JSON `error`
  * string ("Trop de requêtes — réessaie dans quelques minutes."), never that
  * exact number — this turns it into a precise "Réessaie dans 45 secondes."

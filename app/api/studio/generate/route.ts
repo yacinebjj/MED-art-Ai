@@ -13,6 +13,8 @@ import {
   resolveCasCliniqueMaxTokens,
 } from "@/lib/ai/studio-prompts";
 import { parseAndValidateStudioSection } from "@/lib/ai/studio-section-validation";
+import { generateStudioQcmSet } from "@/lib/ai/studio-qcm";
+import { StudioQcmsSchema } from "@/lib/ai/studio-schemas";
 import { errorMessage, MAX_SOURCE_CHARS } from "@/lib/course-generation-shared";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -60,7 +62,7 @@ function isValidActionType(value: unknown): value is JsonSectionId {
  * production pipeline doesn't have, since a malformed shape here would
  * otherwise reach a real React component instead of a database column.
  *
- * ATOMIC generate-then-save, mirroring app/api/studio/regenerate/route.ts:
+ * ATOMIC generate-then-save, with no separate save call:
  * this route now takes `courseId` and persists the validated result to
  * `studio_courses` itself, BEFORE returning success. Used to be "stateless
  * and unauthenticated-to-Supabase on purpose," returning the raw JSON and
@@ -197,8 +199,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // either (that pipeline reuses OTHER students' French, default-prompt
   // chapters — wrong material to reuse for a personalized request). Falls
   // straight through to a full, fresh generation via the generic path
-  // below, exactly like /api/studio/regenerate already does for its own
-  // "student explicitly wants something different" case. Without this, a
+  // below. Without this, a
   // 1ère année and a 3ème année student uploading the SAME course text
   // would silently share one cas_clinique cache entry — showing one of
   // them the wrong shape/content entirely.
@@ -261,9 +262,17 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
   }
 
-  const cacheResult: StudioCacheLookupResult = isPersonalizedVariant
+  const lookedUpCache: StudioCacheLookupResult = isPersonalizedVariant
     ? { hit: false }
     : await lookupStudioContentCache(actionType, truncatedContext);
+  // QCM: only an exact hit holding a full current set is reused. Rows cached
+  // before the 30-question pipeline (15 questions) must not be served, and a
+  // fuzzy delta-adaptation of a 30-question set cannot fit its reduced token
+  // ceiling — the batched generation below is the fast path for QCM anyway.
+  const cacheResult: StudioCacheLookupResult =
+    actionType === "qcm" && lookedUpCache.hit && (lookedUpCache.matchType !== "exact" || !StudioQcmsSchema.safeParse(lookedUpCache.data).success)
+      ? { hit: false }
+      : lookedUpCache;
 
   if (cacheResult.hit && cacheResult.matchType === "exact") {
     finalData = cacheResult.data;
@@ -422,8 +431,22 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       );
     };
 
+    // QCM has its own pipeline: 30 questions in parallel batches, each with
+    // its own model fallback and ledger entry (lib/ai/studio-qcm.ts). One
+    // single call writing all of them could not finish inside the budget.
+    const generateQcmSet = async (): Promise<unknown> => {
+      const platformCapacity = await reservePlatformCapacity();
+      if (!platformCapacity.allowed) throw new StudioGenerationFailure(platformCapacity.reason ?? "MedArt Neural Engine est momentanément saturé. Réessaie un peu plus tard.", 503);
+      try {
+        return await generateStudioQcmSet(truncatedContext, { language, languageInstruction, deadlineMs: STUDIO_GENERATION_BUDGET_MS });
+      } catch (error) {
+        if (error instanceof OpenRouterError) throw new StudioGenerationFailure(error.message, error.status);
+        throw new StudioGenerationFailure(errorMessage(error), 502);
+      }
+    };
+
     try {
-      finalData = await runThroughLedger(ledgerSpec, generateValidatedSection);
+      finalData = actionType === "qcm" ? await generateQcmSet() : await runThroughLedger(ledgerSpec, generateValidatedSection);
     } catch (error) {
       await refundGeneration(user.id);
       if (error instanceof StudioGenerationFailure) {
@@ -456,9 +479,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // studio_courses column name. content_hash is stamped alongside it — the
   // SAME hash lookupStudioContentCache/storeStudioContentCache already
   // compute internally to key studio_content_cache, now also stored
-  // directly on this row so app/api/studio/regenerate can key
-  // studio_content_variations off it without re-fetching or re-hashing
-  // raw_text on every regenerate click. Recomputed on every section's save
+  // directly on this row (it once keyed QCM regeneration variants,
+  // now removed). Recomputed on every section's save
   // (cheap, pure JS) rather than only on the first — harmless if unchanged,
   // and correctly updates a row whose raw_text somehow differs from an
   // earlier section's save.

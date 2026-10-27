@@ -19,7 +19,7 @@
  *     keys, even when some values are left empty.
  */
 
-const JSON_ONLY_RULES = `RÈGLE ABSOLUE : ta réponse doit être UNIQUEMENT un objet JSON valide, strictement conforme au schéma ci-dessous. Aucun texte avant ou après, aucun bloc de code markdown (pas de \`\`\`), aucun commentaire. Juste le JSON brut.
+export const JSON_ONLY_RULES = `RÈGLE ABSOLUE : ta réponse doit être UNIQUEMENT un objet JSON valide, strictement conforme au schéma ci-dessous. Aucun texte avant ou après, aucun bloc de code markdown (pas de \`\`\`), aucun commentaire. Juste le JSON brut.
 
 RÈGLES DE STRUCTURE NON NÉGOCIABLES :
 - N'utilise JAMAIS la valeur \`null\`. Un champ objet non utilisé reste un objet avec des chaînes vides ("") ou des tableaux vides ([]) selon son type — jamais null.

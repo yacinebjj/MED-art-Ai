@@ -179,8 +179,6 @@ export const EXAM_TARGET_TOTAL = 40;
 // Real "Régénérer" generations ever produced per course set — once this many
 // exist, every future "Régénérer" click on this same set is served from them
 // at $0, for ANY student, not just the one who triggered each generation.
-// Same mechanism and cap as Studio's own "Régénérer" (see
-// app/api/studio/regenerate/route.ts's MAX_VARIATIONS).
 export const MAX_EXAM_VARIATIONS = 20;
 // Only applied when `variation: true` — forces creative divergence for a
 // regenerated exam. Left unset (provider default) for a first generation,

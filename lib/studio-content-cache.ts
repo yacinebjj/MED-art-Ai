@@ -21,12 +21,6 @@
  * - "Générer un examen" (app/dashboard/module/[id]/exam) has no real
  *   backend at all yet (fully mocked UI, see that page's own header
  *   comment) — there is no live generation call to cache.
- * - /api/studio/regenerate is intentionally excluded from the LOOKUP path:
- *   a student clicking "Régénérer" is explicitly asking for a fresh, DIFFERENT
- *   version, so serving them the cached original would defeat the button's
- *   entire purpose. Its result is still written back into the cache (see
- *   storeStudioContentCache below), so a later brand-new student can still
- *   benefit from it.
  *
  * Privacy: only the GENERATED JSON output is ever shared — never the
  * original student's raw uploaded text, never their identity, never a
@@ -148,7 +142,7 @@ export async function lookupStudioContentCache(
 }
 
 /**
- * Stores a freshly-generated (or regenerated) Studio result for future
+ * Stores a freshly-generated Studio result for future
  * cross-student reuse. `data` is assumed already zod-validated by the
  * caller (STUDIO_SCHEMAS) — this is the only way a row ever enters the
  * table, so a later cache HIT never needs to re-validate what it reads

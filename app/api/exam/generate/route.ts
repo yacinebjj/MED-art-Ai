@@ -219,8 +219,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 
   // Captured here, not read as `user.id` inside the nested function below —
   // TS's control-flow narrowing from the `if (!user)` guard above doesn't
-  // cross a nested function-declaration boundary (same gotcha hit earlier
-  // in app/api/studio/regenerate/route.ts).
+  // cross a nested function-declaration boundary.
   const userId = user.id;
 
   /** Undoes the regeneration reservation above on a downstream failure — same "a failed attempt shouldn't cost you a unit" fairness as refundGeneration. No-op for a first-ever (non-variation) generation. */

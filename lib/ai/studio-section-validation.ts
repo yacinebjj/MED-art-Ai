@@ -3,12 +3,11 @@ import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/cour
 import type { JsonSectionId } from "@/lib/demo-content";
 
 /**
- * Parses + Zod-validates one Studio JSON response. Shared by
- * app/api/studio/generate (the first generation of a section) and
- * app/api/studio/regenerate (QCM "Régénérer"), so both reject a malformed
- * model response by the exact same rules and feed the same corrective note
- * back into their retry loops. Lives in lib/ rather than in either route
- * because a Next.js route.ts may only export route handlers/config.
+ * Parses + Zod-validates one Studio JSON response for
+ * app/api/studio/generate, so a malformed model response is rejected by the
+ * same rules as the section's schema and a corrective note is fed back into
+ * its retry loop. Lives in lib/ rather than in the route because a Next.js
+ * route.ts may only export route handlers/config.
  */
 export function parseAndValidateStudioSection(
   raw: string,

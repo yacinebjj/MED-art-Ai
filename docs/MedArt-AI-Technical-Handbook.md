@@ -1840,7 +1840,6 @@ To become productive fastest, read in this order:
 | Endpoint | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/studio/generate` | POST | ✅ | Generate one Studio section |
-| `/api/studio/regenerate` | POST | ✅ | Regenerate with a variation |
 | `/api/studio/generate/explication-start` | POST | ✅ | Reserve quota, plan parts |
 | `/api/studio/generate/explication-part` | POST | ✅ | Generate one part (NDJSON) |
 | `/api/studio/generate/explication-finalize` | POST | ✅ | Assemble and persist |

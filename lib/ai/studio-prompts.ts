@@ -4,7 +4,7 @@ import {
   CAS_CLINIQUE_SYSTEM_PROMPT,
   EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
   EXPLICATION_SYSTEM_PROMPT,
-  QCMS_SYSTEM_PROMPT,
+  JSON_ONLY_RULES,
   RESUME_SYSTEM_PROMPT,
 } from "@/lib/prompts/public-course-sections";
 
@@ -212,22 +212,54 @@ SURCHARGE OBLIGATOIRE — DENSITÉ MAXIMALE (remplace toute consigne de longueur
 INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE de chaque puce, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète du mode généré (toutes ses clés de premier niveau et imbriquées telles que définies dans le schéma — hero, sections, ddx_table, pieges, cards, steps, quotes, perles, items — même quand une clé n'est pas utilisée par CE mode précis, auquel cas renvoie-la comme tableau vide [] ou objet aux champs vides, jamais comme clé absente). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.`;
 
 /**
- * QCMS_SYSTEM_PROMPT (imported above) asks for 8-12 QCM + 4-6 QROC — the
- * Studio mandate went through a "minimum 30 QCM + 5 QROC" phase (real cost
- * driver: 30+ questions, each with a 5-option explanation, is a LOT of
- * completion tokens) before settling on the current, cost-conscious target:
- * exactly 15 QCM, and QROC dropped entirely — a focused, high-quality 15-
- * question set instead of a 35-item épreuve most students never finish
- * anyway. `qrocs` stays a required key in STUDIO_SCHEMAS (StudioQcmsSchema,
- * now with no minimum) so InteractiveQuiz — SHARED with the real per-course
- * production pipeline via GastriteQcmsStudio/ExamQcmStudio, never edited to
- * assume Studio-only behavior — keeps receiving the exact prop shape it
- * always has; it already hides its QROC section entirely when the array is
- * empty (see that component's own comment).
+ * Studio Examen QCM — its OWN prompt, no longer an append on the shared
+ * QCMS_SYSTEM_PROMPT. Students reported the old 15-question one-shot set as
+ * shallow (recall of sentences from the course) and it routinely timed out:
+ * one Qwen3-235B call writing every question plus five explanations each
+ * barely fit the route budget. The set is now 30 questions built as parallel
+ * batches (lib/ai/studio-qcm.ts): this prompt describes ONE batch, the
+ * per-batch user message assigns its focus zone of the course. No QROC — the
+ * orchestrator returns `qrocs: []` itself.
  */
-const STUDIO_QCMS_SYSTEM_PROMPT = `${QCMS_SYSTEM_PROMPT}
+const STUDIO_QCMS_SYSTEM_PROMPT = `Tu es un professeur de médecine qui rédige les QCM d'examen de sa faculté (Algérie). Ton but n'est PAS de vérifier si l'étudiant a lu le cours, mais s'il l'a COMPRIS : qu'il sait expliquer pourquoi, prévoir une conséquence, appliquer une notion à une situation nouvelle et distinguer des notions proches. Un étudiant qui a seulement mémorisé des phrases du cours sans les comprendre doit échouer à tes questions ; un étudiant qui a compris doit pouvoir y répondre par le raisonnement.
 
-SURCHARGE OBLIGATOIRE (remplace la consigne de nombre ci-dessus) : le tableau "qcms" doit contenir EXACTEMENT QUINZE (15) QCM — ni plus, ni moins, quelle que soit la longueur du cours source. AUCUN QROC : ignore toute mention de QROC dans les consignes ci-dessus — le tableau "qrocs" doit être renvoyé comme un tableau VIDE ([]), sans générer la moindre question QROC. Les 15 QCM doivent être de niveau Résidanat, réellement difficiles (distracteurs plausibles, questions à réponses multiples incluses), avec une explication complète pour chaque option existante (A à E). Numérote "id" séquentiellement à partir de 1, sans trou.`;
+Tu génères UN LOT de QCM à la fois. Le message de l'utilisateur te donne le nombre exact de QCM et la ZONE DU COURS sur laquelle ce lot se concentre.
+
+TYPES DE QUESTIONS (varie-les dans le lot ; au moins 4 types différents par lot de 5) :
+1. MÉCANISME / CAUSALITÉ : « pourquoi… », « par quel mécanisme… », enchaînement cause → conséquence de la physiopathologie ou de la physiologie.
+2. PRÉDICTION : « si tel élément est altéré, bloqué, absent ou en excès, que se passe-t-il ? » — l'étudiant doit dérouler le raisonnement, la réponse ne figure pas mot pour mot dans le cours.
+3. APPLICATION À UNE SITUATION : une courte mise en situation concrète (2 à 4 phrases : patient, résultat d'examen, situation expérimentale ou physiologique) à interpréter avec les notions du cours. Pour un cours de sciences fondamentales, utilise une situation physiologique ou expérimentale, jamais un cas clinique plaqué artificiellement.
+4. DISCRIMINATION : distinguer deux entités, mécanismes, signes ou traitements proches que les étudiants confondent ; repérer la nuance, l'exception ou la condition qui change tout.
+5. INTÉGRATION : relier deux parties du cours (ex. le mécanisme expliquant un signe, le signe orientant l'examen, le mécanisme justifiant le traitement).
+
+INTERDIT (rejeté d'office) :
+- Une question de pure récitation dont la réponse est une phrase recopiée du cours, une définition brute, une date, un nom propre ou un chiffre isolé sans enjeu de raisonnement. Un chiffre ou un seuil n'est acceptable que si la question exige d'en tirer une conclusion.
+- « Toutes les réponses sont justes », « aucune réponse n'est juste », les combinaisons « A + C », les doubles négations.
+- Un énoncé qui donne la réponse, ou une option correcte reconnaissable à sa longueur ou à sa précision supérieure.
+- Des distracteurs absurdes, hors sujet ou faux au premier coup d'œil.
+- Deux questions du lot qui testent la même notion.
+
+DISTRACTEURS : chaque option fausse incarne une ERREUR DE RAISONNEMENT réelle et fréquente — une confusion entre notions proches, un mécanisme inversé, une généralisation abusive, une exception oubliée. Elle doit paraître juste à l'étudiant qui a appris sans comprendre. Les cinq options sont de même nature, de longueur comparable et grammaticalement cohérentes avec l'énoncé.
+
+RÉPONSES : chaque QCM a exactement 5 options A, B, C, D, E et de 1 à 4 réponses correctes (format QCM à réponses multiples des facultés algériennes). Varie le nombre de bonnes réponses d'une question à l'autre et répartis les bonnes réponses sur toutes les lettres — jamais de motif prévisible (pas toujours B, pas toujours deux réponses).
+
+EXPLICATIONS (le cœur pédagogique) :
+- "globale" : 2 à 3 phrases qui énoncent le PRINCIPE compris que la question teste — le « pourquoi » à retenir, pas une répétition des options.
+- Pour CHAQUE option A à E : commence par « Vrai. » ou « Faux. », puis explique en une ou deux phrases (40 mots maximum) le mécanisme qui la rend juste ou fausse ; pour une option fausse, nomme la confusion qu'elle piège. Ne fais jamais référence à une autre option par sa lettre.
+
+FIDÉLITÉ AU COURS : chaque fait affirmé (dans l'énoncé, les options et les explications) doit être conforme au texte du cours fourni. Le raisonnement peut aller au-delà de la formulation du cours, jamais au-delà de son contenu : n'invente aucune donnée, valeur, classification ou recommandation absente du texte, et ne remplace jamais une affirmation du cours par ta connaissance générale.
+
+${JSON_ONLY_RULES}
+
+Schéma exact (un objet unique, rien avant ni après) :
+{
+  "qcms": [
+    { "id": 1, "question": "...",
+      "options": [ { "label": "A", "text": "..." }, { "label": "B", "text": "..." }, { "label": "C", "text": "..." }, { "label": "D", "text": "..." }, { "label": "E", "text": "..." } ],
+      "reponsesCorrectes": ["A", "D"],
+      "explication": { "globale": "...", "A": "Vrai. ...", "B": "Faux. ...", "C": "Faux. ...", "D": "Vrai. ...", "E": "Faux. ..." } }
+  ]
+}`;
 
 /**
  * EXPLICATION_SYSTEM_PROMPT (imported above) is the shared, production-proven
@@ -318,17 +350,18 @@ interface StudioPromptConfig {
 // lib/studio-explication-delta.ts) still reserves ~20% of this budget for
 // hidden reasoning tokens.
 //
-// The other 4 sections are unchanged at 20000 — their own prompts are
-// already scoped properly and don't have the "sans plafond" problem.
+// The other sections are unchanged at 20000 — their own prompts are already
+// scoped properly and don't have the "sans plafond" problem. qcm's ceiling is
+// PER BATCH (lib/ai/studio-qcm.ts): ~600 tokens per question, 5 per batch.
 export const STUDIO_PROMPT_CONFIG: Record<JsonSectionId, StudioPromptConfig> = {
   explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 8000 },
   resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
-  qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 20000 },
+  qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 7000 },
   exemples_analogies: { systemPrompt: STUDIO_EXEMPLES_ANALOGIES_SYSTEM_PROMPT, maxTokens: 20000 },
 };
 
-/** Maps each Studio tile id to the top-level JSON key its prompt actually returns. "qcm" is the one mismatch — DEMO_SECTIONS uses the singular tile id, but QCMS_SYSTEM_PROMPT (shared with production) returns the plural "qcms" key. */
+/** Maps each Studio tile id to the top-level JSON key its prompt actually returns. "qcm" is the one mismatch — DEMO_SECTIONS uses the singular tile id, but the QCM prompts return the plural "qcms" key. */
 export const STUDIO_SECTION_KEYS: Record<JsonSectionId, string> = {
   explication: "explication",
   resume: "resume",

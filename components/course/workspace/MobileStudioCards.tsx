@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Lock, MoreVertical, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Lock, MoreVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
@@ -13,8 +13,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import {
-  REGENERATABLE_SECTIONS,
-  RegenerateMenuItem,
   SECTIONS_WITH_OPTIONS_MENU,
   TILE_TINTS,
   TileOptionsMenu,
@@ -30,10 +28,6 @@ interface MobileStudioCardsProps {
   getSectionStatus: (id: DemoSectionId) => SectionStatus;
   /** A Set, not a single id — mirrors StudioPanelProps' own field: several sections can now generate concurrently, each card checks its OWN membership. */
   generatingSections: Set<DemoSectionId>;
-  /** Examen QCM regeneration state/handler/counter — mirrors StudioPanelProps' fields of the same names. */
-  regeneratingSections?: Set<DemoSectionId>;
-  onRegenerateSection?: (id: DemoSectionId) => void;
-  qcmRegenerationsLeft?: number;
   onItemClick: (id: DemoSectionId) => void;
   /** Point 5 fix — mirrors StudioPanelProps' own field verbatim: fires from a not-yet-generated card's ChevronDown options menu with the student's chosen language/prompt/model/dialect, instead of the plain default-options onItemClick above. Optional: a caller that omits this simply never renders the ChevronDown (every card falls back to its previous plain-click-only behavior). */
   onItemClickWithOptions?: (id: DemoSectionId, options: TileGenerationOptions) => void;
@@ -49,19 +43,11 @@ interface MobileStudioCardsProps {
  * The "..." trigger + its menu for one already-generated card. Pulled out of
  * the map body purely to keep that map readable — it owns no state of its
  * own. Mirrors StudioPanel's own desktop "Récemment généré" list menu
- * verbatim (same two items, same conditional Régénérer gate, same bare/
- * unwired Supprimer — see that file for why Supprimer has no handler yet)
- * rather than inventing a second, divergent menu design for mobile.
+ * verbatim (same bare/unwired Supprimer — see that file for why Supprimer
+ * has no handler yet) rather than inventing a second, divergent menu design
+ * for mobile.
  */
-function CardOptionsMenu({
-  sectionId,
-  onRegenerateSection,
-  regenerationsLeft,
-}: {
-  sectionId: DemoSectionId;
-  onRegenerateSection?: (id: DemoSectionId) => void;
-  regenerationsLeft?: number;
-}) {
+function CardOptionsMenu() {
   const { language } = useLanguage();
 
   return (
@@ -78,9 +64,6 @@ function CardOptionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
-        {onRegenerateSection && REGENERATABLE_SECTIONS.has(sectionId) && (
-          <RegenerateMenuItem onSelect={() => onRegenerateSection(sectionId)} left={regenerationsLeft} />
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -98,23 +81,15 @@ function CardOptionsMenu({
  * StudioPanel detail view (compact inline, or its own fullscreen mode)
  * instead of duplicating that rendering here.
  *
- * Three distinct card states, one per row in the map below:
+ * Two distinct card states, one per row in the map below:
  *  - generating (first ever run): a plain, non-interactive status row
  *    (Loader2 spin + "Génération en cours...") — nothing to tap into yet,
  *    so it gets no role/handlers at all, mirroring StudioPanel's own
  *    generating row in its desktop "Récemment généré" list.
- *  - regenerating (content already exists, a fresh variation is in
- *    flight): stays a normal, tappable card — a student can keep reading
- *    the current version while the new one is generated — but its "..."
- *    trigger morphs into a static RefreshCw spin in the same slot, so the
- *    one button that actually kicked this off is what visibly shows the
- *    animation, without reinventing a new busy-state system beyond the
- *    regeneratingSections/onRegenerateSection pair StudioPanelProps already
- *    defines.
  *  - idle (available or not-yet-generated): the ordinary tappable card.
  *    Only the "available" case — an already-generated result — gets the
  *    "..." (MoreVertical) trigger; a not-yet-generated tile has nothing to
- *    regenerate or delete, so it keeps its plain ChevronRight instead.
+ *    delete, so it keeps its plain ChevronRight instead.
  *
  * Wrapped in React.memo — the caller (app/dashboard/module/[id]/page.tsx)
  * passes `getSectionStatus`/`onItemClick` as useCallback-stabilized
@@ -127,9 +102,6 @@ export const MobileStudioCards = memo(function MobileStudioCards({
   sections,
   getSectionStatus,
   generatingSections,
-  regeneratingSections,
-  onRegenerateSection,
-  qcmRegenerationsLeft,
   onItemClick,
   onItemClickWithOptions,
   studyYear,
@@ -183,7 +155,6 @@ export const MobileStudioCards = memo(function MobileStudioCards({
           }
 
           const isAvailable = status === "available";
-          const isRegenerating = regeneratingSections?.has(section.id) ?? false;
           const isLocked = lockedSections?.has(section.id) ?? false;
           const masteryPct = sectionMasteryPct?.[section.id];
           // Point 5 fix — same gate as StudioPanel.tsx's own showOptionsMenu:
@@ -225,9 +196,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                   {isAvailable ? tStudio("alreadyGeneratedCaption", language) : tStudio("tapToGenerateCaption", language)}
                 </p>
               </div>
-              {isRegenerating ? (
-                <RefreshCw aria-hidden className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-              ) : isAvailable ? (
+              {isAvailable ? (
                 <>
                   {typeof masteryPct === "number" ? (
                     <ProgressRing
@@ -242,7 +211,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
                   ) : (
                     <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", tint.dot)} />
                   )}
-                  <CardOptionsMenu sectionId={section.id} onRegenerateSection={onRegenerateSection} regenerationsLeft={qcmRegenerationsLeft} />
+                  <CardOptionsMenu />
                 </>
               ) : showOptionsMenu ? (
                 <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>

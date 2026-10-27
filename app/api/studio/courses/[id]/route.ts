@@ -49,14 +49,8 @@ interface StudioCourseMediaRow {
   audio_url: string | null;
 }
 
-function toFullCourse(
-  row: StudioCourseFullRow,
-  infographicUrl: string | null,
-  audioUrl: string | null,
-  qcmRegenerateCount?: number
-): StudioCourseFull {
+function toFullCourse(row: StudioCourseFullRow, infographicUrl: string | null, audioUrl: string | null): StudioCourseFull {
   return {
-    ...(qcmRegenerateCount !== undefined ? { qcmRegenerateCount } : {}),
     id: row.id,
     title: row.title,
     rawText: row.raw_text,
@@ -96,7 +90,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   // "Lecture échouée", which also broke "Afficher le cours" (PDF/PPTX
   // viewer) since it loads the course first. The media query below is
   // allowed to fail on its own; the course itself must always load.
-  const [{ data, error }, { data: mediaRow, error: mediaError }, { data: regenRow, error: regenError }] = await Promise.all([
+  const [{ data, error }, { data: mediaRow, error: mediaError }] = await Promise.all([
     supabase
       .from("studio_courses")
       .select("id, title, raw_text, explication, resume, cas_clinique, qcms, exemples_analogies, source_file_url, updated_at")
@@ -109,19 +103,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       .eq("id", id)
       .eq("user_id", user.id)
       .maybeSingle<StudioCourseMediaRow>(),
-    // Own query on purpose, same reasoning as the media columns above: if the
-    // qcm_regenerate_count migration isn't applied yet, only the counter is lost.
-    supabase
-      .from("studio_courses")
-      .select("qcm_regenerate_count")
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .maybeSingle<{ qcm_regenerate_count: number | null }>(),
   ]);
-
-  if (regenError) {
-    console.warn("[studio/courses/[id]:get] qcm_regenerate_count illisible (migration non appliquée ?):", regenError.message);
-  }
 
   if (mediaError) {
     console.warn(
@@ -172,7 +154,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     }
   }
 
-  return NextResponse.json({ success: true, course: toFullCourse(row, infographicUrl, audioUrl, regenError ? undefined : (regenRow?.qcm_regenerate_count ?? 0)) });
+  return NextResponse.json({ success: true, course: toFullCourse(row, infographicUrl, audioUrl) });
 }
 
 /** Saves one tile's freshly generated content — called right after /api/studio/generate succeeds, so a page refresh (or coming back tomorrow) never has to regenerate it. */
@@ -217,11 +199,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   // SECURITY/INTEGRITY: this route used to write `sectionData` straight into
   // the column with no shape validation at all — sanitizeForPostgres only
   // strips control characters, it doesn't check shape/size. Unlike
-  // /api/studio/generate and /api/studio/regenerate (which both reject a
-  // malformed AI response via this exact schema before ever persisting), a
-  // client sending an arbitrarily-shaped `data` here would corrupt the
-  // column and crash the section's own renderer next time the student
-  // opens this course. studyYear mirrors those two routes' own gating —
+  // /api/studio/generate (which rejects a malformed AI response via this
+  // exact schema before ever persisting), a client sending an
+  // arbitrarily-shaped `data` here would corrupt the column and crash the
+  // section's own renderer next time the student opens this course.
+  // studyYear mirrors that route's own gating —
   // only actionType "cas_clinique" is affected, everything else ignores it.
   const studyYear = typeof studyYearRaw === "number" && Number.isFinite(studyYearRaw) ? studyYearRaw : null;
   const validation = resolveStudioSchema(section, studyYear).safeParse(sectionData);

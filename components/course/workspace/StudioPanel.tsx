@@ -27,7 +27,6 @@ import {
   Paperclip,
   PencilLine,
   Redo2,
-  RefreshCw,
   Sparkles,
   SquarePen,
   Trash2,
@@ -81,34 +80,6 @@ export interface TileGenerationOptions {
   dialect?: PodcastDialect;
 }
 
-/**
- * The ONLY section that offers "Régénérer" (⋮ menu, next to "Supprimer"):
- * the Examen QCM tile, capped at QCM_REGENERATE_CAP per course. Every other
- * Studio tile and every Lab tool is generated once (and shared platform-wide
- * through the content caches), then only viewed. Exported so
- * MobileStudioCards gates its own menu identically.
- */
-export const REGENERATABLE_SECTIONS: ReadonlySet<DemoSectionId> = new Set(["qcm"]);
-
-/** Mirrors QCM_REGENERATE_CAP in app/api/studio/regenerate/route.ts — the server is the real enforcer; this only labels the menu. */
-export const QCM_REGENERATE_CAP = 5;
-
-/** The "Régénérer" menu entry, with the remaining-attempts counter. Disabled — not hidden — once the cap is reached, so the student sees why. */
-export function RegenerateMenuItem({ onSelect, left }: { onSelect: () => void; left?: number }) {
-  const { language } = useLanguage();
-  const exhausted = left !== undefined && left <= 0;
-  return (
-    <DropdownMenuItem disabled={exhausted} onSelect={onSelect}>
-      <RefreshCw className="h-4 w-4" />
-      {exhausted
-        ? `${tStudio("regenerate", language)} — limite atteinte (${QCM_REGENERATE_CAP}/${QCM_REGENERATE_CAP})`
-        : left !== undefined
-          ? `${tStudio("regenerate", language)} (${left} restante${left > 1 ? "s" : ""})`
-          : tStudio("regenerate", language)}
-    </DropdownMenuItem>
-  );
-}
-
 /** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. Exported so MobileStudioCards.tsx (a completely separate component tree for the mobile browse view) gates its own equivalent menu identically instead of drifting out of sync. */
 export const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
   "explication",
@@ -130,12 +101,6 @@ interface StudioPanelProps {
   getSectionStatus: (id: DemoSectionId) => SectionStatus;
   /** A Set, not a single id — several sections can now generate concurrently (a student clicking Résumé no longer blocks clicking Cas Clinique before the first finishes). Each tile checks its OWN membership (`.has(section.id)`), never a single shared value. */
   generatingSections: Set<DemoSectionId>;
-  /** Sections currently regenerating (Examen QCM only). Same Set shape as generatingSections. */
-  regeneratingSections?: Set<DemoSectionId>;
-  /** Fires from the Examen QCM "Régénérer" menu entry. Omitted: the entry isn't rendered. */
-  onRegenerateSection?: (id: DemoSectionId) => void;
-  /** Régénérations restantes de l'Examen QCM de ce cours (plafond serveur). Drives the counter / the disabled state. */
-  qcmRegenerationsLeft?: number;
   /** ISO timestamp of the active course's last section save (studio_courses.updated_at) — powers the "Récemment généré" list's relative-time label (RelativeTime). Same value for every row today (row-level, not per-section — see StudioCourseFull's own comment); null before anything has ever been generated. */
   lastGeneratedAt: string | null;
   isNoteOpen: boolean;
@@ -219,7 +184,7 @@ const GLASS_EXIT_BUTTON_CLASSES =
  * Same "floating glass pill" recipe as GLASS_EXIT_BUTTON_CLASSES above, minus
  * the horizontal hover-shift — that motion reads as "step back" and belongs
  * to the exit control alone. Used for any other icon trigger placed on the
- * same full-viewport glass overlay header (the "..." Régénérer menu next to
+ * same full-viewport glass overlay header (the "..." options menu next to
  * it).
  */
 const GLASS_ICON_BUTTON_CLASSES =
@@ -296,32 +261,11 @@ export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: 
  * "..." trigger + menu for the OPENED section's own detail-view header (both
  * the inline collapsed header and the fullscreen overlay header below) —
  * mirrors the identical DropdownMenu used further down for each "Récemment
- * généré" list row. "Régénérer" appears ONLY for the Examen QCM (see
- * REGENERATABLE_SECTIONS); while that regeneration is running the trigger
- * morphs into a spinning RefreshCw instead of opening a menu.
+ * généré" list row. No Studio tile offers "Régénérer": every section is
+ * generated once, then only viewed.
  */
-function SectionOptionsMenu({
-  sectionId,
-  onRegenerateSection,
-  isRegenerating,
-  regenerationsLeft,
-  triggerClassName,
-}: {
-  sectionId: DemoSectionId;
-  onRegenerateSection?: (id: DemoSectionId) => void;
-  isRegenerating: boolean;
-  regenerationsLeft?: number;
-  triggerClassName: string;
-}) {
+function SectionOptionsMenu({ triggerClassName }: { triggerClassName: string }) {
   const { language } = useLanguage();
-
-  if (isRegenerating) {
-    return (
-      <span aria-hidden className={triggerClassName}>
-        <RefreshCw className="h-4 w-4 animate-spin" />
-      </span>
-    );
-  }
 
   return (
     <DropdownMenu>
@@ -332,9 +276,6 @@ function SectionOptionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
-        {onRegenerateSection && REGENERATABLE_SECTIONS.has(sectionId) && (
-          <RegenerateMenuItem onSelect={() => onRegenerateSection(sectionId)} left={regenerationsLeft} />
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -570,9 +511,6 @@ export function StudioPanel({
   courseSlug,
   onCollapsedChange,
   collapsed,
-  regeneratingSections,
-  onRegenerateSection,
-  qcmRegenerationsLeft,
   studyYear,
   lockedSections,
   sectionMasteryPct,
@@ -863,13 +801,7 @@ export function StudioPanel({
               {/* Global AI-content language — one switch for every tile and Lab tool. */}
               {!isCollapsed && <AiLanguageSelect compact className="mr-0.5" />}
               {openedSection && !isCollapsed && (
-                <SectionOptionsMenu
-                  sectionId={openedSection}
-                  onRegenerateSection={onRegenerateSection}
-                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
-                  regenerationsLeft={qcmRegenerationsLeft}
-                  triggerClassName={PANEL_ICON_BUTTON_CLASSES}
-                />
+                <SectionOptionsMenu triggerClassName={PANEL_ICON_BUTTON_CLASSES} />
               )}
               {isDetailOpen && !isCollapsed && (
                 <Tooltip>
@@ -948,10 +880,9 @@ export function StudioPanel({
                   const isLocked = lockedSections?.has(section.id) ?? false;
                   const masteryPct = sectionMasteryPct?.[section.id];
                   // The arrow/options menu only makes sense BEFORE a section
-                  // has ever been generated — once it exists, "Régénérer"
-                  // (SectionOptionsMenu, on the opened detail view) is the
-                  // relevant follow-up action, not a fresh set of
-                  // language/prompt options. Exemples & Analogies never gets
+                  // has ever been generated — once it exists, the section is
+                  // only viewed (no tile offers a fresh set of
+                  // language/prompt options). Exemples & Analogies never gets
                   // one at all, by explicit product decision (direct click
                   // only) — see SECTIONS_WITH_OPTIONS_MENU's own comment.
                   const showOptionsMenu =
@@ -1109,7 +1040,7 @@ export function StudioPanel({
                   </p>
                   {generations.map((section) => {
                     const Icon = section.icon;
-                    const isGenerating = generatingSections.has(section.id) || (regeneratingSections?.has(section.id) ?? false);
+                    const isGenerating = generatingSections.has(section.id);
 
                     if (isGenerating) {
                       return (
@@ -1165,9 +1096,6 @@ export function StudioPanel({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem>{tStudio("delete", language)}</DropdownMenuItem>
-                            {onRegenerateSection && REGENERATABLE_SECTIONS.has(section.id) && (
-                              <RegenerateMenuItem onSelect={() => onRegenerateSection(section.id)} left={qcmRegenerationsLeft} />
-                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -1465,13 +1393,7 @@ export function StudioPanel({
               )}
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{openedSection ? openedLabel : openedLab?.label}</span>
               {openedSection && (
-                <SectionOptionsMenu
-                  sectionId={openedSection}
-                  onRegenerateSection={onRegenerateSection}
-                  isRegenerating={regeneratingSections?.has(openedSection) ?? false}
-                  regenerationsLeft={qcmRegenerationsLeft}
-                  triggerClassName={GLASS_ICON_BUTTON_CLASSES}
-                />
+                <SectionOptionsMenu triggerClassName={GLASS_ICON_BUTTON_CLASSES} />
               )}
               <button
                 type="button"

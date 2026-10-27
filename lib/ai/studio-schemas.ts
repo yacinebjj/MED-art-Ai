@@ -7,7 +7,7 @@ import type { JsonSectionId } from "@/lib/demo-content";
  * GastriteCasCliniqueStudio, GastriteQcmsStudio) require as props.
  * Validation is strict on TYPES/SHAPE (every required field present, right
  * primitive type, right nesting) and, for cas_clinique/qcm specifically, now
- * also strict on the client's mandated MINIMUM COUNTS (3 cases, 15 QCM) —
+ * also strict on the client's mandated MINIMUM COUNTS (3 cases, 30 QCM) —
  * those are non-negotiable per the current spec, not soft guidance, so an
  * under-count generation is rejected rather than silently accepted. QROC was
  * dropped entirely from the Studio spec for cost reasons — `qrocs` stays a
@@ -199,17 +199,43 @@ const QcmItemSchema = z.object({
 const QrocItemSchema = z.object({ id: z.number(), question: z.string(), reponseOfficielle: z.string() });
 
 /**
- * Client mandate: exactement 15 QCM, aucun QROC — see STUDIO_QCMS_SYSTEM_PROMPT's
- * override in lib/ai/studio-prompts.ts. `qrocs` keeps no minimum (always sent
- * empty by the Studio prompt now) rather than being removed outright, since
- * InteractiveQuiz (components/course/workspace/InteractiveQuiz.tsx) is SHARED
- * with the real per-course production pipeline and still expects the key.
+ * Client mandate: exactement 30 QCM (STUDIO_QCM_TOTAL), aucun QROC — built in
+ * parallel batches by lib/ai/studio-qcm.ts. `qrocs` keeps no minimum (always
+ * empty for Studio) rather than being removed outright, since InteractiveQuiz
+ * (components/course/workspace/InteractiveQuiz.tsx) is SHARED with the real
+ * per-course production pipeline and still expects the key.
  */
+export const STUDIO_QCM_TOTAL = 30;
+
 export const StudioQcmsSchema = z.object({
   titre_section: z.string(),
-  qcms: z.array(QcmItemSchema).min(15),
+  qcms: z.array(QcmItemSchema).min(STUDIO_QCM_TOTAL),
   qrocs: z.array(QrocItemSchema),
 });
+
+const QCM_LABELS = ["A", "B", "C", "D", "E"] as const;
+
+/**
+ * Stricter per-question check for freshly generated Studio QCMs only (never
+ * applied to sets already saved): exactly five options A-E in order, 1-4
+ * distinct correct answers that all exist, and an explanation for every option.
+ */
+export const StudioGeneratedQcmSchema = QcmItemSchema.superRefine((qcm, ctx) => {
+  const labels = qcm.options.map((option) => option.label);
+  if (labels.length !== QCM_LABELS.length || labels.some((label, i) => label !== QCM_LABELS[i])) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "exactement 5 options étiquetées A, B, C, D, E dans cet ordre", path: ["options"] });
+  }
+  const correct = new Set(qcm.reponsesCorrectes);
+  if (correct.size !== qcm.reponsesCorrectes.length || correct.size > 4 || [...correct].some((label) => !labels.includes(label))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "1 à 4 réponses correctes distinctes, toutes parmi A-E", path: ["reponsesCorrectes"] });
+  }
+  for (const label of QCM_LABELS) {
+    if (!qcm.explication[label].trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `explication de l'option ${label} manquante`, path: ["explication", label] });
+    }
+  }
+});
+export type StudioGeneratedQcm = z.infer<typeof StudioGeneratedQcmSchema>;
 
 const StudioTextSchema = z.string().min(50);
 

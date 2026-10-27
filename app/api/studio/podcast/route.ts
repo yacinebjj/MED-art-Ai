@@ -274,9 +274,8 @@ export async function POST(request: NextRequest) {
   // language/dialect dimension. Extending that key would need a schema
   // migration this codebase has no confirmed-live tooling for (see this
   // project's own history of unconfirmed manual migrations); bypassing the
-  // cache for the 3 new variants is the same safe pattern already
-  // established for /api/studio/regenerate (a personalized request that
-  // deliberately skips the shared cache).
+  // cache for the 3 new variants is the safe option (a personalized
+  // request that deliberately skips the shared cache).
   const isDefaultVariant = dialect === DEFAULT_PODCAST_DIALECT;
 
   if (!isSupabaseConfigured()) {

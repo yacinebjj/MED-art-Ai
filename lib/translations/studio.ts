@@ -12,7 +12,6 @@ import type { DemoSectionId } from "@/lib/demo-content";
 export const STUDIO_TRANSLATIONS = {
   studioHeading: { fr: "Studio", en: "Studio" },
   recentlyGenerated: { fr: "Récemment généré", en: "Recently generated" },
-  regenerate: { fr: "Régénérer", en: "Regenerate" },
   delete: { fr: "Supprimer", en: "Delete" },
   normal: { fr: "Normal", en: "Normal" },
   notePlaceholder: { fr: "Écris ta note ici...", en: "Write your note here..." },

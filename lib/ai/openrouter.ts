@@ -337,7 +337,7 @@ export const EXAM_MODEL = LAB_FALLBACK_MODEL;
 export const EXAM_FALLBACK_MODEL = FLASHCARD_MODEL;
 
 // STUDIO MODEL, 2026-10-07 — Studio sections (Résumé, Cas clinique, QCM,
-// Exemples & analogies), Studio "Régénérer", and the module Résumé global
+// Exemples & analogies), and the module Résumé global
 // (per-course chunks, keyword table, personalization pass). Was ECONOMY_MODEL
 // (gemini-3.7-flash, $0.75/M + $3.75/M); qwen3-235b-a22b-2507 is ~$0.09/M +
 // $0.55/M list (~85% cheaper output), non-thinking, 262K context, and already
@@ -585,7 +585,7 @@ const OPENROUTER_CONNECT_TIMEOUT_MS = 60_000;
 // attaches `dispatcher: OPENROUTER_DISPATCHER`, nothing overrides its
 // timeouts per call). These previously matched DEFAULT_TIMEOUT_MS (240s) —
 // but several real call sites deliberately configure a LONGER AbortController
-// timeoutMs than that (explication-part: 260s, podcast/regenerate: 280s),
+// timeoutMs than that (explication-part: 260s, podcast: 280s),
 // believing that value is the operative ceiling. It never was: undici's
 // Agent-level headersTimeout/bodyTimeout fires as its own
 // UND_ERR_HEADERS_TIMEOUT/UND_ERR_BODY_TIMEOUT error, independent of and
@@ -598,7 +598,7 @@ const OPENROUTER_CONNECT_TIMEOUT_MS = 60_000;
 // retry), exhausting all 3 client-side retries and surfacing as a hard,
 // unrecoverable "échec de génération". Decoupled from DEFAULT_TIMEOUT_MS and
 // set generously above the longest timeoutMs any real caller configures
-// today (280s, podcast/regenerate) so this Agent-level ceiling is never the
+// today (280s, podcast) so this Agent-level ceiling is never the
 // binding constraint again — each call's own AbortController timeoutMs
 // remains the real, intended authority.
 // LOWERED 300s -> 250s. This is undici's own headers/body timeout — the LAST
@@ -609,7 +609,7 @@ const OPENROUTER_CONNECT_TIMEOUT_MS = 60_000;
 // actually fire, converting "function hard-killed mid-generation, no error
 // ever reaches the student" into a clean, retryable error with ~30s of room
 // left to write and flush it. Deliberately below the LONGEST timeoutMs some
-// callers still configure (podcast/regenerate pass 280s): that 280s was
+// callers still configure (podcast passes 280s): that 280s was
 // always unachievable under a 280-300s wall anyway, so this makes the real,
 // enforceable ceiling explicit instead of aspirational.
 const OPENROUTER_DISPATCHER_TIMEOUT_MS = 250_000;
