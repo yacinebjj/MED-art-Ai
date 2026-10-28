@@ -338,7 +338,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl overflow-hidden">
+      <DialogContent className="max-w-3xl overflow-hidden max-sm:overflow-y-auto">
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(ellipse_at_top,rgba(34,211,238,0.18),transparent_70%)]" />
         <DialogHeader className="relative">
           <div className="flex items-center gap-3">
@@ -359,7 +359,7 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
           ))}
         </div>
 
-        <motion.div key={method} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="relative mt-4 flex max-h-[55vh] flex-col gap-4 overflow-y-auto overflow-x-hidden pr-0.5">
+        <motion.div key={method} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="relative mt-4 flex max-h-[55vh] flex-col gap-4 overflow-y-auto overflow-x-hidden pr-0.5 max-sm:max-h-none">
           {method === "upload" && (
             <>
               <div
