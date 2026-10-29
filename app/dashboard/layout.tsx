@@ -6,6 +6,7 @@ import { ChunkErrorRecovery } from "@/components/pwa/ChunkErrorRecovery";
 import { PaywallProvider } from "@/components/billing/PaywallProvider";
 import { DeviceGuard } from "@/components/security/DeviceGuard";
 import { OnboardingProvider } from "@/lib/onboarding/onboarding-context";
+import { TourHost } from "@/components/onboarding/TourHost";
 import { RouteMotionProvider } from "@/providers/RouteMotionProvider";
 import { RouteProgress } from "@/components/layout/RouteProgress";
 
@@ -29,7 +30,10 @@ export default function DashboardLayout({
         <ChunkErrorRecovery />
         <RouteProgress />
         <PaywallProvider>
-          <OnboardingProvider>{children}</OnboardingProvider>
+          <OnboardingProvider>
+            {children}
+            <TourHost />
+          </OnboardingProvider>
           <DeviceGuard />
         </PaywallProvider>
       </RouteMotionProvider>

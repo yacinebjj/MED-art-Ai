@@ -42,6 +42,9 @@ import { useTheme } from "next-themes";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES } from "@/lib/markdown";
 import { exportReplyToPdf } from "@/lib/assistant-export";
 import { LAB_HEADING_ICON, type LabToolDescriptor, type LabToolId } from "@/lib/workspace-lab";
+import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
+import { STUDIO_TOOL_TOURS } from "@/lib/onboarding/tour-ids";
 import { INFOGRAPHIC_MODEL_OPTIONS, type InfographicModelKey } from "@/lib/ai/infographic-prompts";
 import { type PodcastDialect } from "@/lib/ai/podcast-prompts";
 import { cn } from "@/lib/utils";
@@ -683,6 +686,9 @@ export function StudioPanel({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isSectionExpanded]);
 
+  // The expanded overlay's portal sits above any tour: none may start under it.
+  useTourBlocker(isSectionExpanded);
+
   // Portal-mount guard: `document` doesn't exist during SSR, and mounting a
   // portal on the very first client render (before hydration settles) can
   // still race in some setups — flipping this in an effect keeps the portal
@@ -804,6 +810,9 @@ export function StudioPanel({
                 <SectionOptionsMenu triggerClassName={PANEL_ICON_BUTTON_CLASSES} />
               )}
               {isDetailOpen && !isCollapsed && (
+                <TourReplayButton tour={STUDIO_TOOL_TOURS[openedSection ?? openedLab?.id ?? ""] ?? null} className="h-8 w-8" />
+              )}
+              {isDetailOpen && !isCollapsed && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -868,7 +877,7 @@ export function StudioPanel({
             )
           ) : (
             <div key="browse" className={cn("motion-swap space-y-3 p-2 pb-20 md:space-y-6 md:p-4 md:pb-24", isCollapsed && "px-2")}>
-              <div className={cn("grid gap-1.5 md:gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-2")}>
+              <div className={cn("grid gap-1.5 md:gap-2", isCollapsed ? "grid-cols-1" : "grid-cols-2")} data-tour="ws-studio">
                 {sections.map((section) => {
                   const Icon = section.icon;
                   const isGenerating = generatingSections.has(section.id);
@@ -1105,7 +1114,7 @@ export function StudioPanel({
               )}
 
               {labTools && labTools.length > 0 && onOpenLabTool && (
-                <section aria-label="MedArt Lab" className="space-y-1.5">
+                <section aria-label="MedArt Lab" className="space-y-1.5" data-tour="ws-lab">
                   {!isCollapsed && (
                     <p className="flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       <LAB_HEADING_ICON className="h-3 w-3" />
@@ -1165,6 +1174,7 @@ export function StudioPanel({
                 type="button"
                 onClick={onOpenNote}
                 aria-label="Ajouter une note"
+                data-tour="ws-note"
                 className={cn(
                   "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary-600 text-sm font-medium text-white shadow-glow transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 active:scale-[0.96] dark:bg-primary-500 dark:hover:bg-primary-400",
                   isCollapsed ? "p-3" : "px-6 py-3"

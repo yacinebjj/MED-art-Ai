@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlignJustify, ListTree, Maximize2, Minimize2, Minus, Plus, Type, X } from "lucide-react";
 import { MedicalMarkdown } from "@/components/reader/MedicalMarkdown";
 import { normalizeCallouts } from "@/lib/markdown";
+import { useToolTour } from "@/lib/onboarding/onboarding-context";
 import { cn } from "@/lib/utils";
 
 const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"], variable: "--reader-font-jakarta", display: "swap" });
@@ -200,7 +201,7 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
   return (
     <div className={cn(jakarta.variable, lora.variable, "relative")}>
       {/* Control bar — sticks to the top of whichever pane scrolls the lesson. */}
-      <div ref={toolbarRef} className="sticky top-0 z-30 rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b1016]/90">
+      <div ref={toolbarRef} data-tour="exp-toolbar" className="sticky top-0 z-30 rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b1016]/90">
         <div className="flex flex-wrap items-center gap-2 px-3 py-2">
           <div className="flex items-center gap-1.5">
             <Type className="h-3.5 w-3.5 text-slate-400" aria-hidden />
@@ -275,7 +276,7 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
           </div>
         </div>
         {/* Reading progress */}
-        <div className="mx-3 mb-2 h-[3px] overflow-hidden rounded-full bg-slate-200/70 dark:bg-white/[0.06]" role="progressbar" aria-label="Progression de lecture" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
+        <div className="mx-3 mb-2 h-[3px] overflow-hidden rounded-full bg-slate-200/70 dark:bg-white/[0.06]" role="progressbar" aria-label="Progression de lecture" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} data-tour="exp-progress">
           <div className="h-full origin-left bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-500 transition-transform duration-150 ease-out" style={{ transform: `scaleX(${progress})` }} />
         </div>
 
@@ -339,6 +340,7 @@ export function ExplicationReader({ markdown, footer }: { markdown: string; foot
   const [mounted, setMounted] = useState(false);
   const zenScrollRef = useRef<HTMLDivElement>(null);
   const normalized = useMemo(() => normalizeCallouts(markdown), [markdown]);
+  useToolTour("tool-explication");
 
   useEffect(() => {
     setPrefsState(readPrefs());

@@ -50,6 +50,7 @@ export function ClinicalConnectionsPanel({ courseId }: ClinicalConnectionsPanelP
           type="button"
           onClick={handleClick}
           disabled={isLoading}
+          data-tour="exp-connections"
           className="flex items-center gap-2 rounded-2xl border border-violet-500/30 bg-violet-50/60 px-4 py-2.5 text-sm font-semibold text-violet-700 shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:bg-violet-100/80 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-60 dark:bg-violet-950/20 dark:text-violet-300 dark:hover:bg-violet-950/40"
         >
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}

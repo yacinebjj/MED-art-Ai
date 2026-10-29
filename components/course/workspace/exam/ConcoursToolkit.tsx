@@ -40,7 +40,7 @@ export function ConfidencePicker({
     return <p className="px-1 text-[11px] text-muted-foreground">Certitude non renseignée pour cette question.</p>;
   }
   return (
-    <div className="flex flex-wrap items-center gap-1.5 px-1" role="radiogroup" aria-label="Ton niveau de certitude avant de répondre">
+    <div className="flex flex-wrap items-center gap-1.5 px-1" role="radiogroup" aria-label="Ton niveau de certitude avant de répondre" data-tour="qcm-confidence">
       <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{locked ? "Certitude" : "Avant de répondre :"}</span>
       {CONFIDENCE_OPTIONS.map((option) => {
         const Icon = option.icon;
@@ -124,7 +124,7 @@ export function ConcoursModeBar({
   ];
 
   return (
-    <div className="sticky top-0 z-10 space-y-2 rounded-2xl border border-border bg-card p-3 shadow-soft">
+    <div className="sticky top-0 z-10 space-y-2 rounded-2xl border border-border bg-card p-3 shadow-soft" data-tour="qcm-mode">
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-teal-700 dark:text-teal-400">
           <Gauge className="h-4 w-4" />

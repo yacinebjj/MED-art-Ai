@@ -75,7 +75,7 @@ function StudyPageContent() {
         actions={
           <>
             {/* Quick Pomodoro control — same global state as the Topbar widget. */}
-            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] py-1.5 pl-3 pr-1.5">
+            <div data-tour="study-pomodoro" className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] py-1.5 pl-3 pr-1.5">
               <span className={cn("relative flex h-2 w-2 shrink-0 rounded-full", isActive ? "bg-emerald-400" : "bg-slate-600")}>
                 {isActive && <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400" />}
               </span>
@@ -111,6 +111,7 @@ function StudyPageContent() {
       <SegmentedControl<StudyTab>
         className="mt-6 w-fit"
         ariaLabel={tStudy("pageTitle", language)}
+        dataTour="study-tabs"
         value={activeTab}
         onChange={handleTabChange}
         options={[

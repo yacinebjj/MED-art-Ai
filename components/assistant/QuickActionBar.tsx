@@ -123,6 +123,7 @@ export function QuickActionBar({
 
       <div
         role="toolbar"
+        data-tour="asst-quick"
         aria-label={tAssistant("quickActionsLabel", language)}
         // The chips scroll sideways INSIDE this strip only (contained, pan-x);
         // the page itself can never move — see the thread's overflow-x lock.

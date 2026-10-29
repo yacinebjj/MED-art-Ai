@@ -44,6 +44,7 @@ import { deleteSyncDoc, fetchSyncNamespace, putSyncDoc, type SyncedValue } from 
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { tStudyTools } from "@/lib/translations/studyTools";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
 /** How long the "Bien joué !" / "Pas grave" confirmation stays before the deck advances. */
@@ -616,6 +617,8 @@ export function ActiveFlashcardsDeck() {
     };
   }, []);
 
+  useTourBlocker(status === "loading" || gradeFeedback !== null);
+
   function handleRestart() {
     if (storageKey) {
       clearSavedSession(storageKey);
@@ -763,7 +766,7 @@ export function ActiveFlashcardsDeck() {
   const ratingTotal = ratings.hard + ratings.medium + ratings.easy;
 
   const header = (
-    <div className="flex flex-wrap items-center gap-3 border-b border-white/[0.06] p-4 sm:p-5">
+    <div data-tour="study-courses" className="flex flex-wrap items-center gap-3 border-b border-white/[0.06] p-4 sm:p-5">
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-200 ring-1 ring-inset ring-violet-400/30">
         <Layers className="h-5 w-5" />
       </span>
@@ -782,7 +785,7 @@ export function ActiveFlashcardsDeck() {
 
   // Live memory telemetry — every number is this session's real grading.
   const tracker = (
-    <CyberPanel className="p-5">
+    <CyberPanel data-tour="study-stats" className="p-5">
       <p className="cyber-kicker flex items-center gap-1.5">
         <Activity className="h-3.5 w-3.5" />
         {copy.liveTitle}

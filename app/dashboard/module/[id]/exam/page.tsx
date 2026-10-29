@@ -72,6 +72,8 @@ import { ExamCombinationText, ExamFormatBadges, ExamPropositionsList, examFormat
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { runExamGeneration, type ExamRunProgress } from "@/lib/exam-run-client";
 import { isAnswerCorrect, parseAnswerLabels, serializeAnswerLabels } from "@/lib/exam-scoring";
+import { useTourBlocker, useToolTour } from "@/lib/onboarding/onboarding-context";
+import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 type ResultStatus = "correct" | "incorrect" | "skipped";
@@ -280,6 +282,9 @@ export default function ExamGeneratorPage() {
     };
   }, [moduleId, retryToken]);
 
+  // Set once the history request below settles, success or not: it may resume an exam (timer running), so no tour starts before.
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
   // History fetch — scoped to THIS module only, fixing the "shows courses
   // from unrelated modules" bug at its root: there was never a real
   // per-module fetch of anything before this pass. Fetches saved exams AND
@@ -346,12 +351,18 @@ export default function ExamGeneratorPage() {
       )
       .catch(() => {
         /* Non-fatal — the page still works, just without history pre-loaded. */
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoaded(true);
       });
 
     return () => {
       cancelled = true;
     };
   }, [moduleId]);
+
+  useTourBlocker(!historyLoaded || examState === "testing" || examState === "generating" || isGenerating || isSavingAttempt || pendingGeneration !== null || isExamFullscreen);
+  useToolTour("exam-results", historyLoaded && examState === "results" && !isExamFullscreen);
 
   function toggleAll() {
     if (!courses) return;
@@ -579,7 +590,7 @@ export default function ExamGeneratorPage() {
   }, [answers, questions]);
 
   const courseHeaderBlock = (
-    <div className="border-b border-border p-4">
+    <div data-tour="exam-courses" className="border-b border-border p-4">
       <div className="flex items-center gap-2.5">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 shadow-sm dark:bg-primary-950/40 dark:text-primary-400">
           <FileQuestion className="h-4 w-4" />
@@ -699,7 +710,7 @@ export default function ExamGeneratorPage() {
   // Mobile "Sources" tab: configuration + a floating action bar, always reachable.
   const generateButtonBlock = (
     <div className="sticky bottom-0 shrink-0 border-t border-white/[0.08] bg-slate-950/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:bg-transparent">
-      <details className="group mb-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] [&_summary::-webkit-details-marker]:hidden">
+      <details data-tour="exam-settings" className="group mb-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] [&_summary::-webkit-details-marker]:hidden">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3.5 text-sm font-bold text-foreground">
           <span className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-cyan-400" />
@@ -710,6 +721,7 @@ export default function ExamGeneratorPage() {
         <div className="max-h-[45vh] overflow-y-auto px-3.5 pb-3.5">{examConfigurator}</div>
       </details>
       <Button
+        data-tour="exam-generate"
         size="lg"
         disabled={selectedCourseIds.size === 0 || isGenerating}
         onClick={handleGenerate}
@@ -750,6 +762,7 @@ export default function ExamGeneratorPage() {
 
       <div className="mx-auto mt-5 flex w-full max-w-xl flex-col items-center gap-2">
         <Button
+          data-tour="exam-generate"
           size="lg"
           disabled={selectedCourseIds.size === 0 || isGenerating}
           onClick={handleGenerate}
@@ -1042,7 +1055,7 @@ export default function ExamGeneratorPage() {
 
   const statsPanel = (
     <div className="space-y-4 xl:sticky xl:top-0">
-      <CyberPanel laser="spin" accent={scorePct >= 50 ? "emerald" : "rose"} className="flex flex-col items-center gap-4 p-5 text-center">
+      <CyberPanel data-tour="exam-score" laser="spin" accent={scorePct >= 50 ? "emerald" : "rose"} className="flex flex-col items-center gap-4 p-5 text-center">
         <NeonRing
           value={questions.length > 0 ? score / questions.length : 0}
           size={132}
@@ -1117,7 +1130,7 @@ export default function ExamGeneratorPage() {
       <div className="xl:order-2">{statsPanel}</div>
       <div className="min-w-0 xl:order-1">
         {/* Instant multi-criteria filters: status × notions × free text. */}
-        <div className="mb-4 space-y-2.5">
+        <div data-tour="exam-filters" className="mb-4 space-y-2.5">
           <SegmentedControl<ResultFilter>
             size="sm"
             ariaLabel="Filtrer les questions"
@@ -1237,7 +1250,7 @@ export default function ExamGeneratorPage() {
                   })}
                 </div>
 
-                <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/[0.06] p-4">
+                <div data-tour="exam-explanation" className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/[0.06] p-4">
                   <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-sky-300">
                     <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
                   </p>
@@ -1262,7 +1275,7 @@ export default function ExamGeneratorPage() {
         </motion.div>
 
         {weakPoints.length > 0 && (
-          <div className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-500/[0.06] p-5">
+          <div data-tour="exam-weak" className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-500/[0.06] p-5">
             <p className="mb-2.5 flex items-center gap-2 text-sm font-black text-amber-200">
               <AlertTriangle className="h-4 w-4" /> Points Faibles Identifiés
             </p>
@@ -1276,7 +1289,7 @@ export default function ExamGeneratorPage() {
           </div>
         )}
 
-        <div className="mt-6 flex flex-col gap-2.5">
+        <div data-tour="exam-actions" className="mt-6 flex flex-col gap-2.5">
           <Button variant="secondary" className="min-h-12 w-full whitespace-normal text-center leading-snug" onClick={handleStartOver}>
             <FilePlus2 className="h-4 w-4 shrink-0" />
             {tExam("generateNewExam", language)}
@@ -1330,7 +1343,7 @@ export default function ExamGeneratorPage() {
     // overflow-hidden, matching the sibling workspace/module page's own
     // identical root treatment.
     <div className="cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
-      <WorkspaceTopbar title="Générateur d'Examen" />
+      <WorkspaceTopbar title="Générateur d'Examen" actions={<TourReplayButton tour={examState === "results" ? "exam-results" : "exam"} className="h-8 w-8" />} />
 
       {/* Mobile-first UX rework — below `md`, aside/main never render side
           by side any more (there was too little room for either once one

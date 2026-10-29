@@ -31,6 +31,7 @@ import {
   Flame,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToolTour } from "@/lib/onboarding/onboarding-context";
 import type {
   GastriteAstuceItem,
   GastriteResumeData,
@@ -794,15 +795,16 @@ function AstucesContent({ mode }: { mode: GastriteResumeMode }) {
 export function GastriteResumeStudio({ data }: { data: GastriteResumeData }) {
   const [activeModeId, setActiveModeId] = useState<GastriteResumeMode["id"]>(MODES[0].id);
   const activeMode = data.modes.find((m) => m.id === activeModeId);
+  useToolTour("tool-resume");
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/30">
+      <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/30" data-tour="res-score">
         <Flame className="h-4 w-4" />
         Tombabilité à l&apos;examen : {data.tombabilite}%
       </div>
 
-      <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
+      <div className="mb-6 flex gap-2 overflow-x-auto pb-2" data-tour="res-modes">
         {MODES.map((m) => {
           const isActive = m.id === activeModeId;
           return (

@@ -32,6 +32,7 @@ import { CyberHeader, CyberPanel, CyberStage, NeonRing, ParticleBurst } from "@/
 import { PAYMENT_CONFIRM_GRACE_MINUTES, PLANS, POOL_DEADLINE_DAYS, REFUND_DELAY_LABEL, formatDZD, type BillingCycle, type PlanId, SEAT_HOLD_MINUTES } from "@/lib/pricing";
 import type { PoolView } from "@/lib/billing-pools";
 import { cn } from "@/lib/utils";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 
 /** lib/billing-pools.ts HOLD_MINUTES (server-only constant, not importable here). */
 const HOLD_MINUTES = SEAT_HOLD_MINUTES;
@@ -338,7 +339,7 @@ function Steps({ pool, paid }: { pool: PoolView; paid: boolean }) {
     { title: `Activation à ${pool.size}/${pool.size}`, text: "pour tout le monde", state: complete ? "done" : "todo" },
   ];
   return (
-    <ol className="mt-5 grid grid-cols-3 gap-2" aria-label="Étapes">
+    <ol data-tour="pool-steps" className="mt-5 grid grid-cols-3 gap-2" aria-label="Étapes">
       {steps.map((step, index) => (
         <li
           key={step.title}
@@ -416,7 +417,7 @@ function InvitePanel({ pool }: { pool: PoolView }) {
   const remaining = Math.max(0, pool.size - pool.confirmed);
 
   return (
-    <CyberPanel accent="violet" className="p-5 sm:p-6">
+    <CyberPanel data-tour="pool-invite" accent="violet" className="p-5 sm:p-6">
       <p className="cyber-kicker">Inviter</p>
       <h2 className="mt-1 text-lg font-black text-white">
         {pool.mode === "leader"
@@ -512,6 +513,7 @@ function PoolTracker() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [burst, setBurst] = useState(0);
   const [showFailure, setShowFailure] = useState(returnStatus === "failure");
+  useTourBlocker(state.kind === "loading" || confirmPhase === "polling" || busy !== null);
 
   const load = useCallback(async (): Promise<PoolView | null> => {
     try {
@@ -787,13 +789,13 @@ function PoolTracker() {
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[1.05fr_1fr]">
-        <CyberPanel laser={readyPool.status === "open" ? "spin" : true} accent={currentPhase === "celebrate" ? "emerald" : "cyan"} className="relative p-5 sm:p-7">
+        <CyberPanel data-tour="pool-gauge" laser={readyPool.status === "open" ? "spin" : true} accent={currentPhase === "celebrate" ? "emerald" : "cyan"} className="relative p-5 sm:p-7">
           <Gauge pool={readyPool} phase={currentPhase} />
           <ParticleBurst nonce={burst} color="rgb(52 211 153)" count={18} spread={120} />
         </CyberPanel>
 
         <div className="space-y-5">
-          <CyberPanel className="p-5 sm:p-6">
+          <CyberPanel data-tour="pool-pay" className="p-5 sm:p-6">
             <StatePanel
               pool={readyPool}
               phase={currentPhase}

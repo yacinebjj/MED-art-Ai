@@ -32,6 +32,7 @@ import {
 import { playPomodoroChime, preparePomodoroChimes, unlockPomodoroAudio } from "@/lib/pomodoro/chime";
 import { CyberPanel, NeonRing } from "@/components/cyber/primitives";
 import { useMagnetic, useRichEffects } from "@/components/cyber/hooks";
+import { useToolTour } from "@/lib/onboarding/onboarding-context";
 import { AMBIENCES, AmbiencePanel, type AmbienceId } from "./pomodoro/AmbiencePanel";
 import { BreathingPanel } from "./pomodoro/BreathingPanel";
 
@@ -123,6 +124,7 @@ export function StudyDashboard() {
   const startRef = useMagnetic<HTMLButtonElement>(0.2);
 
   const { seconds, isActive: isRunning, toggleActive, resetTimer: globalReset, focusLog } = usePomodoro();
+  useToolTour("pomodoro");
 
   const [settings, setSettings] = useState<PomodoroSettings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -225,7 +227,7 @@ export function StudyDashboard() {
         {/* ── Monumental dial ─────────────────────────────────────────── */}
         <CyberPanel laser={rich ? "spin" : true} accent={isStudyMode ? "cyan" : "amber"} className="overflow-hidden p-5 sm:p-8">
           <div aria-hidden className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br transition-colors duration-1000", ambienceTint)} />
-          <div className="relative flex flex-col items-center gap-6">
+          <div data-tour="pomo-dial" className="relative flex flex-col items-center gap-6">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={derivedMode}
@@ -300,7 +302,7 @@ export function StudyDashboard() {
           </div>
 
           {/* Presets + steppers */}
-          <div className="relative mt-8 border-t border-white/[0.07] pt-6">
+          <div data-tour="pomo-programs" className="relative mt-8 border-t border-white/[0.07] pt-6">
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <span className="cyber-kicker mr-1">Programmes</span>
               {PRESETS.map((preset) => {
@@ -344,7 +346,7 @@ export function StudyDashboard() {
         </CyberPanel>
 
         {/* ── Side console ────────────────────────────────────────────── */}
-        <div className="space-y-5">
+        <div data-tour="pomo-side" className="space-y-5">
           <CyberPanel className="p-5">
             <p className="cyber-kicker">Télémétrie de focus</p>
             <div className="mt-3 grid grid-cols-2 gap-3">

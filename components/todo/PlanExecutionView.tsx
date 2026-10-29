@@ -405,7 +405,7 @@ export function PlanExecutionView({ planId, initialTasks, onReset }: PlanExecuti
       ) : (
         <div key="list" className="motion-swap space-y-4">
           {/* HERO — Aujourd'hui, toujours visible en premier */}
-          <div className="relative overflow-hidden rounded-3xl border border-cyan-400/30 cyber-surface-hero p-4 shadow-[0_0_50px_-20px_rgba(34,211,238,0.55)] sm:p-6">
+          <div data-tour="todo-today" className="relative overflow-hidden rounded-3xl border border-cyan-400/30 cyber-surface-hero p-4 shadow-[0_0_50px_-20px_rgba(34,211,238,0.55)] sm:p-6">
             {todayTotal === 0 ? (
               <div key="rest" className="motion-swap flex flex-col items-center gap-2 py-6 text-center">
                 <Coffee className="h-8 w-8 text-primary/70" />

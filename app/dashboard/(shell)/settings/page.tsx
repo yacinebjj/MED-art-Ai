@@ -290,7 +290,7 @@ function SettingsHub() {
   }
 
   const profileSection = (
-    <CyberPanel className="p-5 sm:p-6">
+    <CyberPanel data-tour="settings-profile" className="p-5 sm:p-6">
       <div className="mb-5 flex items-center gap-3">
         <AvatarUpload />
         <div className="min-w-0">
@@ -388,6 +388,7 @@ function SettingsHub() {
 
       <SegmentedControl<SettingsSection>
         className="mt-6"
+        dataTour="settings-tabs"
         ariaLabel={fr ? "Sections des paramètres" : "Settings sections"}
         value={section}
         onChange={openSection}

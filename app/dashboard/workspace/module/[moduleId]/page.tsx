@@ -31,6 +31,8 @@ import { usePaywall } from "@/components/billing/PaywallProvider";
 import { notifyUsageChanged, remaining as remainingOf, useUsage } from "@/hooks/useUsage";
 import { PAID_LIMITS } from "@/lib/pricing";
 import { SUMMARY_DEPTHS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type SummaryDepth, type SynthesisOptions } from "@/lib/synthesis-options";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
+import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 
 /**
  * PHASE 2 — real generation calls wired to
@@ -365,6 +367,7 @@ export default function ModuleWorkspacePage() {
   const summaryPersonalized = needsSynthesisTransform(summaryOptions);
   const hasSelection = selectedIds.size >= MIN_COURSES_REQUIRED;
   const isGenerating = isGeneratingSummary || isGeneratingKeywords || isGeneratingDictionary;
+  useTourBlocker(isGenerating);
 
   /**
    * LARGE SELECTIONS (more than DIRECT_SYNTHESIS_MAX_COURSES): a single
@@ -568,7 +571,7 @@ export default function ModuleWorkspacePage() {
 
   const selectionRatio = Math.min(1, selectedIds.size / MIN_COURSES_REQUIRED);
   const sourcesHeader = (
-    <div className="space-y-3 border-b border-white/[0.07] px-4 py-4">
+    <div data-tour="syn-sources" className="space-y-3 border-b border-white/[0.07] px-4 py-4">
       <div className="flex items-center gap-3">
         <NeonRing value={selectionRatio} size={46} stroke={4} from={hasSelection ? "#34d399" : "#22d3ee"} to="#8b5cf6" aria-label={`${selectedIds.size} cours sélectionnés sur ${MIN_COURSES_REQUIRED} minimum`}>
           <Layers className="h-4 w-4 text-cyan-400" />
@@ -670,7 +673,7 @@ export default function ModuleWorkspacePage() {
 
   // Desktop: open until a first result exists. Phones: collapsed (it would squeeze the course list).
   const renderSummaryOptions = (openByDefault: boolean) => (
-    <details open={openByDefault} className="group rounded-2xl border border-white/[0.08] bg-white/[0.02] [&_summary::-webkit-details-marker]:hidden">
+    <details data-tour="syn-options" open={openByDefault} className="group rounded-2xl border border-white/[0.08] bg-white/[0.02] [&_summary::-webkit-details-marker]:hidden">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3.5 text-sm font-bold text-foreground">
         <span className="flex items-center gap-2">
           <Wand2 className="h-4 w-4 text-cyan-400" />
@@ -711,7 +714,7 @@ export default function ModuleWorkspacePage() {
   const generateButtonsRow = (
     <div className="space-y-3 border-b border-white/[0.07] px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-6 md:bg-transparent md:pb-4">
       {isDesktopOrTablet && renderSummaryOptions(!output)}
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+      <div data-tour="syn-generate" className="grid grid-cols-3 gap-2 sm:gap-3">
         {GENERATION_TILES.map(({ type, icon: Icon, title, short, hint, tone, loading, onClick }) => (
           <button
             key={type}
@@ -749,7 +752,7 @@ export default function ModuleWorkspacePage() {
         <History className="h-4 w-4 text-teal-600 dark:text-teal-400" />
         <h2 className="text-sm font-bold text-foreground">{tWorkspaceSynthesis("resultsHeading", language)}</h2>
       </div>
-      <ul className="max-h-56 space-y-1 overflow-y-auto px-2 pb-3 md:max-h-56">
+      <ul data-tour="syn-results" className="max-h-56 space-y-1 overflow-y-auto px-2 pb-3 md:max-h-56">
         {history.map((entry) => (
           <li key={entry.id}>
             <button
@@ -991,7 +994,7 @@ export default function ModuleWorkspacePage() {
     // wrappers). Matches app/dashboard/module/[id]/exam/page.tsx's own
     // identical root treatment.
     <div className="cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
-      <WorkspaceTopbar title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)} />
+      <WorkspaceTopbar title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)} actions={<TourReplayButton className="h-8 w-8" />} />
 
       <PomodoroStudyBanner />
 

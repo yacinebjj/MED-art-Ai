@@ -50,6 +50,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
+import { useToolTour, useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
@@ -697,6 +698,7 @@ function DifficultyPicker({ value, onChange, disabled }: { value: Difficulty; on
         role="radiogroup"
         aria-label="Niveau de difficulté"
         aria-describedby={descriptionId}
+        data-tour="case-level"
         className="grid grid-cols-3 gap-1 rounded-2xl border border-border bg-slate-100/80 p-1 dark:bg-slate-900/60"
       >
         {DIFFICULTY_OPTIONS.map((option, index) => {
@@ -994,7 +996,7 @@ function SetupScreen({
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-primary-700 dark:text-primary-300">Niveau du cas</p>
         <DifficultyPicker value={state.difficulty} onChange={onDifficultyChange} disabled={state.starting} />
 
-        <Button type="button" size="lg" onClick={onStart} isLoading={state.starting} className="mt-3 w-full">
+        <Button type="button" size="lg" onClick={onStart} isLoading={state.starting} className="mt-3 w-full" data-tour="case-start">
           {!state.starting && <Play className="h-4 w-4" aria-hidden />}
           Lancer le cas
         </Button>
@@ -1839,6 +1841,9 @@ export function ClinicalCaseSimulator({ courseId, courseTitle, onAskInChat }: Cl
   const snapshot = state.snapshot;
   const evaluation = snapshot?.evaluation ?? null;
   const phase: "setup" | "loading" | "case" | "results" = snapshot ? (evaluation ? "results" : "case") : state.starting ? "loading" : "setup";
+  // The tour presents the setup screen ("setup" already means no case running or starting).
+  useToolTour("tool-case", phase === "setup");
+  useTourBlocker(state.starting || state.submitting || state.pendingExamIds.length > 0);
 
   // Bring the top of the simulator back into view on every screen change — results land while the student is down at the diagnosis form.
   const previousPhase = useRef(phase);

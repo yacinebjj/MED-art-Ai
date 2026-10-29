@@ -90,6 +90,7 @@ import { MobileStudioCards } from "@/components/course/workspace/MobileStudioCar
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useCourseChat } from "@/hooks/useCourseChat";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { MAX_LEITNER_BOX } from "@/lib/srs";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
 import { DEMO_SECTIONS, buildQuotedChatMessage, visibleStudioSections, type DemoSectionId } from "@/lib/demo-content";
@@ -541,7 +542,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
         {variant === "desktop" && !isRail && (
           <>
             {/* Always enabled — adding a 2nd, 3rd, ... course never disables this, per the multi-course mandate. */}
-            <Button variant="outline" size="sm" className="w-full rounded-xl border-dashed" onClick={() => setUploadOpen(true)}>
+            <Button variant="outline" size="sm" className="w-full rounded-xl border-dashed" onClick={() => setUploadOpen(true)} data-tour="ws-add-source">
               <Plus className="h-4 w-4" />
               {tModulePage("addSourceLabel", language)}
             </Button>
@@ -631,6 +632,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
               type="button"
               onClick={() => setUploadOpen(true)}
               title={tModulePage("addSourceLabel", language)}
+              data-tour="ws-add-source"
               className="flex aspect-square w-full items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground transition-all duration-300 hover:border-primary-300 hover:text-primary-600"
             >
               <Plus className="h-4 w-4" />
@@ -686,6 +688,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
               return (
                 <div
                   key={course.id}
+                  data-tour="ws-course"
                   className={cn(
                     "group flex items-start gap-2 rounded-2xl border p-3 transition-all duration-300",
                     isActive
@@ -791,7 +794,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
 
       {variant === "mobile" && (
         <div className="flex shrink-0 items-center gap-2 border-t border-border p-4">
-          <Button className="flex-1 rounded-full" onClick={() => setUploadOpen(true)}>
+          <Button className="flex-1 rounded-full" onClick={() => setUploadOpen(true)} data-tour="ws-add-source">
             <Plus className="h-4 w-4" />
             {tModulePage("addSourceLabel", language)}
           </Button>
@@ -2104,6 +2107,10 @@ export default function ModuleWorkspacePage() {
           .join(" · ")
       : "Synchronisé — chaque cours et chaque contenu généré est enregistré automatiquement sur ton compte.";
 
+  // The module tour waits until the page is loaded and settled: nothing
+  // generating, importing or replying, no palette, course viewer or note open.
+  useTourBlocker(loading || syncState === "working" || isSwitchingCourse || isPaletteOpen || fileViewerCourse !== null || isNoteOpen);
+
   if (loading) {
     return (
       <div className="aurora-canvas-bg flex h-dvh items-center justify-center">
@@ -2698,7 +2705,7 @@ export default function ModuleWorkspacePage() {
                   />
                   </div>
                   {/* The tab bar below is in the flow (MobileWorkspaceTabBar), not over this list: no clearance, just air. */}
-                  <section aria-label="MedArt Lab" className="space-y-2 px-3 pb-6 pt-1">
+                  <section aria-label="MedArt Lab" className="space-y-2 px-3 pb-6 pt-1" data-tour="ws-lab">
                     <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">MedArt Lab</p>
                     <div className="grid grid-cols-2 gap-2">
                       {LAB_TOOLS.map((tool) => {
@@ -2720,6 +2727,7 @@ export default function ModuleWorkspacePage() {
                     <button
                       type="button"
                       onClick={openQuickNote}
+                      data-tour="ws-note"
                       className="mt-1 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-600 py-3 text-sm font-semibold text-white shadow-glow dark:bg-primary-500"
                     >
                       <SquarePen className="h-4 w-4" />

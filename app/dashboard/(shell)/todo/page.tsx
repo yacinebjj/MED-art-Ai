@@ -9,6 +9,7 @@ import { useLanguage } from "@/providers/LanguageProvider";
 import { tTodo } from "@/lib/translations/todo";
 import { CyberHeader, CyberPanel, CyberStage } from "@/components/cyber/primitives";
 import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import type { GeneratedPlanDay, StudyPlan, StudyPlanTask } from "@/types/study-planner";
 
 // Each wizard step is its own chunk — only the one on screen is downloaded.
@@ -46,6 +47,8 @@ export default function TodoPage() {
   const { language } = useLanguage();
   const [step, setStep] = useState<WizardStep>({ name: "loading" });
   const [selectedModuleIds, setSelectedModuleIds] = useState<Set<number>>(new Set());
+  // The saved plan decides which step shows first: no tour before it is known.
+  useTourBlocker(step.name === "loading");
 
   useEffect(() => {
     let cancelled = false;
@@ -158,7 +161,7 @@ export default function TodoPage() {
         <TodoStepper currentIndex={currentIndex} />
       </div>
 
-      <CyberPanel className="mt-4 overflow-hidden p-4 sm:mt-5 sm:p-6 lg:p-8">
+      <CyberPanel data-tour="todo-wizard" className="mt-4 overflow-hidden p-4 sm:mt-5 sm:p-6 lg:p-8">
         {/* No exit-then-enter wait: the next step replaces the current one immediately. */}
         <LocalErrorBoundary resetKey={step.name} onReset={handleReset} title="Ce planning n'a pas pu s'afficher." description="Tes tâches sont intactes. Réessaie : le planificateur repart de l'étape des modules.">
           <motion.div
@@ -215,7 +218,7 @@ function TodoStepper({ currentIndex }: { currentIndex: number }) {
   const next = currentIndex >= 0 && currentIndex < STEPS.length - 1 ? STEPS[currentIndex + 1] : null;
 
   return (
-    <CyberPanel className="px-3 py-3 sm:px-6 sm:py-4">
+    <CyberPanel data-tour="todo-steps" className="px-3 py-3 sm:px-6 sm:py-4">
       <div className="flex items-center">
         {STEPS.map((s, i) => {
           const isDone = currentIndex > i;

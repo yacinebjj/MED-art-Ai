@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
 import { createClient } from "@/lib/supabase/client";
 import { putSyncDoc, reconcileValue } from "@/lib/user-sync";
+import { useToolTour } from "@/lib/onboarding/onboarding-context";
 import { CalibrationReport, ConcoursModeBar, ConfidencePicker, type Confidence, type TimerMode } from "@/components/course/workspace/exam/ConcoursToolkit";
 
 /**
@@ -147,7 +148,7 @@ function QcmCard({ qcm, answer, onAnswer }: { qcm: Qcm; answer: QcmAnswerState |
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 md:p-6 shadow-sm space-y-4">
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 md:p-6 shadow-sm space-y-4" data-tour="qcm-card">
       <div className="flex items-start gap-3">
         <span className="shrink-0 w-8 h-8 rounded-lg bg-teal-600 text-white flex items-center justify-center font-black text-sm">{qcm.id}</span>
         <p dir="auto" className="text-sm md:text-base font-semibold text-slate-800 dark:text-slate-100 leading-relaxed pt-0.5">
@@ -518,6 +519,8 @@ export function InteractiveQuiz({
   const [confidence, setConfidence] = useState<Record<number, Confidence>>({});
   const [timerMode, setTimerMode] = useState<TimerMode>("libre");
   const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
+  // The QCM tour covers the workspace's Mode Concours only, and never opens over a running countdown.
+  useToolTour("tool-qcm", concoursTools && timerMode === "libre");
   const { toast } = useToast();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";

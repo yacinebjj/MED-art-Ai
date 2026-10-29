@@ -100,7 +100,7 @@ export function FlashcardCoursePicker({ onSelectionChanged }: { onSelectionChang
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button data-tour="study-courses" variant="outline" size="sm" onClick={() => setOpen(true)}>
         <ListChecks className="h-3.5 w-3.5" />
         Choisir des cours
         {activeCount > 0 && ` (${activeCount})`}

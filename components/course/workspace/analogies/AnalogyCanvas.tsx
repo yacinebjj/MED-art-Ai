@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
+import { useToolTour } from "@/lib/onboarding/onboarding-context";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { parseAnalogies, plainText, type AnalogyBlock, type AnalogySection, type SectionKind } from "@/lib/analogies/parse";
 import { rehypeBidiTerms, TERM_CHIP_CLASS } from "@/lib/analogies/rehype-bidi-terms";
@@ -473,7 +474,7 @@ function AnalogyCard({ section, rtl, fontClass, kit, labels, language, expanded,
               )}
 
               {/* Actions — interface language, always left-to-right. */}
-              <div dir="ltr" className="relative mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-white/5">
+              <div dir="ltr" className="relative mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-white/5" data-tour="ana-actions">
                 <ActionButton onClick={copy} icon={copied ? Check : Copy} active={copied} label={copied ? UI.copied[language] : UI.copy[language]} />
                 <ActionButton
                   onClick={() => {
@@ -705,6 +706,9 @@ export function AnalogyCanvas({ courseId, markdown, fallback }: { courseId: numb
     window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   }, []);
 
+  // Only the canvas has the tour's controls; the plain-article fallback below has none.
+  useToolTour("tool-analogies", sections.length >= 2);
+
   if (sections.length < 2) return <>{fallback}</>;
 
   const total = sections.length;
@@ -755,7 +759,7 @@ export function AnalogyCanvas({ courseId, markdown, fallback }: { courseId: numb
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        <div role="tablist" className="inline-flex rounded-2xl border border-slate-200 bg-white/80 p-1 shadow-sm dark:border-white/10 dark:bg-slate-900/60">
+        <div role="tablist" className="inline-flex rounded-2xl border border-slate-200 bg-white/80 p-1 shadow-sm dark:border-white/10 dark:bg-slate-900/60" data-tour="ana-views">
           {views.map((option) => {
             const active = view === option.id;
             const Icon = option.icon;

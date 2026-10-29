@@ -197,6 +197,7 @@ export function ConversationSidebar({
       </AnimatePresence>
 
       <div
+        data-tour="asst-history"
         className={cn(
           // The drawer glides on the app's sheet curve (app/globals.css MOTION SYSTEM).
           "glass-panel fixed inset-y-0 left-0 z-50 flex h-full w-72 max-w-[85vw] shrink-0 flex-col overflow-hidden border-r border-l-0 border-y-0 shadow-glass transition-transform [transition-duration:420ms] [transition-timing-function:cubic-bezier(0.32,0.72,0,1)] dark:shadow-glass-dark lg:static lg:z-auto lg:max-w-none lg:translate-x-0 lg:transition-[width]",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
 import { ArrowLeft, Copy, Moon, Settings, Sun } from "lucide-react";
@@ -20,10 +20,12 @@ import { tWorkspaceTopbar } from "@/lib/translations/workspaceTopbar";
 
 interface WorkspaceTopbarProps {
   title: string;
+  /** Page-specific controls (e.g. the "?" guide button), shown first in the right-side cluster. */
+  actions?: ReactNode;
 }
 
 /** NotebookLM-style topbar: logo + course title on the left, action cluster on the right. */
-export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
+export function WorkspaceTopbar({ title, actions }: WorkspaceTopbarProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
   const { language } = useLanguage();
@@ -78,6 +80,7 @@ export function WorkspaceTopbar({ title }: WorkspaceTopbarProps) {
       </div>
 
       <div className="flex items-center gap-1 sm:gap-1.5">
+        {actions}
         <Button
           variant="ghost"
           size="sm"

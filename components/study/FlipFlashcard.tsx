@@ -272,6 +272,7 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
       <div className="card-deal relative">
         {/* Swipe layer — carries the drag/exit transform in isolation from the overlay. */}
         <div
+          data-tour="study-card"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -397,7 +398,7 @@ export function FlipFlashcard({ item, index, total, flipped, onFlip, onPrev, onN
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5">
+      <div data-tour="study-rate" className="grid grid-cols-3 gap-1.5 sm:gap-2.5">
         {(["hard", "medium", "easy"] as const).map((rating) => (
           <RatingButton key={rating} rating={rating} language={language} disabled={isLocked} onRate={stableRate} />
         ))}

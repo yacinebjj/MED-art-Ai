@@ -110,7 +110,7 @@ export function ModuleChipSelector({ selectedModuleIds, onChange, onNext }: Modu
 
       {groups?.length === 0 && <p className="text-sm text-muted-foreground">{tTodo("modulesEmpty", language)}</p>}
 
-      <motion.div className="space-y-5" variants={GROUP_LIST_VARIANTS} initial="hidden" animate="show">
+      <motion.div data-tour="todo-modules" className="space-y-5" variants={GROUP_LIST_VARIANTS} initial="hidden" animate="show">
         {groups?.map((group) => (
           <motion.div key={group.label} variants={GROUP_ITEM_VARIANTS}>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</p>

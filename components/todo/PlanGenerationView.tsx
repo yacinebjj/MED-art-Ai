@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tTodo } from "@/lib/translations/todo";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import type { GeneratedPlanDay, StudyPlanChatMessage } from "@/types/study-planner";
 
 interface PlanGenerationViewProps {
@@ -37,6 +38,7 @@ export function PlanGenerationView({ planId, initialCoachMessage, initialDays, o
   const [isRefining, setIsRefining] = useState(false);
   const [isSaving, setIsSaving] = useState<"draft" | "active" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useTourBlocker(isRefining || isSaving !== null);
 
   const weeks = useMemo(() => groupByWeek(days), [days]);
 

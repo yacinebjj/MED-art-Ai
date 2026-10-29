@@ -31,3 +31,11 @@ export const AUDIO_SMART_NOTES_API = "/api/lecture-notes";
 export const INFOGRAPHIC_ENABLED = process.env.NEXT_PUBLIC_FEATURE_INFOGRAPHIC === "true";
 
 export const INFOGRAPHIC_API = "/api/studio/infographic";
+
+/**
+ * Page and tool guided tours (lib/onboarding/tours.ts) — on unless switched
+ * off. Set NEXT_PUBLIC_FEATURE_PAGE_TOURS=false, then redeploy, to withdraw
+ * every page / Studio / Lab tour at once: none auto-starts and the "?" guide
+ * buttons disappear. The dashboard's first-run tour is not affected.
+ */
+export const PAGE_TOURS_ENABLED = process.env.NEXT_PUBLIC_FEATURE_PAGE_TOURS !== "false";

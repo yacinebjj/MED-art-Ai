@@ -44,6 +44,7 @@ import { NoteSummaryButton } from "@/components/notes/NoteSummaryButton";
 import { sanitizeNoteHtml } from "@/lib/notes/sanitize-note-html";
 import { CyberHeader, CyberPanel, CyberStage, SegmentedControl } from "@/components/cyber/primitives";
 import { useStoredPreference } from "@/components/cyber/hooks";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import type { UserNote } from "@/types/user-notes";
 
 const SIDEBAR_WIDTH = 320;
@@ -124,6 +125,7 @@ function NotesPageContent() {
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
   const selectedOriginalContent = selectedNote ? selectedNote.content : "";
   const isDirty = selectedNote ? draftTitle !== selectedNote.title || draftContent !== selectedOriginalContent : false;
+  useTourBlocker(loading || isDirty || isSaving || isOrganizing || isCreating || isFullscreen || deletingId !== null);
 
   // Plain text of every note, computed once per notes change (search, previews, badges, stats).
   const plainById = useMemo(() => {
@@ -426,6 +428,7 @@ function NotesPageContent() {
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
+              data-tour="notes-ai"
               onClick={handleOrganizeByAI}
               disabled={isOrganizing || draftPlain.trim().length === 0}
               className="group relative flex h-10 w-full items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-fuchsia-400/40 bg-fuchsia-500/10 px-3.5 text-xs font-bold text-fuchsia-100 transition-[background-color,box-shadow] hover:bg-fuchsia-500/20 hover:shadow-[0_0_22px_rgba(217,70,239,0.3)] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:w-auto"
@@ -439,6 +442,7 @@ function NotesPageContent() {
 
           <button
             type="button"
+            data-tour="notes-save"
             onClick={handleSave}
             disabled={isSaving || !isDirty}
             className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-300 to-sky-400 px-5 text-sm font-black text-slate-950 shadow-[0_0_22px_rgba(34,211,238,0.35)] transition-[transform,opacity] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none sm:h-9 sm:w-auto"
@@ -490,10 +494,11 @@ function NotesPageContent() {
           // max-md:flex-1: on phones this pane needs a real height for its list to scroll.
           className={cn("min-h-0 w-full overflow-hidden max-md:flex-1 md:shrink-0", selectedId ? "hidden md:block" : "block")}
         >
-          <CyberPanel className="flex h-full min-h-0 w-full flex-col p-3" style={isDesktopOrTablet ? { width: SIDEBAR_WIDTH } : undefined}>
+          <CyberPanel data-tour="notes-list" className="flex h-full min-h-0 w-full flex-col p-3" style={isDesktopOrTablet ? { width: SIDEBAR_WIDTH } : undefined}>
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
+                data-tour="notes-new"
                 onClick={handleCreate}
                 disabled={isCreating}
                 className="group relative flex h-11 flex-1 items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-cyan-300 via-sky-400 to-violet-500 text-sm font-black text-slate-950 shadow-[0_0_24px_rgba(34,211,238,0.35)] transition-transform active:scale-95 disabled:opacity-60"
@@ -512,7 +517,7 @@ function NotesPageContent() {
               </button>
             </div>
 
-            <div className="relative mt-3 shrink-0">
+            <div data-tour="notes-search" className="relative mt-3 shrink-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
               <input
                 type="text"

@@ -248,6 +248,7 @@ const ModuleCard = memo(function ModuleCard({
             </button>
             <Link
               href={`/dashboard/module/${mod.id}/exam`}
+              data-tour="exam-module"
               className={cn(ACTION_TILE, "border-rose-500/25 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:border-rose-400/25 dark:text-rose-300")}
             >
               <FileQuestion className="h-4 w-4" />

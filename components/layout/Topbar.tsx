@@ -10,6 +10,7 @@ import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
 import { NotificationCenter } from "./cockpit/NotificationCenter";
 import { Kbd } from "@/components/course/workspace/os/Kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { useCockpitUi } from "@/store/useCockpitUi";
 import { tCockpit } from "@/lib/translations/cockpit";
@@ -244,7 +245,10 @@ export function Topbar({ title, className }: { title: string; className?: string
     >
       <div className="flex min-w-0 items-center gap-3 lg:w-48 lg:shrink-0 xl:w-56">
         <AnimatedBrandMark size="sm" className="lg:hidden" />
-        <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">{title}</h1>
+        <div className="flex min-w-0 items-center gap-1">
+          <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">{title}</h1>
+          <TourReplayButton className="h-8 w-8" />
+        </div>
       </div>
 
       <div className="hidden min-w-0 flex-1 justify-center md:flex">

@@ -269,6 +269,7 @@ export function SegmentedControl<T extends string>({
   className,
   size = "md",
   ariaLabel,
+  dataTour,
 }: {
   value: T;
   options: SegmentOption<T>[];
@@ -276,10 +277,11 @@ export function SegmentedControl<T extends string>({
   className?: string;
   size?: "sm" | "md";
   ariaLabel?: string;
+  dataTour?: string;
 }) {
   const layoutId = useId();
   return (
-    <div role="tablist" aria-label={ariaLabel} // Wraps onto a second row instead of scrolling sideways on narrow phones.
+    <div role="tablist" aria-label={ariaLabel} data-tour={dataTour} // Wraps onto a second row instead of scrolling sideways on narrow phones.
       className={cn("flex max-w-full flex-wrap gap-1 rounded-2xl border border-white/10 bg-white/[0.03] p-1", className)}>
       {options.map((option) => {
         const active = option.value === value;

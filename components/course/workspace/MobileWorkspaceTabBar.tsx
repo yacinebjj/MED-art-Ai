@@ -57,6 +57,7 @@ export const MobileWorkspaceTabBar = memo(function MobileWorkspaceTabBar({ activ
             type="button"
             onClick={() => onChange(tab.id)}
             aria-pressed={isActive}
+            data-tour={`ws-tab-${tab.id}`}
             className="relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl py-1.5 text-xs font-medium"
           >
             {isActive && (

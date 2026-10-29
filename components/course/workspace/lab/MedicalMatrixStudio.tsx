@@ -51,6 +51,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { slugify } from "@/lib/course-generation-shared";
+import { useToolTour, useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { cn } from "@/lib/utils";
 
 export type MatrixKind = "pharmaco" | "ddx";
@@ -601,7 +602,7 @@ function MatrixEmptyState({
       </div>
 
       <div className="mt-5 flex flex-col items-start gap-2.5">
-        <Button onClick={onGenerate} isLoading={pending} className={TEAL_BUTTON}>
+        <Button onClick={onGenerate} isLoading={pending} className={TEAL_BUTTON} data-tour="matrix-generate">
           {!pending && <Sparkles className="h-4 w-4" />}
           Générer la matrice
         </Button>
@@ -756,7 +757,7 @@ function MatrixView({ entry, courseTitle, onAskInChat, error }: MatrixViewProps)
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2" data-tour="matrix-toolbar">
         {rowCount > 0 && (
           <>
             <label className="relative min-w-[10rem] flex-1">
@@ -1108,6 +1109,10 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
     [adopt, courseId, language, userId]
   );
 
+  // The tour waits for the matrix (cache, then server history) and never opens over a generation.
+  useToolTour("tool-matrix", cacheReady && !historyLoading && !pending[kind]);
+  useTourBlocker(pending.pharmaco || pending.ddx);
+
   const meta = KIND_META[kind];
   const entry = entries[kind];
 
@@ -1147,6 +1152,7 @@ export function MedicalMatrixStudio({ courseId, courseTitle, onAskInChat }: Medi
       <div
         role="tablist"
         aria-label="Type de matrice"
+        data-tour="matrix-kind"
         className="grid grid-cols-2 gap-1 rounded-2xl border border-slate-200 bg-slate-100/80 p-1 dark:border-slate-800 dark:bg-slate-900/70"
       >
         {MATRIX_KINDS.map((option) => {

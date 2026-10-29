@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveLucideIcon } from "@/lib/lucide-icon-lookup";
+import { useToolTour } from "@/lib/onboarding/onboarding-context";
 import type { GastriteCasCliniqueData, GastriteRawCase } from "@/lib/course-slug-content";
 
 /* ----------------------------------------------------------------------- */
@@ -251,7 +252,7 @@ function Accordion({
   }, [open]);
   return (
     <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center justify-between gap-3 p-4 text-left">
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} data-tour="cas-acts" className="w-full flex items-center justify-between gap-3 p-4 text-left">
         <div className="flex items-center gap-3">
           <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0", ACTE_COLOR_CHIP[color])}>
             <Icon className="w-4 h-4" />
@@ -426,10 +427,12 @@ export function GastriteCasCliniqueStudio({ data }: { data: GastriteCasCliniqueD
   const cases = data.cases.map(mapRawCase);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeCase = cases[activeIndex];
+  useToolTour("tool-cas");
 
   return (
     <div className="w-full mx-auto space-y-6 font-sans text-slate-800 dark:text-slate-200 animate-fade-in">
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* Anchored only while the row shows case pills (the tour's "Plusieurs cas" step is optional). */}
+      <div className="flex items-center gap-3 flex-wrap" data-tour={cases.length > 1 ? "cas-cases" : undefined}>
         <div className="flex items-center gap-2 mr-2">
           <Stethoscope className="w-5 h-5 text-teal-600 dark:text-teal-400" />
           <h2 className="text-sm font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{data.titre_section}</h2>

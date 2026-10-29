@@ -41,6 +41,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useLanguageStore, type ContentLanguage } from "@/store/useLanguageStore";
 import { buildRateLimitMessage } from "@/lib/rate-limit-message";
 import { slugify } from "@/lib/course-generation-shared";
+import { useToolTour, useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { cn } from "@/lib/utils";
 
 export type MindMapNodeKind = "etiologie" | "physiopathologie" | "clinique" | "diagnostic" | "traitement" | "complication" | "autre";
@@ -1118,7 +1119,7 @@ function MindMapEmptyState({
       </div>
 
       <div className="mt-5 flex flex-col items-start gap-2.5">
-        <Button onClick={onGenerate} className={TEAL_BUTTON}>
+        <Button onClick={onGenerate} className={TEAL_BUTTON} data-tour="mindmap-generate">
           <Sparkles className="h-4 w-4" />
           Générer la carte mentale
         </Button>
@@ -1340,6 +1341,8 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, error }: MindMapViewer
   const [panning, setPanning] = useState(false);
   const [exporting, setExporting] = useState<"svg" | "png" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  // An export is work in progress too (MindMapLab's own blocker covers generation).
+  useTourBlocker(exporting !== null);
 
   const measure = useMemo(() => (fontState ? createMeasure(fontState.family) : null), [fontState]);
   const boxes = useMemo(() => (measure ? measureTree(tree, measure) : null), [tree, measure]);
@@ -1841,7 +1844,7 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, error }: MindMapViewer
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2" data-tour="mindmap-toolbar">
         <Button variant="outline" size="sm" onClick={() => setAllCollapsed("expand")} disabled={!boxes}>
           <ChevronsUpDown className="h-3.5 w-3.5" />
           Tout déplier
@@ -1885,6 +1888,7 @@ function MindMapViewer({ entry, courseTitle, onAskInChat, error }: MindMapViewer
         ref={canvasRef}
         tabIndex={0}
         role="application"
+        data-tour="mindmap-canvas"
         aria-roledescription="carte mentale"
         aria-label={`Carte mentale « ${mindmap.title} ». Flèches pour naviguer entre les nœuds, Entrée pour déplier ou replier, + et − pour zoomer, 0 pour ajuster.`}
         aria-activedescendant={activeDescendant}
@@ -2154,6 +2158,10 @@ export function MindMapLab({ courseId, courseTitle, onAskInChat }: MindMapLabPro
     // startGeneration hands back the running request if there is one, so a double click never pays twice.
     adopt(startGeneration(userId, courseId, language));
   }, [adopt, courseId, language, userId]);
+
+  // The tour waits for the map (cache, then server history) and never opens over a generation.
+  useToolTour("tool-mindmap", cacheReady && !historyLoading && !pending);
+  useTourBlocker(pending);
 
   let content: ReactNode;
   if (!cacheReady) {

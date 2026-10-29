@@ -670,6 +670,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             e.preventDefault();
             submit();
           }}
+          data-tour="ws-chat"
           className={cn(
             "rounded-2xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--background)_70%,transparent)] shadow-soft transition-all duration-300 focus-within:border-primary-300 focus-within:shadow-glow dark:bg-white/[0.03] dark:focus-within:border-primary-700",
             dictation.state === "recording" && "border-rose-300 dark:border-rose-800"

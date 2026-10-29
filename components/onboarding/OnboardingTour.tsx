@@ -2,96 +2,15 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform, type MotionValue } from "framer-motion";
-import { ArrowLeft, ArrowRight, BookOpenText, ClipboardCheck, FlaskConical, GraduationCap, Sparkles, Trophy, X, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Sparkles, Trophy, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
-import { ONBOARDING_ROUTE, useOnboarding } from "@/lib/onboarding/onboarding-context";
+import { useOnboarding } from "@/lib/onboarding/onboarding-context";
+import { TOURS, type TourDefinition, type TourStep } from "@/lib/onboarding/tours";
 
-// ─── Content ────────────────────────────────────────────────────────────────
-
-interface TourStep {
-  id: string;
-  /** `data-tour` values, in priority order: the first VISIBLE one is spotlighted (desktop sidebar vs mobile dock…). None visible → centered card. */
-  targets: string[];
-  icon: LucideIcon;
-  /** Badge chip gradient + glow color of this workspace. */
-  gradient: string;
-  glow: string;
-  badge: Record<Language, string>;
-  title: Record<Language, string>;
-  body: Record<Language, string>;
-}
-
-const STEPS: TourStep[] = [
-  {
-    id: "studio",
-    targets: ["studio"],
-    icon: GraduationCap,
-    gradient: "from-emerald-400 to-teal-500",
-    glow: "rgba(16,185,129,0.55)",
-    badge: { fr: "Studio", en: "Studio" },
-    title: { fr: "Ton programme, ton Studio", en: "Your curriculum, your Studio" },
-    body: {
-      fr: "Choisis un module et importe ton polycopié (PDF, Word, photo). En quelques secondes il devient un cours structuré, prêt à réviser.",
-      en: "Pick a module and import your handout (PDF, Word, photo). Within seconds it becomes a structured course, ready to study.",
-    },
-  },
-  {
-    id: "explication",
-    targets: ["explication"],
-    icon: BookOpenText,
-    gradient: "from-cyan-400 to-sky-500",
-    glow: "rgba(34,211,238,0.55)",
-    badge: { fr: "Explication", en: "Explanation" },
-    title: { fr: "L'Explication Ultra-Détaillée", en: "The Ultra-Detailed Explanation" },
-    body: {
-      fr: "Chaque chapitre décortiqué : physiopathologie, clinique, pièges. Et tu reprends toujours là où tu t'es arrêté(e), en un clic.",
-      en: "Every chapter broken down: pathophysiology, presentation, pitfalls. And you always pick up where you left off, in one tap.",
-    },
-  },
-  {
-    id: "lab",
-    targets: ["lab"],
-    icon: FlaskConical,
-    gradient: "from-violet-400 to-fuchsia-500",
-    glow: "rgba(167,139,250,0.55)",
-    badge: { fr: "MedArt Lab", en: "MedArt Lab" },
-    title: { fr: "Le Lab : pratique comme en stage", en: "The Lab: practice like on rounds" },
-    body: {
-      fr: "Patient virtuel pour t'entraîner au diagnostic, cartes mentales et matrices pharmaco / diagnostic différentiel — générés depuis TON cours.",
-      en: "A virtual patient to train your diagnosis, mind maps and pharmacology / differential matrices — built from YOUR course.",
-    },
-  },
-  {
-    id: "exam",
-    targets: ["exam"],
-    icon: ClipboardCheck,
-    gradient: "from-amber-400 to-orange-500",
-    glow: "rgba(251,191,36,0.55)",
-    badge: { fr: "Examen", en: "Exam" },
-    title: { fr: "Le simulateur d'examen", en: "The exam simulator" },
-    body: {
-      fr: "Des QCM style concours sur tout un module, chronométrés et corrigés. Chaque erreur devient une notion à revoir.",
-      en: "Exam-style MCQs across a whole module, timed and corrected. Every mistake becomes a topic to review.",
-    },
-  },
-  {
-    id: "chat",
-    targets: ["chat"],
-    icon: Sparkles,
-    gradient: "from-fuchsia-400 to-pink-500",
-    glow: "rgba(232,121,249,0.55)",
-    badge: { fr: "Copilot IA", en: "AI Copilot" },
-    title: { fr: "Ton Copilot clinique, 24h/24", en: "Your clinical Copilot, 24/7" },
-    body: {
-      fr: "Une question en pleine garde ? Demande. Il répond à partir de tes cours, explique, compare et te fait réciter.",
-      en: "A question mid-shift? Ask. It answers from your courses, explains, compares and quizzes you.",
-    },
-  },
-];
+// ─── Copy ───────────────────────────────────────────────────────────────────
 
 const XP_PER_STEP = 20;
 
@@ -104,13 +23,6 @@ const COPY = {
   of: { fr: "sur", en: "of" },
   keys: { fr: "← → pour naviguer · Échap pour passer", en: "← → to navigate · Esc to skip" },
   finaleKicker: { fr: "Badge débloqué", en: "Badge unlocked" },
-  finaleTitle: { fr: "Prêt pour le Majorat !", en: "Ready for the top rank!" },
-  finaleBody: {
-    fr: "Tu connais les 5 armes de MedArt AI. Importe ton premier cours et laisse le Studio faire le reste.",
-    en: "You know MedArt AI's 5 weapons. Import your first course and let the Studio do the rest.",
-  },
-  launch: { fr: "C'est parti !", en: "Let's go!" },
-  dialog: { fr: "Visite guidée de MedArt AI", en: "MedArt AI guided tour" },
 } satisfies Record<string, Record<Language, string>>;
 
 // ─── Geometry ───────────────────────────────────────────────────────────────
@@ -130,11 +42,18 @@ interface Box {
   h: number;
 }
 
+type VisibilityCheckable = Element & { checkVisibility?: (options?: { opacityProperty?: boolean; visibilityProperty?: boolean }) => boolean };
+
 function isVisible(el: Element): boolean {
   const rect = el.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return false;
+  // Off-canvas (a drawer translated out of the screen). Below or above the fold is fine: the step scrolls to it.
+  if (rect.right <= 0 || rect.left >= window.innerWidth) return false;
   const style = window.getComputedStyle(el);
-  return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.05;
+  if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) <= 0.05) return false;
+  // Hidden by an ancestor (display: none, visibility: hidden, opacity: 0), where the browser can tell.
+  const checkable = el as VisibilityCheckable;
+  return typeof checkable.checkVisibility !== "function" || checkable.checkVisibility({ opacityProperty: true, visibilityProperty: true });
 }
 
 function findTarget(keys: string[]): HTMLElement | null {
@@ -283,8 +202,10 @@ function FinaleMedal({ reduceMotion }: { reduceMotion: boolean }) {
 // ─── Tour ───────────────────────────────────────────────────────────────────
 
 /**
- * Gamified first-run tour of the dashboard. Rendered once by the shell
- * layout; shows only while useOnboarding().active on ONBOARDING_ROUTE.
+ * Gamified guided tours: the dashboard's first-run tour, and every page /
+ * Studio / Lab tour of lib/onboarding/tours.ts. Rendered once for all of
+ * /dashboard (components/onboarding/TourHost.tsx); plays
+ * useOnboarding().activeTour.
  *
  * Mechanics:
  *  - Spotlight: a fixed dim + blur layer whose clip-path is the viewport
@@ -294,27 +215,39 @@ function FinaleMedal({ reduceMotion }: { reduceMotion: boolean }) {
  *    guided, nothing navigates away mid-step.
  *  - Targets: `data-tour="…"` attributes; the first VISIBLE match wins (the
  *    desktop sidebar or the mobile dock). No visible target → the hole
- *    closes and the card centers itself.
+ *    closes and the card centers itself; a target that shows up during the
+ *    step's first second (fading in, mounting) is picked up. Optional steps
+ *    whose feature isn't on screen when the tour opens are left out.
  *  - Tracking: re-measured on resize, on any scroll (capture phase, so the
  *    shell's own scrolling <main> counts), on target resize, and every
  *    frame for ~1s after a step change while smooth-scrolling settles.
  *  - Card: collision-aware placement (below/above/right/left, else
  *    centered); docked to the screen edge away from the target on phones.
  *  - Keyboard: Esc = skip, ←/→ = back/next; focus moves to the primary
- *    button on every step.
+ *    button on every step. The tour is modal: no key reaches the page
+ *    behind it (flashcards, exam answers, workspace shortcuts), and focus
+ *    returns where it was when it closes.
  */
 export function OnboardingTour() {
-  const { active, finish } = useOnboarding();
-  const pathname = usePathname();
-  const show = active && pathname === ONBOARDING_ROUTE;
+  const { activeTour, finish, dismiss } = useOnboarding();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   if (!mounted || typeof document === "undefined") return null;
-  return createPortal(<AnimatePresence>{show && <TourLayer key="tour" onDone={finish} />}</AnimatePresence>, document.body);
+  const tour = activeTour ? TOURS[activeTour] : null;
+  return createPortal(<AnimatePresence>{tour && <TourLayer key={activeTour} tour={tour} onDone={finish} onEmpty={dismiss} />}</AnimatePresence>, document.body);
 }
 
-function TourLayer({ onDone }: { onDone: () => void }) {
+function TourLayer({ tour, onDone, onEmpty }: { tour: TourDefinition; onDone: () => void; onEmpty: () => void }) {
+  // Fixed for the whole run: optional steps whose feature isn't on screen now are left out.
+  const [steps] = useState(() => tour.steps.filter((candidate) => !candidate.optional || findTarget(candidate.targets) !== null));
+  useEffect(() => {
+    if (steps.length === 0) onEmpty();
+  }, [steps, onEmpty]);
+  return steps.length > 0 ? <TourRun tour={tour} steps={steps} onDone={onDone} /> : null;
+}
+
+function TourRun({ tour, steps, onDone }: { tour: TourDefinition; steps: TourStep[]; onDone: () => void }) {
   const { language } = useLanguage();
   const reduceMotion = useReducedMotion() ?? false;
   const [step, setStep] = useState(0);
@@ -338,8 +271,8 @@ function TourLayer({ onDone }: { onDone: () => void }) {
   const hh = useSpring(0, springConfig);
   const clipPath = useTransform([hx, hy, hw, hh, vw, vh] as MotionValue<number>[], ([x, y, w, h, width, height]: number[]) => holeClipPath(x, y, w, h, width, height));
 
-  const current = STEPS[step];
-  const total = STEPS.length;
+  const current = steps[step];
+  const total = steps.length;
 
   const measure = useCallback(() => {
     const width = window.innerWidth;
@@ -365,25 +298,36 @@ function TourLayer({ onDone }: { onDone: () => void }) {
     setHasTarget(Boolean(hole));
   }, [finale, hx, hy, hw, hh, vw, vh]);
 
+  /** Looks the step's target up again when it is missing or was replaced by a re-render; true when one was just found. */
+  const refreshTarget = useCallback(() => {
+    if (finale || targetRef.current?.isConnected) return false;
+    targetRef.current = findTarget(current.targets);
+    return targetRef.current !== null;
+  }, [finale, current.targets]);
+
   // Resolve + scroll to this step's target, then follow it for ~1s while smooth-scroll settles.
   useLayoutEffect(() => {
-    targetRef.current = finale ? null : findTarget(current.targets);
-    const target = targetRef.current;
-    if (target) {
+    const reveal = (target: HTMLElement) => {
       const rect = target.getBoundingClientRect();
       const outOfView = rect.top < VIEWPORT_MARGIN || rect.bottom > window.innerHeight - VIEWPORT_MARGIN;
       if (outOfView) target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
-    }
+    };
+    targetRef.current = finale ? null : findTarget(current.targets);
+    if (targetRef.current) reveal(targetRef.current);
     measure();
     let frame = 0;
-    const until = performance.now() + 1000;
+    const start = performance.now();
     const tick = () => {
+      // A target still fading in (or mounting) when the step opened is picked up as soon as it shows.
+      if (refreshTarget() && targetRef.current) reveal(targetRef.current);
       measure();
-      if (performance.now() < until) frame = requestAnimationFrame(tick);
+      // ~1s of tracking; up to 3s while the target hasn't shown up yet.
+      const elapsed = performance.now() - start;
+      if (elapsed < 1000 || (!finale && !targetRef.current && elapsed < 3000)) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [step, finale, current.targets, measure, reduceMotion]);
+  }, [step, finale, current.targets, measure, refreshTarget, reduceMotion]);
 
   // Keep tracking afterwards: resize, any scroll (capture), target size changes.
   useEffect(() => {
@@ -392,6 +336,7 @@ function TourLayer({ onDone }: { onDone: () => void }) {
       if (scheduled) return;
       scheduled = requestAnimationFrame(() => {
         scheduled = 0;
+        refreshTarget();
         measure();
       });
     };
@@ -406,13 +351,14 @@ function TourLayer({ onDone }: { onDone: () => void }) {
       window.removeEventListener("scroll", schedule, { capture: true });
       observer?.disconnect();
     };
-  }, [measure, step, finale]);
+  }, [measure, refreshTarget, step, finale]);
 
   const goNext = useCallback(() => {
     haptic(8);
     if (step < total - 1) setStep((s) => s + 1);
-    else setFinale(true);
-  }, [step, total]);
+    else if (tour.finale) setFinale(true);
+    else onDone();
+  }, [step, total, tour.finale, onDone]);
 
   const goBack = useCallback(() => {
     if (finale) {
@@ -425,9 +371,14 @@ function TourLayer({ onDone }: { onDone: () => void }) {
     }
   }, [finale, step]);
 
-  // Keyboard control.
+  // Keyboard control. Captured on window before anything else sees the key,
+  // and stopped there: the page behind a modal tour must not react (←/→
+  // would also flip flashcards or change exam questions, A–E tick answers).
+  // Default actions still run, so Tab and Enter/Space on the card's buttons work.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
+      event.stopPropagation();
+      if (event.type !== "keydown") return;
       if (event.key === "Escape") {
         event.preventDefault();
         onDone();
@@ -440,9 +391,23 @@ function TourLayer({ onDone }: { onDone: () => void }) {
         goBack();
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKey, true);
+    window.addEventListener("keypress", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKey, true);
+      window.removeEventListener("keypress", onKey, true);
+    };
   }, [finale, goBack, goNext, onDone]);
+
+  // Focus goes back where it was (a field, a button) once the tour closes.
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    return () => {
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, []);
 
   // Focus follows the step (keyboard / screen-reader users land on the action).
   useEffect(() => {
@@ -462,7 +427,7 @@ function TourLayer({ onDone }: { onDone: () => void }) {
       className="fixed inset-0 z-[95]"
       role="dialog"
       aria-modal="true"
-      aria-label={COPY.dialog[language]}
+      aria-label={tour.label[language]}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -535,8 +500,8 @@ function TourLayer({ onDone }: { onDone: () => void }) {
             >
               <FinaleMedal reduceMotion={reduceMotion} />
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-300">{COPY.finaleKicker[language]}</p>
-              <h2 className="mt-1 text-xl font-extrabold tracking-tight">{COPY.finaleTitle[language]}</h2>
-              <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-slate-300">{COPY.finaleBody[language]}</p>
+              <h2 className="mt-1 text-xl font-extrabold tracking-tight">{tour.finale?.title[language]}</h2>
+              <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-slate-300">{tour.finale?.body[language]}</p>
               <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">
                 <Sparkles className="h-3.5 w-3.5" /> {xp} XP
               </p>
@@ -546,7 +511,7 @@ function TourLayer({ onDone }: { onDone: () => void }) {
                 onClick={onDone}
                 className="press-feedback mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-400 via-cyan-400 to-fuchsia-400 text-[15px] font-extrabold text-slate-950 shadow-[0_0_30px_rgba(52,211,153,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
-                {COPY.launch[language]}
+                {tour.finale?.launch[language]}
                 <ArrowRight className="h-4 w-4" />
               </button>
             </motion.div>

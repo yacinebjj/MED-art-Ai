@@ -124,7 +124,7 @@ export function ReferenceExamUploader({ styleProfile, onStyleProfileChange, disa
     // A compact one-row card (it used to be a heading, a paragraph and a tall
     // dropzone): the whole row is the drop target and the file picker; the
     // full explanation is its tooltip.
-    <div className="border-b border-white/40 px-3 py-2.5 dark:border-white/10">
+    <div data-tour="exam-style" className="border-b border-white/40 px-3 py-2.5 dark:border-white/10">
       {!hasContent ? (
         <label
           title="Dépose un ancien examen ou une correction type de ton prof : l'IA reprend son style, sa logique de pièges et sa formulation de QCM."

@@ -64,7 +64,7 @@ export function ExamConfigurator({
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div data-tour="exam-timer" className="space-y-2">
         <p className={label}>
           <Clock3 className="h-3.5 w-3.5 text-cyan-400" />
           Minuteur

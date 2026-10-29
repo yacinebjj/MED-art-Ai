@@ -58,7 +58,9 @@ import { VoiceMeter } from "@/components/assistant/VoiceMeter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
+import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 import { ASSISTANT_PREFILL_KEY } from "@/lib/dashboard/assistant-prefill";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 
 interface HistoryTurn {
   role: "user" | "assistant";
@@ -107,7 +109,7 @@ function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelect
         </p>
       </div>
 
-      <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+      <div data-tour="asst-suggestions" className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
         {QUICK_PROMPTS.map((prompt, index) => (
           <motion.button
             key={prompt.text}
@@ -553,6 +555,8 @@ export default function AssistantPage() {
   useEffect(() => { isTypingRef.current = isTyping; }, [isTyping]);
 
   const isEmpty = messages.length === 0;
+  // No guided tour opens over a loading history, a reply, a dictation, voice mode, an attachment or the phone keyboard.
+  useTourBlocker(!hydrated || isTyping || isListening || isTranscribing || voiceModeOpen || isAttachmentBusy || isPreparingImage || keyboardOpen);
 
   useEffect(() => {
     setMicSupported(
@@ -1222,8 +1226,10 @@ export default function AssistantPage() {
           <div className="min-w-0 flex-1 text-center">
             <p className="truncate text-[15px] font-semibold text-foreground">{isEmpty ? "MedArt Assistant" : activeConversationTitle || "MedArt Assistant"}</p>
           </div>
+          <TourReplayButton tour="assistant" className="h-10 w-10 rounded-full" />
           <button
             type="button"
+            data-tour="asst-history-phone"
             onClick={() => setIsHistoryOpen(true)}
             aria-label="Afficher l'historique des conversations"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-transform active:scale-90 active:bg-accent"
@@ -1344,7 +1350,7 @@ export default function AssistantPage() {
             )}
 
             <div className="px-3 sm:px-4">
-              <div className="relative flex w-full flex-col rounded-[26px] border border-black/[0.08] bg-white/70 shadow-soft transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:border-white/10 dark:bg-white/[0.06]">
+              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[26px] border border-black/[0.08] bg-white/70 shadow-soft transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:border-white/10 dark:bg-white/[0.06]">
                 <AnimatePresence initial={false}>
                   {activeAction && (
                     <motion.div
@@ -1406,6 +1412,7 @@ export default function AssistantPage() {
                     <button
                       ref={attachmentButtonRef}
                       type="button"
+                      data-tour="asst-attach"
                       onClick={() => {
                         haptic();
                         setIsAttachmentMenuOpen((prev) => !prev);

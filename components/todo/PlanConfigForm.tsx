@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 import { MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import type { GeneratedPlanDay } from "@/types/study-planner";
 
 function buildRestDaysOptions(language: Language) {
@@ -49,6 +50,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  useTourBlocker(isGenerating || isUploading);
 
   const minExamDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 

@@ -33,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
+import { useToolTour, useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { deleteSyncDoc, putSyncDoc, reconcileList, reconcileValue, type SyncedValue } from "@/lib/user-sync";
 import { MAX_CACHED_AUDIO_BYTES, deleteCachedAudio, getCachedAudio, putCachedAudio } from "@/lib/audio/audio-blob-cache";
 
@@ -639,6 +640,9 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
   const [isOffline, setIsOffline] = useState(false);
   const playbackErrorRef = useRef(false);
   playbackErrorRef.current = playbackError;
+  useToolTour("tool-podcast");
+  // A playing episode is work in progress: no tour starts over it.
+  useTourBlocker(isPlaying);
 
   // A failure caused by a dropped connection fixes itself: when the network
   // comes back, the source ladder restarts on its own — no tap needed.
@@ -1311,7 +1315,7 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
         onError={handleMediaError}
       />
 
-      <section className="glass-card flex flex-col gap-4 rounded-3xl p-4 shadow-glass dark:shadow-glass-dark sm:p-5" aria-label="Lecteur du podcast">
+      <section className="glass-card flex flex-col gap-4 rounded-3xl p-4 shadow-glass dark:shadow-glass-dark sm:p-5" aria-label="Lecteur du podcast" data-tour="pod-player">
         {/* Header */}
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-100 text-primary-700 dark:bg-primary-500/15 dark:text-primary-300">
@@ -1527,7 +1531,7 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
       </section>
 
       {/* Moments clés */}
-      <section className="glass-card flex flex-col gap-3 rounded-3xl p-4 shadow-glass dark:shadow-glass-dark" aria-label="Moments clés">
+      <section className="glass-card flex flex-col gap-3 rounded-3xl p-4 shadow-glass dark:shadow-glass-dark" aria-label="Moments clés" data-tour="pod-moments">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Bookmark className="h-4 w-4 text-amber-500 dark:text-amber-400" />
@@ -1574,6 +1578,7 @@ export function AudioPodcastViewer({ audioUrl: storedAudioUrl, courseTitle }: { 
           download={downloadName}
           target="_blank"
           rel="noopener noreferrer"
+          data-tour="pod-download"
           className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-bold text-white shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 hover:shadow-glow dark:bg-primary-500 dark:hover:bg-primary-400"
         >
           <Download className="h-4 w-4" />

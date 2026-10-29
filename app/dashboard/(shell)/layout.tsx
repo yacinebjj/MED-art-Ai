@@ -18,9 +18,6 @@ import { useOnboarding } from "@/lib/onboarding/onboarding-context";
 import { t } from "@/lib/translations";
 import { cn } from "@/lib/utils";
 
-// First-run tour: only downloaded once a tour actually runs.
-const OnboardingTour = dynamic(() => import("@/components/onboarding/OnboardingTour").then((mod) => mod.OnboardingTour), { ssr: false });
-
 // R3F/WebGL needs a real DOM canvas — dynamically imported with ssr:false so
 // Next.js never tries to render it on the server.
 const DnaBackground = dynamic(
@@ -288,7 +285,6 @@ export default function DashboardShellLayout({
       <Spotlight />
       <LabLauncher />
       <NightModeOverlay />
-      {onboarding.active && <OnboardingTour />}
     </SidebarProvider>
   );
 }

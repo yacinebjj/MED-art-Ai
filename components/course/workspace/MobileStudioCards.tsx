@@ -116,7 +116,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
 
   return (
     <div className="flex h-full flex-col gap-2 overflow-y-auto p-2">
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2" data-tour="ws-studio">
         {sections.map((section) => {
           const Icon = section.icon;
           const status = getSectionStatus(section.id);

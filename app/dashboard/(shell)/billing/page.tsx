@@ -41,6 +41,7 @@ import { tSettings } from "@/lib/translations/settings";
 import { cn } from "@/lib/utils";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 import { PAYMENT_GATEWAY_UNAVAILABLE_MESSAGE, PAYMENT_INTERRUPTED_MESSAGE } from "@/lib/payment-messages";
+import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 
 interface SubscriptionInfo {
   plan: PlanId;
@@ -614,6 +615,7 @@ function BillingPageContent() {
   const [interrupted, setInterrupted] = useState(false);
   const silentCheckDoneRef = useRef(false);
   const userId = user?.id ?? null;
+  useTourBlocker(!loaded || loadingKey !== null || confirmPhase === "checking" || interrupted);
 
   const loadSubscription = useCallback(async () => {
     try {
@@ -906,7 +908,7 @@ function BillingPageContent() {
 
       {/* ── Status ─────────────────────────────────────────────────────── */}
       <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
-        <CyberPanel laser="spin" accent={isPaidActive ? "emerald" : "cyan"} className="p-5 sm:p-6">
+        <CyberPanel data-tour="billing-current" laser="spin" accent={isPaidActive ? "emerald" : "cyan"} className="p-5 sm:p-6">
           {!loaded ? (
             <div className="h-40 animate-pulse rounded-2xl bg-white/[0.04]" />
           ) : (
@@ -958,7 +960,7 @@ function BillingPageContent() {
           )}
         </CyberPanel>
 
-        <CyberPanel className="p-5 sm:p-6">
+        <CyberPanel data-tour="billing-payment" className="p-5 sm:p-6">
           <p className="cyber-kicker flex items-center gap-1.5">
             <CreditCard className="h-3.5 w-3.5" />
             {tSettings("paymentMethod", language)}
@@ -972,7 +974,7 @@ function BillingPageContent() {
 
       {/* ── Plan picker ────────────────────────────────────────────────── */}
       {plansOpen && (
-        <section className="mt-8" aria-labelledby="billing-plans-title">
+        <section data-tour="billing-plans" className="mt-8" aria-labelledby="billing-plans-title">
           <h2 id="billing-plans-title" className="text-center text-lg font-black text-white">
             Choisis ta formule
           </h2>
@@ -999,7 +1001,7 @@ function BillingPageContent() {
       )}
 
       {/* ── Ta consommation ────────────────────────────────────────────── */}
-      <CyberPanel className="mt-8 p-5 sm:p-6">
+      <CyberPanel data-tour="billing-usage" className="mt-8 p-5 sm:p-6">
         <h2 className="flex items-center gap-2 text-lg font-black text-white">
           <Gauge className="h-5 w-5 text-cyan-300" />
           Ta consommation
@@ -1042,7 +1044,7 @@ function BillingPageContent() {
       </CyberPanel>
 
       {/* ── Invoices (real Chargily payments) ──────────────────────────── */}
-      <CyberPanel className="mt-8 p-5 sm:p-6">
+      <CyberPanel data-tour="billing-invoices" className="mt-8 p-5 sm:p-6">
         <p className="cyber-kicker flex items-center gap-1.5">
           <Receipt className="h-3.5 w-3.5" />
           {tSettings("invoiceHistory", language)}

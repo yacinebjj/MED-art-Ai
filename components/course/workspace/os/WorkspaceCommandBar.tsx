@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft,
   ChevronRight,
+  CircleHelp,
   ClipboardCheck,
   CloudOff,
   Copy,
@@ -43,6 +44,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/DropdownMenu";
 import { Kbd } from "@/components/course/workspace/os/Kbd";
+import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
+import { useOptionalOnboarding } from "@/lib/onboarding/onboarding-context";
+import { PAGE_TOURS_ENABLED } from "@/lib/feature-flags";
 import type { WorkspaceDensity } from "@/hooks/useWorkspaceLayout";
 
 export type WorkspaceSyncState = "synced" | "working" | "offline";
@@ -73,6 +77,7 @@ function BarButton({
   active,
   children,
   className,
+  dataTour,
 }: {
   label: string;
   keys?: string[];
@@ -80,6 +85,7 @@ function BarButton({
   active?: boolean;
   children: React.ReactNode;
   className?: string;
+  dataTour?: string;
 }) {
   return (
     <Tooltip>
@@ -91,6 +97,7 @@ function BarButton({
           onClick={onClick}
           aria-label={label}
           aria-pressed={active}
+          data-tour={dataTour}
           className={cn(
             "flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
             active && "bg-primary-600 text-white shadow-glow hover:bg-primary-600 hover:text-white dark:bg-primary-500",
@@ -184,6 +191,7 @@ export function WorkspaceCommandBar({
   modKey,
 }: WorkspaceCommandBarProps) {
   const { resolvedTheme, setTheme } = useTheme();
+  const onboarding = useOptionalOnboarding();
   const { toast } = useToast();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -303,7 +311,7 @@ export function WorkspaceCommandBar({
 
         <WorkspacePomodoro />
 
-        <BarButton label="Note rapide" keys={["⇧", "N"]} onClick={onQuickNote}>
+        <BarButton label="Note rapide" keys={["⇧", "N"]} onClick={onQuickNote} dataTour="ws-quick-note">
           <SquarePen className="h-4 w-4" />
         </BarButton>
 
@@ -328,6 +336,9 @@ export function WorkspaceCommandBar({
           {!mounted ? <Moon className="h-4 w-4" /> : isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </BarButton>
 
+        {/* Phones replay the guide from the ⋯ menu: the bar is already full there. */}
+        <TourReplayButton className="hidden h-8 w-8 sm:flex" />
+
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -335,6 +346,7 @@ export function WorkspaceCommandBar({
                 <button
                   type="button"
                   aria-label="Plus d'options"
+                  data-tour="ws-more"
                   className="flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                 >
                   <MoreHorizontal className="h-4 w-4" />
@@ -363,6 +375,12 @@ export function WorkspaceCommandBar({
                 Mes notes
               </Link>
             </DropdownMenuItem>
+            {onboarding && PAGE_TOURS_ENABLED && (
+              <DropdownMenuItem className="sm:hidden" onSelect={() => onboarding.startTour("module")}>
+                <CircleHelp className="h-4 w-4" />
+                Revoir le guide de cette page
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={handleCopyLink}>
               <Copy className="h-4 w-4" />
