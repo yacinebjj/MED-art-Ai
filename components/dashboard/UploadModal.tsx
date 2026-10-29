@@ -4,15 +4,13 @@ import "@/components/cyber/cyber.css";
 
 import { DragEvent, KeyboardEvent, useEffect, useRef, useState, type ComponentType } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, CheckCircle2, Cloud, File, FileImage, FileSpreadsheet, FileText, FileType2, Globe, Link2, Loader2, Presentation, Sparkles, Trash2, Upload, UploadCloud, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, File, FileImage, FileSpreadsheet, FileText, FileType2, Globe, Link2, Loader2, Presentation, Sparkles, Trash2, Upload, UploadCloud, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_MB, MAX_UPLOAD_FILES as MAX_BATCH_FILES } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
-import { preloadGoogleDriveScripts, type DriveListItem } from "@/lib/google-drive-picker";
-import { DriveBrowser } from "@/components/dashboard/DriveBrowser";
 import { useToast } from "@/components/ui/Toast";
 import { OcrSuggestedError } from "@/lib/upload-client";
 import { useCyberTilt } from "@/components/cyber/hooks";
@@ -23,7 +21,7 @@ import { notifyUsageChanged } from "@/hooks/useUsage";
 // — checked here so an oversized file is rejected instantly, before spending
 // a student's time and mobile data.
 
-type Method = "upload" | "drive" | "text" | "link";
+type Method = "upload" | "text" | "link";
 type QueueStatus = "pending" | "uploading" | "done" | "error";
 
 interface QueueItem {
@@ -60,7 +58,6 @@ function handleZoneKeyDown(e: KeyboardEvent<HTMLDivElement>, action: () => void)
 
 const METHODS: { id: Method; label: string; hint: string; icon: ComponentType<{ className?: string }>; tint: string }[] = [
   { id: "upload", label: "Fichiers", hint: "PDF, DOCX, PPTX, TXT…", icon: UploadCloud, tint: "from-cyan-300 to-sky-500" },
-  { id: "drive", label: "Google Drive", hint: "Parcourir tes dossiers", icon: Cloud, tint: "from-emerald-300 to-teal-500" },
   { id: "text", label: "Texte direct", hint: "Notes, polycopié collé", icon: FileText, tint: "from-violet-400 to-fuchsia-500" },
   { id: "link", label: "Lien web", hint: "Page de cours en ligne", icon: Globe, tint: "from-amber-300 to-orange-500" },
 ];
@@ -99,7 +96,7 @@ export interface UploadModalProps {
   onUploaded: (result: string) => void;
   /** Overrides the default POST /api/generate-course flow — e.g. the module workspace creates a studio_courses row scoped to one module. Must resolve with an identifier string, or throw an Error with a user-facing message. Enables multi-file batches. */
   onSubmitFile?: (file: File) => Promise<string>;
-  /** Same override, for "Texte direct", Drive and "Lien web" (all become text). */
+  /** Same override, for "Texte direct" and "Lien web" (both become text). */
   onSubmitText?: (text: string, title: string) => Promise<string>;
   /** Only meaningful when onSubmitFile throws lib/upload-client.ts's OcrSuggestedError (a scanned PDF). */
   onRetryWithOcr?: (path: string, fileName: string) => Promise<string>;
@@ -108,8 +105,8 @@ export interface UploadModalProps {
 }
 
 /**
- * Source import studio: files (batch, per-file status), Google Drive, direct
- * text and web link — the four real import paths this app supports.
+ * Source import studio: files (batch, per-file status), direct text and web
+ * link — the three import paths offered to students.
  */
 export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSubmitText, onRetryWithOcr, title: modalTitle, description }: UploadModalProps) {
   const [method, setMethod] = useState<Method>("upload");
@@ -119,20 +116,15 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
   const [title, setTitle] = useState("");
   const [link, setLink] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isDriveImporting, setIsDriveImporting] = useState(false);
-  // Lifted out of DriveBrowser so the OAuth connection survives switching tabs.
-  const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   // Batches only where the caller handles each file itself (module workspace) —
   // the default dashboard flow navigates to the one course it just created.
   const allowsBatch = Boolean(onSubmitFile);
-  const busy = isSubmitting || isDriveImporting;
+  const busy = isSubmitting;
 
-  // Preload Google's scripts as soon as the modal opens (popup must follow the tap synchronously on mobile).
   useEffect(() => {
-    if (open) preloadGoogleDriveScripts();
     // Fresh course counter every time the modal opens.
     if (open) notifyUsageChanged();
   }, [open]);
@@ -145,7 +137,6 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     setTitle("");
     setLink("");
     setError(null);
-    setDriveAccessToken(null);
   }
 
   function handleOpenChange(next: boolean) {
@@ -301,39 +292,6 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
     }
   }
 
-  /** A Drive file is downloaded + extracted server-side, then goes through the same text path. */
-  async function handleDriveFileSelected(picked: DriveListItem, accessToken: string) {
-    if (isDriveImporting) return;
-    setError(null);
-    setIsDriveImporting(true);
-    try {
-      const res = await fetch("/api/drive/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileId: picked.id, mimeType: picked.mimeType, accessToken, fileName: picked.name }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        if (data.authExpired) {
-          setDriveAccessToken(null);
-          throw new Error(data.error ?? "Ta session Google Drive a expiré. Reconnecte-toi pour réessayer.");
-        }
-        throw new Error(data.error ?? "L'import depuis Google Drive a échoué.");
-      }
-      const result = await (onSubmitText ?? defaultSubmitText)(data.text, picked.name);
-      onUploaded(result);
-      toast({ variant: "success", title: "Source importée depuis Drive" });
-      notifyUsageChanged();
-      handleOpenChange(false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "L'import depuis Google Drive a échoué.";
-      setError(message);
-      toast({ variant: "error", title: "L'import Google Drive a échoué", description: message });
-    } finally {
-      setIsDriveImporting(false);
-    }
-  }
-
   const pendingCount = queue.filter((q) => q.status === "pending" || q.status === "error").length;
 
   return (
@@ -347,13 +305,13 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
             </span>
             <div className="min-w-0 text-left">
               <DialogTitle>{modalTitle ?? "Ajouter un cours"}</DialogTitle>
-              <DialogDescription>{description ?? "Importe un document, connecte Google Drive, colle du texte ou un lien pour créer un espace de travail."}</DialogDescription>
+              <DialogDescription>{description ?? "Importe un document, colle du texte ou un lien pour créer un espace de travail."}</DialogDescription>
             </div>
           </div>
           <CourseCreditLine className="mt-3" />
         </DialogHeader>
 
-        <div className="relative mt-2 grid grid-cols-4 gap-2 sm:gap-3">
+        <div className="relative mt-2 grid grid-cols-3 gap-2 sm:gap-3">
           {METHODS.map((m) => (
             <MethodCard key={m.id} method={m} active={method === m.id} disabled={busy} onSelect={() => setMethod(m.id)} />
           ))}
@@ -464,10 +422,6 @@ export function UploadModal({ open, onOpenChange, onUploaded, onSubmitFile, onSu
                 {pendingCount > 1 ? `Importer ${pendingCount} fichiers` : "Importer"}
               </Button>
             </>
-          )}
-
-          {method === "drive" && (
-            <DriveBrowser accessToken={driveAccessToken} onAccessTokenChange={setDriveAccessToken} onFileSelected={handleDriveFileSelected} disabled={isDriveImporting} />
           )}
 
           {method === "text" && (

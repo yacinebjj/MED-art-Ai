@@ -182,8 +182,8 @@ export const TOURS: Record<TourId, TourDefinition> = {
         badge: { fr: "Sources", en: "Sources" },
         title: { fr: "Tes sources, la base de tout", en: "Your sources come first" },
         body: {
-          fr: "Importe ton polycopié : PDF, Word, PowerPoint, texte collé ou Google Drive. Chaque source devient un cours sur lequel le Studio et le Co-pilote travaillent.",
-          en: "Import your handout: PDF, Word, PowerPoint, pasted text or Google Drive. Each source becomes a course the Studio and the Co-pilot work on.",
+          fr: "Importe ton polycopié (PDF, Word, PowerPoint), colle du texte ou un lien web. Chaque source devient un cours sur lequel le Studio et le Co-pilote travaillent.",
+          en: "Import your handout (PDF, Word, PowerPoint), paste text or a web link. Each source becomes a course the Studio and the Co-pilot work on.",
         },
       },
       {

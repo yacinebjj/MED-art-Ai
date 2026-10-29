@@ -2198,7 +2198,7 @@ export default function ModuleWorkspacePage() {
       id: "add-source",
       group: "Sources",
       label: "Ajouter une source",
-      description: "PDF, DOCX, PPTX, TXT, Google Drive ou texte collé",
+      description: "PDF, DOCX, PPTX, TXT, texte collé ou lien web",
       icon: Plus,
       keywords: ["importer", "upload", "polycop"],
       run: () => {

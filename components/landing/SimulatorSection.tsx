@@ -23,8 +23,8 @@ const OUTPUTS = [
 
 const STEPS = [
   {
-    fr: { title: "Importe ton cours", text: "PDF, Word, PowerPoint, photo ou Google Drive : dépose ton polycopié dans le module de ton programme officiel." },
-    en: { title: "Import your course", text: "PDF, Word, PowerPoint, photo or Google Drive: drop your handout into its module of the official curriculum." },
+    fr: { title: "Importe ton cours", text: "PDF, Word, PowerPoint, photo, texte ou lien web : dépose ton polycopié dans le module de ton programme officiel." },
+    en: { title: "Import your course", text: "PDF, Word, PowerPoint, photo, text or web link: drop your handout into its module of the official curriculum." },
   },
   {
     fr: { title: "L'IA l'analyse en profondeur", text: "Chaque mécanisme est décortiqué, chaque piège de QCM repéré — en restant fidèle à TON cours, pas à Internet." },

@@ -115,8 +115,8 @@ const FAQ = [
     },
   },
   {
-    fr: { q: "Quels documents puis-je importer ?", a: "PDF, Word, PowerPoint, images de cours (lues par OCR) et fichiers Google Drive. Tu les ranges dans les modules de ton programme officiel." },
-    en: { q: "Which documents can I import?", a: "PDF, Word, PowerPoint, course images (read by OCR) and Google Drive files. You file them under the modules of your official curriculum." },
+    fr: { q: "Quels documents puis-je importer ?", a: "PDF, Word, PowerPoint, images de cours (lues par OCR), texte collé et pages web. Tu les ranges dans les modules de ton programme officiel." },
+    en: { q: "Which documents can I import?", a: "PDF, Word, PowerPoint, course images (read by OCR), pasted text and web pages. You file them under the modules of your official curriculum." },
   },
   {
     fr: { q: "Le contenu généré est-il fiable ?", a: "L'IA travaille sur TON cours, pas sur Internet : explications, QCM et cas cliniques restent fidèles à ton polycopié. Comme pour tout outil, garde ton esprit critique et vérifie ce qui te paraît douteux." },
