@@ -38,11 +38,11 @@ export function GastriteQcmsStudio({
           </div>
           <div>
             <span className="px-3 py-1 text-[10px] font-black uppercase tracking-widest bg-white/20 text-white rounded-full border border-white/30">
-              Niveau Faculté de Médecine — 4ème Année
+              Évaluation des connaissances
             </span>
-            <h1 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tight mt-2">{data.titre_section}</h1>
+            <h1 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tight mt-2">Épreuve QCM</h1>
             <p className="text-sm text-teal-100 mt-1 max-w-2xl">
-              {data.qcms.length} QCM{data.qrocs.length > 0 ? ` et ${data.qrocs.length} QROC` : ""} à difficulté extrême — physiopathologie, histologie, complications évolutives, éradication et maladie de Biermer. Aucune complaisance.
+              Testez vos connaissances et évaluez votre compréhension du cours avec cette série de questions à choix multiples.
             </p>
           </div>
         </div>
