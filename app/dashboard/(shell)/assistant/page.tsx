@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowDown,
+  ArrowUp,
   BookOpenCheck,
   Brain,
   BrainCircuit,
@@ -24,7 +25,6 @@ import {
   PanelLeftOpen,
   Plus,
   RefreshCw,
-  Send,
   Square,
   SquarePen,
   Stethoscope,
@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 import { generateId } from "@/lib/generate-id";
 import { uploadDocumentDirect } from "@/lib/upload-client";
 import { haptic } from "@/lib/haptics";
-import { DEFAULT_ASSISTANT_PREFS, isAssistantStyle, type AssistantMode, type AssistantPrefs } from "@/lib/assistant-modes";
+import { DEFAULT_ASSISTANT_PREFS, type AssistantMode } from "@/lib/assistant-modes";
 import { useSidebarState } from "@/providers/SidebarProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAssistant } from "@/lib/translations/assistant";
@@ -96,7 +96,7 @@ function NovaOrb() {
         </defs>
       </svg>
       <span className="absolute inset-2 rounded-full bg-[conic-gradient(from_200deg,rgba(56,189,248,0.45),rgba(34,211,238,0.4),rgba(37,99,235,0.45),rgba(56,189,248,0.45))] opacity-60 blur-2xl dark:opacity-70" />
-      <BrainCircuit color="url(#copilot-orb-stroke)" strokeWidth={1.5} className="relative h-12 w-12 animate-float sm:h-14 sm:w-14" />
+      <BrainCircuit color="url(#copilot-orb-stroke)" strokeWidth={1.5} className="relative h-12 w-12 sm:h-14 sm:w-14" />
     </div>
   );
 }
@@ -104,28 +104,32 @@ function NovaOrb() {
 function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
   const { language } = useLanguage();
   return (
-    // Clears the floating glass header and composer (their measured heights, see the chat column).
+    // Clears the floating header and composer (their measured heights, see the chat column) and dissolves before reaching them.
     // motion-swap: rises in when it replaces a conversation ("Nouvelle conversation").
-    <div className="motion-swap relative isolate flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-none px-3 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:gap-8 sm:px-4 sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
+    <div className="copilot-thread-fade motion-swap relative isolate flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center overflow-y-auto overflow-x-hidden overscroll-none px-4 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
       {/* Desktop only: a slow, blurred light drifting behind the welcome (transform-only; still under reduced motion, absent on phones). */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden lg:block">
         <div className="absolute left-1/2 top-[38%] -ml-[340px] -mt-[220px] h-[440px] w-[680px] rounded-full bg-[radial-gradient(closest-side,rgba(14,165,233,0.14),rgba(37,99,235,0.07)_55%,transparent)] blur-3xl [animation:copilot-aurora_26s_ease-in-out_infinite] motion-reduce:[animation:none] dark:bg-[radial-gradient(closest-side,rgba(56,189,248,0.2),rgba(37,99,235,0.1)_55%,transparent)]" />
       </div>
       <NovaOrb />
-      <div className="max-w-xl space-y-3">
-        <h1 className="text-[28px] font-medium leading-tight tracking-[-0.015em] text-slate-800 dark:text-white/90 md:text-[40px]">
-          {language === "fr" ? "Bonjour" : "Hi"}{" "}
-          <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 bg-clip-text text-transparent dark:from-cyan-300 dark:via-sky-300 dark:to-blue-400">{firstName}</span>
-          {language === "fr" ? ", on révise quoi aujourd'hui ?" : ", what's on your mind?"}
+      <div className="mt-5 w-full max-w-2xl sm:mt-6">
+        {/* Two deliberate lines at one size, two tones: the greeting (the name in the logo's gradient) over the question. */}
+        <h1 className="text-balance text-[30px] font-medium leading-[1.15] tracking-[-0.022em] sm:text-[38px] lg:text-[44px] lg:tracking-[-0.026em]">
+          <span className="block text-slate-900 dark:text-white">
+            {language === "fr" ? "Bonjour" : "Hi"}{" "}
+            <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 bg-clip-text text-transparent dark:from-cyan-300 dark:via-sky-400 dark:to-blue-500">{firstName}</span>
+          </span>{" "}
+          <span className="block text-slate-400 dark:text-white/40">{language === "fr" ? "On révise quoi aujourd'hui ?" : "What's on your mind?"}</span>
         </h1>
-        <p className="text-sm leading-relaxed text-slate-500 dark:text-white/55 sm:text-base">
+        <p className="mx-auto mt-4 max-w-md text-balance text-[15px] leading-relaxed text-slate-500 dark:text-white/50">
           {language === "fr"
             ? "Un module compliqué, un planning à caler, ou juste besoin de souffler ? Je suis là."
             : "A tough module, a study plan to build, or just need a breather? I'm here."}
         </p>
       </div>
 
-      <div data-tour="asst-suggestions" className="flex w-full max-w-2xl flex-wrap justify-center gap-2">
+      {/* Phones: a tidy 2×3 grid of compact tiles (pills wrapped into five ragged rows there); from sm, centred pills. */}
+      <div data-tour="asst-suggestions" className="mt-8 grid w-full max-w-2xl grid-cols-2 gap-2 sm:mt-10 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5">
         {QUICK_PROMPTS.map((prompt, index) => (
           <motion.button
             key={prompt.text}
@@ -136,7 +140,7 @@ function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelect
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 + index * 0.04, duration: 0.3, ease: "easeOut" }}
             whileTap={{ scale: 0.97 }}
-            className="flex min-h-11 items-center gap-2 rounded-full border border-black/[0.06] bg-white/70 px-4 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-white/80 dark:shadow-none dark:hover:bg-white/[0.08]"
+            className="flex min-h-[52px] min-w-0 items-center gap-2.5 rounded-2xl border border-black/[0.06] bg-white/70 px-3.5 py-2 text-left text-[13px] font-medium leading-snug text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-white hover:text-slate-900 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/75 dark:shadow-none dark:hover:bg-white/[0.08] dark:hover:text-white sm:min-h-11 sm:gap-2 sm:rounded-full sm:px-4 sm:py-0"
           >
             <prompt.icon className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300" strokeWidth={1.75} />
             {prompt.label}
@@ -328,8 +332,6 @@ const ChatBubble = memo(function ChatBubble({
   );
 });
 
-const PREFS_STORAGE_KEY = "medart-assistant-prefs";
-
 const ATTACHMENT_ITEMS = [
   { kind: "image" as const, icon: ImageIcon, label: "Importer une image" },
   { kind: "pdf" as const, icon: FileText, label: "Importer un PDF" },
@@ -520,10 +522,8 @@ export default function AssistantPage() {
   // full-screen layout: keyboard open, or iOS having scrolled the visual
   // viewport. Otherwise the CSS (`inset-0`) alone sizes the surface.
   const dockedBox = viewportBox && (viewportBox.keyboardOpen || viewportBox.top > 0) ? viewportBox : null;
-  // Quick action ("QCM", "Flashcards"…) armed for the NEXT message only, and
-  // the answer-style toggles (kept per device in localStorage).
+  // Quick action ("QCM", "Flashcards"…) armed for the NEXT message only.
   const [mode, setMode] = useState<AssistantMode | null>(null);
-  const [prefs, setPrefs] = useState<AssistantPrefs>(DEFAULT_ASSISTANT_PREFS);
   const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   // Aborts the in-flight reply when the student taps Stop (see stopGeneration).
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -601,31 +601,6 @@ export default function AssistantPage() {
         typeof MediaRecorder !== "undefined"
     );
   }, []);
-
-  // Answer-style preferences survive reloads (per device — not sensitive, and
-  // the server validates them against a whitelist on every request anyway).
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(PREFS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<AssistantPrefs> | null;
-      setPrefs({
-        style: isAssistantStyle(parsed?.style) ? parsed.style : DEFAULT_ASSISTANT_PREFS.style,
-        stepByStep: parsed?.stepByStep === true,
-      });
-    } catch {
-      // Unreadable or storage blocked — keep the defaults.
-    }
-  }, []);
-
-  function updatePrefs(next: AssistantPrefs) {
-    setPrefs(next);
-    try {
-      window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Private mode / quota: the choice still applies for this session.
-    }
-  }
 
   // Never leave a reply being read aloud (or a generation running) behind a page the student has left.
   useEffect(() => {
@@ -858,10 +833,11 @@ export default function AssistantPage() {
           message: userText,
           history: historyForRequest,
           language,
-          // Answer-style settings + the armed quick action; the server
-          // validates each against a whitelist (lib/assistant-modes.ts).
-          style: prefs.style,
-          stepByStep: prefs.stepByStep,
+          // The default answer style (no longer adjustable in the chip bar) +
+          // the armed quick action; the server validates each against a
+          // whitelist (lib/assistant-modes.ts).
+          style: DEFAULT_ASSISTANT_PREFS.style,
+          stepByStep: DEFAULT_ASSISTANT_PREFS.stepByStep,
           ...(requestMode ? { mode: requestMode } : {}),
           ...(attachments?.image ? { image: attachments.image } : {}),
           ...(attachments?.document ? { document: attachments.document } : {}),
@@ -910,7 +886,7 @@ export default function AssistantPage() {
       if (abortControllerRef.current === controller) abortControllerRef.current = null;
       if (isMountedRef.current) setIsTyping(false);
     }
-  }, [language, prefs]);
+  }, [language]);
 
   function stopGeneration() {
     haptic();
@@ -1181,9 +1157,6 @@ export default function AssistantPage() {
   const canSend = (input.trim().length > 0 || pendingImage !== null) && !isTyping && !isAttachmentBusy;
   const activeAction = mode ? QUICK_ACTIONS.find((action) => action.mode === mode) : undefined;
   const composerPlaceholder = activeAction ? tAssistant(activeAction.placeholder, language) : tAssistant("composerPlaceholder", language);
-  // On a phone the primary button morphs (mic while there's nothing to send,
-  // Send once there is) to give the text field the width — see the mic's className.
-  const hasPrimaryAction = canSend || isTyping;
 
   function handleSelectMode(next: AssistantMode | null) {
     setMode(next);
@@ -1214,12 +1187,13 @@ export default function AssistantPage() {
       // the horizontal-sway lock: nothing inside can widen this surface.
       // overscroll-none: the frame itself never rubber-bands (no "void").
       //
-      // .copilot-canvas (app/globals.css): the assistant's own clean, opaque
-      // background — no aurora, mesh grid or video behind the conversation
-      // (the shell doesn't mount its DNA canvas on this route either). From
-      // lg it is a rounded panel beside the sidebar.
+      // .copilot-canvas (app/globals.css): the Copilot's own opaque
+      // atmosphere — no aurora, mesh grid or video behind the conversation.
+      // Below lg this full-screen surface paints it; from lg the shell paints
+      // it behind everything (app/dashboard/(shell)/layout.tsx) and this
+      // surface stays transparent, with no panel edge boxing the light in.
       className={cn(
-        "copilot-canvas flex w-full max-w-full overflow-hidden overscroll-none lg:h-full lg:rounded-3xl lg:border lg:border-black/[0.05] lg:dark:border-white/[0.06]",
+        "flex w-full max-w-full overflow-hidden overscroll-none max-lg:copilot-canvas lg:h-full",
         // Portaled on phones, outside the page transition: it fades in over the page it was opened from.
         isPhoneLayout && "copilot-enter",
         // `inset-0` (like the group chat room, proven on real phones) — the
@@ -1239,11 +1213,11 @@ export default function AssistantPage() {
         onDelete={handleDeleteConversation}
       />
 
-      {/* The chat column. Its glass header (phones) and glass composer dock
-          float OVER the thread, which slides beneath them: their measured
-          heights live here as --copilot-header-h / --copilot-composer-h
-          (see the layout effect above), and the thread and empty state pad
-          by exactly that much. */}
+      {/* The chat column. Its header (phones) and composer dock float OVER
+          the thread, which dissolves before it reaches them
+          (.copilot-thread-fade): their measured heights live here as
+          --copilot-header-h / --copilot-composer-h (see the layout effect
+          above), and the thread and empty state pad by exactly that much. */}
       <div ref={chatColumnRef} className="relative flex w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden">
         {/* Phone header — the shell hides its Topbar and bottom nav on this
             route below lg (see CHROMELESS_MOBILE_ROUTES), so this page owns
@@ -1252,8 +1226,6 @@ export default function AssistantPage() {
           ref={phoneHeaderRef}
           className="absolute inset-x-0 top-0 z-20 flex items-center gap-1 px-1.5 pb-3 pt-[calc(env(safe-area-inset-top)+0.375rem)] lg:hidden"
         >
-          {/* Frosted, no divider: the blur fades out at its lower edge instead of ending on a line (glass-chrome keeps its blur on phones; the fade covers only the bottom padding, so the buttons never fade). */}
-          <div aria-hidden className="glass-chrome pointer-events-none absolute inset-0 -z-10 border-0 [mask-image:linear-gradient(to_top,transparent,black_12px)]" />
           <Link
             href="/dashboard"
             aria-label="Retour au tableau de bord"
@@ -1315,7 +1287,7 @@ export default function AssistantPage() {
             <div
               ref={scrollContainerRef}
               onScroll={handleScroll}
-              className="h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
+              className="copilot-thread-fade h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
             >
               <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 px-3 pb-[calc(var(--copilot-composer-h,0px)+1rem)] pt-[calc(var(--copilot-header-h,0px)+1rem)] sm:px-5 md:px-6 md:pb-[calc(var(--copilot-composer-h,0px)+1.5rem)] md:pt-[calc(var(--copilot-header-h,0px)+1.5rem)]">
                 <AnimatePresence initial={false}>
@@ -1362,35 +1334,29 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {/* The composer dock: one full-width glass bar the thread slides under.
-            Bottom safe-area only while the keyboard is CLOSED: with it open the
-            home indicator is hidden under the keyboard, and keeping that inset
-            is exactly the "awkward gap above the keyboard". */}
+        {/* The composer dock: chips and hub float on the atmosphere itself —
+            no bar behind them; the thread dissolves before it gets there
+            (.copilot-thread-fade). Bottom safe-area only while the keyboard is
+            CLOSED: with it open the home indicator is hidden under the
+            keyboard, and keeping that inset is exactly the "awkward gap above
+            the keyboard". */}
         <div
           ref={composerDockRef}
           className={cn(
-            "absolute inset-x-0 bottom-0 z-20 pt-6 lg:pb-5",
+            "absolute inset-x-0 bottom-0 z-20 pt-4 lg:pb-6",
             keyboardOpen ? "pb-2" : "pb-[max(0.75rem,env(safe-area-inset-bottom))]"
           )}
         >
-          {/* No bar behind the floating hub: the thread fades into frosted glass over the top padding only (glass-chrome keeps its blur on phones), so chips and hub stay crisp. */}
-          <div aria-hidden className="glass-chrome pointer-events-none absolute inset-0 -z-10 border-0 bg-[rgb(245_247_250/0.72)] [mask-image:linear-gradient(to_bottom,transparent,black_24px)] dark:bg-[rgb(5_20_29/0.62)]" />
           <div className="mx-auto w-full max-w-3xl">
             {/* Comes back with a fade when the keyboard closes (motion-swap, app/globals.css). */}
             {!keyboardOpen && (
               <div className="motion-swap">
-                <QuickActionBar
-                  mode={mode}
-                  onSelectMode={handleSelectMode}
-                  prefs={prefs}
-                  onChangePrefs={updatePrefs}
-                  disabled={isTyping || isListening}
-                />
+                <QuickActionBar mode={mode} onSelectMode={handleSelectMode} disabled={isTyping || isListening} />
               </div>
             )}
 
             <div className="px-3 sm:px-4">
-              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[32px] border border-black/[0.06] bg-white/95 shadow-[0_12px_40px_-14px_rgba(15,23,42,0.22)] backdrop-blur-xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_14px_44px_-14px_rgba(14,165,233,0.4)] dark:border-white/10 dark:bg-[#16191d]/95 dark:shadow-[0_18px_60px_-12px_rgba(0,0,0,0.8)] dark:focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.25),0_18px_60px_-12px_rgba(0,0,0,0.8)]">
+              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[32px] border border-black/[0.06] bg-white/85 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_44px_-18px_rgba(15,23,42,0.28)] backdrop-blur-2xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_16px_48px_-16px_rgba(14,165,233,0.38)] dark:border-white/[0.09] dark:bg-[#0e1115]/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_24px_64px_-20px_rgba(0,0,0,0.9)] dark:focus-within:border-sky-400/25 dark:focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_0_0_1px_rgba(56,189,248,0.16),0_24px_64px_-20px_rgba(14,165,233,0.32)]">
                 <AnimatePresence initial={false}>
                   {activeAction && (
                     <motion.div
@@ -1567,23 +1533,6 @@ export default function AssistantPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      haptic();
-                      setVoiceModeOpen(true);
-                    }}
-                    disabled={!micSupported || isListening || isTyping}
-                    aria-label="Mode vocal"
-                    title="Mode vocal (conversation à la voix)"
-                    className={cn(
-                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-[transform,background-color,color] duration-150 hover:bg-accent hover:text-foreground active:scale-90 disabled:cursor-not-allowed disabled:opacity-40",
-                      hasPrimaryAction && "max-sm:hidden"
-                    )}
-                  >
-                    <AudioLines strokeWidth={1.75} className="h-5 w-5" />
-                  </button>
-
-                  <button
-                    type="button"
                     title={micSupported ? "Dicter (Ctrl+M)" : undefined}
                     onClick={() => {
                       haptic();
@@ -1594,8 +1543,7 @@ export default function AssistantPage() {
                     className={cn(
                       "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
                       isListening ? "bg-sky-600 text-white shadow-[0_0_0_4px_rgba(14,165,233,0.18)]" : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40",
-                      hasPrimaryAction && !isListening && "max-sm:hidden"
+                      (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40"
                     )}
                   >
                     {isTranscribing ? (
@@ -1607,30 +1555,59 @@ export default function AssistantPage() {
                     )}
                   </button>
 
-                  {isTyping ? (
-                    <button
-                      type="button"
-                      onClick={stopGeneration}
-                      aria-label={tAssistant("stopGeneration", language)}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-transform active:scale-90"
-                    >
-                      <Square className="h-4 w-4 fill-current" />
-                    </button>
-                  ) : canSend && !isListening ? (
-                    <motion.button
-                      key="send"
-                      type="button"
-                      onClick={handleSubmit}
-                      initial={{ scale: 0.6, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ duration: 0.15 }}
-                      whileTap={{ scale: 0.9 }}
-                      aria-label={tAssistant("sendMessage", language)}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white shadow-soft"
-                    >
-                      <Send className="h-5 w-5" />
-                    </motion.button>
-                  ) : null}
+                  {/* One fixed slot: voice mode while there's nothing to send, Send once there is, Stop while a reply streams. They swap in place (the old one leaves at once, so a fast second tap can never land on it), and the row never reflows. */}
+                  <div className="relative h-11 w-11 shrink-0">
+                    <AnimatePresence initial={false}>
+                      {isTyping ? (
+                        <motion.button
+                          key="stop"
+                          type="button"
+                          onClick={stopGeneration}
+                          initial={{ scale: 0.6, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                          whileTap={{ scale: 0.9 }}
+                          aria-label={tAssistant("stopGeneration", language)}
+                          className="absolute inset-0 flex items-center justify-center rounded-full bg-foreground text-background"
+                        >
+                          <Square className="h-4 w-4 fill-current" />
+                        </motion.button>
+                      ) : canSend && !isListening ? (
+                        <motion.button
+                          key="send"
+                          type="button"
+                          onClick={handleSubmit}
+                          initial={{ scale: 0.6, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                          whileTap={{ scale: 0.9 }}
+                          aria-label={tAssistant("sendMessage", language)}
+                          className="absolute inset-0 flex items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-[0_8px_20px_-8px_rgba(14,165,233,0.75)]"
+                        >
+                          <ArrowUp strokeWidth={2.25} className="h-5 w-5" />
+                        </motion.button>
+                      ) : (
+                        <motion.button
+                          key="voice"
+                          type="button"
+                          onClick={() => {
+                            haptic();
+                            setVoiceModeOpen(true);
+                          }}
+                          disabled={!micSupported || isListening}
+                          initial={{ scale: 0.6, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                          whileTap={{ scale: 0.9 }}
+                          aria-label="Mode vocal"
+                          title="Mode vocal (conversation à la voix)"
+                          className="absolute inset-0 flex items-center justify-center rounded-full bg-sky-500/10 text-sky-700 transition-colors duration-150 hover:bg-sky-500/[0.16] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:bg-sky-400/[0.16]"
+                        >
+                          <AudioLines strokeWidth={1.75} className="h-5 w-5" />
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
               </div>
             </div>

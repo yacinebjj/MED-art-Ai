@@ -147,7 +147,7 @@ export function ThemeModeSwitcher({ className }: { className?: string }) {
       <DropdownMenuTrigger
         aria-label={language === "fr" ? "Changer de thème" : "Change theme"}
         className={cn(
-          "flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           current === "night" && "text-amber-500",
           className
         )}

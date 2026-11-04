@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { FileText, Layers, Lightbulb, ListChecks, Scale, SlidersHorizontal, Stethoscope, type LucideIcon } from "lucide-react";
+import { FileText, Layers, Lightbulb, ListChecks, Scale, Stethoscope, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAssistant, type ASSISTANT_TRANSLATIONS } from "@/lib/translations/assistant";
-import { Switch } from "@/components/ui/Switch";
-import { ASSISTANT_STYLES, type AssistantMode, type AssistantPrefs, type AssistantStyle } from "@/lib/assistant-modes";
+import type { AssistantMode } from "@/lib/assistant-modes";
 
 type TranslationKey = keyof typeof ASSISTANT_TRANSLATIONS;
 
@@ -21,134 +19,62 @@ export const QUICK_ACTIONS: { mode: AssistantMode; icon: LucideIcon; label: Tran
   { mode: "flashcards", icon: Layers, label: "modeFlashcards", placeholder: "placeholderFlashcards" },
 ];
 
-const STYLE_LABEL: Record<AssistantStyle, { label: TranslationKey; hint: TranslationKey }> = {
-  academic: { label: "styleAcademic", hint: "styleAcademicHint" },
-  simple: { label: "styleSimple", hint: "styleSimpleHint" },
-  patient: { label: "stylePatient", hint: "stylePatientHint" },
-};
-
 /**
  * Chips above the composer. A chip does NOT send anything: it arms a quick
  * action ("QCM", "Flashcards"…) for the student's NEXT message, which the
  * server then answers with that action's dedicated instructions (see
- * lib/ai/assistant-prompts.ts). Tapping the armed chip again disarms it. The
- * leading sliders button opens the answer-style settings.
+ * lib/ai/assistant-prompts.ts). Tapping the armed chip again disarms it.
  */
 export function QuickActionBar({
   mode,
   onSelectMode,
-  prefs,
-  onChangePrefs,
   disabled = false,
 }: {
   mode: AssistantMode | null;
   onSelectMode: (mode: AssistantMode | null) => void;
-  prefs: AssistantPrefs;
-  onChangePrefs: (next: AssistantPrefs) => void;
   disabled?: boolean;
 }) {
   const { language } = useLanguage();
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  // Which ends have more chips beyond them: only those fade (.copilot-chip-strip, app/globals.css).
+  const [overflow, setOverflow] = useState({ start: false, end: false });
 
   useEffect(() => {
-    if (!settingsOpen) return;
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target as Node;
-      if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
-      setSettingsOpen(false);
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [settingsOpen]);
-
-  const customized = prefs.style !== "academic" || prefs.stepByStep;
+    const strip = stripRef.current;
+    const row = rowRef.current;
+    if (!strip || !row) return;
+    const measure = () => {
+      const start = strip.scrollLeft > 1;
+      const end = strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1;
+      setOverflow((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+    };
+    measure();
+    strip.addEventListener("scroll", measure, { passive: true });
+    // The strip's own width (window, history panel) and the chips' (language switch).
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    observer.observe(row);
+    return () => {
+      strip.removeEventListener("scroll", measure);
+      observer.disconnect();
+    };
+  }, []);
 
   return (
-    <div className="relative">
-      <AnimatePresence>
-        {settingsOpen && (
-          <motion.div
-            ref={panelRef}
-            role="dialog"
-            aria-label={tAssistant("settingsTitle", language)}
-            initial={{ opacity: 0, y: 8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ duration: 0.16 }}
-            className="absolute bottom-full left-3 right-3 z-40 mb-2 rounded-2xl border border-border bg-popover p-3.5 text-popover-foreground shadow-glass dark:shadow-glass-dark sm:right-auto sm:w-80"
-          >
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tAssistant("settingsTitle", language)}</p>
-
-            <div role="radiogroup" aria-label={tAssistant("settingsTitle", language)} className="grid grid-cols-3 gap-1 rounded-xl bg-black/[0.04] p-1 dark:bg-white/[0.06]">
-              {ASSISTANT_STYLES.map((style) => (
-                <button
-                  key={style}
-                  type="button"
-                  role="radio"
-                  aria-checked={prefs.style === style}
-                  onClick={() => {
-                    haptic();
-                    onChangePrefs({ ...prefs, style });
-                  }}
-                  className={cn(
-                    "min-h-11 rounded-lg px-2 text-sm font-medium transition-[background-color,color,transform] duration-150 active:scale-95",
-                    prefs.style === style ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
-                  )}
-                >
-                  {tAssistant(STYLE_LABEL[style].label, language)}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 px-1 text-xs leading-relaxed text-muted-foreground">{tAssistant(STYLE_LABEL[prefs.style].hint, language)}</p>
-
-            <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-between gap-3 border-t border-black/[0.08] pt-3 dark:border-white/10">
-              <span className="min-w-0">
-                <span className="block text-sm font-medium text-foreground">{tAssistant("stepByStep", language)}</span>
-                <span className="block text-xs leading-snug text-muted-foreground">{tAssistant("stepByStepHint", language)}</span>
-              </span>
-              <Switch
-                checked={prefs.stepByStep}
-                onCheckedChange={(checked) => {
-                  haptic();
-                  onChangePrefs({ ...prefs, stepByStep: checked });
-                }}
-                aria-label={tAssistant("stepByStep", language)}
-              />
-            </label>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div
-        role="toolbar"
-        data-tour="asst-quick"
-        aria-label={tAssistant("quickActionsLabel", language)}
-        // The chips scroll sideways INSIDE this strip only (contained, pan-x);
-        // the page itself can never move — see the thread's overflow-x lock.
-        className="flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-2.5 pt-0.5 [-ms-overflow-style:none] [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        <button
-          ref={buttonRef}
-          type="button"
-          onClick={() => {
-            haptic();
-            setSettingsOpen((open) => !open);
-          }}
-          aria-label={tAssistant("settings", language)}
-          aria-expanded={settingsOpen}
-          className={cn(
-            "relative flex h-11 shrink-0 items-center justify-center rounded-full border px-3.5 transition-[transform,background-color] duration-150 active:scale-95",
-            settingsOpen || customized
-              ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-              : "border-black/[0.06] bg-white/70 text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60"
-          )}
-        >
-          <SlidersHorizontal strokeWidth={1.75} className="h-[18px] w-[18px]" />
-          {customized && <span aria-hidden className="absolute right-2 top-2 h-2 w-2 rounded-full bg-sky-600 ring-2 ring-card" />}
-        </button>
-
+    <div
+      ref={stripRef}
+      role="toolbar"
+      data-tour="asst-quick"
+      aria-label={tAssistant("quickActionsLabel", language)}
+      data-fade-start={overflow.start ? "" : undefined}
+      data-fade-end={overflow.end ? "" : undefined}
+      // The chips scroll sideways INSIDE this strip only (contained, pan-x);
+      // the page itself can never move — see the thread's overflow-x lock.
+      className="copilot-chip-strip overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
+      {/* w-max + mx-auto: centred while the chips fit, scrolling from the first one once they don't. */}
+      <div ref={rowRef} className="mx-auto flex w-max gap-2 px-4 pb-3 pt-1">
         {QUICK_ACTIONS.map(({ mode: actionMode, icon: Icon, label }) => {
           const active = mode === actionMode;
           return (
@@ -159,17 +85,16 @@ export function QuickActionBar({
               aria-pressed={active}
               onClick={() => {
                 haptic();
-                setSettingsOpen(false);
                 onSelectMode(active ? null : actionMode);
               }}
               className={cn(
-                "flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-sm font-medium transition-[transform,background-color,color,border-color,box-shadow] duration-150 active:scale-95 disabled:opacity-50",
+                "flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-[13px] font-medium transition-[transform,background-color,color,border-color,box-shadow] duration-150 active:scale-95 disabled:opacity-50 sm:h-10",
                 active
-                  ? "border-sky-600 bg-sky-600 text-white shadow-[0_6px_18px_-8px_rgba(14,165,233,0.6)]"
-                  : "border-black/[0.06] bg-white/70 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.06] dark:text-white/80 dark:hover:bg-white/[0.1]"
+                  ? "border-transparent bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-[0_8px_20px_-10px_rgba(14,165,233,0.75)]"
+                  : "border-black/[0.06] bg-white/60 text-slate-600 hover:bg-white hover:text-slate-900 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/70 dark:hover:bg-white/[0.08] dark:hover:text-white"
               )}
             >
-              <Icon strokeWidth={1.75} className="h-4 w-4" />
+              <Icon strokeWidth={1.75} className={cn("h-4 w-4", active ? "text-white" : "text-sky-600 dark:text-sky-300")} />
               {tAssistant(label, language)}
             </button>
           );

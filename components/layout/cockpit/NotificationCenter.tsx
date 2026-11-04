@@ -206,7 +206,7 @@ export function NotificationCenter() {
     <DropdownMenu onOpenChange={(open) => !open && unread.length > 0 && markAllRead()}>
       <DropdownMenuTrigger
         aria-label={tCockpit("notifications", language)}
-        className="relative flex h-10 w-10 items-center sm:h-9 sm:w-9 justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative flex h-10 w-10 items-center sm:h-9 sm:w-9 justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Bell className={cn("h-4 w-4", unread.length > 0 && "text-foreground")} />
         <AnimatePresence>

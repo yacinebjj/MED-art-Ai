@@ -216,23 +216,68 @@
     background-image: linear-gradient(to bottom, #030712, transparent);
   }
 
-  /* MedArt Assistant (app/dashboard/(shell)/assistant/page.tsx): its own
-     clean, opaque canvas — the theme background with a faint brand glow at
-     the top, no aurora, mesh grid or video behind the conversation. */
+  /* MedArt Copilot (app/dashboard/(shell)/assistant/page.tsx): its own
+     opaque atmosphere, no aurora, mesh grid or video behind the
+     conversation. On phones it is the full-screen chat surface; from lg the
+     shell paints it behind the sidebar and topbar too
+     (app/dashboard/(shell)/layout.tsx), so the light is never boxed in.
+     Liquid light, in the logo's blues: one tall swell rising from below the
+     fold almost to the top (eased stops, so no ring or band
+     shows), two off-centre currents that keep it from reading as a
+     symmetric spotlight, and in dark a faint veil behind the welcome. */
   .copilot-canvas {
-    /* Light: a cool off-white (never stark #fff) lifted by a faint petrol
-       glow from the base and a whisper of brand green at the top. */
-    background-color: #f5f7fa;
+    /* Light: a cool off-white (never stark #fff) under a soft sky haze. */
+    background-color: #f6f8fb;
     background-image:
-      radial-gradient(140% 70% at 50% 120%, rgb(14 116 144 / 0.1), transparent 70%),
-      radial-gradient(120% 55% at 50% 0%, rgb(16 185 129 / 0.05), transparent 70%);
+      radial-gradient(135% 130% at 50% 115%, rgb(56 189 248 / 0.26) 0%, rgb(56 189 248 / 0.19) 20%, rgb(96 165 250 / 0.12) 40%, rgb(147 197 253 / 0.07) 60%, rgb(191 219 254 / 0.03) 80%, transparent 100%),
+      radial-gradient(60% 80% at 2% 100%, rgb(34 211 238 / 0.12), transparent 70%),
+      radial-gradient(65% 85% at 98% 95%, rgb(59 130 246 / 0.12), transparent 70%);
   }
 
   .dark .copilot-canvas {
-    /* Dark: OLED black at the top, easing (non-linearly, no visible band)
-       into deep petrol / navy at the base. */
+    /* Dark: OLED black at the top, deepening into the logo's medical blue. */
     background-color: #000;
-    background-image: radial-gradient(150% 85% at 50% 125%, rgb(13 51 67) 0%, rgb(7 28 40 / 0.85) 30%, rgb(3 12 20 / 0.55) 58%, transparent 80%);
+    background-image:
+      radial-gradient(135% 130% at 50% 115%, rgb(14 165 233 / 0.36) 0%, rgb(14 140 222 / 0.27) 20%, rgb(29 100 210 / 0.18) 40%, rgb(30 64 175 / 0.1) 60%, rgb(23 37 84 / 0.04) 80%, transparent 100%),
+      radial-gradient(60% 80% at 2% 100%, rgb(34 211 238 / 0.14), transparent 70%),
+      radial-gradient(65% 85% at 98% 95%, rgb(37 99 235 / 0.22), transparent 70%),
+      radial-gradient(100% 60% at 50% 45%, rgb(14 165 233 / 0.05), transparent 75%);
+  }
+
+  /* The Copilot thread and welcome dissolve before they reach the floating
+     composer (and, on phones, the header), so neither needs a bar or band
+     behind it and the atmosphere runs unbroken to the screen's edges. The
+     chat column measures both live (--copilot-header-h, --copilot-composer-h);
+     the fades end just above the chips and just below the header buttons,
+     and the thread's own padding keeps its first and last lines clear of them. */
+  .copilot-thread-fade {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent calc(var(--copilot-header-h, 0px) - 0.75rem),
+      #000 calc(var(--copilot-header-h, 0px) + 1rem),
+      #000 calc(100% - var(--copilot-composer-h, 0px) - 1rem),
+      transparent calc(100% - var(--copilot-composer-h, 0px) + 1rem)
+    );
+  }
+
+  /* Copilot quick-action chips (components/assistant/QuickActionBar.tsx):
+     the strip fades only at an end with more chips beyond it — the bar sets
+     the data attributes as it scrolls — so a row that fits ends crisply. */
+  .copilot-chip-strip {
+    --chip-fade-start: 0px;
+    --chip-fade-end: 0px;
+    mask-image: linear-gradient(to right, transparent, #000 var(--chip-fade-start), #000 calc(100% - var(--chip-fade-end)), transparent);
+    transition:
+      --chip-fade-start 0.24s ease,
+      --chip-fade-end 0.24s ease;
+  }
+
+  .copilot-chip-strip[data-fade-start] {
+    --chip-fade-start: 3rem;
+  }
+
+  .copilot-chip-strip[data-fade-end] {
+    --chip-fade-end: 3rem;
   }
 
   /* Any active paid plan: the neon halo around the student's avatar
@@ -1342,6 +1387,19 @@ html.theme-reveal::view-transition-new(root) {
   .copilot-shimmer {
     animation-duration: 3.6s;
   }
+}
+
+/* Registered so the chip strip's edge fades glide in and out (.copilot-chip-strip). */
+@property --chip-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --chip-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
 }
 
 /* Copilot welcome (desktop): the ambient light behind the orb drifts — transform only. */

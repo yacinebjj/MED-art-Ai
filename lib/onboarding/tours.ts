@@ -482,8 +482,8 @@ export const TOURS: Record<TourId, TourDefinition> = {
         badge: { fr: "Actions rapides", en: "Quick actions" },
         title: { fr: "Une demande en un appui", en: "A request in one tap" },
         body: {
-          fr: "Cas clinique, QCM, diagnostic différentiel, résumé, simplification, flashcards : un appui prépare la demande. « Réglages » change le style des réponses.",
-          en: "Clinical case, MCQs, differential diagnosis, summary, simplify, flashcards: one tap drafts the request. Settings changes the answer style.",
+          fr: "Cas clinique, QCM, diagnostic différentiel, résumé, simplification, flashcards : un appui prépare la demande.",
+          en: "Clinical case, MCQs, differential diagnosis, summary, simplify, flashcards: one tap drafts the request.",
         },
       },
       {

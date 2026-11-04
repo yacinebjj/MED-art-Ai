@@ -85,7 +85,6 @@ function ConversationRow({
 
   return (
     <motion.div
-      layout
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -12, transition: { duration: 0.15 } }}
@@ -93,7 +92,7 @@ function ConversationRow({
       className={cn(
         "group relative flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors duration-200",
         isActive
-          ? "bg-sky-50 text-sky-800 shadow-[inset_2px_0_0_0_theme(colors.emerald.500)] dark:bg-sky-500/10 dark:text-sky-300"
+          ? "bg-sky-50 text-sky-800 shadow-[inset_2px_0_0_0_theme(colors.sky.500)] dark:bg-sky-500/10 dark:text-sky-300"
           : "text-slate-700 hover:bg-accent hover:text-foreground dark:text-white/80"
       )}
     >
@@ -121,7 +120,7 @@ function ConversationRow({
             aria-label={confirming ? "Confirmer la suppression" : "Supprimer la conversation"}
             className={cn(
               // Hover-reveal only where a real hover exists — on touch tablets `sm:opacity-0` hid it for good.
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-md opacity-100 transition-all duration-200 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-md opacity-100 transition-[opacity,background-color,color,transform] duration-200 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
               confirming
                 ? "scale-105 bg-destructive/15 text-destructive opacity-100 ring-1 ring-destructive/40"
                 : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -200,7 +199,7 @@ export function ConversationSidebar({
         data-tour="asst-history"
         className={cn(
           // The drawer glides on the app's sheet curve (app/globals.css MOTION SYSTEM).
-          "glass-panel fixed inset-y-0 left-0 z-50 flex h-full w-72 max-w-[85vw] shrink-0 flex-col overflow-hidden border-r border-l-0 border-y-0 shadow-glass transition-transform [transition-duration:420ms] [transition-timing-function:cubic-bezier(0.32,0.72,0,1)] dark:shadow-glass-dark lg:static lg:z-auto lg:max-w-none lg:translate-x-0 lg:transition-[width]",
+          "glass-panel fixed inset-y-0 left-0 z-50 flex h-full w-72 max-w-[85vw] shrink-0 flex-col overflow-hidden border-r border-l-0 border-y-0 shadow-glass transition-transform [transition-duration:420ms] [transition-timing-function:cubic-bezier(0.32,0.72,0,1)] dark:shadow-glass-dark lg:static lg:z-auto lg:max-w-none lg:translate-x-0 lg:border-black/[0.06] lg:bg-transparent lg:shadow-none lg:backdrop-blur-none lg:transition-[width] lg:dark:border-white/[0.06] lg:dark:bg-transparent lg:dark:shadow-none",
           "max-lg:pb-[env(safe-area-inset-bottom)] max-lg:pl-[env(safe-area-inset-left)] max-lg:pt-[env(safe-area-inset-top)]",
           isOpen ? "translate-x-0" : "-translate-x-full",
           isOpen ? "lg:w-72" : "lg:w-0 lg:border-r-0"

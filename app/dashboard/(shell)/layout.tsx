@@ -102,9 +102,10 @@ const CHROMELESS_MOBILE_ROUTES = ["/dashboard/assistant"];
 // on large screens (1080p / 4K) than the text-first pages.
 const WIDE_ROUTES = ["/dashboard"];
 
-// These pages paint their own opaque canvas over the whole frame (the
-// assistant's .copilot-canvas): the 3D DNA behind them would render every
-// frame for nothing, so it is not mounted there.
+// These pages bring their own atmosphere (the Copilot's .copilot-canvas):
+// the shell paints it instead of the aurora, behind the sidebar and topbar
+// too, so on desktop the light runs under everything rather than inside a
+// boxed panel. The 3D DNA and the mesh grid are not mounted there.
 const OWN_CANVAS_ROUTES = ["/dashboard/assistant"];
 
 /**
@@ -140,6 +141,7 @@ export default function DashboardShellLayout({
   const isFullBleed = FULL_BLEED_ROUTES.includes(pathname);
   const needsFixedHeight = isFullBleed || FIXED_HEIGHT_ROUTES.includes(pathname) || isGroupChatRoomRoute(pathname);
   const isChromelessOnMobile = CHROMELESS_MOBILE_ROUTES.includes(pathname);
+  const ownsCanvas = OWN_CANVAS_ROUTES.includes(pathname);
   // Pages that scroll as a whole run under the glass Topbar; the ones that
   // own their scrolling (full-bleed, fixed-height) start below it instead.
   const scrollsUnderTopbar = !needsFixedHeight;
@@ -214,10 +216,10 @@ export default function DashboardShellLayout({
       >
         Aller au contenu principal
       </a>
-      <div className="aurora-canvas-bg relative flex h-dvh w-full overflow-hidden">
-        <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+      <div className={cn("relative flex h-dvh w-full overflow-hidden", ownsCanvas ? "copilot-canvas" : "aurora-canvas-bg")}>
+        {!ownsCanvas && <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />}
         {/* Pages sit on this same canvas — their cyber stages are bare now, see CyberStage. */}
-        {!OWN_CANVAS_ROUTES.includes(pathname) && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
+        {!ownsCanvas && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
 
         <div className="hidden shrink-0 lg:block lg:p-3">
           <Sidebar />

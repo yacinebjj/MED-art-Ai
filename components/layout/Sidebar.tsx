@@ -311,8 +311,7 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
     collapsed ? "justify-center px-0" : "px-2.5",
     isActive
       ? cn("font-semibold", hue.activeText)
-      : "font-medium text-muted-foreground hover:bg-white/50 hover:text-foreground dark:hover:bg-white/5",
-    !isActive && !collapsed && "hover:translate-x-0.5"
+      : "font-medium text-muted-foreground hover:bg-white/50 hover:text-foreground dark:hover:bg-white/5"
   );
 
   const inner = (
@@ -328,12 +327,12 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
           />
         </>
       )}
-      {/* 3D icon chip: gradient body + inner top highlight + ring, lifted/tilted on hover with a colored aura. */}
+      {/* 3D icon chip: gradient body + inner top highlight + ring; on hover a gentle swell and a colored aura (no lift or tilt chasing the cursor). */}
       <span
         className={cn(
           "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br ring-1 ring-inset",
           "shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_4px_10px_-4px_rgba(0,0,0,0.35)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_6px_14px_-6px_rgba(0,0,0,0.8)]",
-          "transition-all duration-300 ease-out will-change-transform group-hover:-translate-y-0.5 group-hover:rotate-3 group-hover:scale-[1.15] motion-reduce:transform-none",
+          "transition-[transform,filter] duration-200 ease-out group-hover:scale-[1.06] motion-reduce:transform-none",
           hue.tile,
           hue.glow,
           isActive && cn("scale-105", hue.activeGlow)

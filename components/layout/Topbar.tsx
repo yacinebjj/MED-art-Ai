@@ -149,7 +149,7 @@ function PlanBadge() {
     <Link
       href="/dashboard/billing"
       className={cn(
-        "hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all duration-200 hover:-translate-y-0.5 xl:inline-flex",
+        "hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-[filter] duration-200 hover:brightness-105 xl:inline-flex",
         plan.paidActive
           ? "border-amber-300/70 bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 dark:border-amber-700/50 dark:from-amber-950/40 dark:to-orange-950/40 dark:text-amber-300"
           : "border-border/60 bg-background/60 text-muted-foreground"
