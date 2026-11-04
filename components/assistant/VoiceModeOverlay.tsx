@@ -38,13 +38,22 @@ const STATE_COPY: Record<VoiceState, string> = {
   speaking: "Je te réponds…",
 };
 
-const STATE_TONES: Record<VoiceState, { core: string; glow: string }> = {
-  idle: { core: "from-slate-300 via-slate-500 to-slate-700", glow: "rgba(148,163,184,0.35)" },
-  listening: { core: "from-sky-200 via-cyan-400 to-sky-600", glow: "rgba(34,211,238,0.55)" },
-  transcribing: { core: "from-cyan-200 via-sky-400 to-indigo-600", glow: "rgba(56,189,248,0.5)" },
-  thinking: { core: "from-fuchsia-300 via-violet-500 to-indigo-700", glow: "rgba(139,92,246,0.6)" },
-  speaking: { core: "from-cyan-200 via-blue-500 to-violet-600", glow: "rgba(59,130,246,0.6)" },
+/** `core`: the sphere's gradient; `light`: its ambient light ("r g b") and that light's peak opacity. */
+const STATE_TONES: Record<VoiceState, { core: string; light: string; peak: number }> = {
+  idle: { core: "from-slate-300 via-slate-500 to-slate-700", light: "148 163 184", peak: 0.3 },
+  listening: { core: "from-sky-200 via-cyan-400 to-sky-600", light: "34 211 238", peak: 0.5 },
+  transcribing: { core: "from-cyan-200 via-sky-400 to-indigo-600", light: "56 189 248", peak: 0.46 },
+  thinking: { core: "from-fuchsia-300 via-violet-500 to-indigo-700", light: "139 92 246", peak: 0.52 },
+  speaking: { core: "from-cyan-200 via-blue-500 to-violet-600", light: "59 130 246", peak: 0.54 },
 };
+
+const VOICE_STATES = Object.keys(STATE_TONES) as VoiceState[];
+
+/** The light pooled around the orb: an eased radial falloff that reaches zero at its own edge, so it never shows a boundary. */
+function ambientLight({ light, peak }: { light: string; peak: number }): string {
+  const at = (share: number) => `rgb(${light} / ${(peak * share).toFixed(3)})`;
+  return `radial-gradient(closest-side, ${at(1)} 0%, ${at(0.55)} 22%, ${at(0.26)} 42%, ${at(0.1)} 62%, ${at(0.03)} 80%, transparent 100%)`;
+}
 
 /** Text that reads well aloud: no markdown, no URLs, no emoji noise. */
 function toSpeakable(markdown: string): string {
@@ -351,7 +360,6 @@ export function VoiceModeOverlay({ open, onClose, onAsk }: { open: boolean; onCl
     setPaused(!paused);
   }
 
-  const tone = STATE_TONES[state];
   const voiceLabel = voices.filter((v) => /^fr/i.test(v.lang))[voiceIndex % Math.max(1, voices.filter((v) => /^fr/i.test(v.lang)).length)]?.name;
 
   if (!mounted) return null;
@@ -368,37 +376,64 @@ export function VoiceModeOverlay({ open, onClose, onAsk }: { open: boolean; onCl
           transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
           className="fixed inset-0 z-[9998] flex flex-col items-center justify-between overflow-hidden bg-black px-4 pb-[calc(1.75rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] text-white"
         >
-          <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(150%_85%_at_50%_120%,rgba(13,51,67,0.95)_0%,rgba(6,26,38,0.75)_32%,rgba(3,12,20,0.45)_58%,transparent_80%)]" />
-
           <div className="relative flex w-full max-w-xl items-center justify-center">
             <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/45">Mode vocal · MedArt</p>
           </div>
 
-          {/* 3D neural orb */}
-          <button type="button" onClick={handleOrbTap} aria-label={STATE_COPY[state]} className="relative flex h-72 w-72 items-center justify-center [perspective:900px] focus:outline-none sm:h-80 sm:w-80">
+          {/* The orb, free-floating: no frame, no box. Its light is drawn with
+              radial gradients that fade to nothing at their own edge — never a
+              blur filter, which iOS Safari clips into a hard-edged square on a
+              moving 3D layer (the "box" around the sphere). The pools reach
+              far past the orb, so no edge ever shows; each state's colour
+              cross-fades into the next. */}
+          <button type="button" onClick={handleOrbTap} aria-label={STATE_COPY[state]} className="relative flex h-72 w-72 items-center justify-center rounded-full focus:outline-none sm:h-80 sm:w-80">
             <div ref={orbRef} className="relative flex h-full w-full items-center justify-center" style={{ ["--level" as string]: 0 }}>
-              <span
-                aria-hidden
-                className="absolute inset-6 rounded-full blur-3xl transition-colors duration-700"
-                style={{ background: tone.glow, transform: "scale(calc(0.85 + var(--level) * 0.5))" }}
-              />
+              {/* Ambient light: a wide haze and a brighter pool, breathing with the voice. */}
+              <span aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[340%] w-[340%] -translate-x-1/2 -translate-y-1/2">
+                {VOICE_STATES.map((key) => (
+                  <span
+                    key={key}
+                    className="absolute inset-0 rounded-full transition-opacity duration-700 ease-out"
+                    style={{ opacity: key === state ? 0.45 : 0, background: ambientLight(STATE_TONES[key]) }}
+                  />
+                ))}
+              </span>
+              <span aria-hidden className="pointer-events-none absolute inset-0" style={{ transform: "scale(calc(0.92 + var(--level) * 0.4))", transition: "transform 80ms linear" }}>
+                {VOICE_STATES.map((key) => (
+                  <span
+                    key={key}
+                    className="absolute -inset-[40%] rounded-full transition-opacity duration-700 ease-out"
+                    style={{ opacity: key === state ? 1 : 0, background: ambientLight(STATE_TONES[key]) }}
+                  />
+                ))}
+              </span>
               {(state === "thinking" || state === "transcribing") && !reduceMotion && (
-                <>
+                // Only the thin orbit rings live in 3D.
+                <span aria-hidden className="pointer-events-none absolute inset-0 [perspective:900px]">
                   <motion.span aria-hidden className="absolute inset-4 rounded-full border border-violet-300/25" style={{ transformStyle: "preserve-3d" }} animate={{ rotateX: [65, 65], rotateZ: [0, 360] }} transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }} />
                   <motion.span aria-hidden className="absolute inset-10 rounded-full border border-cyan-200/20" style={{ transformStyle: "preserve-3d" }} animate={{ rotateY: [70, 70], rotateZ: [360, 0] }} transition={{ duration: 3.2, repeat: Infinity, ease: "linear" }} />
-                </>
+                </span>
               )}
               {state === "speaking" && !reduceMotion && (
                 <span aria-hidden className="absolute inset-8 rounded-full border border-sky-200/20" style={{ transform: "scale(calc(1 + var(--level) * 0.25))", transition: "transform 80ms linear" }} />
               )}
               <motion.span
                 aria-hidden
-                className={cn("relative h-40 w-40 rounded-full bg-gradient-to-br shadow-[inset_-18px_-22px_40px_rgba(2,6,23,0.55),inset_14px_16px_30px_rgba(255,255,255,0.35)] sm:h-44 sm:w-44", tone.core)}
+                className="relative h-40 w-40 rounded-full sm:h-44 sm:w-44"
                 style={{ transform: "scale(calc(1 + var(--level) * 0.28))", transition: "transform 70ms linear" }}
                 animate={reduceMotion || state === "listening" || state === "speaking" ? undefined : { scale: [1, 1.04, 1] }}
                 transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
               >
-                <span className="absolute left-[22%] top-[18%] h-10 w-14 rotate-[-25deg] rounded-full bg-white/40 blur-md" />
+                {VOICE_STATES.map((key) => (
+                  <span
+                    key={key}
+                    className={cn("absolute inset-0 rounded-full bg-gradient-to-br transition-opacity duration-700 ease-out", STATE_TONES[key].core)}
+                    style={{ opacity: key === state ? 1 : 0 }}
+                  />
+                ))}
+                {/* Shading and a specular highlight over the colour: a lit sphere, no filters. */}
+                <span className="absolute inset-0 rounded-full shadow-[inset_-18px_-22px_40px_rgba(2,6,23,0.55),inset_14px_16px_30px_rgba(255,255,255,0.35)]" />
+                <span className="absolute left-[20%] top-[14%] h-12 w-16 rotate-[-25deg] rounded-full bg-[radial-gradient(closest-side,rgba(255,255,255,0.6),rgba(255,255,255,0.18)_55%,transparent)]" />
               </motion.span>
             </div>
           </button>

@@ -45,7 +45,6 @@ import {
   Upload,
   Users,
   Wind,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { Language } from "@/providers/LanguageProvider";
@@ -472,18 +471,6 @@ export const TOURS: Record<TourId, TourDefinition> = {
         body: {
           fr: "Pose ta question comme à un interne de garde : il explique, compare et te fait réciter.",
           en: "Ask the way you'd ask a resident on call: it explains, compares and quizzes you.",
-        },
-      },
-      {
-        id: "quick",
-        targets: ["asst-quick"],
-        icon: Zap,
-        ...HUE.violet,
-        badge: { fr: "Actions rapides", en: "Quick actions" },
-        title: { fr: "Une demande en un appui", en: "A request in one tap" },
-        body: {
-          fr: "Cas clinique, QCM, diagnostic différentiel, résumé, simplification, flashcards : un appui prépare la demande.",
-          en: "Clinical case, MCQs, differential diagnosis, summary, simplify, flashcards: one tap drafts the request.",
         },
       },
       {

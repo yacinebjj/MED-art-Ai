@@ -52,7 +52,7 @@ import { stopSpeaking } from "@/hooks/useSpeechSynthesis";
 import { useVisualViewportBox } from "@/hooks/useVisualViewportBox";
 import { ConversationSidebar, ConversationSidebarCollapsedToggle } from "@/components/assistant/ConversationSidebar";
 import { MessageActions } from "@/components/assistant/MessageActions";
-import { QUICK_ACTIONS, QuickActionBar } from "@/components/assistant/QuickActionBar";
+import { QUICK_ACTIONS } from "@/components/assistant/QuickActionBar";
 import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
 import { VoiceMeter } from "@/components/assistant/VoiceMeter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
@@ -1158,11 +1158,6 @@ export default function AssistantPage() {
   const activeAction = mode ? QUICK_ACTIONS.find((action) => action.mode === mode) : undefined;
   const composerPlaceholder = activeAction ? tAssistant(activeAction.placeholder, language) : tAssistant("composerPlaceholder", language);
 
-  function handleSelectMode(next: AssistantMode | null) {
-    setMode(next);
-    if (next) textareaRef.current?.focus();
-  }
-
   function attachmentLabel(kind: AttachmentKind, fallback: string): string {
     return kind === "image" ? tAssistant("attachImage", language) : kind === "camera" ? tAssistant("attachCamera", language) : fallback;
   }
@@ -1348,15 +1343,8 @@ export default function AssistantPage() {
           )}
         >
           <div className="mx-auto w-full max-w-3xl">
-            {/* Comes back with a fade when the keyboard closes (motion-swap, app/globals.css). */}
-            {!keyboardOpen && (
-              <div className="motion-swap">
-                <QuickActionBar mode={mode} onSelectMode={handleSelectMode} disabled={isTyping || isListening} />
-              </div>
-            )}
-
             <div className="px-3 sm:px-4">
-              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[32px] border border-black/[0.06] bg-white/85 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_44px_-18px_rgba(15,23,42,0.28)] backdrop-blur-2xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_16px_48px_-16px_rgba(14,165,233,0.38)] dark:border-white/[0.09] dark:bg-[#0e1115]/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_24px_64px_-20px_rgba(0,0,0,0.9)] dark:focus-within:border-sky-400/25 dark:focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_0_0_1px_rgba(56,189,248,0.16),0_24px_64px_-20px_rgba(14,165,233,0.32)]">
+              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[36px] border border-black/[0.06] bg-white/85 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_44px_-18px_rgba(15,23,42,0.28)] backdrop-blur-2xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_16px_48px_-16px_rgba(14,165,233,0.38)] dark:border-white/[0.09] dark:bg-[#0e1115]/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_24px_64px_-20px_rgba(0,0,0,0.9)] dark:focus-within:border-sky-400/25 dark:focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_0_0_1px_rgba(56,189,248,0.16),0_24px_64px_-20px_rgba(14,165,233,0.32)]">
                 <AnimatePresence initial={false}>
                   {activeAction && (
                     <motion.div
@@ -1413,7 +1401,7 @@ export default function AssistantPage() {
                   </div>
                 )}
 
-                <div className="flex w-full items-end gap-1.5 px-2.5 py-2.5">
+                <div className="flex w-full items-end gap-1.5 p-3.5">
                   <div className="relative shrink-0">
                     <button
                       ref={attachmentButtonRef}

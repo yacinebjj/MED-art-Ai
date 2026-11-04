@@ -24,6 +24,10 @@ export const QUICK_ACTIONS: { mode: AssistantMode; icon: LucideIcon; label: Tran
  * action ("QCM", "Flashcards"…) for the student's NEXT message, which the
  * server then answers with that action's dedicated instructions (see
  * lib/ai/assistant-prompts.ts). Tapping the armed chip again disarms it.
+ *
+ * Not rendered since the user had the bar removed from above the composer;
+ * kept for QUICK_ACTIONS (the thread still labels messages sent with a mode)
+ * and so the bar can come back in one line.
  */
 export function QuickActionBar({
   mode,
