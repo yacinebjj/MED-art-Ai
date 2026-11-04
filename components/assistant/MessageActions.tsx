@@ -8,6 +8,7 @@ import { Check, Copy, FileDown, Flag, Loader2, MoreHorizontal, NotebookPen, Refr
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
 import { exportReplyToPdf } from "@/lib/assistant-export";
+import { cleanAssistantMarkdown } from "@/lib/assistant-markdown";
 import { speak, stopSpeaking, useSpeakingId } from "@/hooks/useSpeechSynthesis";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -16,8 +17,14 @@ import { useToast } from "@/components/ui/Toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
 
+// Quiet until touched: grey glyphs, a soft disc on hover, no colour change.
+// Desktop: 32 px discs with 16 px glyphs. Phones: 40 px boxes around the same
+// small glyphs, so thumbs still land. The row's negative margin lines the
+// first glyph up with the reply's text.
 const ICON_BUTTON =
-  "flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-[transform,background-color,color] duration-150 active:scale-90 active:bg-accent hover:bg-accent hover:text-sky-500 disabled:opacity-50 sm:h-9 sm:w-9";
+  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 outline-none transition-[background-color,color,transform] duration-150 ease-out hover:bg-black/[0.05] hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-sky-500/40 active:scale-[0.92] active:bg-black/[0.06] disabled:pointer-events-none disabled:opacity-40 dark:text-white/40 dark:hover:bg-white/[0.07] dark:hover:text-white/85 dark:active:bg-white/[0.08] sm:h-8 sm:w-8";
+const ICON = "h-4 w-4";
+const MENU_ICON = "h-[18px] w-[18px] sm:h-4 sm:w-4";
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -29,7 +36,7 @@ function MenuItem({ icon, label, onClick, tone = "default" }: { icon: ReactNode;
       type="button"
       onClick={onClick}
       className={cn(
-        "flex min-h-12 w-full items-center gap-3 px-4 text-left text-[15px] transition-colors active:bg-accent hover:bg-accent sm:min-h-10 sm:text-sm",
+        "flex min-h-12 w-full items-center gap-3 px-4 text-left text-[15px] transition-colors active:bg-accent hover:bg-accent sm:min-h-9 sm:rounded-xl sm:px-3 sm:text-[13.5px]",
         tone === "danger" && "text-rose-600 dark:text-rose-400",
         tone === "active" && "text-sky-600 dark:text-sky-400",
         tone === "default" && "text-foreground"
@@ -72,6 +79,8 @@ export function MessageActions({
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [reported, setReported] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Opens upward unless the button sits near the top: below the last reply is the composer's fade.
+  const [menuUp, setMenuUp] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -105,10 +114,15 @@ export function MessageActions({
     return html.replace(/\s(?:class|style)="[^"]*"/g, "");
   }
 
+  /** The reply as readable Markdown: LaTeX turned into plain symbols, formulas on lines of their own. */
+  function readableReply(): string {
+    return cleanAssistantMarkdown(content, { formulaBlocks: false, typography: false });
+  }
+
   async function handleCopy() {
     haptic();
     try {
-      await navigator.clipboard.writeText(content);
+      await navigator.clipboard.writeText(readableReply());
       setCopied(true);
       later(() => setCopied(false), 1500);
     } catch {
@@ -122,7 +136,7 @@ export function MessageActions({
       stopSpeaking();
       return;
     }
-    const result = speak(messageId, content, language, () =>
+    const result = speak(messageId, readableReply(), language, () =>
       toast({ variant: "error", title: tAssistant("speechFailed", language), description: tAssistant("speechFailedHint", language) })
     );
     if (!result.ok && result.reason !== "empty") {
@@ -184,12 +198,12 @@ export function MessageActions({
   const menuItems = (
     <>
       <MenuItem
-        icon={isExporting ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : <FileDown className="h-[18px] w-[18px]" />}
+        icon={isExporting ? <Loader2 className={cn(MENU_ICON, "animate-spin")} /> : <FileDown strokeWidth={1.75} className={MENU_ICON} />}
         label={tAssistant("exportPdf", language)}
         onClick={handleExport}
       />
       <MenuItem
-        icon={<ThumbsUp className="h-[18px] w-[18px]" />}
+        icon={<ThumbsUp strokeWidth={1.75} className={MENU_ICON} />}
         label={tAssistant("goodResponse", language)}
         tone={feedback === "up" ? "active" : "default"}
         onClick={() => {
@@ -198,7 +212,7 @@ export function MessageActions({
         }}
       />
       <MenuItem
-        icon={<ThumbsDown className="h-[18px] w-[18px]" />}
+        icon={<ThumbsDown strokeWidth={1.75} className={MENU_ICON} />}
         label={tAssistant("badResponse", language)}
         tone={feedback === "down" ? "danger" : "default"}
         onClick={() => {
@@ -207,7 +221,7 @@ export function MessageActions({
         }}
       />
       <MenuItem
-        icon={<Flag className="h-[18px] w-[18px]" />}
+        icon={<Flag strokeWidth={1.75} className={MENU_ICON} />}
         label={reported ? tAssistant("reported", language) : tAssistant("reportResponse", language)}
         onClick={() => {
           setReported(true);
@@ -215,7 +229,7 @@ export function MessageActions({
         }}
       />
       <MenuItem
-        icon={<Trash2 className="h-[18px] w-[18px]" />}
+        icon={<Trash2 strokeWidth={1.75} className={MENU_ICON} />}
         label={tAssistant("deleteResponse", language)}
         tone="danger"
         onClick={() => {
@@ -227,7 +241,7 @@ export function MessageActions({
   );
 
   return (
-    <div className="-ml-2.5 mt-1 flex flex-row items-center gap-0.5 text-muted-foreground sm:ml-0">
+    <div className="-ml-3 mt-1 flex flex-row items-center sm:-ml-2 sm:gap-0.5">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -235,9 +249,12 @@ export function MessageActions({
             onClick={handleSpeak}
             aria-label={isSpeaking ? tAssistant("stopSpeaking", language) : tAssistant("speak", language)}
             aria-pressed={isSpeaking}
-            className={cn(ICON_BUTTON, isSpeaking && "bg-sky-500/10 text-sky-600 dark:text-sky-400")}
+            className={cn(
+              ICON_BUTTON,
+              isSpeaking && "bg-sky-500/10 text-sky-600 hover:bg-sky-500/15 hover:text-sky-600 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:bg-sky-400/15 dark:hover:text-sky-300"
+            )}
           >
-            {isSpeaking ? <Square className="h-4 w-4 animate-pulse fill-current" /> : <Volume2 className="h-[18px] w-[18px]" />}
+            {isSpeaking ? <Square className="h-3.5 w-3.5 animate-pulse fill-current" /> : <Volume2 strokeWidth={1.75} className={ICON} />}
           </button>
         </TooltipTrigger>
         <TooltipContent>{isSpeaking ? tAssistant("stopSpeaking", language) : tAssistant("speak", language)}</TooltipContent>
@@ -246,7 +263,7 @@ export function MessageActions({
       <Tooltip open={copied ? true : undefined}>
         <TooltipTrigger asChild>
           <button type="button" onClick={handleCopy} aria-label={tAssistant("copyMarkdown", language)} className={ICON_BUTTON}>
-            {copied ? <Check className="h-[18px] w-[18px] text-sky-500" /> : <Copy className="h-[18px] w-[18px]" />}
+            {copied ? <Check strokeWidth={2} className={cn(ICON, "text-sky-500")} /> : <Copy strokeWidth={1.75} className={ICON} />}
           </button>
         </TooltipTrigger>
         <TooltipContent>{copied ? tAssistant("copied", language) : tAssistant("copyMarkdown", language)}</TooltipContent>
@@ -262,11 +279,11 @@ export function MessageActions({
             className={ICON_BUTTON}
           >
             {noteState === "saving" ? (
-              <Loader2 className="h-[18px] w-[18px] animate-spin" />
+              <Loader2 className={cn(ICON, "animate-spin")} />
             ) : noteState === "saved" ? (
-              <Check className="h-[18px] w-[18px] text-sky-500" />
+              <Check strokeWidth={2} className={cn(ICON, "text-sky-500")} />
             ) : (
-              <NotebookPen className="h-[18px] w-[18px]" />
+              <NotebookPen strokeWidth={1.75} className={ICON} />
             )}
           </button>
         </TooltipTrigger>
@@ -284,7 +301,7 @@ export function MessageActions({
             aria-label={tAssistant("regenerateResponse", language)}
             className={ICON_BUTTON}
           >
-            <RefreshCw className="h-[18px] w-[18px]" />
+            <RefreshCw strokeWidth={1.75} className={ICON} />
           </button>
         </TooltipTrigger>
         <TooltipContent>{tAssistant("regenerateResponse", language)}</TooltipContent>
@@ -294,12 +311,16 @@ export function MessageActions({
         <button
           ref={menuButtonRef}
           type="button"
-          onClick={() => setMenuOpen((prev) => !prev)}
+          onClick={() => {
+            const top = menuButtonRef.current?.getBoundingClientRect().top;
+            setMenuUp(top === undefined || top > 300);
+            setMenuOpen((prev) => !prev);
+          }}
           aria-label={tAssistant("moreOptions", language)}
           aria-expanded={menuOpen}
-          className={cn(ICON_BUTTON, feedback === "up" && "text-sky-500", feedback === "down" && "text-rose-500")}
+          className={cn(ICON_BUTTON, feedback === "up" && "text-sky-500 dark:text-sky-400", feedback === "down" && "text-rose-500 dark:text-rose-400")}
         >
-          <MoreHorizontal className="h-[18px] w-[18px]" />
+          <MoreHorizontal strokeWidth={1.75} className={ICON} />
         </button>
 
         {/* Desktop: anchored popover. */}
@@ -307,11 +328,14 @@ export function MessageActions({
           {menuOpen && !isPhone && (
             <motion.div
               ref={menuRef}
-              initial={{ opacity: 0, y: 6, scale: 0.96 }}
+              initial={{ opacity: 0, y: menuUp ? 6 : -6, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.96 }}
+              exit={{ opacity: 0, y: menuUp ? 6 : -6, scale: 0.96 }}
               transition={{ duration: 0.15 }}
-              className="absolute left-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-xl border border-border bg-popover py-1 text-popover-foreground shadow-glass dark:shadow-glass-dark"
+              className={cn(
+                "absolute left-0 z-50 w-56 overflow-hidden rounded-2xl border border-black/[0.06] bg-white/95 p-1 text-popover-foreground shadow-[0_18px_48px_-18px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-[#14171b]/95 dark:shadow-[0_24px_60px_-20px_rgba(0,0,0,0.85)]",
+                menuUp ? "bottom-full mb-1.5 origin-bottom-left" : "top-full mt-1.5 origin-top-left"
+              )}
             >
               {menuItems}
             </motion.div>
