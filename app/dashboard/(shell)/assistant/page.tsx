@@ -106,7 +106,11 @@ function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelect
   return (
     // Clears the floating glass header and composer (their measured heights, see the chat column).
     // motion-swap: rises in when it replaces a conversation ("Nouvelle conversation").
-    <div className="motion-swap relative flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-none px-3 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:gap-8 sm:px-4 sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
+    <div className="motion-swap relative isolate flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-none px-3 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:gap-8 sm:px-4 sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
+      {/* Desktop only: a slow, blurred light drifting behind the welcome (transform-only; still under reduced motion, absent on phones). */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden lg:block">
+        <div className="absolute left-1/2 top-[38%] -ml-[340px] -mt-[220px] h-[440px] w-[680px] rounded-full bg-[radial-gradient(closest-side,rgba(14,165,233,0.14),rgba(37,99,235,0.07)_55%,transparent)] blur-3xl [animation:copilot-aurora_26s_ease-in-out_infinite] motion-reduce:[animation:none] dark:bg-[radial-gradient(closest-side,rgba(56,189,248,0.2),rgba(37,99,235,0.1)_55%,transparent)]" />
+      </div>
       <NovaOrb />
       <div className="max-w-xl space-y-3">
         <h1 className="text-[28px] font-medium leading-tight tracking-[-0.015em] text-slate-800 dark:text-white/90 md:text-[40px]">
@@ -240,11 +244,11 @@ const ChatBubble = memo(function ChatBubble({
             <img
               src={attachment.dataUrl}
               alt={attachment.fileName ?? "Image envoyée"}
-              className="max-h-64 w-auto max-w-full rounded-2xl rounded-br-sm border border-sky-500/30 object-cover shadow-sm"
+              className="max-h-64 w-auto max-w-full rounded-3xl rounded-br-lg border border-sky-500/20 object-cover shadow-sm"
             />
           )}
           {attachment?.kind === DOCUMENT_ENVELOPE_KIND && (
-            <div className="flex max-w-full items-center gap-2 rounded-2xl rounded-br-sm border border-sky-500/30 bg-sky-50/80 px-3.5 py-2.5 text-sky-800 shadow-sm dark:bg-sky-950/30 dark:text-sky-200">
+            <div className="flex max-w-full items-center gap-2 rounded-3xl rounded-br-lg border border-sky-500/20 bg-sky-50/80 px-3.5 py-2.5 text-sky-800 shadow-sm dark:bg-sky-950/30 dark:text-sky-200">
               <FileText className="h-4 w-4 shrink-0" />
               <span className="min-w-0 max-w-[14rem] truncate text-sm font-medium">{attachment.fileName}</span>
             </div>
@@ -256,7 +260,7 @@ const ChatBubble = memo(function ChatBubble({
             // a pasted long token wraps instead of widening the thread.
             <div
               dir="auto"
-              className="max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-br-sm border border-border bg-card px-4 py-2.5 text-[16px] leading-relaxed text-card-foreground shadow-sm"
+              className="max-w-full whitespace-pre-wrap break-words rounded-3xl rounded-br-lg border border-sky-100 bg-sky-50 px-4 py-3 text-[16px] leading-relaxed text-slate-800 dark:border-white/[0.06] dark:bg-white/[0.07] dark:text-white/90"
             >
               {attachment ? attachment.caption : message.content}
             </div>
@@ -1258,7 +1262,7 @@ export default function AssistantPage() {
             <ChevronLeft className="h-6 w-6" />
           </Link>
           <div className="min-w-0 flex-1 text-center">
-            <p className="truncate text-[15px] font-semibold text-foreground">{isEmpty ? "MedArt Assistant" : activeConversationTitle || "MedArt Assistant"}</p>
+            <p className="truncate text-[15px] font-semibold text-foreground">{isEmpty ? "MedArt Copilot" : activeConversationTitle || "MedArt Copilot"}</p>
           </div>
           <TourReplayButton tour="assistant" className="h-10 w-10 rounded-full" />
           <button
@@ -1347,7 +1351,7 @@ export default function AssistantPage() {
                     "absolute bottom-[calc(var(--copilot-composer-h,0px)+0.75rem)] left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-glass transition-colors dark:shadow-glass-dark",
                     isTyping
                       ? "border-sky-500/30 bg-sky-600 text-white hover:bg-sky-700"
-                      : "border-border bg-popover/95 text-foreground hover:bg-accent"
+                      : "border-black/[0.06] bg-white/95 text-foreground hover:bg-white dark:border-white/10 dark:bg-[#16191d]/95 dark:hover:bg-[#1b1f24]"
                   )}
                 >
                   <ArrowDown className="h-4 w-4" />
@@ -1459,7 +1463,7 @@ export default function AssistantPage() {
                       className={cn(
                         "flex h-11 w-11 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
                         isAttachmentBusy || isListening
-                          ? "cursor-not-allowed text-muted-foreground/50"
+                          ? "cursor-not-allowed text-muted-foreground opacity-40"
                           : "text-muted-foreground hover:bg-accent hover:text-foreground"
                       )}
                     >

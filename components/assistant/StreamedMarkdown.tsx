@@ -143,13 +143,13 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
     </th>
   ),
   td: ({ children }) => (
-    <td dir="auto" className="min-w-[7rem] border-b border-border/60 px-3 py-2.5 align-top text-foreground/80 last:border-b-0">
+    <td dir="auto" className="min-w-[7rem] border-b border-black/[0.06] px-3 py-2.5 align-top text-slate-700 last:border-b-0 dark:border-white/[0.08] dark:text-white/80">
       {children}
     </td>
   ),
-  tr: ({ children }) => <tr className="even:bg-muted/40">{children}</tr>,
+  tr: ({ children }) => <tr className="even:bg-black/[0.025] dark:even:bg-white/[0.03]">{children}</tr>,
   pre: ({ children }) => (
-    <pre className="my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-muted/60 p-3.5 text-[13.5px] leading-relaxed">{children}</pre>
+    <pre className="my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-black/[0.04] p-3.5 dark:bg-white/[0.05] text-[13.5px] leading-relaxed">{children}</pre>
   ),
   a: ({ children, href }) => (
     <a href={href} target="_blank" rel="noopener noreferrer" className="break-words">

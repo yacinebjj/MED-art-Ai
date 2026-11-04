@@ -81,7 +81,7 @@ export function QuickActionBar({
           >
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tAssistant("settingsTitle", language)}</p>
 
-            <div role="radiogroup" aria-label={tAssistant("settingsTitle", language)} className="grid grid-cols-3 gap-1 rounded-xl bg-muted/70 p-1">
+            <div role="radiogroup" aria-label={tAssistant("settingsTitle", language)} className="grid grid-cols-3 gap-1 rounded-xl bg-black/[0.04] p-1 dark:bg-white/[0.06]">
               {ASSISTANT_STYLES.map((style) => (
                 <button
                   key={style}
@@ -103,7 +103,7 @@ export function QuickActionBar({
             </div>
             <p className="mt-2 px-1 text-xs leading-relaxed text-muted-foreground">{tAssistant(STYLE_LABEL[prefs.style].hint, language)}</p>
 
-            <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-between gap-3 border-t border-border/70 pt-3">
+            <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-between gap-3 border-t border-black/[0.08] pt-3 dark:border-white/10">
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-foreground">{tAssistant("stepByStep", language)}</span>
                 <span className="block text-xs leading-snug text-muted-foreground">{tAssistant("stepByStepHint", language)}</span>

@@ -39,7 +39,7 @@ export const ASSISTANT_TRANSLATIONS = {
   assistantNoReplyError: { fr: "L'assistant n'a pas pu répondre.", en: "The assistant couldn't reply." },
 
   // Composer
-  composerPlaceholder: { fr: "Écris à MedArt Assistant…", en: "Message MedArt Assistant…" },
+  composerPlaceholder: { fr: "Demande au Copilot…", en: "Ask Copilot…" },
   stopGeneration: { fr: "Arrêter la génération", en: "Stop generating" },
   listening: { fr: "J'écoute…", en: "Listening…" },
   removeMode: { fr: "Retirer ce mode", en: "Remove this mode" },

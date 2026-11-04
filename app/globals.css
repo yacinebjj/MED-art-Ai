@@ -1344,6 +1344,17 @@ html.theme-reveal::view-transition-new(root) {
   }
 }
 
+/* Copilot welcome (desktop): the ambient light behind the orb drifts — transform only. */
+@keyframes copilot-aurora {
+  0%,
+  100% {
+    transform: translate3d(-5%, -3%, 0) rotate(0deg) scale(1);
+  }
+  50% {
+    transform: translate3d(5%, 4%, 0) rotate(10deg) scale(1.08);
+  }
+}
+
 @keyframes copilot-shimmer {
   from {
     background-position: 110% 0;

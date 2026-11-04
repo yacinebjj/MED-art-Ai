@@ -142,7 +142,7 @@ export function MessageActions({
       const res = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: subject ? `MedArt — ${subject}` : "MedArt Assistant", content: replyHtml() }),
+        body: JSON.stringify({ title: subject ? `MedArt — ${subject}` : "MedArt Copilot", content: replyHtml() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement de la note a échoué.");
@@ -169,7 +169,7 @@ export function MessageActions({
     if (isExporting) return;
     setIsExporting(true);
     try {
-      await exportReplyToPdf({ title: "MedArt Assistant", html: replyHtml(), locale: language === "en" ? "en-US" : "fr-FR" });
+      await exportReplyToPdf({ title: "MedArt Copilot", html: replyHtml(), locale: language === "en" ? "en-US" : "fr-FR" });
     } catch (error) {
       toast({
         variant: "error",

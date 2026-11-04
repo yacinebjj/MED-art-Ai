@@ -11,7 +11,7 @@ import type { Language } from "@/providers/LanguageProvider";
  */
 export const NAV_TRANSLATIONS = {
   dashboard: { fr: "Tableau de bord", en: "Dashboard" },
-  assistant: { fr: "MedArt Assistant", en: "MedArt Assistant" },
+  assistant: { fr: "MedArt Copilot", en: "MedArt Copilot" },
   studySpace: { fr: "Espace Étude", en: "Study Space" },
   todo: { fr: "To-Do List", en: "To-Do List" },
   groups: { fr: "Groupes de Révision", en: "Study Groups" },

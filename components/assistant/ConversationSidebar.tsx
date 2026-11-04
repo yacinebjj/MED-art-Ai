@@ -94,7 +94,7 @@ function ConversationRow({
         "group relative flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors duration-200",
         isActive
           ? "bg-sky-50 text-sky-800 shadow-[inset_2px_0_0_0_theme(colors.emerald.500)] dark:bg-sky-500/10 dark:text-sky-300"
-          : "text-foreground/80 hover:bg-accent hover:text-foreground"
+          : "text-slate-700 hover:bg-accent hover:text-foreground dark:text-white/80"
       )}
     >
       <button
@@ -108,7 +108,7 @@ function ConversationRow({
           <span className="truncate" title={conversation.title}>
             {conversation.title}
           </span>
-          <span className="text-[10.5px] leading-tight text-muted-foreground/80">{formatRelativeTime(conversation.updatedAt)}</span>
+          <span className="text-[10.5px] leading-tight text-muted-foreground">{formatRelativeTime(conversation.updatedAt)}</span>
         </span>
       </button>
 
@@ -272,7 +272,7 @@ export function ConversationSidebar({
             </div>
           ) : hasNoResults ? (
             <div className="motion-swap flex flex-col items-center gap-2.5 px-3 py-10 text-center">
-              <Search className="h-5 w-5 text-muted-foreground/60" />
+              <Search className="h-5 w-5 text-slate-400 dark:text-white/40" />
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Aucun résultat pour «&nbsp;{query}&nbsp;»
               </p>
@@ -290,7 +290,7 @@ export function ConversationSidebar({
               if (!items || items.length === 0) return null;
               return (
                 <div key={group} className="motion-swap mb-3">
-                  <p className="sticky top-0 z-10 bg-inherit px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80 backdrop-blur-sm">
+                  <p className="sticky top-0 z-10 bg-inherit px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur-sm">
                     {group}
                   </p>
                   <AnimatePresence initial={false}>
