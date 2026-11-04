@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ArrowDownAZ,
   BarChart3,
   BookOpen,
   BookOpenText,
@@ -17,11 +16,9 @@ import {
   Layers,
   LoaderCircle,
   MoreVertical,
-  Search,
   Target,
   Trash2,
   TrendingUp,
-  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
@@ -45,7 +42,6 @@ import { Skeleton } from "./primitives";
 const ModuleStatsModal = dynamic(() => import("@/components/dashboard/ModuleStatsModal").then((m) => m.ModuleStatsModal), { ssr: false });
 
 type StatusFilter = "all" | "not-started" | "in-progress" | "mastered";
-type SortKey = "priority" | "progress" | "alpha" | "recent";
 
 /** Mean QCM mastery at or above this = "Maîtrisé". */
 const MASTERED_PCT = 80;
@@ -317,7 +313,8 @@ export function CurriculumHubSkeleton() {
  * Curriculum 3.0 — every module of the student's year as one card with real
  * progress (mean QCM mastery of its courses, /api/dashboard/overview), course
  * and QCM metadata, exam-priority flag (modules of the study plan with the
- * nearest exam), quick actions, and a search / UE / status / sort toolbar.
+ * nearest exam), quick actions, and a UE / status toolbar. Modules keep the
+ * exam-priority order (the search field and the sort menu were removed).
  */
 export function CurriculumHub({ data }: { data: CurriculumYearData }) {
   const router = useRouter();
@@ -326,10 +323,8 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
   const overview = useCockpitStore((state) => state.overview);
   const refresh = useCockpitStore((state) => state.refresh);
 
-  const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [sort, setSort] = useState<SortKey>("priority");
   const [activeFlashcardModuleIds, setActiveFlashcardModuleIds] = useState<Set<number>>(new Set());
   const [launchingId, setLaunchingId] = useState<number | null>(null);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
@@ -359,39 +354,21 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
   }, [entries]);
 
   const visible = useMemo(() => {
-    const COMBINING = new RegExp("[\\u0300-\\u036f]", "g");
-    const norm = (s: string) => s.normalize("NFD").replace(COMBINING, "").toLowerCase();
-    const q = norm(query.trim());
     const filtered = entries.filter((e) => {
       if (statusFilter !== "all" && e.status !== statusFilter) return false;
       if (unitFilter === "independent" && e.unitId !== null) return false;
       if (unitFilter !== "all" && unitFilter !== "independent" && String(e.unitId) !== unitFilter) return false;
-      if (q) {
-        const haystack = norm(`${e.module.title} ${translateCurriculumName(e.module.title, language)} ${e.unitTitle ?? ""}`);
-        if (!haystack.includes(q)) return false;
-      }
       return true;
     });
-    const byTitle = (a: ModuleEntry, b: ModuleEntry) => translateCurriculumName(a.module.title, language).localeCompare(translateCurriculumName(b.module.title, language), language);
-    return [...filtered].sort((a, b) => {
-      switch (sort) {
-        case "alpha":
-          return byTitle(a, b);
-        case "progress":
-          return (b.stats?.progressPct ?? -1) - (a.stats?.progressPct ?? -1) || byTitle(a, b);
-        case "recent":
-          return (b.stats?.lastActivityAt ?? "").localeCompare(a.stats?.lastActivityAt ?? "") || byTitle(a, b);
-        default:
-          // Priority: modules of the upcoming exam first, then those with courses but the lowest mastery (most work left), then untouched ones.
-          return (
-            Number(b.examPriority) - Number(a.examPriority) ||
-            Number((b.stats?.courseCount ?? 0) > 0) - Number((a.stats?.courseCount ?? 0) > 0) ||
-            (a.stats?.progressPct ?? 0) - (b.stats?.progressPct ?? 0) ||
-            a.module.displayOrder - b.module.displayOrder
-          );
-      }
-    });
-  }, [entries, query, statusFilter, unitFilter, sort, language]);
+    // Exam priority: modules of the upcoming exam first, then those with courses but the lowest mastery (most work left), then untouched ones.
+    return [...filtered].sort(
+      (a, b) =>
+        Number(b.examPriority) - Number(a.examPriority) ||
+        Number((b.stats?.courseCount ?? 0) > 0) - Number((a.stats?.courseCount ?? 0) > 0) ||
+        (a.stats?.progressPct ?? 0) - (b.stats?.progressPct ?? 0) ||
+        a.module.displayOrder - b.module.displayOrder
+    );
+  }, [entries, statusFilter, unitFilter]);
 
   /** Optimistic toggle — reverted with a toast if the PATCH fails. */
   const toggleFlashcards = useCallback(
@@ -449,12 +426,6 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
     ...data.teachingUnits.map((unit) => ({ value: String(unit.id), label: translateCurriculumName(unit.title, language) })),
     ...(data.independentModules.length > 0 && data.teachingUnits.length > 0 ? [{ value: "independent", label: tCockpit("filterIndependent", language) }] : []),
   ];
-  const sortOptions = [
-    { value: "priority", label: tCockpit("sortPriority", language) },
-    { value: "progress", label: tCockpit("sortProgress", language) },
-    { value: "recent", label: tCockpit("sortRecent", language) },
-    { value: "alpha", label: tCockpit("sortAlpha", language) },
-  ];
   const statusChips: { value: StatusFilter; key: "statusAll" | "statusNotStarted" | "statusInProgress" | "statusMastered" }[] = [
     { value: "all", key: "statusAll" },
     { value: "not-started", key: "statusNotStarted" },
@@ -474,35 +445,17 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="glass-card flex flex-col gap-2.5 rounded-2xl border border-white/30 p-2.5 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark lg:flex-row lg:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={tCockpit("searchModules", language)}
-            className="h-10 w-full rounded-xl border border-border/60 bg-background/60 pl-9 pr-8 text-sm outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-500/20"
-          />
-          {query && (
-            <button type="button" onClick={() => setQuery("")} aria-label={tCockpit("clearSearch", language)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {data.teachingUnits.length > 0 && (
+      {/* Toolbar: the teaching-unit filter (only when the year has teaching units). */}
+      {data.teachingUnits.length > 0 && (
+        <div className="glass-card flex flex-col gap-2.5 rounded-2xl border border-white/30 p-2.5 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark lg:flex-row lg:items-center">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5">
               <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
               <Select value={unitFilter} onValueChange={setUnitFilter} options={unitOptions} className="h-10 w-[11rem] rounded-xl text-xs sm:w-[13rem]" />
             </div>
-          )}
-          <div className="flex items-center gap-1.5">
-            <ArrowDownAZ className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <Select value={sort} onValueChange={(v) => setSort(v as SortKey)} options={sortOptions} className="h-10 w-[10.5rem] rounded-xl text-xs" />
           </div>
         </div>
-      </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-1.5">
         {statusChips.map((chip) => (

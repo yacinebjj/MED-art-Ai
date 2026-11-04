@@ -129,7 +129,7 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
   blockquote: ({ children }) => (
     <blockquote
       dir="auto"
-      className="my-[1em] animate-in fade-in rounded-e-xl border-s-2 border-s-sky-400/80 bg-sky-500/[0.05] py-[0.5em] pe-[0.9em] ps-[1em] font-normal not-italic text-slate-700 duration-300 dark:border-s-sky-400/60 dark:bg-sky-400/[0.06] dark:text-zinc-300 [&>p:first-of-type]:before:content-none [&>p:last-of-type]:after:content-none [&>p]:my-[0.35em]"
+      className="my-[0.7em] animate-in fade-in rounded-e-xl border-s-2 border-s-sky-400/80 bg-sky-500/[0.05] py-[0.4em] pe-[0.9em] ps-[1em] font-normal not-italic text-slate-700 duration-300 dark:border-s-sky-400/60 dark:bg-sky-400/[0.06] dark:text-zinc-300 [&>p:first-of-type]:before:content-none [&>p:last-of-type]:after:content-none [&>p]:my-[0.25em]"
     >
       {children}
     </blockquote>
@@ -138,20 +138,20 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
   // swipe from chaining into the thread, and the table itself only widens as
   // far as its columns need (min-w on cells) before the wrapper takes over.
   table: ({ children }) => (
-    <div className="my-[1em] w-full max-w-full animate-in fade-in overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.07] duration-300 dark:border-white/[0.08]">
-      <table className="my-0 min-w-full border-collapse text-left text-[14.5px] leading-[1.55] [font-variant-numeric:tabular-nums] [&_tbody>tr:last-child>td]:border-b-0">
+    <div className="my-[0.75em] w-full max-w-full animate-in fade-in overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.07] duration-300 dark:border-white/[0.08]">
+      <table className="my-0 min-w-full border-collapse text-left text-[13.5px] leading-[1.45] [font-variant-numeric:tabular-nums] [&_tbody>tr:last-child>td]:border-b-0">
         {children}
       </table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-sky-50/80 dark:bg-sky-400/[0.06]">{children}</thead>,
   th: ({ children }) => (
-    <th dir="auto" className="min-w-[7rem] border-b border-black/[0.07] px-3.5 py-2.5 text-[13.5px] font-semibold text-slate-900 dark:border-white/[0.08] dark:text-white">
+    <th dir="auto" className="min-w-[7rem] border-b border-black/[0.07] px-3 py-2 text-[12.5px] font-semibold text-slate-900 dark:border-white/[0.08] dark:text-white">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td dir="auto" className="min-w-[7rem] border-b border-black/[0.05] px-3.5 py-2.5 align-top text-slate-700 dark:border-white/[0.06] dark:text-zinc-300">
+    <td dir="auto" className="min-w-[7rem] border-b border-black/[0.05] px-3 py-2 align-top text-slate-700 dark:border-white/[0.06] dark:text-zinc-300">
       {children}
     </td>
   ),
@@ -165,14 +165,14 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
       return (
         <div
           dir="ltr"
-          className="my-[0.9em] overflow-x-auto overscroll-x-contain whitespace-pre-line rounded-xl border border-sky-500/15 bg-sky-500/[0.05] px-4 py-3 text-center text-[1.02em] font-medium leading-relaxed text-slate-900 [font-variant-numeric:tabular-nums] dark:border-sky-400/15 dark:bg-sky-400/[0.06] dark:text-white"
+          className="my-[0.7em] overflow-x-auto overscroll-x-contain whitespace-pre-line rounded-xl border border-sky-500/15 bg-sky-500/[0.05] px-4 py-2.5 text-center text-[1em] font-medium leading-relaxed text-slate-900 [font-variant-numeric:tabular-nums] dark:border-sky-400/15 dark:bg-sky-400/[0.06] dark:text-white"
         >
           {formula}
         </div>
       );
     }
     return (
-      <pre className="my-[0.9em] max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.06] bg-slate-50 p-4 text-[13.5px] leading-relaxed text-slate-800 dark:border-white/[0.07] dark:bg-white/[0.04] dark:text-zinc-200">
+      <pre className="my-[0.7em] max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.06] bg-slate-50 p-3.5 text-[0.8125rem] leading-relaxed text-slate-800 dark:border-white/[0.07] dark:bg-white/[0.04] dark:text-zinc-200">
         {children}
       </pre>
     );
@@ -235,9 +235,10 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, live }: { text: string
 // --- Public component --------------------------------------------------------------
 
 // Sizing notes:
-//  - text-[17px] (an arbitrary value, so app/globals.css's mobile bump of
-//    `.text-sm`/`.text-base` doesn't apply) with a 1.75 line-height: the
-//    comfortable measure for long clinical paragraphs on a phone.
+//  - 15px on phones and 16px from sm, with a 1.55 line-height: Gemini's
+//    compact, dense measure. Written in rem (text-[0.9375rem]), not px:
+//    app/globals.css's phone type scale lifts text-[15px] (and text-sm /
+//    text-base) a step below md, which would undo the smaller size.
 //  - No prose-{size} modifier on purpose — Typography scales headings and
 //    spacing in `em` from the container's own font-size, so one font-size
 //    here tunes the whole scale at once, and every gap below is in em too.
@@ -252,23 +253,23 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, live }: { text: string
 //    string that would otherwise overflow.
 //  - min-w-0/max-w-full/w-full so no long token can ever widen the thread.
 const PROSE_CLASSES =
-  "prose w-full min-w-0 max-w-full break-words text-[17px] leading-[1.75] text-slate-700 dark:prose-invert dark:text-zinc-300 " +
-  // Headings introduce, they don't shout: one weight, air above, little below.
+  "prose w-full min-w-0 max-w-full break-words text-[0.9375rem] leading-[1.55] text-slate-700 dark:prose-invert dark:text-zinc-300 sm:text-[16px] " +
+  // Headings introduce, they don't shout: one weight, a little air above, almost none below.
   "prose-headings:text-balance prose-headings:font-semibold prose-headings:tracking-[-0.011em] prose-headings:text-slate-900 dark:prose-headings:text-white " +
-  "prose-h1:mb-[0.55em] prose-h1:mt-[1.5em] prose-h1:text-[1.32em] prose-h1:leading-[1.3] " +
-  "prose-h2:mb-[0.5em] prose-h2:mt-[1.45em] prose-h2:text-[1.2em] prose-h2:leading-[1.35] " +
-  "prose-h3:mb-[0.45em] prose-h3:mt-[1.35em] prose-h3:text-[1.07em] prose-h3:leading-[1.4] " +
-  "prose-h4:mb-[0.4em] prose-h4:mt-[1.2em] prose-h4:text-[1em] prose-h4:leading-[1.45] " +
-  // Paragraphs and lists share one rhythm, and no line ends on an orphan word.
-  "prose-p:my-[0.75em] prose-p:text-pretty prose-li:text-pretty " +
-  "prose-ul:my-[0.75em] prose-ul:pl-[1.3em] prose-ol:my-[0.75em] prose-ol:pl-[1.45em] prose-li:my-[0.3em] prose-li:pl-[0.3em] " +
-  "[&_li>p]:my-[0.3em] [&_li>ol]:my-[0.35em] [&_li>ul]:my-[0.35em] " +
+  "prose-h1:mb-[0.4em] prose-h1:mt-[1.15em] prose-h1:text-[1.25em] prose-h1:leading-[1.3] " +
+  "prose-h2:mb-[0.35em] prose-h2:mt-[1.1em] prose-h2:text-[1.15em] prose-h2:leading-[1.3] " +
+  "prose-h3:mb-[0.3em] prose-h3:mt-[1em] prose-h3:text-[1.05em] prose-h3:leading-[1.35] " +
+  "prose-h4:mb-[0.25em] prose-h4:mt-[0.9em] prose-h4:text-[1em] prose-h4:leading-[1.4] " +
+  // Paragraphs and lists share one tight, even rhythm, and no line ends on an orphan word.
+  "prose-p:my-[0.55em] prose-p:text-pretty prose-li:text-pretty " +
+  "prose-ul:my-[0.5em] prose-ul:pl-[1.25em] prose-ol:my-[0.5em] prose-ol:pl-[1.4em] prose-li:my-[0.15em] prose-li:pl-[0.25em] " +
+  "[&_li>p]:my-[0.15em] [&_li>ol]:my-[0.2em] [&_li>ul]:my-[0.2em] " +
   "marker:text-sky-500 dark:marker:text-sky-400 [&_ol>li]:marker:font-semibold " +
   "prose-strong:font-semibold prose-strong:text-slate-900 prose-em:text-inherit dark:prose-strong:text-white " +
   "prose-code:rounded-md prose-code:bg-black/[0.05] prose-code:px-[0.38em] prose-code:py-[0.12em] prose-code:text-[0.86em] prose-code:font-medium prose-code:text-slate-800 prose-code:before:content-none prose-code:after:content-none dark:prose-code:bg-white/[0.08] dark:prose-code:text-zinc-100 " +
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[1em] [&_pre_code]:font-normal " +
   "prose-a:font-medium prose-a:text-sky-600 prose-a:decoration-sky-500/40 prose-a:underline-offset-[3px] dark:prose-a:text-sky-400 " +
-  "prose-hr:my-[1.6em] prose-hr:border-black/[0.07] dark:prose-hr:border-white/[0.08] " +
+  "prose-hr:my-[1.1em] prose-hr:border-black/[0.07] dark:prose-hr:border-white/[0.08] " +
   "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
 export const StreamedMarkdown = forwardRef<HTMLDivElement, { content: string; isStreaming?: boolean }>(function StreamedMarkdown(

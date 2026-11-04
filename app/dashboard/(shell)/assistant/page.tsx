@@ -264,7 +264,7 @@ const ChatBubble = memo(function ChatBubble({
             // a pasted long token wraps instead of widening the thread.
             <div
               dir="auto"
-              className="max-w-full whitespace-pre-wrap break-words rounded-3xl rounded-br-lg border border-sky-100 bg-sky-50 px-4 py-3 text-[16px] leading-relaxed text-slate-800 dark:border-white/[0.06] dark:bg-white/[0.07] dark:text-white/90"
+              className="max-w-full whitespace-pre-wrap break-words rounded-3xl rounded-br-lg border border-sky-100 bg-sky-50 px-4 py-2.5 text-[0.9375rem] leading-[1.5] text-slate-800 sm:text-[16px] dark:border-white/[0.06] dark:bg-white/[0.07] dark:text-white/90"
             >
               {attachment ? attachment.caption : message.content}
             </div>
@@ -1301,7 +1301,7 @@ export default function AssistantPage() {
               </div>
             </div>
 
-            {/* "Revenir en bas" — only surfaces once the student has scrolled away from the latest message, so it never competes for attention while they're already following along. Louder styling + label while a reply is actively streaming, since that's the moment missing it matters most. */}
+            {/* Back to the latest message: a round arrow-only button that surfaces once the student has scrolled away, filled blue while a reply is streaming (the moment missing it matters most). Centred with inset-x-0 + mx-auto, not a translate: framer-motion owns this element's transform for its entrance, and used to wipe -translate-x-1/2, leaving it off-centre. */}
             <AnimatePresence>
               {!isAtBottom && (
                 <motion.button
@@ -1310,19 +1310,19 @@ export default function AssistantPage() {
                     haptic();
                     scrollToBottom();
                   }}
-                  initial={{ opacity: 0, y: 10, scale: 0.94 }}
+                  aria-label={isTyping ? tAssistant("newResponseInProgress", language) : tAssistant("backToBottom", language)}
+                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.94 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.9 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
                   className={cn(
-                    "absolute bottom-[calc(var(--copilot-composer-h,0px)+0.75rem)] left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-glass transition-colors dark:shadow-glass-dark",
+                    "touch-target absolute inset-x-0 bottom-[calc(var(--copilot-composer-h,0px)+0.75rem)] z-10 mx-auto flex h-10 w-10 items-center justify-center rounded-full border shadow-glass transition-colors dark:shadow-glass-dark",
                     isTyping
                       ? "border-sky-500/30 bg-sky-600 text-white hover:bg-sky-700"
                       : "border-black/[0.06] bg-white/95 text-foreground hover:bg-white dark:border-white/10 dark:bg-[#16191d]/95 dark:hover:bg-[#1b1f24]"
                   )}
                 >
-                  <ArrowDown className="h-4 w-4" />
-                  {isTyping ? tAssistant("newResponseInProgress", language) : tAssistant("backToBottom", language)}
+                  <ArrowDown strokeWidth={2} className="h-[18px] w-[18px]" />
                 </motion.button>
               )}
             </AnimatePresence>

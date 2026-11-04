@@ -207,15 +207,6 @@ export default function DashboardShellLayout({
 
   return (
     <SidebarProvider>
-      {/* Visually hidden until keyboard-focused: lets a keyboard/screen-reader
-          user jump straight past the ~8-item sidebar into the page content
-          instead of tabbing through the whole nav on every single page. */}
-      <a
-        href="#main-content"
-        className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-3 focus-visible:top-3 focus-visible:z-[100] focus-visible:rounded-xl focus-visible:bg-primary-600 focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-semibold focus-visible:text-white focus-visible:shadow-glow"
-      >
-        Aller au contenu principal
-      </a>
       <div className={cn("relative flex h-dvh w-full overflow-hidden", ownsCanvas ? "copilot-canvas" : "aurora-canvas-bg")}>
         {!ownsCanvas && <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />}
         {/* Pages sit on this same canvas — their cyber stages are bare now, see CyberStage. */}

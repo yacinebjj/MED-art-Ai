@@ -3,16 +3,14 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Settings, LogOut, PlayCircle, Play, Pause, RotateCcw, EyeOff, Timer, Search, CreditCard, Crown, Cpu } from "lucide-react";
+import { Settings, LogOut, PlayCircle, Play, Pause, RotateCcw, EyeOff, Timer, CreditCard, Crown, Cpu } from "lucide-react";
 import { AnimatedBrandMark } from "./AnimatedBrandMark";
 import { THEME_MODE_ICONS, THEME_MODE_LABELS, ThemeModeSwitcher, useThemeMode, type ThemeMode } from "./cockpit/ThemeModeSwitcher";
 import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
 import { NotificationCenter } from "./cockpit/NotificationCenter";
-import { Kbd } from "@/components/course/workspace/os/Kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 import { useCockpitStore } from "@/store/useCockpitStore";
-import { useCockpitUi } from "@/store/useCockpitUi";
 import { tCockpit } from "@/lib/translations/cockpit";
 import { FLASHCARD_ENGINE_LABEL } from "@/lib/dashboard/engine";
 import { PLEURESIE_DEMO_SLUG } from "@/lib/constants";
@@ -188,36 +186,6 @@ function EngineBadge() {
   );
 }
 
-/** Spotlight trigger: a full search field on desktop, an icon on phones. */
-function SpotlightTrigger() {
-  const { language } = useLanguage();
-  const setSpotlightOpen = useCockpitUi((state) => state.setSpotlightOpen);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setSpotlightOpen(true)}
-        className="group hidden h-10 w-full max-w-md items-center gap-2.5 rounded-xl border border-border/60 bg-background/50 px-3 text-left text-sm text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.4)] transition-all duration-200 hover:border-primary-300/70 hover:bg-background/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:shadow-none dark:hover:border-primary-800/70 md:flex"
-      >
-        <Search className="h-4 w-4 shrink-0 text-primary-500 transition-transform duration-200 group-hover:scale-110" />
-        <span className="min-w-0 flex-1 truncate">{tCockpit("spotlightTrigger", language)}</span>
-        <span className="flex shrink-0 items-center gap-1">
-          <Kbd>Ctrl</Kbd>
-          <Kbd>K</Kbd>
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => setSpotlightOpen(true)}
-        aria-label={tCockpit("spotlightTrigger", language)}
-        className="flex h-10 w-10 items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-      >
-        <Search className="h-4 w-4" />
-      </button>
-    </>
-  );
-}
-
 export function Topbar({ title, className }: { title: string; className?: string }) {
   const router = useRouter();
   const { profile, signOut } = useAuth();
@@ -251,10 +219,6 @@ export function Topbar({ title, className }: { title: string; className?: string
         </div>
       </div>
 
-      <div className="hidden min-w-0 flex-1 justify-center md:flex">
-        <SpotlightTrigger />
-      </div>
-
       <div className="flex items-center gap-1.5 sm:gap-2">
         <EngineBadge />
         <PlanBadge />
@@ -272,11 +236,8 @@ export function Topbar({ title, className }: { title: string; className?: string
           <PlayCircle className="h-3.5 w-3.5" />
           Voir la Démo
         </Link> */}
-        <div className="md:hidden">
-          <SpotlightTrigger />
-        </div>
         {/* Below lg the bottom nav's Menu sheet carries language, appearance and
-            the account — the bar keeps only search + notifications. */}
+            the account — the bar keeps only notifications. */}
         <UnifiedLanguageSwitch className="hidden lg:flex" />
         <ThemeModeSwitcher className="hidden lg:flex" />
         <NotificationCenter />
