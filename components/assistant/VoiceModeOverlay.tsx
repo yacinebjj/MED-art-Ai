@@ -40,7 +40,7 @@ const STATE_COPY: Record<VoiceState, string> = {
 
 const STATE_TONES: Record<VoiceState, { core: string; glow: string }> = {
   idle: { core: "from-slate-300 via-slate-500 to-slate-700", glow: "rgba(148,163,184,0.35)" },
-  listening: { core: "from-emerald-200 via-cyan-400 to-sky-600", glow: "rgba(34,211,238,0.55)" },
+  listening: { core: "from-sky-200 via-cyan-400 to-sky-600", glow: "rgba(34,211,238,0.55)" },
   transcribing: { core: "from-cyan-200 via-sky-400 to-indigo-600", glow: "rgba(56,189,248,0.5)" },
   thinking: { core: "from-fuchsia-300 via-violet-500 to-indigo-700", glow: "rgba(139,92,246,0.6)" },
   speaking: { core: "from-cyan-200 via-blue-500 to-violet-600", glow: "rgba(59,130,246,0.6)" },

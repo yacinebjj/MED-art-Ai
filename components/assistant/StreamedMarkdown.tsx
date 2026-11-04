@@ -124,7 +124,7 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
   h3: ({ children }) => <h3 dir="auto" className="animate-in fade-in duration-300">{children}</h3>,
   h4: ({ children }) => <h4 dir="auto" className="animate-in fade-in duration-300">{children}</h4>,
   blockquote: ({ children }) => (
-    <blockquote dir="auto" className="animate-in fade-in border-l-emerald-400 duration-300 dark:border-l-emerald-500/60">
+    <blockquote dir="auto" className="animate-in fade-in border-l-sky-400 duration-300 dark:border-l-sky-500/60">
       {children}
     </blockquote>
   ),
@@ -136,7 +136,7 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
       <table className="min-w-full border-collapse text-left text-[14.5px] leading-snug">{children}</table>
     </div>
   ),
-  thead: ({ children }) => <thead className="bg-emerald-50 dark:bg-emerald-950/40">{children}</thead>,
+  thead: ({ children }) => <thead className="bg-sky-50 dark:bg-sky-950/40">{children}</thead>,
   th: ({ children }) => (
     <th dir="auto" className="min-w-[7rem] border-b border-border px-3 py-2.5 font-semibold text-foreground">
       {children}
@@ -228,7 +228,7 @@ const PROSE_CLASSES =
   "prose-h1:text-[1.35em] prose-h2:text-[1.2em] prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-[1.08em] prose-h4:mb-1.5 prose-h4:mt-4 prose-h4:text-[1em] " +
   "prose-p:my-2.5 prose-strong:font-semibold prose-strong:text-cyan-700 dark:prose-strong:text-cyan-300 " +
   "prose-ul:my-2.5 prose-ul:space-y-1.5 prose-ol:my-2.5 prose-ol:space-y-1.5 prose-li:pl-1 marker:text-cyan-500 dark:marker:text-cyan-400 " +
-  "prose-code:break-words prose-code:text-foreground prose-a:text-emerald-600 dark:prose-a:text-emerald-400 " +
+  "prose-code:break-words prose-code:text-foreground prose-a:text-sky-600 dark:prose-a:text-sky-400 " +
   "dark:[&_strong]:[text-shadow:0_0_14px_rgba(34,211,238,0.35)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
 export const StreamedMarkdown = forwardRef<HTMLDivElement, { content: string; isStreaming?: boolean }>(function StreamedMarkdown(

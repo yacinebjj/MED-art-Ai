@@ -93,7 +93,7 @@ function ConversationRow({
       className={cn(
         "group relative flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors duration-200",
         isActive
-          ? "bg-emerald-50 text-emerald-800 shadow-[inset_2px_0_0_0_theme(colors.emerald.500)] dark:bg-emerald-500/10 dark:text-emerald-300"
+          ? "bg-sky-50 text-sky-800 shadow-[inset_2px_0_0_0_theme(colors.emerald.500)] dark:bg-sky-500/10 dark:text-sky-300"
           : "text-foreground/80 hover:bg-accent hover:text-foreground"
       )}
     >
@@ -214,7 +214,7 @@ export function ConversationSidebar({
             onClick={onNewConversation}
             className="flex min-h-11 flex-1 items-center gap-2 rounded-full border border-black/[0.06] bg-white/60 px-4 text-sm font-medium text-foreground transition-colors duration-200 hover:bg-white active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
           >
-            <Plus strokeWidth={2} className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+            <Plus strokeWidth={2} className="h-4 w-4 text-sky-600 dark:text-sky-300" />
             Nouvelle conversation
           </button>
           <Tooltip>
@@ -240,7 +240,7 @@ export function ConversationSidebar({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Rechercher…"
-              className="w-full rounded-full border border-black/[0.06] bg-white/50 py-2 pl-8 pr-7 text-base text-foreground outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500/40 focus:ring-2 focus:ring-emerald-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:placeholder:text-white/40 sm:text-xs"
+              className="w-full rounded-full border border-black/[0.06] bg-white/50 py-2 pl-8 pr-7 text-base text-foreground outline-none transition-colors placeholder:text-slate-400 focus:border-sky-500/40 focus:ring-2 focus:ring-sky-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:placeholder:text-white/40 sm:text-xs"
             />
             {query && (
               <button
@@ -261,7 +261,7 @@ export function ConversationSidebar({
               with it, so it doesn't animate its first rows itself. */}
           {!hasAnyConversations ? (
             <div className="motion-swap flex flex-col items-center gap-2.5 px-3 py-10 text-center">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400">
                 <MessagesSquare className="h-5 w-5" />
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
@@ -279,7 +279,7 @@ export function ConversationSidebar({
               <button
                 type="button"
                 onClick={() => setQuery("")}
-                className="text-xs font-medium text-emerald-600 underline-offset-2 hover:underline dark:text-emerald-400"
+                className="text-xs font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
               >
                 Réinitialiser la recherche
               </button>

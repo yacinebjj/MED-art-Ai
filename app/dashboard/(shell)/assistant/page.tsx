@@ -89,13 +89,13 @@ function NovaOrb() {
       <svg width="0" height="0" className="absolute">
         <defs>
           <linearGradient id="copilot-orb-stroke" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#34d399" />
-            <stop offset="50%" stopColor="#22d3ee" />
-            <stop offset="100%" stopColor="#a78bfa" />
+            <stop offset="0%" stopColor="#22d3ee" />
+            <stop offset="50%" stopColor="#0ea5e9" />
+            <stop offset="100%" stopColor="#2563eb" />
           </linearGradient>
         </defs>
       </svg>
-      <span className="absolute inset-2 rounded-full bg-[conic-gradient(from_200deg,rgba(52,211,153,0.45),rgba(34,211,238,0.4),rgba(167,139,250,0.45),rgba(52,211,153,0.45))] opacity-60 blur-2xl dark:opacity-70" />
+      <span className="absolute inset-2 rounded-full bg-[conic-gradient(from_200deg,rgba(56,189,248,0.45),rgba(34,211,238,0.4),rgba(37,99,235,0.45),rgba(56,189,248,0.45))] opacity-60 blur-2xl dark:opacity-70" />
       <BrainCircuit color="url(#copilot-orb-stroke)" strokeWidth={1.5} className="relative h-12 w-12 animate-float sm:h-14 sm:w-14" />
     </div>
   );
@@ -111,7 +111,7 @@ function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelect
       <div className="max-w-xl space-y-3">
         <h1 className="text-[28px] font-medium leading-tight tracking-[-0.015em] text-slate-800 dark:text-white/90 md:text-[40px]">
           {language === "fr" ? "Bonjour" : "Hi"}{" "}
-          <span className="bg-gradient-to-r from-emerald-500 via-cyan-500 to-violet-500 bg-clip-text text-transparent dark:from-emerald-300 dark:via-cyan-300 dark:to-violet-300">{firstName}</span>
+          <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 bg-clip-text text-transparent dark:from-cyan-300 dark:via-sky-300 dark:to-blue-400">{firstName}</span>
           {language === "fr" ? ", on révise quoi aujourd'hui ?" : ", what's on your mind?"}
         </h1>
         <p className="text-sm leading-relaxed text-slate-500 dark:text-white/55 sm:text-base">
@@ -134,7 +134,7 @@ function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelect
             whileTap={{ scale: 0.97 }}
             className="flex min-h-11 items-center gap-2 rounded-full border border-black/[0.06] bg-white/70 px-4 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-white/80 dark:shadow-none dark:hover:bg-white/[0.08]"
           >
-            <prompt.icon className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" strokeWidth={1.75} />
+            <prompt.icon className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300" strokeWidth={1.75} />
             {prompt.label}
           </motion.button>
         ))}
@@ -146,14 +146,27 @@ function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelect
 /** `isPending`: true only while THIS message is actively streaming — the animated ping is a "generating now" signal, not a permanent decoration, so it stops once the reply is complete (a static dot per finished message would just be visual noise on a long scrollback). */
 function AssistantAvatar({ isPending = false }: { isPending?: boolean }) {
   return (
-    <div className="relative mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-      <BrainCircuit className="h-5 w-5" />
+    <div className="relative mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-300">
+      {isPending && (
+        <span
+          aria-hidden
+          className="absolute -inset-[3px] animate-[spin_2.2s_linear_infinite] rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.95)_100deg,rgba(37,99,235,0.6)_160deg,transparent_220deg)] [mask:radial-gradient(farthest-side,transparent_calc(100%-2px),#000_calc(100%-2px))] motion-reduce:animate-[spin_4.4s_linear_infinite]"
+        />
+      )}
+      <BrainCircuit className="h-5 w-5" strokeWidth={1.75} />
       <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-        {isPending && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />}
+        {isPending && (
+          <motion.span
+            className="absolute inline-flex h-full w-full rounded-full bg-sky-400"
+            initial={{ scale: 1, opacity: 0.55 }}
+            animate={{ scale: 2.4, opacity: 0 }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
+          />
+        )}
         <span
           className={cn(
-            "relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 transition-shadow duration-300",
-            isPending && "shadow-[0_0_6px_2px_rgba(52,211,153,0.6)]"
+            "relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-400 transition-shadow duration-300",
+            isPending && "shadow-[0_0_6px_2px_rgba(56,189,248,0.6)]"
           )}
         />
       </span>
@@ -164,18 +177,20 @@ function AssistantAvatar({ isPending = false }: { isPending?: boolean }) {
 /** Streaming placeholder shown before the first token arrives — paired with a short reassurance label rather than a bare spinner, so a student watching a blank bubble knows the assistant is working, not stuck. */
 function TypingIndicator() {
   return (
-    <div className="flex items-center gap-2 py-1">
-      <div className="flex items-center gap-1">
+    <div className="flex items-center gap-2.5 py-1" role="status">
+      <div className="flex items-center gap-1" aria-hidden>
         {[0, 1, 2].map((i) => (
           <motion.span
             key={i}
-            className="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400"
-            animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }}
-            transition={{ duration: 1, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+            className="h-1.5 w-1.5 rounded-full bg-sky-500 dark:bg-sky-400"
+            animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1.15, 0.8] }}
+            transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
           />
         ))}
       </div>
-      <span className="text-xs font-medium text-muted-foreground">MedArt réfléchit…</span>
+      <span className="copilot-shimmer bg-[linear-gradient(90deg,rgb(100_116_139)_0%,rgb(14_165_233)_45%,rgb(100_116_139)_90%)] bg-[length:220%_100%] bg-clip-text text-xs font-medium text-transparent dark:bg-[linear-gradient(90deg,rgb(148_163_184)_0%,rgb(125_211_252)_45%,rgb(148_163_184)_90%)]">
+        MedArt réfléchit…
+      </span>
     </div>
   );
 }
@@ -215,7 +230,7 @@ const ChatBubble = memo(function ChatBubble({
       >
         <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
           {action && (
-            <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+            <span className="flex items-center gap-1 rounded-full bg-sky-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-300">
               <action.icon className="h-3 w-3" />
               {tAssistant(action.label, language)}
             </span>
@@ -225,11 +240,11 @@ const ChatBubble = memo(function ChatBubble({
             <img
               src={attachment.dataUrl}
               alt={attachment.fileName ?? "Image envoyée"}
-              className="max-h-64 w-auto max-w-full rounded-2xl rounded-br-sm border border-emerald-500/30 object-cover shadow-sm"
+              className="max-h-64 w-auto max-w-full rounded-2xl rounded-br-sm border border-sky-500/30 object-cover shadow-sm"
             />
           )}
           {attachment?.kind === DOCUMENT_ENVELOPE_KIND && (
-            <div className="flex max-w-full items-center gap-2 rounded-2xl rounded-br-sm border border-emerald-500/30 bg-emerald-50/80 px-3.5 py-2.5 text-emerald-800 shadow-sm dark:bg-emerald-950/30 dark:text-emerald-200">
+            <div className="flex max-w-full items-center gap-2 rounded-2xl rounded-br-sm border border-sky-500/30 bg-sky-50/80 px-3.5 py-2.5 text-sky-800 shadow-sm dark:bg-sky-950/30 dark:text-sky-200">
               <FileText className="h-4 w-4 shrink-0" />
               <span className="min-w-0 max-w-[14rem] truncate text-sm font-medium">{attachment.fileName}</span>
             </div>
@@ -318,6 +333,13 @@ const ATTACHMENT_ITEMS = [
 ];
 
 type AttachmentKind = (typeof ATTACHMENT_ITEMS)[number]["kind"];
+
+/** One line under each attachment choice (desktop menu). */
+const ATTACHMENT_HINTS: Record<AttachmentKind, Record<"fr" | "en", string>> = {
+  image: { fr: "Schéma, ECG, radio, page de cours", en: "Diagram, ECG, X-ray, course page" },
+  pdf: { fr: "Polycopié ou article : le texte est lu", en: "Handout or article: its text is read" },
+  camera: { fr: "Photographier une page ou un tableau", en: "Snap a page or a whiteboard" },
+};
 
 // --- Image/document attachment envelopes -----------------------------------
 // ChatMessage (hooks/useAssistantConversations.ts, out of this mission's
@@ -1324,7 +1346,7 @@ export default function AssistantPage() {
                   className={cn(
                     "absolute bottom-[calc(var(--copilot-composer-h,0px)+0.75rem)] left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border px-4 text-sm font-medium shadow-glass transition-colors dark:shadow-glass-dark",
                     isTyping
-                      ? "border-emerald-500/30 bg-emerald-500 text-white hover:bg-emerald-600"
+                      ? "border-sky-500/30 bg-sky-600 text-white hover:bg-sky-700"
                       : "border-border bg-popover/95 text-foreground hover:bg-accent"
                   )}
                 >
@@ -1364,7 +1386,7 @@ export default function AssistantPage() {
             )}
 
             <div className="px-3 sm:px-4">
-              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[28px] border border-black/[0.06] bg-white/95 shadow-[0_12px_40px_-14px_rgba(15,23,42,0.22)] backdrop-blur-xl transition-[box-shadow,border-color] duration-300 focus-within:border-emerald-500/30 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.22),0_14px_44px_-14px_rgba(16,185,129,0.4)] dark:border-white/10 dark:bg-[#16191d]/95 dark:shadow-[0_18px_60px_-12px_rgba(0,0,0,0.8)] dark:focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.25),0_18px_60px_-12px_rgba(0,0,0,0.8)]">
+              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[32px] border border-black/[0.06] bg-white/95 shadow-[0_12px_40px_-14px_rgba(15,23,42,0.22)] backdrop-blur-xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_14px_44px_-14px_rgba(14,165,233,0.4)] dark:border-white/10 dark:bg-[#16191d]/95 dark:shadow-[0_18px_60px_-12px_rgba(0,0,0,0.8)] dark:focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.25),0_18px_60px_-12px_rgba(0,0,0,0.8)]">
                 <AnimatePresence initial={false}>
                   {activeAction && (
                     <motion.div
@@ -1375,8 +1397,8 @@ export default function AssistantPage() {
                       transition={{ duration: 0.18 }}
                       className="overflow-hidden"
                     >
-                      <div className="flex items-center gap-2 px-3.5 pt-2.5">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 py-1 pl-2.5 pr-1 text-xs font-semibold text-white">
+                      <div className="flex items-center gap-2 px-5 pt-3">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-600 py-1 pl-2.5 pr-1 text-xs font-semibold text-white">
                           <activeAction.icon className="h-3.5 w-3.5" />
                           {tAssistant(activeAction.label, language)}
                           <button
@@ -1394,7 +1416,7 @@ export default function AssistantPage() {
                 </AnimatePresence>
 
                 {(pendingImage || isPreparingImage) && (
-                  <div className="flex items-center gap-3 px-3 pt-3">
+                  <div className="flex items-center gap-3 px-4 pt-3.5">
                     <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-border bg-muted">
                       {pendingImage ? (
                         // eslint-disable-next-line @next/next/no-img-element -- local data: URL preview
@@ -1421,7 +1443,7 @@ export default function AssistantPage() {
                   </div>
                 )}
 
-                <div className="flex w-full items-end gap-1 p-1.5">
+                <div className="flex w-full items-end gap-1.5 px-2.5 py-2.5">
                   <div className="relative shrink-0">
                     <button
                       ref={attachmentButtonRef}
@@ -1459,22 +1481,31 @@ export default function AssistantPage() {
                       {isAttachmentMenuOpen && !isPhoneLayout && (
                         <motion.div
                           ref={attachmentMenuRef}
-                          initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                          initial={{ opacity: 0, y: 12, scale: 0.92 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                          transition={{ duration: 0.15 }}
-                          className="absolute bottom-full left-0 z-50 mb-2 w-60 overflow-hidden rounded-2xl border border-border bg-popover py-1 text-popover-foreground shadow-glass dark:shadow-glass-dark"
+                          exit={{ opacity: 0, y: 8, scale: 0.96, transition: { duration: 0.14, ease: "easeIn" } }}
+                          transition={{ type: "spring", stiffness: 480, damping: 32, mass: 0.7 }}
+                          style={{ transformOrigin: "bottom left" }}
+                          className="absolute bottom-full left-0 z-50 mb-3 w-80 overflow-hidden rounded-3xl border border-black/[0.06] bg-white/90 p-1.5 text-popover-foreground shadow-[0_24px_60px_-18px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#14171b]/90 dark:shadow-[0_28px_70px_-18px_rgba(0,0,0,0.85)]"
                         >
-                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }) => (
-                            <button
+                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }, index) => (
+                            <motion.button
                               key={kind}
                               type="button"
                               onClick={() => pickAttachment(kind)}
-                              className="flex min-h-12 w-full cursor-pointer items-center gap-3 px-4 text-left text-[15px] text-foreground transition-colors active:bg-accent hover:bg-accent"
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.04 + index * 0.035, duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                              className="flex min-h-[60px] w-full cursor-pointer items-center gap-3 rounded-2xl px-2.5 text-left transition-colors hover:bg-sky-500/[0.08] focus-visible:bg-sky-500/[0.1] focus-visible:outline-none active:bg-sky-500/[0.14]"
                             >
-                              <Icon size={18} className="shrink-0 text-emerald-500" />
-                              <span className="flex-1">{attachmentLabel(kind, label)}</span>
-                            </button>
+                              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 text-white shadow-[0_8px_18px_-8px_rgba(14,165,233,0.8)]">
+                                <Icon className="h-5 w-5" strokeWidth={1.75} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-[15px] font-medium text-foreground">{attachmentLabel(kind, label)}</span>
+                                <span className="block truncate text-xs text-muted-foreground">{ATTACHMENT_HINTS[kind][language]}</span>
+                              </span>
+                            </motion.button>
                           ))}
                         </motion.div>
                       )}
@@ -1488,19 +1519,23 @@ export default function AssistantPage() {
                           <DialogTitle className="text-base font-bold">{tAssistant("addAttachment", language)}</DialogTitle>
                           <DialogDescription className="sr-only">{tAssistant("addAttachment", language)}</DialogDescription>
                         </div>
-                        <div className="grid gap-1 px-2 pb-3">
-                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }) => (
-                            <button
+                        <div className="grid grid-cols-3 gap-2.5 px-3 pb-4">
+                          {ATTACHMENT_ITEMS.map(({ kind, icon: Icon, label }, index) => (
+                            <motion.button
                               key={kind}
                               type="button"
                               onClick={() => pickAttachment(kind)}
-                              className="press-feedback flex min-h-14 w-full items-center gap-3 rounded-2xl px-2 text-left text-[15px] font-semibold text-foreground active:bg-accent"
+                              initial={{ opacity: 0, y: 10, scale: 0.96 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              transition={{ delay: 0.08 + index * 0.05, type: "spring", stiffness: 420, damping: 30 }}
+                              whileTap={{ scale: 0.96 }}
+                              className="flex min-h-[112px] flex-col items-center justify-center gap-2.5 rounded-3xl border border-black/[0.06] bg-white/70 px-2 text-center outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 active:bg-sky-500/[0.08] dark:border-white/10 dark:bg-white/[0.04]"
                             >
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                                <Icon className="h-5 w-5" />
+                              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 text-white shadow-[0_10px_22px_-10px_rgba(14,165,233,0.85)]">
+                                <Icon className="h-6 w-6" strokeWidth={1.75} />
                               </span>
-                              <span className="flex-1">{attachmentLabel(kind, label)}</span>
-                            </button>
+                              <span className="text-[13px] font-semibold leading-tight text-foreground">{attachmentLabel(kind, label)}</span>
+                            </motion.button>
                           ))}
                         </div>
                       </DialogContent>
@@ -1522,7 +1557,7 @@ export default function AssistantPage() {
                       enterKeyHint="send"
                       aria-label={tAssistant("composerPlaceholder", language)}
                       placeholder={composerPlaceholder}
-                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out animate-in fade-in-0 placeholder:truncate placeholder:text-slate-400 focus:ring-0 dark:placeholder:text-white/40"
+                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-2 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out animate-in fade-in-0 placeholder:truncate placeholder:text-slate-400 focus:ring-0 dark:placeholder:text-white/40"
                     />
                   )}
 
@@ -1554,7 +1589,7 @@ export default function AssistantPage() {
                     aria-label={isListening ? tAssistant("stopDictation", language) : tAssistant("startDictation", language)}
                     className={cn(
                       "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
-                      isListening ? "bg-emerald-500 text-white shadow-[0_0_0_4px_rgba(16,185,129,0.18)]" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      isListening ? "bg-sky-600 text-white shadow-[0_0_0_4px_rgba(14,165,233,0.18)]" : "text-muted-foreground hover:bg-accent hover:text-foreground",
                       (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40",
                       hasPrimaryAction && !isListening && "max-sm:hidden"
                     )}
@@ -1587,7 +1622,7 @@ export default function AssistantPage() {
                       transition={{ duration: 0.15 }}
                       whileTap={{ scale: 0.9 }}
                       aria-label={tAssistant("sendMessage", language)}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-soft"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-sky-600 text-white shadow-soft"
                     >
                       <Send className="h-5 w-5" />
                     </motion.button>

@@ -17,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip
 import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
 
 const ICON_BUTTON =
-  "flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-[transform,background-color,color] duration-150 active:scale-90 active:bg-accent hover:bg-accent hover:text-emerald-500 disabled:opacity-50 sm:h-9 sm:w-9";
+  "flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-[transform,background-color,color] duration-150 active:scale-90 active:bg-accent hover:bg-accent hover:text-sky-500 disabled:opacity-50 sm:h-9 sm:w-9";
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -31,7 +31,7 @@ function MenuItem({ icon, label, onClick, tone = "default" }: { icon: ReactNode;
       className={cn(
         "flex min-h-12 w-full items-center gap-3 px-4 text-left text-[15px] transition-colors active:bg-accent hover:bg-accent sm:min-h-10 sm:text-sm",
         tone === "danger" && "text-rose-600 dark:text-rose-400",
-        tone === "active" && "text-emerald-600 dark:text-emerald-400",
+        tone === "active" && "text-sky-600 dark:text-sky-400",
         tone === "default" && "text-foreground"
       )}
     >
@@ -235,7 +235,7 @@ export function MessageActions({
             onClick={handleSpeak}
             aria-label={isSpeaking ? tAssistant("stopSpeaking", language) : tAssistant("speak", language)}
             aria-pressed={isSpeaking}
-            className={cn(ICON_BUTTON, isSpeaking && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400")}
+            className={cn(ICON_BUTTON, isSpeaking && "bg-sky-500/10 text-sky-600 dark:text-sky-400")}
           >
             {isSpeaking ? <Square className="h-4 w-4 animate-pulse fill-current" /> : <Volume2 className="h-[18px] w-[18px]" />}
           </button>
@@ -246,7 +246,7 @@ export function MessageActions({
       <Tooltip open={copied ? true : undefined}>
         <TooltipTrigger asChild>
           <button type="button" onClick={handleCopy} aria-label={tAssistant("copyMarkdown", language)} className={ICON_BUTTON}>
-            {copied ? <Check className="h-[18px] w-[18px] text-emerald-500" /> : <Copy className="h-[18px] w-[18px]" />}
+            {copied ? <Check className="h-[18px] w-[18px] text-sky-500" /> : <Copy className="h-[18px] w-[18px]" />}
           </button>
         </TooltipTrigger>
         <TooltipContent>{copied ? tAssistant("copied", language) : tAssistant("copyMarkdown", language)}</TooltipContent>
@@ -264,7 +264,7 @@ export function MessageActions({
             {noteState === "saving" ? (
               <Loader2 className="h-[18px] w-[18px] animate-spin" />
             ) : noteState === "saved" ? (
-              <Check className="h-[18px] w-[18px] text-emerald-500" />
+              <Check className="h-[18px] w-[18px] text-sky-500" />
             ) : (
               <NotebookPen className="h-[18px] w-[18px]" />
             )}
@@ -297,7 +297,7 @@ export function MessageActions({
           onClick={() => setMenuOpen((prev) => !prev)}
           aria-label={tAssistant("moreOptions", language)}
           aria-expanded={menuOpen}
-          className={cn(ICON_BUTTON, feedback === "up" && "text-emerald-500", feedback === "down" && "text-rose-500")}
+          className={cn(ICON_BUTTON, feedback === "up" && "text-sky-500", feedback === "down" && "text-rose-500")}
         >
           <MoreHorizontal className="h-[18px] w-[18px]" />
         </button>

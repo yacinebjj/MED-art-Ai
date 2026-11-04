@@ -141,12 +141,12 @@ export function QuickActionBar({
           className={cn(
             "relative flex h-11 shrink-0 items-center justify-center rounded-full border px-3.5 transition-[transform,background-color] duration-150 active:scale-95",
             settingsOpen || customized
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300"
               : "border-black/[0.06] bg-white/70 text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/60"
           )}
         >
           <SlidersHorizontal strokeWidth={1.75} className="h-[18px] w-[18px]" />
-          {customized && <span aria-hidden className="absolute right-2 top-2 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-card" />}
+          {customized && <span aria-hidden className="absolute right-2 top-2 h-2 w-2 rounded-full bg-sky-600 ring-2 ring-card" />}
         </button>
 
         {QUICK_ACTIONS.map(({ mode: actionMode, icon: Icon, label }) => {
@@ -165,7 +165,7 @@ export function QuickActionBar({
               className={cn(
                 "flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-sm font-medium transition-[transform,background-color,color,border-color,box-shadow] duration-150 active:scale-95 disabled:opacity-50",
                 active
-                  ? "border-emerald-500 bg-emerald-500 text-white shadow-[0_6px_18px_-8px_rgba(16,185,129,0.6)]"
+                  ? "border-sky-600 bg-sky-600 text-white shadow-[0_6px_18px_-8px_rgba(14,165,233,0.6)]"
                   : "border-black/[0.06] bg-white/70 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.06] dark:text-white/80 dark:hover:bg-white/[0.1]"
               )}
             >
