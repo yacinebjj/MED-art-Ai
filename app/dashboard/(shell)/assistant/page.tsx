@@ -72,60 +72,70 @@ interface HistoryTurn {
 // task) tailored to Algerian médecine/pharmacie/dentaire students, reviewed
 // before shipping. Purely a UI convenience (clicking one just calls the
 // EXISTING sendMessage with this text) — no backend/streaming change.
-const QUICK_PROMPTS: { icon: LucideIcon; text: string }[] = [
-  { icon: Stethoscope, text: "Génère un cas clinique progressif pour tester mon raisonnement diagnostique." },
-  { icon: Brain, text: "Explique-moi ce mécanisme physiologique avec une analogie simple et visuelle." },
-  { icon: Calendar, text: "Crée-moi un planning de révision réaliste pour mes prochains examens." },
-  { icon: ListChecks, text: "Donne-moi des moyens mnémotechniques percutants pour retenir cette classification." },
-  { icon: HeartPulse, text: "Je stresse avant mes épreuves, comment prioriser sans paniquer ?" },
-  { icon: BookOpenCheck, text: "Pose-moi cinq QCM pièges pour évaluer mon niveau aujourd'hui." },
+/** `label`: the short chip on the welcome screen; `text`: the full request it sends. */
+const QUICK_PROMPTS: { icon: LucideIcon; label: string; text: string }[] = [
+  { icon: Stethoscope, label: "Cas clinique progressif", text: "Génère un cas clinique progressif pour tester mon raisonnement diagnostique." },
+  { icon: Brain, label: "Mécanisme en analogie", text: "Explique-moi ce mécanisme physiologique avec une analogie simple et visuelle." },
+  { icon: Calendar, label: "Planning de révision", text: "Crée-moi un planning de révision réaliste pour mes prochains examens." },
+  { icon: ListChecks, label: "Moyens mnémotechniques", text: "Donne-moi des moyens mnémotechniques percutants pour retenir cette classification." },
+  { icon: HeartPulse, label: "Gérer le stress", text: "Je stresse avant mes épreuves, comment prioriser sans paniquer ?" },
+  { icon: BookOpenCheck, label: "5 QCM pièges", text: "Pose-moi cinq QCM pièges pour évaluer mon niveau aujourd'hui." },
 ];
 
 function NovaOrb() {
   return (
     <div className="relative flex h-20 w-20 shrink-0 items-center justify-center sm:h-24 sm:w-24" aria-hidden="true">
-      {/* Soft ambient bloom behind the glyph — same "brand glow, not a flat icon tile" language as AssistantAvatar/the composer's focus ring, so the very first thing a student sees on an empty thread already reads as MedArt rather than a generic placeholder icon. */}
-      <span className="absolute inset-1 rounded-full bg-emerald-400/25 blur-xl" />
-      <div className="relative flex h-full w-full animate-float items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 shadow-[0_0_40px_-10px_rgba(16,185,129,0.5)] dark:text-emerald-400">
-        <BrainCircuit className="h-10 w-10 sm:h-12 sm:w-12" />
-      </div>
+      {/* No tile, no frame: a multi-colour bloom and a gradient-stroked glyph floating on the canvas. */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <linearGradient id="copilot-orb-stroke" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#34d399" />
+            <stop offset="50%" stopColor="#22d3ee" />
+            <stop offset="100%" stopColor="#a78bfa" />
+          </linearGradient>
+        </defs>
+      </svg>
+      <span className="absolute inset-2 rounded-full bg-[conic-gradient(from_200deg,rgba(52,211,153,0.45),rgba(34,211,238,0.4),rgba(167,139,250,0.45),rgba(52,211,153,0.45))] opacity-60 blur-2xl dark:opacity-70" />
+      <BrainCircuit color="url(#copilot-orb-stroke)" strokeWidth={1.5} className="relative h-12 w-12 animate-float sm:h-14 sm:w-14" />
     </div>
   );
 }
 
 function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
+  const { language } = useLanguage();
   return (
     // Clears the floating glass header and composer (their measured heights, see the chat column).
     // motion-swap: rises in when it replaces a conversation ("Nouvelle conversation").
     <div className="motion-swap relative flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-6 overflow-y-auto overflow-x-hidden overscroll-none px-3 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:gap-8 sm:px-4 sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
       <NovaOrb />
       <div className="max-w-xl space-y-3">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-4xl">
-          Hi {firstName}, what&apos;s on your mind?
+        <h1 className="text-[28px] font-medium leading-tight tracking-[-0.015em] text-slate-800 dark:text-white/90 md:text-[40px]">
+          {language === "fr" ? "Bonjour" : "Hi"}{" "}
+          <span className="bg-gradient-to-r from-emerald-500 via-cyan-500 to-violet-500 bg-clip-text text-transparent dark:from-emerald-300 dark:via-cyan-300 dark:to-violet-300">{firstName}</span>
+          {language === "fr" ? ", on révise quoi aujourd'hui ?" : ", what's on your mind?"}
         </h1>
-        <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-          Besoin d&apos;aide pour organiser tes révisions, comprendre un module compliqué, ou juste souffler un peu ?
-          Je suis là.
+        <p className="text-sm leading-relaxed text-slate-500 dark:text-white/55 sm:text-base">
+          {language === "fr"
+            ? "Un module compliqué, un planning à caler, ou juste besoin de souffler ? Je suis là."
+            : "A tough module, a study plan to build, or just need a breather? I'm here."}
         </p>
       </div>
 
-      <div data-tour="asst-suggestions" className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+      <div data-tour="asst-suggestions" className="flex w-full max-w-2xl flex-wrap justify-center gap-2">
         {QUICK_PROMPTS.map((prompt, index) => (
           <motion.button
             key={prompt.text}
             type="button"
             onClick={() => onSelectPrompt(prompt.text)}
-            initial={{ opacity: 0, y: 10 }}
+            title={prompt.text}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 + index * 0.05, duration: 0.3, ease: "easeOut" }}
-            whileHover={{ y: -2 }}
-            whileTap={{ scale: 0.98 }}
-            className="glass-card flex items-center gap-2.5 rounded-2xl px-4 py-3 text-left shadow-soft transition-shadow duration-200 hover:shadow-glow"
+            transition={{ delay: 0.2 + index * 0.04, duration: 0.3, ease: "easeOut" }}
+            whileTap={{ scale: 0.97 }}
+            className="flex min-h-11 items-center gap-2 rounded-full border border-black/[0.06] bg-white/70 px-4 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-white/80 dark:shadow-none dark:hover:bg-white/[0.08]"
           >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-              <prompt.icon className="h-4 w-4" />
-            </span>
-            <span className="line-clamp-2 text-sm text-foreground/90">{prompt.text}</span>
+            <prompt.icon className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" strokeWidth={1.75} />
+            {prompt.label}
           </motion.button>
         ))}
       </div>
@@ -1183,7 +1193,7 @@ export default function AssistantPage() {
       // (the shell doesn't mount its DNA canvas on this route either). From
       // lg it is a rounded panel beside the sidebar.
       className={cn(
-        "copilot-canvas flex w-full max-w-full overflow-hidden overscroll-none lg:h-full lg:rounded-3xl lg:border",
+        "copilot-canvas flex w-full max-w-full overflow-hidden overscroll-none lg:h-full lg:rounded-3xl lg:border lg:border-black/[0.05] lg:dark:border-white/[0.06]",
         // Portaled on phones, outside the page transition: it fades in over the page it was opened from.
         isPhoneLayout && "copilot-enter",
         // `inset-0` (like the group chat room, proven on real phones) — the
@@ -1214,8 +1224,10 @@ export default function AssistantPage() {
             the full screen and needs its own way back out. */}
         <div
           ref={phoneHeaderRef}
-          className="glass-chrome absolute inset-x-0 top-0 z-20 flex items-center gap-1 rounded-none border-x-0 border-t-0 px-1.5 pb-1.5 pt-[calc(env(safe-area-inset-top)+0.375rem)] lg:hidden"
+          className="absolute inset-x-0 top-0 z-20 flex items-center gap-1 px-1.5 pb-3 pt-[calc(env(safe-area-inset-top)+0.375rem)] lg:hidden"
         >
+          {/* Frosted, no divider: the blur fades out at its lower edge instead of ending on a line (glass-chrome keeps its blur on phones; the fade covers only the bottom padding, so the buttons never fade). */}
+          <div aria-hidden className="glass-chrome pointer-events-none absolute inset-0 -z-10 border-0 [mask-image:linear-gradient(to_top,transparent,black_12px)]" />
           <Link
             href="/dashboard"
             aria-label="Retour au tableau de bord"
@@ -1331,10 +1343,12 @@ export default function AssistantPage() {
         <div
           ref={composerDockRef}
           className={cn(
-            "glass-chrome absolute inset-x-0 bottom-0 z-20 rounded-none border-x-0 border-b-0 pt-1.5 lg:pb-5",
-            keyboardOpen ? "pb-2" : "pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+            "absolute inset-x-0 bottom-0 z-20 pt-6 lg:pb-5",
+            keyboardOpen ? "pb-2" : "pb-[max(0.75rem,env(safe-area-inset-bottom))]"
           )}
         >
+          {/* No bar behind the floating hub: the thread fades into frosted glass over the top padding only (glass-chrome keeps its blur on phones), so chips and hub stay crisp. */}
+          <div aria-hidden className="glass-chrome pointer-events-none absolute inset-0 -z-10 border-0 bg-[rgb(245_247_250/0.72)] [mask-image:linear-gradient(to_bottom,transparent,black_24px)] dark:bg-[rgb(5_20_29/0.62)]" />
           <div className="mx-auto w-full max-w-3xl">
             {/* Comes back with a fade when the keyboard closes (motion-swap, app/globals.css). */}
             {!keyboardOpen && (
@@ -1350,7 +1364,7 @@ export default function AssistantPage() {
             )}
 
             <div className="px-3 sm:px-4">
-              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[26px] border border-black/[0.08] bg-white/70 shadow-soft transition-shadow duration-300 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.4),0_8px_32px_-8px_rgba(16,185,129,0.35)] dark:border-white/10 dark:bg-white/[0.06]">
+              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[28px] border border-black/[0.06] bg-white/95 shadow-[0_12px_40px_-14px_rgba(15,23,42,0.22)] backdrop-blur-xl transition-[box-shadow,border-color] duration-300 focus-within:border-emerald-500/30 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.22),0_14px_44px_-14px_rgba(16,185,129,0.4)] dark:border-white/10 dark:bg-[#16191d]/95 dark:shadow-[0_18px_60px_-12px_rgba(0,0,0,0.8)] dark:focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.25),0_18px_60px_-12px_rgba(0,0,0,0.8)]">
                 <AnimatePresence initial={false}>
                   {activeAction && (
                     <motion.div
@@ -1430,7 +1444,7 @@ export default function AssistantPage() {
                       {isAttachmentBusy ? (
                         <RefreshCw className="h-5 w-5 animate-spin" />
                       ) : (
-                        <Plus className={cn("h-5 w-5 transition-transform duration-200", isAttachmentMenuOpen && "rotate-45")} />
+                        <Plus strokeWidth={1.75} className={cn("h-5 w-5 transition-transform duration-200", isAttachmentMenuOpen && "rotate-45")} />
                       )}
                     </button>
 
@@ -1508,7 +1522,7 @@ export default function AssistantPage() {
                       enterKeyHint="send"
                       aria-label={tAssistant("composerPlaceholder", language)}
                       placeholder={composerPlaceholder}
-                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out animate-in fade-in-0 placeholder:truncate placeholder:text-muted-foreground focus:ring-0"
+                      className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out animate-in fade-in-0 placeholder:truncate placeholder:text-slate-400 focus:ring-0 dark:placeholder:text-white/40"
                     />
                   )}
 
@@ -1526,7 +1540,7 @@ export default function AssistantPage() {
                       hasPrimaryAction && "max-sm:hidden"
                     )}
                   >
-                    <AudioLines className="h-5 w-5" />
+                    <AudioLines strokeWidth={1.75} className="h-5 w-5" />
                   </button>
 
                   <button
@@ -1550,7 +1564,7 @@ export default function AssistantPage() {
                     ) : isListening ? (
                       <Square className="h-4 w-4 fill-current" />
                     ) : (
-                      <Mic className="h-5 w-5" />
+                      <Mic strokeWidth={1.75} className="h-5 w-5" />
                     )}
                   </button>
 

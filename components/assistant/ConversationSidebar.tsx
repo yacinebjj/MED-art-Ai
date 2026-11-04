@@ -212,9 +212,9 @@ export function ConversationSidebar({
           <button
             type="button"
             onClick={onNewConversation}
-            className="flex flex-1 items-center gap-2 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-6px_rgba(16,185,129,0.55)] active:scale-[0.98] active:translate-y-0"
+            className="flex min-h-11 flex-1 items-center gap-2 rounded-full border border-black/[0.06] bg-white/60 px-4 text-sm font-medium text-foreground transition-colors duration-200 hover:bg-white active:scale-[0.98] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
           >
-            <Plus className="h-4 w-4" />
+            <Plus strokeWidth={2} className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
             Nouvelle conversation
           </button>
           <Tooltip>
@@ -239,8 +239,8 @@ export function ConversationSidebar({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher une conversation…"
-              className="w-full rounded-lg border border-border bg-background/50 py-1.5 pl-8 pr-7 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/25 sm:text-xs"
+              placeholder="Rechercher…"
+              className="w-full rounded-full border border-black/[0.06] bg-white/50 py-2 pl-8 pr-7 text-base text-foreground outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500/40 focus:ring-2 focus:ring-emerald-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:placeholder:text-white/40 sm:text-xs"
             />
             {query && (
               <button

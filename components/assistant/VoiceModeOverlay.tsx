@@ -362,18 +362,16 @@ export function VoiceModeOverlay({ open, onClose, onAsk }: { open: boolean; onCl
           role="dialog"
           aria-modal="true"
           aria-label="Mode vocal MedArt"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[9998] flex flex-col items-center justify-between overflow-hidden bg-[#020617] px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] text-white"
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 1.015 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 1.01 }}
+          transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+          className="fixed inset-0 z-[9998] flex flex-col items-center justify-between overflow-hidden bg-black px-4 pb-[calc(1.75rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] text-white"
         >
-          <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(34,211,238,0.12),transparent_60%)]" />
+          <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(150%_85%_at_50%_120%,rgba(13,51,67,0.95)_0%,rgba(6,26,38,0.75)_32%,rgba(3,12,20,0.45)_58%,transparent_80%)]" />
 
-          <div className="relative flex w-full max-w-xl items-center justify-between">
-            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-cyan-300/80">Mode vocal · MedArt</p>
-            <button type="button" onClick={onClose} aria-label="Quitter le mode vocal" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 transition-colors hover:bg-white/20">
-              <X className="h-5 w-5" />
-            </button>
+          <div className="relative flex w-full max-w-xl items-center justify-center">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/45">Mode vocal · MedArt</p>
           </div>
 
           {/* 3D neural orb */}
@@ -386,12 +384,12 @@ export function VoiceModeOverlay({ open, onClose, onAsk }: { open: boolean; onCl
               />
               {(state === "thinking" || state === "transcribing") && !reduceMotion && (
                 <>
-                  <motion.span aria-hidden className="absolute inset-4 rounded-full border-2 border-violet-400/60" style={{ transformStyle: "preserve-3d" }} animate={{ rotateX: [65, 65], rotateZ: [0, 360] }} transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }} />
-                  <motion.span aria-hidden className="absolute inset-10 rounded-full border-2 border-cyan-300/50" style={{ transformStyle: "preserve-3d" }} animate={{ rotateY: [70, 70], rotateZ: [360, 0] }} transition={{ duration: 3.2, repeat: Infinity, ease: "linear" }} />
+                  <motion.span aria-hidden className="absolute inset-4 rounded-full border border-violet-300/25" style={{ transformStyle: "preserve-3d" }} animate={{ rotateX: [65, 65], rotateZ: [0, 360] }} transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }} />
+                  <motion.span aria-hidden className="absolute inset-10 rounded-full border border-cyan-200/20" style={{ transformStyle: "preserve-3d" }} animate={{ rotateY: [70, 70], rotateZ: [360, 0] }} transition={{ duration: 3.2, repeat: Infinity, ease: "linear" }} />
                 </>
               )}
               {state === "speaking" && !reduceMotion && (
-                <span aria-hidden className="absolute inset-8 rounded-full border border-sky-300/40" style={{ transform: "scale(calc(1 + var(--level) * 0.25))", transition: "transform 80ms linear" }} />
+                <span aria-hidden className="absolute inset-8 rounded-full border border-sky-200/20" style={{ transform: "scale(calc(1 + var(--level) * 0.25))", transition: "transform 80ms linear" }} />
               )}
               <motion.span
                 aria-hidden
@@ -406,7 +404,7 @@ export function VoiceModeOverlay({ open, onClose, onAsk }: { open: boolean; onCl
           </button>
 
           <div className="relative w-full max-w-xl text-center" aria-live="polite">
-            <p className="text-lg font-black">{STATE_COPY[state]}</p>
+            <p className="text-lg font-medium tracking-tight text-white/90">{STATE_COPY[state]}</p>
             {notice && <p className="mt-1 text-sm text-amber-300">{notice}</p>}
             {caption.you && <p className="mt-3 line-clamp-2 text-sm text-slate-400">Toi : « {caption.you} »</p>}
             {caption.assistant && <p className="mt-2 max-h-28 overflow-y-auto text-sm leading-relaxed text-slate-200">{caption.assistant}</p>}
@@ -414,7 +412,7 @@ export function VoiceModeOverlay({ open, onClose, onAsk }: { open: boolean; onCl
           </div>
 
           {/* Floating HUD */}
-          <div className="relative flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] p-2 sm:gap-3">
+          <div className="relative flex max-w-full items-center gap-3 sm:gap-4">
             <button
               type="button"
               onClick={toggleMute}
@@ -444,8 +442,8 @@ export function VoiceModeOverlay({ open, onClose, onAsk }: { open: boolean; onCl
               {state === "transcribing" || state === "thinking" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
               <span className="max-w-[4.5rem] truncate sm:max-w-[7rem]">{voiceLabel ?? "Voix"}</span>
             </button>
-            <button type="button" onClick={onClose} className="flex h-12 shrink-0 items-center rounded-full bg-gradient-to-r from-rose-500 to-pink-600 px-4 text-sm font-black sm:px-5">
-              Quitter
+            <button type="button" onClick={onClose} aria-label="Quitter le mode vocal" title="Quitter (Échap)" className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-rose-500 text-white shadow-[0_8px_30px_-8px_rgba(244,63,94,0.7)] transition-[transform,background-color] hover:bg-rose-600 active:scale-95">
+              <X className="h-6 w-6" />
             </button>
           </div>
         </motion.div>

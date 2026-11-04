@@ -220,12 +220,19 @@
      clean, opaque canvas — the theme background with a faint brand glow at
      the top, no aurora, mesh grid or video behind the conversation. */
   .copilot-canvas {
-    background-color: var(--background);
-    background-image: radial-gradient(120% 55% at 50% 0%, rgb(16 185 129 / 0.05), transparent 70%);
+    /* Light: a cool off-white (never stark #fff) lifted by a faint petrol
+       glow from the base and a whisper of brand green at the top. */
+    background-color: #f5f7fa;
+    background-image:
+      radial-gradient(140% 70% at 50% 120%, rgb(14 116 144 / 0.1), transparent 70%),
+      radial-gradient(120% 55% at 50% 0%, rgb(16 185 129 / 0.05), transparent 70%);
   }
 
   .dark .copilot-canvas {
-    background-image: radial-gradient(120% 55% at 50% 0%, rgb(16 185 129 / 0.08), transparent 70%);
+    /* Dark: OLED black at the top, easing (non-linearly, no visible band)
+       into deep petrol / navy at the base. */
+    background-color: #000;
+    background-image: radial-gradient(150% 85% at 50% 125%, rgb(13 51 67) 0%, rgb(7 28 40 / 0.85) 30%, rgb(3 12 20 / 0.55) 58%, transparent 80%);
   }
 
   /* Any active paid plan: the neon halo around the student's avatar
