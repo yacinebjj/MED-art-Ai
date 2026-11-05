@@ -16,12 +16,10 @@ import { tAssistant } from "@/lib/translations/assistant";
 import { useToast } from "@/components/ui/Toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
+import { COPILOT_ACTION_BUTTON_CLASSES } from "@/components/assistant/CopilotParts";
 
-// Clear at a glance: 40 px discs with 20 px glyphs on every screen, solid
-// white in dark mode (near-black in light), a soft disc on hover. The row's
-// negative margin lines the first glyph up with the reply's text.
-const ICON_BUTTON =
-  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-800 outline-none transition-[background-color,color,transform] duration-150 ease-out hover:bg-black/[0.06] hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-sky-500/40 active:scale-[0.92] active:bg-black/[0.08] disabled:pointer-events-none disabled:opacity-40 dark:text-white dark:hover:bg-white/[0.1] dark:active:bg-white/[0.14]";
+// Clear at a glance: 40 px discs with 20 px glyphs (components/assistant/CopilotParts.tsx).
+const ICON_BUTTON = COPILOT_ACTION_BUTTON_CLASSES;
 const ICON = "h-5 w-5";
 const MENU_ICON = "h-[18px] w-[18px] sm:h-4 sm:w-4";
 

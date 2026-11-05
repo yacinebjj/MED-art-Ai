@@ -1,15 +1,16 @@
 "use client";
 
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
+  BookOpenCheck,
   BookOpenText,
   Check,
-  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Columns2,
   Copy,
   Download,
@@ -17,75 +18,63 @@ import {
   GraduationCap,
   Info,
   Layers,
+  ListChecks,
   Loader2,
   MessageSquareText,
   Mic,
-  MoreVertical,
+  MoreHorizontal,
   NotebookPen,
-  Paperclip,
+  Plus,
   RefreshCw,
-  Sparkles,
+  ShieldAlert,
   Square,
+  Table2,
   Trash2,
   Volume2,
-  VolumeX,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { haptic } from "@/lib/haptics";
 import { stripReasoning } from "@/lib/strip-reasoning";
+import { cleanAssistantMarkdown } from "@/lib/assistant-markdown";
+import { dominantDirection } from "@/lib/text-direction";
+import { tAssistant } from "@/lib/translations/assistant";
 import { useLanguage } from "@/providers/LanguageProvider";
-import {
-  CHAT_PROSE_CLASSES,
-  DARK_CHAT_PROSE_CLASSES,
-  CHAT_MARKDOWN_COMPONENTS,
-  DARK_CHAT_MARKDOWN_COMPONENTS,
-  normalizeCallouts,
-} from "@/lib/markdown";
+import { useAuth } from "@/providers/AuthProvider";
 import { CHAT_MAX_CONTEXT_CHARS, MAX_CHAT_SOURCE_COURSES, type ChatMode } from "@/lib/chat-constants";
 import { stripCitationMarkers, type CitationSourceText } from "@/lib/chat-citations";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useVoiceDictation } from "@/hooks/useVoiceDictation";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { isSpeechSupported, speak, stopSpeaking, useSpeakingId } from "@/hooks/useSpeechSynthesis";
 import { useToast } from "@/components/ui/Toast";
-import { Badge } from "@/components/ui/Badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
-import { Kbd } from "@/components/course/workspace/os/Kbd";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/Dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/DropdownMenu";
+  AssistantAvatar,
+  COPILOT_ACTION_BUTTON_CLASSES,
+  COPILOT_HUB_CLASSES,
+  COPILOT_SUGGESTION_CLASSES,
+  COPILOT_USER_BUBBLE_CLASSES,
+  NovaOrb,
+  TypingIndicator,
+} from "@/components/assistant/CopilotParts";
+import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
+import { VoiceMeter } from "@/components/assistant/VoiceMeter";
 import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
 import { ChatRichMarkdown } from "@/components/course/workspace/ChatRichMarkdown";
 import type { ChatMessage } from "@/lib/types";
-
-/** Memoized plain-markdown bubble: past messages are not re-parsed on every streamed chunk of the latest one. */
-const PlainChatMarkdown = memo(function PlainChatMarkdown({ content, dark }: { content: string; dark: boolean }) {
-  return (
-    <article className={cn(dark ? DARK_CHAT_PROSE_CLASSES : CHAT_PROSE_CLASSES, "max-w-none")}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={dark ? DARK_CHAT_MARKDOWN_COMPONENTS : CHAT_MARKDOWN_COMPONENTS}>
-        {normalizeCallouts(content || "…")}
-      </ReactMarkdown>
-    </article>
-  );
-});
 
 export interface ChatDocumentPanelHandle {
   focusInput: () => void;
   /** Puts `text` in the composer (replacing it) and focuses it — used by the command palette's "Poser une question". */
   setDraft: (text: string) => void;
 }
-
-const EMPTY_CHAT_PLACEHOLDER = {
-  fr: "Pose une question sur tes sources, ou lance une des suggestions ci-dessous.",
-  en: "Ask a question about your sources, or start with one of the suggestions below.",
-} as const;
 
 /** Server-side cap on one chat message (app/api/courses/chat/route.ts's MAX_MESSAGE_CHARS). */
 const MAX_MESSAGE_CHARS = 4000;
@@ -97,12 +86,259 @@ export const CHAT_MODE_OPTIONS: { id: ChatMode; label: string; description: stri
   { id: "express", label: "Synthèse express", description: "5 à 8 puces, l'essentiel à haut rendement", icon: Zap, placeholder: "Que veux-tu réviser en express ?" },
 ];
 
-const STARTER_PROMPTS = [
-  "Résume ce cours en 10 points clés à haut rendement.",
-  "Quels sont les pièges d'examen classiques de ce cours ?",
-  "Fais-moi un tableau de diagnostic différentiel des pathologies du cours.",
-  "Pose-moi 3 questions pour vérifier que j'ai compris l'essentiel.",
+/** Welcome suggestions — `label` on the pill, `text` the request it sends. */
+const STARTER_PROMPTS: { icon: LucideIcon; label: string; text: string }[] = [
+  { icon: ListChecks, label: "10 points clés", text: "Résume ce cours en 10 points clés à haut rendement." },
+  { icon: ShieldAlert, label: "Pièges d'examen", text: "Quels sont les pièges d'examen classiques de ce cours ?" },
+  { icon: Table2, label: "Diagnostic différentiel", text: "Fais-moi un tableau de diagnostic différentiel des pathologies du cours." },
+  { icon: BookOpenCheck, label: "Teste-moi en 3 questions", text: "Pose-moi 3 questions pour vérifier que j'ai compris l'essentiel." },
 ];
+
+/** The "+" menu's rows: an icon tile, a label and a hint (the MedArt Copilot's attachment menu). */
+const MENU_ROW =
+  "flex min-h-[60px] w-full cursor-pointer items-center gap-3 rounded-2xl px-2.5 text-left transition-colors hover:bg-sky-500/[0.08] focus-visible:bg-sky-500/[0.1] focus-visible:outline-none active:bg-sky-500/[0.14]";
+const MENU_TILE = "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl";
+const MENU_TILE_ACCENT = "bg-gradient-to-br from-sky-400 to-blue-600 text-white shadow-[0_8px_18px_-8px_rgba(14,165,233,0.8)]";
+const MENU_TILE_QUIET = "bg-black/[0.04] text-slate-600 dark:bg-white/[0.06] dark:text-white/70";
+
+/** A reply that failed: useCourseChat writes a single short "⚠️ …" line instead of the answer. */
+function isErrorReply(content: string): boolean {
+  const text = content.trim();
+  return text.startsWith("⚠️") && text.length < 400 && !text.includes("\n");
+}
+
+/** A reply as plain, readable Markdown — for the clipboard, Mes notes, read-aloud and the export. */
+function readableReply(content: string): string {
+  return cleanAssistantMarkdown(stripCitationMarkers(content), { formulaBlocks: false, typography: false });
+}
+
+function downloadMarkdown(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+type MenuView = "root" | "mode" | "sources";
+
+interface ComposerMenuProps {
+  view: MenuView;
+  onViewChange: (view: MenuView) => void;
+  onClose: () => void;
+  onImport?: () => void;
+  mode: ChatMode;
+  onModeChange?: (mode: ChatMode) => void;
+  sources?: { id: number; title: string }[];
+  selectedSourceIds?: Set<number>;
+  onToggleSource?: (id: number) => void;
+  activeSourceId?: number | null;
+  onSelectSource?: (id: number) => void;
+  isLongCourse: boolean;
+}
+
+/**
+ * What the Workspace needs beyond a plain chat — importing a course, the
+ * answer mode (Mode Examen…) and which sources the Co-pilot reads — kept out
+ * of sight behind the composer's "+", the way the MedArt Copilot keeps its
+ * attachments there. A popover above the "+" on desktop, a bottom sheet on
+ * phones; the mode and the sources open as their own page inside it.
+ */
+function ComposerMenuBody({
+  view,
+  onViewChange,
+  onClose,
+  onImport,
+  mode,
+  onModeChange,
+  sources,
+  selectedSourceIds,
+  onToggleSource,
+  activeSourceId,
+  onSelectSource,
+  isLongCourse,
+}: ComposerMenuProps) {
+  const activeMode = CHAT_MODE_OPTIONS.find((option) => option.id === mode) ?? CHAT_MODE_OPTIONS[0];
+  const ModeIcon = activeMode.icon;
+  const isMulti = Boolean(onToggleSource && selectedSourceIds);
+  const hasSources = Boolean(sources && sources.length > 0 && (onToggleSource || onSelectSource));
+  const checkedCount = selectedSourceIds ? sources?.filter((source) => selectedSourceIds.has(source.id)).length ?? 0 : 0;
+  const activeSourceTitle = sources?.find((source) => source.id === activeSourceId)?.title;
+
+  if (view === "mode" && onModeChange) {
+    return (
+      <div>
+        <MenuHeader title="Mode de réponse" onBack={() => onViewChange("root")} />
+        <div role="radiogroup" aria-label="Mode de réponse">
+          {CHAT_MODE_OPTIONS.map((option) => {
+            const OptionIcon = option.icon;
+            const isActive = option.id === mode;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={isActive}
+                onClick={() => {
+                  haptic();
+                  onModeChange(option.id);
+                  onClose();
+                }}
+                className={MENU_ROW}
+              >
+                <span className={cn(MENU_TILE, isActive ? MENU_TILE_ACCENT : MENU_TILE_QUIET)}>
+                  <OptionIcon className="h-5 w-5" strokeWidth={1.75} />
+                </span>
+                <span className="min-w-0 flex-1 py-2">
+                  <span className="block text-[15px] font-medium text-foreground">{option.label}</span>
+                  <span className="block text-xs leading-snug text-muted-foreground">{option.description}</span>
+                </span>
+                {isActive && <Check className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" strokeWidth={2.5} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  if (view === "sources" && hasSources && sources) {
+    const isOverCap = isMulti && checkedCount > MAX_CHAT_SOURCE_COURSES;
+    const listTitle = isMulti ? "Sources en contexte" : "Cours de la discussion";
+    return (
+      <div>
+        <MenuHeader title={listTitle} aside={isMulti ? `${checkedCount}/${MAX_CHAT_SOURCE_COURSES}` : undefined} onBack={() => onViewChange("root")} />
+        <div role={isMulti ? "group" : "radiogroup"} aria-label={listTitle}>
+          {sources.map((source) => {
+            const isChecked = isMulti ? Boolean(selectedSourceIds?.has(source.id)) : source.id === activeSourceId;
+            return (
+              <button
+                key={source.id}
+                type="button"
+                role={isMulti ? "checkbox" : "radio"}
+                aria-checked={isChecked}
+                onClick={() => {
+                  haptic();
+                  if (isMulti) {
+                    onToggleSource?.(source.id);
+                  } else {
+                    onSelectSource?.(source.id);
+                    onClose();
+                  }
+                }}
+                className="flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 text-left transition-colors hover:bg-sky-500/[0.08] focus-visible:bg-sky-500/[0.1] focus-visible:outline-none active:bg-sky-500/[0.14]"
+              >
+                {isMulti ? (
+                  <span
+                    className={cn(
+                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                      isChecked ? "border-sky-500 bg-sky-500 text-white" : "border-slate-300 dark:border-white/25"
+                    )}
+                  >
+                    {isChecked && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                  </span>
+                ) : (
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                    {isChecked && <Check className="h-4 w-4 text-sky-600 dark:text-sky-400" strokeWidth={2.5} />}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate py-2 text-sm text-foreground">{source.title}</span>
+              </button>
+            );
+          })}
+        </div>
+        {(isOverCap || isLongCourse) && (
+          <div className="space-y-1.5 px-3 pb-2 pt-2.5">
+            {isOverCap && (
+              <p className="text-xs leading-snug text-amber-700 dark:text-amber-300">
+                Seules les {MAX_CHAT_SOURCE_COURSES} premières sources cochées sont lues à chaque message.
+              </p>
+            )}
+            {isLongCourse && (
+              <p className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground">
+                <Info className="mt-px h-3.5 w-3.5 shrink-0" />
+                Cours très long : le Co-pilote se concentre sur ses passages les plus pertinents.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {onImport && (
+        <button
+          type="button"
+          onClick={() => {
+            haptic();
+            onImport();
+            onClose();
+          }}
+          className={MENU_ROW}
+        >
+          <span className={cn(MENU_TILE, MENU_TILE_ACCENT)}>
+            <FileUp className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium text-foreground">Ajouter une source</span>
+            <span className="block truncate text-xs text-muted-foreground">PDF, DOCX, PPTX ou TXT</span>
+          </span>
+        </button>
+      )}
+      {onModeChange && (
+        <button type="button" onClick={() => onViewChange("mode")} className={MENU_ROW}>
+          <span className={cn(MENU_TILE, MENU_TILE_ACCENT)}>
+            <ModeIcon className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium text-foreground">Mode de réponse</span>
+            <span className="block truncate text-xs text-muted-foreground">{activeMode.label}</span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </button>
+      )}
+      {hasSources && sources && (
+        <button type="button" onClick={() => onViewChange("sources")} className={MENU_ROW}>
+          <span className={cn(MENU_TILE, MENU_TILE_ACCENT)}>
+            <Layers className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium text-foreground">{isMulti ? "Sources en contexte" : "Cours de la discussion"}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {isMulti
+                ? `${checkedCount} sur ${sources.length} cochée${checkedCount > 1 ? "s" : ""}`
+                : activeSourceTitle ?? "Aucun cours ouvert"}
+            </span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MenuHeader({ title, aside, onBack }: { title: string; aside?: string; onBack: () => void }) {
+  return (
+    <div className="flex items-center gap-1 pb-1">
+      <button
+        type="button"
+        onClick={onBack}
+        aria-label="Retour"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-600 transition-colors hover:bg-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 dark:text-white/70 dark:hover:bg-white/[0.08]"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+      <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{title}</p>
+      {aside && <span className="pr-3 text-xs tabular-nums text-muted-foreground">{aside}</span>}
+    </div>
+  );
+}
 
 interface ChatDocumentPanelProps {
   title: string;
@@ -112,6 +348,8 @@ interface ChatDocumentPanelProps {
   isTyping: boolean;
   /** True from send until the reply has fully streamed (isTyping drops at the first chunk). Blocks sends/regenerations meanwhile. Defaults to isTyping. */
   isBusy?: boolean;
+  /** The saved conversation is still loading: the welcome screen waits instead of flashing before it. */
+  isHistoryLoading?: boolean;
   input: string;
   onInputChange: (value: string) => void;
   onSend: () => void;
@@ -126,12 +364,11 @@ interface ChatDocumentPanelProps {
   onToggleSplitScreen: () => void;
   /** Split-screen is a wide-viewport-only concept — the mobile instance hides the toggle entirely. */
   showSplitScreenToggle?: boolean;
-  dark: boolean;
   /** Every course in the current module, for the composer's source selector. */
   sources?: { id: number; title: string }[];
   activeSourceId?: number | null;
   onSelectSource?: (id: number) => void;
-  /** Multi-select variant (desktop): checked sources are the chat's real RAG context (see app/api/courses/chat's sourceCourseIds). */
+  /** The sources the chat really reads (its RAG context, see app/api/courses/chat's sourceCourseIds) — what the welcome counts. With onToggleSource (desktop), the "+" menu checks and unchecks them. */
   selectedSourceIds?: Set<number>;
   onToggleSource?: (id: number) => void;
   moduleId?: number;
@@ -152,74 +389,16 @@ interface ChatDocumentPanelProps {
   onImportFiles?: (files: File[]) => void;
 }
 
-function IconButton({
-  label,
-  shortcut,
-  onClick,
-  active,
-  disabled,
-  children,
-  className,
-}: {
-  label: string;
-  shortcut?: string;
-  onClick?: () => void;
-  active?: boolean;
-  disabled?: boolean;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <motion.button
-          type="button"
-          whileTap={{ scale: 0.9 }}
-          transition={{ type: "spring", stiffness: 520, damping: 30 }}
-          onClick={onClick}
-          disabled={disabled}
-          aria-label={label}
-          aria-pressed={active}
-          className={cn(
-            "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:pointer-events-none disabled:opacity-40",
-            active && "bg-primary-600 text-white shadow-glow hover:bg-primary-600 hover:text-white dark:bg-primary-500",
-            className
-          )}
-        >
-          {children}
-        </motion.button>
-      </TooltipTrigger>
-      <TooltipContent className="flex items-center gap-2">
-        {label}
-        {shortcut && <Kbd tone="inverse">{shortcut}</Kbd>}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function formatClock(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function downloadMarkdown(filename: string, content: string) {
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
 /**
- * Center "Co-pilot" panel of the module workspace — NotebookLM-style flowing
- * document (no chat bubbles for replies), with a full input control deck:
- * answer mode, checked-source context meter, voice dictation, file import,
- * and replies rendered with medical callouts + verifiable citations.
+ * The module workspace's Co-pilot, in the MedArt Copilot's own design
+ * (app/dashboard/(shell)/assistant/page.tsx, shared through
+ * components/assistant/CopilotParts.tsx): its liquid-light canvas, the
+ * glowing brain and greeting, sky bubbles, the same reply typography and
+ * action bar, and the same floating composer. What only the workspace needs
+ * stays out of sight until asked for: importing a course, the answer mode and
+ * the sources live behind the composer's "+" (an armed mode shows as one chip
+ * in the composer, like the Copilot's quick actions), the conversation's
+ * options behind one "…", citations and medical callouts inside the replies.
  */
 export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumentPanelProps>(function ChatDocumentPanel(
   {
@@ -229,6 +408,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     messages,
     isTyping,
     isBusy: isBusyProp,
+    isHistoryLoading = false,
     input,
     onInputChange,
     onSend,
@@ -240,7 +420,6 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     isSplitScreen,
     onToggleSplitScreen,
     showSplitScreenToggle = true,
-    dark,
     sources,
     activeSourceId,
     onSelectSource,
@@ -261,19 +440,30 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   },
   ref
 ) {
+  const columnRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const plusButtonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
   const { language } = useLanguage();
+  const { profile } = useAuth();
+  const firstName = profile?.fullName?.split(" ")[0] || "Étudiant(e)";
   const { toast } = useToast();
   const speakingId = useSpeakingId();
+  // Phones get the "+" menu as a bottom sheet (the module page's own mobile layout starts below md).
+  const isCompactMenu = useMediaQuery("(max-width: 767px)");
   const isBusy = isBusyProp ?? isTyping;
 
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuView, setMenuView] = useState<MenuView>("root");
   // Resolved after mount: speechSynthesis doesn't exist during SSR, so
   // reading it in render would make server and client markup disagree.
   const [canReadAloud, setCanReadAloud] = useState(false);
@@ -294,6 +484,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     },
     onError: (errTitle, description) => toast({ variant: "error", title: errTitle, description }),
   });
+  const isRecording = dictation.state === "recording";
+  const isTranscribing = dictation.state === "transcribing";
 
   useImperativeHandle(ref, () => ({
     focusInput: () => inputRef.current?.focus(),
@@ -307,6 +499,35 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       });
     },
   }));
+
+  const hasConversation = messages.length > 0;
+  const hasOptions = showSplitScreenToggle || hasConversation;
+  const hasSourcePicker = Boolean(sources && sources.length > 0 && (onToggleSource || onSelectSource));
+  const hasMenu = Boolean(onImportFiles || onModeChange || hasSourcePicker);
+
+  // The header ("…") and the composer float over the thread, which dissolves
+  // before it reaches them (.copilot-thread-fade, app/globals.css): their
+  // measured heights are published on the column as --copilot-header-h /
+  // --copilot-composer-h, exactly as on the MedArt Copilot page.
+  useLayoutEffect(() => {
+    const column = columnRef.current;
+    if (!column) return;
+    const header = headerRef.current;
+    const dock = dockRef.current;
+    const publish = () => {
+      column.style.setProperty("--copilot-header-h", `${header?.offsetHeight ?? 0}px`);
+      column.style.setProperty("--copilot-composer-h", `${dock?.offsetHeight ?? 0}px`);
+      // Following along: the latest message stays right above the composer as it grows.
+      const thread = scrollRef.current;
+      if (thread && stickToBottomRef.current) thread.scrollTop = thread.scrollHeight;
+    };
+    publish();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(publish);
+    if (header) observer.observe(header);
+    if (dock) observer.observe(dock);
+    return () => observer.disconnect();
+  }, [hasOptions]);
 
   useEffect(() => {
     if (!stickToBottomRef.current) return;
@@ -327,7 +548,28 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  }, [input]);
+  }, [input, isRecording]);
+
+  // Desktop popover: closes on a click elsewhere or Escape (the phone sheet is a Dialog, which does both itself).
+  useEffect(() => {
+    if (!menuOpen || isCompactMenu) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (target && (menuRef.current?.contains(target) || plusButtonRef.current?.contains(target))) return;
+      setMenuOpen(false);
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      plusButtonRef.current?.focus();
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen, isCompactMenu]);
 
   function setMessagesRef(node: HTMLDivElement | null) {
     scrollRef.current = node;
@@ -339,7 +581,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distanceFromBottom < 120;
-    setShowJumpToLatest(distanceFromBottom > 400);
+    setShowJumpToLatest(distanceFromBottom > 300);
   }
 
   function jumpToLatest() {
@@ -347,13 +589,22 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }
 
-  const canSend = input.trim().length > 0 && input.length <= MAX_MESSAGE_CHARS && !isBusy && dictation.state !== "transcribing";
+  const canSend = input.trim().length > 0 && input.length <= MAX_MESSAGE_CHARS && !isBusy && !isTranscribing;
 
   function submit() {
-    if (!canSend) return;
+    if (!canSend || isRecording) return;
+    haptic();
     stickToBottomRef.current = true;
     dictationBaseRef.current = "";
     onSend();
+  }
+
+  function sendPrompt(prompt: string) {
+    if (isBusy) return;
+    haptic();
+    stickToBottomRef.current = true;
+    if (onSendPrompt) onSendPrompt(prompt);
+    else onInputChange(prompt);
   }
 
   function handleComposerKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -365,8 +616,9 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
 
   function handleCopy(messageId: string, text: string) {
     if (!navigator.clipboard) return;
+    haptic();
     navigator.clipboard
-      .writeText(stripCitationMarkers(text))
+      .writeText(readableReply(text))
       .then(() => {
         setCopiedMessageId(messageId);
         if (copyResetTimeoutRef.current) clearTimeout(copyResetTimeoutRef.current);
@@ -376,17 +628,19 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   }
 
   function handleSaveToNotes(messageId: string, content: string) {
-    onSaveToNotes?.(stripCitationMarkers(content));
+    haptic();
+    onSaveToNotes?.(readableReply(content));
     setSavedMessageId(messageId);
     setTimeout(() => setSavedMessageId((prev) => (prev === messageId ? null : prev)), 1500);
   }
 
   function handleReadAloud(messageId: string, content: string) {
+    haptic();
     if (speakingId === messageId) {
       stopSpeaking();
       return;
     }
-    const result = speak(messageId, stripCitationMarkers(content), language, () =>
+    const result = speak(messageId, readableReply(content), language, () =>
       toast({ variant: "error", title: "Lecture interrompue", description: "Le navigateur n'a pas pu lire cette réponse à voix haute." })
     );
     if (!result.ok) {
@@ -402,7 +656,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     if (messages.length === 0) return;
     const lines = [`# ${title} — Conversation MedArt`, "", `_${dateLabel}_`, ""];
     for (const message of messages) {
-      const content = stripCitationMarkers(message.role === "assistant" ? stripReasoning(message.content) : message.content).trim();
+      const content = (message.role === "assistant" ? readableReply(stripReasoning(message.content)) : message.content).trim();
       if (!content) continue;
       lines.push(message.role === "user" ? `## ❓ ${content}` : content, "");
     }
@@ -436,15 +690,44 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     handleFiles(e.dataTransfer.files);
   }
 
+  function toggleMenu() {
+    haptic();
+    setMenuView("root");
+    setMenuOpen((prev) => !prev);
+  }
+
   const contextCount = selectedSourceIds ? selectedSourceIds.size : sourceCount;
   const activeMode = CHAT_MODE_OPTIONS.find((option) => option.id === mode) ?? CHAT_MODE_OPTIONS[0];
-  const ModeIcon = activeMode.icon;
-  const isOverSourceCap = Boolean(selectedSourceIds) && contextCount > MAX_CHAT_SOURCE_COURSES;
+  const ArmedModeIcon = activeMode.icon;
   const useRichRenderer = Boolean(citationSources);
+  const isLongCourse = sourceTextLength !== undefined && sourceTextLength > CHAT_MAX_CONTEXT_CHARS;
+  const welcomeLine =
+    contextCount > 0
+      ? language === "fr"
+        ? `Je réponds à partir de ${contextCount === 1 ? "ta source" : `tes ${contextCount} sources`}, citations à l'appui.`
+        : `I answer from your ${contextCount === 1 ? "source" : `${contextCount} sources`}, with citations.`
+      : language === "fr"
+        ? "Ouvre un cours, ou ajoute-en un avec +, et je réponds à partir de tes sources."
+        : "Open a course, or add one with +, and I'll answer from your sources.";
+
+  const menuBodyProps: ComposerMenuProps = {
+    view: menuView,
+    onViewChange: setMenuView,
+    onClose: () => setMenuOpen(false),
+    onImport: onImportFiles ? () => fileInputRef.current?.click() : undefined,
+    mode,
+    onModeChange,
+    sources,
+    selectedSourceIds,
+    onToggleSource,
+    activeSourceId,
+    onSelectSource,
+    isLongCourse,
+  };
 
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col"
+      className="copilot-canvas relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden"
       onDragOver={handleDragOver}
       onDragLeave={(e) => {
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
@@ -452,359 +735,503 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       }}
       onDrop={handleDrop}
     >
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[color-mix(in_oklab,var(--border)_70%,transparent)] px-3 md:h-14 md:px-4">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-sky-500 text-white shadow-glow">
-            <Sparkles className="h-4 w-4" />
-            {isTyping && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-ping rounded-full bg-emerald-400" />}
-          </span>
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold tracking-tight text-foreground">MedArt Co-pilot</h2>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {isTyping ? "Analyse de tes sources…" : `${contextCount} source${contextCount > 1 ? "s" : ""} en contexte · ${activeMode.label}`}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-0.5">
-          {showSplitScreenToggle && (
-            <IconButton label={isSplitScreen ? "Quitter l'écran partagé" : "Écran partagé Chat + Studio"} active={isSplitScreen} onClick={onToggleSplitScreen}>
-              <Columns2 className="h-4 w-4" />
-            </IconButton>
-          )}
-          <IconButton label="Exporter la conversation (.md)" onClick={handleExportConversation} disabled={messages.length === 0}>
-            <Download className="h-4 w-4" />
-          </IconButton>
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Options du chat"
-                    className="flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Options du chat</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onSelect={handleExportConversation} disabled={messages.length === 0}>
-                <Download className="h-4 w-4" />
-                Exporter en Markdown
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onClearHistory} disabled={messages.length === 0}>
-                <Trash2 className="h-4 w-4" />
-                Nouvelle conversation
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      <div
-        ref={setMessagesRef}
-        onScroll={handleScroll}
-        className="min-h-0 flex-1 space-y-7 overflow-y-auto px-4 py-5 font-sans antialiased leading-[1.7] tracking-normal text-foreground md:px-6 md:text-[15px]"
-      >
-        <div>
-          <h1 className="bg-gradient-to-r from-foreground via-foreground to-primary-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent dark:to-primary-300">
-            {title}
-          </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-            <Layers className="h-3.5 w-3.5" />
-            {contextCount} source{contextCount > 1 ? "s" : ""} · {dateLabel}
-          </p>
-        </div>
-
-        {sourceTextLength !== undefined && sourceTextLength > CHAT_MAX_CONTEXT_CHARS && (
-          <div className="animate-fade-in flex items-start gap-2 rounded-xl border border-amber-200/70 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-300">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <p>Ce cours est très long. L&apos;IA se concentrera sur les parties les plus pertinentes.</p>
+      <div ref={columnRef} className="relative flex min-h-0 w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden">
+        {/* No title bar: one quiet "…" holds the conversation's options. */}
+        {hasOptions && (
+          <div ref={headerRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-end px-2 pt-2 sm:px-3">
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Options de la conversation"
+                      className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-[background-color,color,transform] duration-150 hover:bg-black/[0.06] hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 active:scale-90 dark:text-white/60 dark:hover:bg-white/[0.1] dark:hover:text-white"
+                    >
+                      <MoreHorizontal className="h-5 w-5" strokeWidth={2} />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Options de la conversation</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="w-72">
+                {showSplitScreenToggle && (
+                  <DropdownMenuItem onSelect={onToggleSplitScreen}>
+                    <Columns2 className="h-4 w-4" />
+                    {isSplitScreen ? "Quitter l'écran partagé" : "Écran partagé Chat + Studio"}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={handleExportConversation} disabled={!hasConversation}>
+                  <Download className="h-4 w-4" />
+                  Exporter la conversation (.md)
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onClearHistory} disabled={!hasConversation}>
+                  <Trash2 className="h-4 w-4" />
+                  Nouvelle conversation
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
 
-        {messages.length === 0 && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">{EMPTY_CHAT_PLACEHOLDER[language]}</p>
-            {contextCount > 0 && (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {STARTER_PROMPTS.map((prompt, index) => (
-                  <motion.button
-                    key={prompt}
-                    type="button"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05, type: "spring", stiffness: 380, damping: 30 }}
-                    whileHover={{ y: -2 }}
-                    whileTap={{ scale: 0.98 }}
-                    disabled={isBusy}
-                    onClick={() => (onSendPrompt ? onSendPrompt(prompt) : onInputChange(prompt))}
-                    className="group flex items-start gap-2 rounded-2xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--card)_60%,transparent)] p-3 text-left text-xs font-medium text-[color-mix(in_oklab,var(--foreground)_85%,transparent)] backdrop-blur-md transition-colors hover:border-primary-300 hover:bg-primary-50/60 disabled:opacity-50 dark:hover:border-primary-700 dark:hover:bg-primary-950/30"
-                  >
-                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary-500 transition-transform group-hover:rotate-12" />
-                    {prompt}
-                  </motion.button>
-                ))}
+        {!hasConversation ? (
+          isHistoryLoading ? (
+            <div className="flex-1" aria-busy="true" />
+          ) : (
+            // The welcome: clears the floating header and composer (their measured heights) and dissolves before reaching them.
+            <div className="copilot-thread-fade motion-swap relative isolate flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center overflow-y-auto overflow-x-hidden overscroll-none px-4 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
+              {/* Desktop only: a slow, blurred light drifting behind the welcome (transform-only; still under reduced motion). */}
+              <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden lg:block">
+                <div className="absolute left-1/2 top-[38%] -ml-[340px] -mt-[220px] h-[440px] w-[680px] rounded-full bg-[radial-gradient(closest-side,rgba(14,165,233,0.14),rgba(37,99,235,0.07)_55%,transparent)] blur-3xl [animation:copilot-aurora_26s_ease-in-out_infinite] motion-reduce:[animation:none] dark:bg-[radial-gradient(closest-side,rgba(56,189,248,0.2),rgba(37,99,235,0.1)_55%,transparent)]" />
               </div>
-            )}
-          </div>
-        )}
-
-        {messages.map((message, index) => {
-          const isLast = index === messages.length - 1;
-          if (message.role === "user") {
-            return (
-              <div key={message.id} className="animate-in fade-in slide-in-from-bottom-4 flex items-start gap-2.5 duration-500 ease-out">
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklab,var(--foreground)_90%,transparent)] text-[10px] font-bold text-background">Q</span>
-                <p className="min-w-0 whitespace-pre-wrap break-words text-base font-semibold leading-[1.6] tracking-tight text-foreground md:text-[17px]">
-                  {message.content}
-                </p>
+              <NovaOrb />
+              <div className="mt-5 w-full max-w-2xl sm:mt-6">
+                <h1 className="text-balance text-[30px] font-medium leading-[1.15] tracking-[-0.022em] sm:text-[38px] 2xl:text-[44px] 2xl:tracking-[-0.026em]">
+                  <span className="block text-slate-900 dark:text-white">
+                    {language === "fr" ? "Bonjour" : "Hi"}{" "}
+                    <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 bg-clip-text text-transparent dark:from-cyan-300 dark:via-sky-400 dark:to-blue-500">{firstName}</span>
+                  </span>{" "}
+                  <span className="block text-slate-400 dark:text-white/40">{language === "fr" ? "On révise quoi aujourd'hui ?" : "What's on your mind?"}</span>
+                </h1>
+                <p className="mx-auto mt-4 max-w-md text-balance text-[15px] leading-relaxed text-slate-500 dark:text-white/50">{welcomeLine}</p>
+                {isLongCourse && (
+                  <p className="mx-auto mt-3 flex max-w-md items-start justify-center gap-1.5 text-balance text-[13px] leading-snug text-amber-700/90 dark:text-amber-300/80">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    {language === "fr"
+                      ? "Ce cours est très long : je me concentre sur ses passages les plus pertinents."
+                      : "This course is very long: I focus on its most relevant passages."}
+                  </p>
+                )}
               </div>
-            );
-          }
 
-          const cleanContent = stripReasoning(message.content);
-          const isStreaming = isLast && (isBusy || cleanContent.length === 0);
-          const showToolbar = cleanContent.length > 0 && !isStreaming;
-
-          return (
-            <div key={message.id} className="group animate-in fade-in slide-in-from-bottom-4 space-y-2 duration-500 ease-out">
-              {useRichRenderer ? (
-                <ChatRichMarkdown
-                  content={cleanContent}
-                  dark={dark}
-                  citationSources={citationSources ?? []}
-                  onOpenSource={onOpenCitationSource}
-                  isStreaming={isStreaming}
-                />
-              ) : (
-                <PlainChatMarkdown content={cleanContent} dark={dark} />
-              )}
-              {showToolbar && !isStreaming && (
-                <div className="flex items-center gap-0.5 transition-opacity duration-200 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:focus-within:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100">
-                  <IconButton label={copiedMessageId === message.id ? "Copié" : "Copier la réponse"} onClick={() => handleCopy(message.id, cleanContent)}>
-                    {copiedMessageId === message.id ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                  </IconButton>
-                  {onRegenerate && (
-                    <IconButton label="Régénérer la réponse" disabled={isBusy} onClick={() => onRegenerate(message.id)}>
-                      <RefreshCw className="h-4 w-4" />
-                    </IconButton>
-                  )}
-                  {onSaveToNotes && (
-                    <IconButton
-                      label={savedMessageId === message.id ? "Enregistré dans Mes notes" : "Enregistrer dans Mes notes"}
-                      onClick={() => handleSaveToNotes(message.id, cleanContent)}
+              {/* Phones: a 2×2 grid of compact tiles; from sm, centred pills. */}
+              {contextCount > 0 && (
+                <div className="mt-8 grid w-full max-w-2xl grid-cols-2 gap-2 sm:mt-10 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5">
+                  {STARTER_PROMPTS.map((prompt, index) => (
+                    <motion.button
+                      key={prompt.text}
+                      type="button"
+                      onClick={() => sendPrompt(prompt.text)}
+                      disabled={isBusy}
+                      title={prompt.text}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2 + index * 0.04, duration: 0.3, ease: "easeOut" }}
+                      whileTap={{ scale: 0.97 }}
+                      className={cn(COPILOT_SUGGESTION_CLASSES, "disabled:opacity-50")}
                     >
-                      {savedMessageId === message.id ? <Check className="h-4 w-4 text-emerald-500" /> : <NotebookPen className="h-4 w-4" />}
-                    </IconButton>
-                  )}
-                  {canReadAloud && (
-                    <IconButton
-                      label={speakingId === message.id ? "Arrêter la lecture" : "Lire à voix haute"}
-                      active={speakingId === message.id}
-                      onClick={() => handleReadAloud(message.id, cleanContent)}
-                    >
-                      {speakingId === message.id ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                    </IconButton>
-                  )}
+                      <prompt.icon className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300" strokeWidth={1.75} />
+                      {prompt.label}
+                    </motion.button>
+                  ))}
                 </div>
               )}
             </div>
-          );
-        })}
+          )
+        ) : (
+          // motion-swap: the thread rises in where the welcome was (its
+          // AnimatePresence mounts with it, so the bubbles' own entrance is skipped).
+          <div className="motion-swap relative min-h-0 w-full max-w-full flex-1">
+            {/* overflow-x-hidden + touch-action pan-y: a long token, a wide table or a stray sideways swipe never moves the thread. */}
+            <div
+              ref={setMessagesRef}
+              onScroll={handleScroll}
+              className="copilot-thread-fade h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
+            >
+              <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 px-3 pb-[calc(var(--copilot-composer-h,0px)+1rem)] pt-[calc(var(--copilot-header-h,0px)+1rem)] sm:px-5 md:px-6 md:pb-[calc(var(--copilot-composer-h,0px)+1.5rem)] md:pt-[calc(var(--copilot-header-h,0px)+1.5rem)]">
+                <AnimatePresence initial={false}>
+                  {messages.map((message, index) => {
+                    if (message.role === "user") {
+                      return (
+                        <motion.div
+                          key={message.id}
+                          initial={{ opacity: 0, y: 16 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                          className="flex w-full min-w-0 justify-end"
+                        >
+                          <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
+                            <div dir={dominantDirection(message.content) ?? "auto"} className={COPILOT_USER_BUBBLE_CLASSES}>
+                              {message.content}
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    }
 
-        {isTyping && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-            <span className="flex gap-0.5">
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary-500 [animation-delay:-0.3s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary-500 [animation-delay:-0.15s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary-500" />
-            </span>
-            {pendingThinkingLabel ? `Analyse de « ${pendingThinkingLabel} »…` : `MedArt rédige · ${activeMode.label}…`}
-          </div>
-        )}
-      </div>
+                    const cleanContent = stripReasoning(message.content);
+                    const isLive = index === messages.length - 1 && isBusy;
+                    const isPending = cleanContent.trim().length === 0;
+                    // A settled reply with no text has nothing to show.
+                    if (isPending && !isLive) return null;
+                    const isError = !isPending && isErrorReply(cleanContent);
+                    const isSpeaking = speakingId === message.id;
 
-      <AnimatePresence>
-        {showJumpToLatest && (
-          <motion.button
-            type="button"
-            initial={{ opacity: 0, y: 8, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.9 }}
-            onClick={jumpToLatest}
-            aria-label="Aller au dernier message"
-            className="absolute bottom-36 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-[color-mix(in_oklab,var(--card)_90%,transparent)] px-3 py-1.5 text-xs font-medium text-foreground shadow-glass backdrop-blur-md"
-          >
-            <ArrowDown className="h-3.5 w-3.5" />
-            Dernier message
-          </motion.button>
-        )}
-      </AnimatePresence>
-
-      {selection && (
-        <TextSelectionToolbar
-          ref={tooltipRef}
-          selection={selection}
-          onAsk={(text) => {
-            onAskSelection(text);
-            clearSelection();
-          }}
-          onTranslate={(text) => {
-            onTranslateSelection(text);
-            clearSelection();
-          }}
-          moduleId={moduleId}
-          courseTitle={courseTitle}
-          courseSlug={courseSlug}
-          container={container}
-        />
-      )}
-
-      <div className="shrink-0 border-t border-[color-mix(in_oklab,var(--border)_70%,transparent)] bg-[color-mix(in_oklab,var(--card)_70%,transparent)] p-3 backdrop-blur-md md:p-4">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-          data-tour="ws-chat"
-          className={cn(
-            "rounded-2xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--background)_70%,transparent)] shadow-soft transition-all duration-300 focus-within:border-primary-300 focus-within:shadow-glow dark:bg-white/[0.03] dark:focus-within:border-primary-700",
-            dictation.state === "recording" && "border-rose-300 dark:border-rose-800"
-          )}
-        >
-          <textarea
-            ref={inputRef}
-            value={input}
-            rows={1}
-            maxLength={MAX_MESSAGE_CHARS + 200}
-            onChange={(e) => onInputChange(e.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            onFocus={() => onInputFocusChange?.(true)}
-            onBlur={() => onInputFocusChange?.(false)}
-            placeholder={dictation.state === "recording" ? "Je t'écoute… clique sur ■ pour terminer." : activeMode.placeholder}
-            aria-label="Message au co-pilote"
-            className="block max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
-          />
-          <div className="flex items-center gap-1 px-2 pb-2">
-            {onModeChange && (
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className={cn(
-                          "flex h-8 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
-                          mode === "standard"
-                            ? "border-[color-mix(in_oklab,var(--border)_80%,transparent)] text-muted-foreground hover:bg-accent hover:text-foreground"
-                            : "border-primary-300 bg-primary-50 text-primary-700 dark:border-primary-800 dark:bg-primary-950/40 dark:text-primary-300"
-                        )}
-                      >
-                        <ModeIcon className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">{activeMode.label}</span>
-                        <ChevronDown className="h-3 w-3 opacity-60" />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>Mode de réponse</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start" className="w-72">
-                  <DropdownMenuLabel>Mode de réponse</DropdownMenuLabel>
-                  {CHAT_MODE_OPTIONS.map((option) => {
-                    const OptionIcon = option.icon;
                     return (
-                      <DropdownMenuItem key={option.id} onSelect={() => onModeChange(option.id)} className="items-start gap-2.5 py-2">
-                        <OptionIcon className={cn("mt-0.5 h-4 w-4 shrink-0", option.id === mode ? "text-primary-600 dark:text-primary-400" : "text-muted-foreground")} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium">{option.label}</span>
-                          <span className="block text-xs text-muted-foreground">{option.description}</span>
-                        </span>
-                        {option.id === mode && <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary-600 dark:text-primary-400" />}
-                      </DropdownMenuItem>
+                      <motion.div
+                        key={message.id}
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                        className="flex w-full min-w-0 flex-col items-start"
+                      >
+                        {/* Edge-to-edge on phones: no avatar column there. */}
+                        <div className="flex w-full min-w-0 items-start gap-2.5">
+                          <div className="hidden sm:block">
+                            <AssistantAvatar isPending={isPending} />
+                          </div>
+                          <div className="min-w-0 max-w-full flex-1 pt-0.5">
+                            {isPending ? (
+                              <TypingIndicator label={pendingThinkingLabel ? `Analyse de « ${pendingThinkingLabel} »…` : undefined} />
+                            ) : isError ? (
+                              <div className="flex items-start gap-2.5 rounded-xl border border-amber-300/60 bg-amber-50/80 px-3.5 py-3 text-[15px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                                <div className="min-w-0 flex-1 space-y-2">
+                                  <p className="break-words leading-relaxed">{cleanContent.trimStart().replace(/^⚠️\s*/, "")}</p>
+                                  {onRegenerate && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        haptic();
+                                        onRegenerate(message.id);
+                                      }}
+                                      disabled={isBusy}
+                                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-amber-500/15 px-3.5 text-sm font-medium text-amber-900 transition-[transform,background-color] hover:bg-amber-500/25 active:scale-95 disabled:opacity-50 dark:text-amber-100"
+                                    >
+                                      <RefreshCw className="h-3.5 w-3.5" /> Réessayer
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ) : useRichRenderer ? (
+                              <ChatRichMarkdown content={cleanContent} citationSources={citationSources ?? []} onOpenSource={onOpenCitationSource} isStreaming={isLive} />
+                            ) : (
+                              <StreamedMarkdown content={cleanContent} isStreaming={isLive} />
+                            )}
+                          </div>
+                        </div>
+
+                        {!isPending && !isError && !isLive && (
+                          <div className="w-full min-w-0 sm:pl-[3.125rem]">
+                            <div className="-ml-2.5 mt-1 flex flex-row items-center gap-1">
+                              {canReadAloud && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleReadAloud(message.id, cleanContent)}
+                                      aria-label={isSpeaking ? tAssistant("stopSpeaking", language) : tAssistant("speak", language)}
+                                      aria-pressed={isSpeaking}
+                                      className={cn(
+                                        COPILOT_ACTION_BUTTON_CLASSES,
+                                        isSpeaking &&
+                                          "bg-sky-500/10 text-sky-600 hover:bg-sky-500/15 hover:text-sky-600 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:bg-sky-400/15 dark:hover:text-sky-300"
+                                      )}
+                                    >
+                                      {isSpeaking ? <Square className="h-4 w-4 animate-pulse fill-current" /> : <Volume2 strokeWidth={2} className="h-5 w-5" />}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{isSpeaking ? tAssistant("stopSpeaking", language) : tAssistant("speak", language)}</TooltipContent>
+                                </Tooltip>
+                              )}
+
+                              <Tooltip open={copiedMessageId === message.id ? true : undefined}>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopy(message.id, cleanContent)}
+                                    aria-label={tAssistant("copyMarkdown", language)}
+                                    className={COPILOT_ACTION_BUTTON_CLASSES}
+                                  >
+                                    {copiedMessageId === message.id ? (
+                                      <Check strokeWidth={2} className="h-5 w-5 text-sky-500" />
+                                    ) : (
+                                      <Copy strokeWidth={2} className="h-5 w-5" />
+                                    )}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{copiedMessageId === message.id ? tAssistant("copied", language) : tAssistant("copyMarkdown", language)}</TooltipContent>
+                              </Tooltip>
+
+                              {onSaveToNotes && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveToNotes(message.id, cleanContent)}
+                                      aria-label={savedMessageId === message.id ? tAssistant("savedToNotes", language) : tAssistant("saveToNotes", language)}
+                                      className={COPILOT_ACTION_BUTTON_CLASSES}
+                                    >
+                                      {savedMessageId === message.id ? (
+                                        <Check strokeWidth={2} className="h-5 w-5 text-sky-500" />
+                                      ) : (
+                                        <NotebookPen strokeWidth={2} className="h-5 w-5" />
+                                      )}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{savedMessageId === message.id ? tAssistant("savedToNotes", language) : tAssistant("saveToNotes", language)}</TooltipContent>
+                                </Tooltip>
+                              )}
+
+                              {onRegenerate && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        haptic();
+                                        onRegenerate(message.id);
+                                      }}
+                                      disabled={isBusy}
+                                      aria-label={tAssistant("regenerateResponse", language)}
+                                      className={COPILOT_ACTION_BUTTON_CLASSES}
+                                    >
+                                      <RefreshCw strokeWidth={2} className="h-5 w-5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{tAssistant("regenerateResponse", language)}</TooltipContent>
+                                </Tooltip>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
                     );
                   })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+                </AnimatePresence>
+              </div>
+            </div>
 
-            {sources && sources.length > 0 && (onToggleSource || onSelectSource) ? (
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex h-8 items-center gap-1.5 rounded-xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                      >
-                        <Layers className="h-3.5 w-3.5" />
-                        {contextCount}
-                        {selectedSourceIds && (
-                          <span aria-hidden className="hidden h-1.5 w-10 overflow-hidden rounded-full bg-muted sm:block">
-                            <span
-                              className={cn("block h-full rounded-full transition-all duration-500", isOverSourceCap ? "bg-amber-500" : "bg-primary-500")}
-                              style={{ width: `${Math.min(100, (contextCount / MAX_CHAT_SOURCE_COURSES) * 100)}%` }}
-                            />
-                          </span>
-                        )}
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs whitespace-normal">
-                    {selectedSourceIds
-                      ? `Contexte : ${contextCount}/${MAX_CHAT_SOURCE_COURSES} sources. Le co-pilote cherche les passages les plus pertinents dans les sources cochées.`
-                      : "Choisir le cours de la discussion"}
-                  </TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start" className="w-72">
-                  <DropdownMenuLabel>{selectedSourceIds ? "Sources en contexte" : "Cours de la discussion"}</DropdownMenuLabel>
-                  {sources.map((source) =>
-                    onToggleSource && selectedSourceIds ? (
-                      <DropdownMenuItem
-                        key={source.id}
-                        onSelect={(e) => {
-                          e.preventDefault();
-                          onToggleSource(source.id);
-                        }}
-                      >
-                        <span
-                          className={cn(
-                            "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border",
-                            selectedSourceIds.has(source.id) ? "border-primary-500 bg-primary-500 text-white" : "border-[color-mix(in_oklab,var(--muted-foreground)_40%,transparent)]"
-                          )}
+            {/* Back to the latest message: a round arrow above the composer, filled sky while a reply streams. Centred with inset-x-0 + mx-auto: framer-motion owns its transform. */}
+            <AnimatePresence>
+              {showJumpToLatest && (
+                <motion.button
+                  type="button"
+                  onClick={() => {
+                    haptic();
+                    jumpToLatest();
+                  }}
+                  aria-label={isBusy ? tAssistant("newResponseInProgress", language) : tAssistant("backToBottom", language)}
+                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className={cn(
+                    "touch-target absolute inset-x-0 bottom-[calc(var(--copilot-composer-h,0px)+0.75rem)] z-10 mx-auto flex h-10 w-10 items-center justify-center rounded-full border shadow-glass transition-colors dark:shadow-glass-dark",
+                    isBusy
+                      ? "border-sky-500/30 bg-sky-600 text-white hover:bg-sky-700"
+                      : "border-black/[0.06] bg-white/95 text-foreground hover:bg-white dark:border-white/10 dark:bg-[#16191d]/95 dark:hover:bg-[#1b1f24]"
+                  )}
+                >
+                  <ArrowDown strokeWidth={2} className="h-[18px] w-[18px]" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {selection && (
+          <TextSelectionToolbar
+            ref={tooltipRef}
+            selection={selection}
+            onAsk={(text) => {
+              onAskSelection(text);
+              clearSelection();
+            }}
+            onTranslate={(text) => {
+              onTranslateSelection(text);
+              clearSelection();
+            }}
+            moduleId={moduleId}
+            courseTitle={courseTitle}
+            courseSlug={courseSlug}
+            container={container}
+          />
+        )}
+
+        {/* The composer floats on the canvas — no bar behind it; the thread dissolves before it gets there. */}
+        <div ref={dockRef} className="absolute inset-x-0 bottom-0 z-20 pb-3 pt-4 md:pb-4">
+          {input.length > MAX_MESSAGE_CHARS * 0.85 && (
+            <span
+              className={cn(
+                "pointer-events-none absolute right-7 top-0 text-[11px] tabular-nums sm:right-8",
+                input.length > MAX_MESSAGE_CHARS ? "font-semibold text-destructive" : "text-muted-foreground"
+              )}
+            >
+              {input.length}/{MAX_MESSAGE_CHARS}
+            </span>
+          )}
+          <div className="mx-auto w-full max-w-3xl px-3 sm:px-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submit();
+              }}
+              data-tour="ws-chat"
+              className={COPILOT_HUB_CLASSES}
+            >
+              {/* An answer mode other than Standard shows as one chip, like the Copilot's quick actions; × goes back to Standard. */}
+              <AnimatePresence initial={false}>
+                {onModeChange && mode !== "standard" && (
+                  <motion.div
+                    key="armed-mode"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2 px-5 pt-3">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-600 py-1 pl-2.5 pr-1 text-xs font-semibold text-white">
+                        <ArmedModeIcon className="h-3.5 w-3.5" />
+                        {activeMode.label}
+                        <button
+                          type="button"
+                          onClick={() => onModeChange("standard")}
+                          aria-label="Revenir au mode Standard"
+                          className="touch-target relative flex h-5 w-5 items-center justify-center rounded-full transition-colors hover:bg-white/20 active:bg-white/25"
                         >
-                          {selectedSourceIds.has(source.id) && <Check className="h-2.5 w-2.5" />}
-                        </span>
-                        <span className="truncate">{source.title}</span>
-                      </DropdownMenuItem>
-                    ) : (
-                      <DropdownMenuItem key={source.id} onSelect={() => onSelectSource?.(source.id)}>
-                        {source.id === activeSourceId ? <Check className="h-4 w-4" /> : <span className="h-4 w-4" />}
-                        <span className="truncate">{source.title}</span>
-                      </DropdownMenuItem>
-                    )
-                  )}
-                  {isOverSourceCap && (
-                    <p className="px-2 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-                      Seules les {MAX_CHAT_SOURCE_COURSES} premières sources cochées sont interrogées à chaque message.
-                    </p>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <Badge variant="neutral" className="shrink-0">
-                {sourceCount} source{sourceCount > 1 ? "s" : ""}
-              </Badge>
-            )}
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-            {onImportFiles && (
-              <>
-                <IconButton label="Importer un document comme source" onClick={() => fileInputRef.current?.click()}>
-                  <Paperclip className="h-4 w-4" />
-                </IconButton>
+              <div className="flex w-full items-end gap-1.5 p-3.5">
+                {hasMenu && (
+                  <button
+                    ref={plusButtonRef}
+                    type="button"
+                    onClick={toggleMenu}
+                    disabled={isRecording}
+                    aria-label="Outils du Co-pilote"
+                    aria-haspopup="dialog"
+                    aria-expanded={menuOpen}
+                    className={cn(
+                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-800 transition-[transform,background-color,color] duration-150 active:scale-90 dark:text-white",
+                      isRecording ? "cursor-not-allowed opacity-40" : "hover:bg-black/[0.06] dark:hover:bg-white/[0.1]"
+                    )}
+                  >
+                    <Plus strokeWidth={2} className={cn("h-6 w-6 transition-transform duration-200", menuOpen && "rotate-45")} />
+                  </button>
+                )}
+
+                {isRecording ? (
+                  <VoiceMeter stream={dictation.stream} label={tAssistant("listening", language)} />
+                ) : (
+                  // text-[16px] (never smaller): iOS Safari zooms the page when a field under 16px is focused.
+                  <textarea
+                    ref={inputRef}
+                    value={input}
+                    rows={1}
+                    maxLength={MAX_MESSAGE_CHARS + 200}
+                    onChange={(e) => onInputChange(e.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    onFocus={() => onInputFocusChange?.(true)}
+                    onBlur={() => onInputFocusChange?.(false)}
+                    enterKeyHint="send"
+                    placeholder={isTranscribing ? "Transcription…" : activeMode.placeholder}
+                    aria-label="Message au Co-pilote"
+                    className="scrollbar-hide min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-2 py-[10px] text-[16px] leading-6 text-foreground outline-none transition-[height] duration-100 ease-out placeholder:truncate placeholder:text-slate-400 focus:ring-0 dark:placeholder:text-white/40"
+                  />
+                )}
+
+                <button
+                  type="button"
+                  title={dictation.supported ? tAssistant("startDictation", language) : undefined}
+                  onClick={() => {
+                    haptic();
+                    if (dictation.state === "idle") dictationBaseRef.current = input;
+                    dictation.toggle();
+                  }}
+                  disabled={!dictation.supported || isTranscribing}
+                  aria-label={isRecording ? tAssistant("stopDictation", language) : tAssistant("startDictation", language)}
+                  className={cn(
+                    "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
+                    isRecording ? "bg-sky-600 text-white shadow-[0_0_0_4px_rgba(14,165,233,0.18)]" : "text-slate-800 hover:bg-black/[0.06] dark:text-white dark:hover:bg-white/[0.1]",
+                    (!dictation.supported || isTranscribing) && "cursor-not-allowed opacity-40"
+                  )}
+                >
+                  {isTranscribing ? (
+                    <RefreshCw strokeWidth={2} className="h-5 w-5 animate-spin" />
+                  ) : isRecording ? (
+                    <Square className="h-[18px] w-[18px] fill-current" />
+                  ) : (
+                    <Mic strokeWidth={2} className="h-6 w-6" />
+                  )}
+                </button>
+
+                {/* One fixed slot: Send once there is something to send, a spinner while the reply streams, a quiet arrow otherwise. They swap in place and the row never reflows. */}
+                <div className="relative h-11 w-11 shrink-0">
+                  <AnimatePresence initial={false}>
+                    {isBusy ? (
+                      <motion.span
+                        key="busy"
+                        role="status"
+                        aria-label="Réponse en cours…"
+                        initial={{ scale: 0.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute inset-0 flex items-center justify-center rounded-full bg-black/[0.06] text-slate-800 dark:bg-white/[0.12] dark:text-white"
+                      >
+                        <Loader2 strokeWidth={2.25} className="h-5 w-5 animate-spin" />
+                      </motion.span>
+                    ) : canSend && !isRecording ? (
+                      <motion.button
+                        key="send"
+                        type="submit"
+                        initial={{ scale: 0.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        whileTap={{ scale: 0.9 }}
+                        aria-label="Envoyer"
+                        className="absolute inset-0 flex items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-[0_8px_20px_-8px_rgba(14,165,233,0.75)]"
+                      >
+                        <ArrowUp strokeWidth={2.25} className="h-6 w-6" />
+                      </motion.button>
+                    ) : (
+                      <motion.button
+                        key="idle"
+                        type="button"
+                        disabled
+                        initial={{ scale: 0.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        aria-label="Envoyer"
+                        className="absolute inset-0 flex items-center justify-center rounded-full bg-black/[0.06] text-slate-800 dark:bg-white/[0.12] dark:text-white"
+                      >
+                        <ArrowUp strokeWidth={2.25} className="h-6 w-6 opacity-40" />
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+
+              {/* Desktop: the "+" menu as a popover above the composer (phones: the sheet below). */}
+              <AnimatePresence>
+                {menuOpen && !isCompactMenu && (
+                  <motion.div
+                    ref={menuRef}
+                    role="dialog"
+                    aria-label="Outils du Co-pilote"
+                    initial={{ opacity: 0, y: 12, scale: 0.92 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.96, transition: { duration: 0.14, ease: "easeIn" } }}
+                    transition={{ type: "spring", stiffness: 480, damping: 32, mass: 0.7 }}
+                    style={{ transformOrigin: "bottom left" }}
+                    className="absolute bottom-full left-0 z-50 mb-3 w-full max-w-[20rem] overflow-hidden rounded-3xl border border-black/[0.06] bg-white/90 p-1.5 text-popover-foreground shadow-[0_24px_60px_-18px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-[#14171b]/90 dark:shadow-[0_28px_70px_-18px_rgba(0,0,0,0.85)]"
+                  >
+                    <div className="max-h-[min(26rem,calc(100dvh-12rem))] overflow-y-auto overscroll-contain">
+                      <ComposerMenuBody {...menuBodyProps} />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {onImportFiles && (
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -816,62 +1243,24 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                     e.target.value = "";
                   }}
                 />
-              </>
-            )}
-
-            {dictation.supported && (
-              <IconButton
-                label={dictation.state === "recording" ? "Terminer la dictée" : dictation.state === "transcribing" ? "Transcription…" : "Dicter ta question"}
-                active={dictation.state === "recording"}
-                disabled={dictation.state === "transcribing"}
-                onClick={() => {
-                  if (dictation.state === "idle") dictationBaseRef.current = input;
-                  dictation.toggle();
-                }}
-                className={cn(dictation.state === "recording" && "bg-rose-600 hover:bg-rose-600 dark:bg-rose-500")}
-              >
-                {dictation.state === "transcribing" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : dictation.state === "recording" ? (
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                ) : (
-                  <Mic className="h-4 w-4" />
-                )}
-              </IconButton>
-            )}
-            {dictation.state === "recording" && (
-              <span className="flex items-center gap-1 text-[11px] font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
-                {formatClock(dictation.elapsedSeconds)}
-              </span>
-            )}
-
-            <div className="ml-auto flex items-center gap-2">
-              {input.length > MAX_MESSAGE_CHARS * 0.85 && (
-                <span className={cn("text-[11px] tabular-nums", input.length > MAX_MESSAGE_CHARS ? "font-semibold text-destructive" : "text-muted-foreground")}>
-                  {input.length}/{MAX_MESSAGE_CHARS}
-                </span>
               )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <motion.button
-                    type="submit"
-                    whileTap={{ scale: 0.9 }}
-                    disabled={!canSend}
-                    aria-label="Envoyer"
-                    className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary-600 text-white shadow-glow transition-colors hover:bg-primary-500 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none dark:bg-primary-500"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </motion.button>
-                </TooltipTrigger>
-                <TooltipContent className="flex items-center gap-2">
-                  Envoyer <Kbd tone="inverse">↵</Kbd> · nouvelle ligne <Kbd tone="inverse">⇧↵</Kbd>
-                </TooltipContent>
-              </Tooltip>
-            </div>
+            </form>
           </div>
-        </form>
+        </div>
       </div>
+
+      {/* Phones: the same menu as a bottom sheet (swipe down or tap outside to dismiss). */}
+      <Dialog open={menuOpen && isCompactMenu} onOpenChange={setMenuOpen}>
+        <DialogContent className="p-0 sm:max-w-sm sm:p-0">
+          <div className="px-4 pb-2 pr-12 pt-7">
+            <DialogTitle className="text-base font-bold">Outils du Co-pilote</DialogTitle>
+            <DialogDescription className="sr-only">Ajouter une source, choisir le mode de réponse et les sources que le Co-pilote lit.</DialogDescription>
+          </div>
+          <div className="max-h-[70dvh] overflow-y-auto overscroll-contain px-2 pb-4">
+            <ComposerMenuBody {...menuBodyProps} />
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AnimatePresence>
         {isDragOver && (
@@ -879,9 +1268,11 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-primary-400 bg-primary-50/85 text-primary-700 backdrop-blur-md dark:bg-primary-950/70 dark:text-primary-200"
+            className="pointer-events-none absolute inset-3 z-30 flex flex-col items-center justify-center gap-2 rounded-[32px] border-2 border-dashed border-sky-400/70 bg-white/80 px-6 text-center text-sky-800 backdrop-blur-xl dark:border-sky-400/50 dark:bg-black/70 dark:text-sky-100"
           >
-            <FileUp className="h-8 w-8" />
+            <span className="mb-1 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 text-white shadow-[0_10px_22px_-10px_rgba(14,165,233,0.85)]">
+              <FileUp className="h-7 w-7" strokeWidth={1.75} />
+            </span>
             <p className="text-sm font-semibold">Dépose ton polycop pour l&apos;ajouter aux sources</p>
             <p className="text-xs opacity-80">PDF, DOCX, PPTX, TXT — max {MAX_UPLOAD_FILE_MB} Mo</p>
           </motion.div>

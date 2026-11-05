@@ -48,6 +48,8 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
   const [state, setState] = useState<DictationState>("idle");
   const [supported, setSupported] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  /** The microphone stream while recording (for a live level meter), null otherwise. */
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -118,6 +120,7 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
       }
       const activeStream = stream;
       streamRef.current = activeStream;
+      setStream(activeStream);
       chunksRef.current = [];
       const recorder = new MediaRecorder(activeStream);
       recorderRef.current = recorder;
@@ -129,6 +132,7 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
         chunksRef.current = [];
         activeStream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+        if (mountedRef.current) setStream(null);
         if (timerRef.current) clearInterval(timerRef.current);
         void transcribe(blob);
       };
@@ -141,6 +145,7 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
       stream?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       if (mountedRef.current) {
+        setStream(null);
         setState("idle");
         callbacksRef.current.onError("Micro inaccessible", describeMicError(error));
       }
@@ -158,5 +163,5 @@ export function useVoiceDictation({ onTranscript, onError }: UseVoiceDictationOp
     else if (state === "idle") void start();
   }, [state, start, stop]);
 
-  return { state, supported, elapsedSeconds, start, stop, toggle };
+  return { state, supported, elapsedSeconds, stream, start, stop, toggle };
 }

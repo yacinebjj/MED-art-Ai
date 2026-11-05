@@ -10,7 +10,6 @@ import {
   ArrowUp,
   BookOpenCheck,
   Brain,
-  BrainCircuit,
   Calendar,
   Camera,
   ChevronLeft,
@@ -51,6 +50,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { stopSpeaking } from "@/hooks/useSpeechSynthesis";
 import { useVisualViewportBox } from "@/hooks/useVisualViewportBox";
 import { ConversationSidebar, ConversationSidebarCollapsedToggle } from "@/components/assistant/ConversationSidebar";
+import { AssistantAvatar, COPILOT_HUB_CLASSES, COPILOT_SUGGESTION_CLASSES, COPILOT_USER_BUBBLE_CLASSES, NovaOrb, TypingIndicator } from "@/components/assistant/CopilotParts";
 import { MessageActions } from "@/components/assistant/MessageActions";
 import { QUICK_ACTIONS } from "@/components/assistant/QuickActionBar";
 import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
@@ -83,25 +83,6 @@ const QUICK_PROMPTS: { icon: LucideIcon; label: string; text: string }[] = [
   { icon: HeartPulse, label: "Gérer le stress", text: "Je stresse avant mes épreuves, comment prioriser sans paniquer ?" },
   { icon: BookOpenCheck, label: "5 QCM pièges", text: "Pose-moi cinq QCM pièges pour évaluer mon niveau aujourd'hui." },
 ];
-
-function NovaOrb() {
-  return (
-    <div className="relative flex h-20 w-20 shrink-0 items-center justify-center sm:h-24 sm:w-24" aria-hidden="true">
-      {/* No tile, no frame: a multi-colour bloom and a gradient-stroked glyph floating on the canvas. */}
-      <svg width="0" height="0" className="absolute">
-        <defs>
-          <linearGradient id="copilot-orb-stroke" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#22d3ee" />
-            <stop offset="50%" stopColor="#0ea5e9" />
-            <stop offset="100%" stopColor="#2563eb" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <span className="absolute inset-2 rounded-full bg-[conic-gradient(from_200deg,rgba(56,189,248,0.45),rgba(34,211,238,0.4),rgba(37,99,235,0.45),rgba(56,189,248,0.45))] opacity-60 blur-2xl dark:opacity-70" />
-      <BrainCircuit color="url(#copilot-orb-stroke)" strokeWidth={1.5} className="relative h-12 w-12 sm:h-14 sm:w-14" />
-    </div>
-  );
-}
 
 function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
   const { language } = useLanguage();
@@ -142,65 +123,13 @@ function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelect
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 + index * 0.04, duration: 0.3, ease: "easeOut" }}
             whileTap={{ scale: 0.97 }}
-            className="flex min-h-[52px] min-w-0 items-center gap-2.5 rounded-2xl border border-black/[0.06] bg-white/70 px-3.5 py-2 text-left text-[13px] font-medium leading-snug text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-white hover:text-slate-900 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/75 dark:shadow-none dark:hover:bg-white/[0.08] dark:hover:text-white sm:min-h-11 sm:gap-2 sm:rounded-full sm:px-4 sm:py-0"
+            className={COPILOT_SUGGESTION_CLASSES}
           >
             <prompt.icon className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300" strokeWidth={1.75} />
             {prompt.label}
           </motion.button>
         ))}
       </div>
-    </div>
-  );
-}
-
-/** `isPending`: true only while THIS message is actively streaming — the animated ping is a "generating now" signal, not a permanent decoration, so it stops once the reply is complete (a static dot per finished message would just be visual noise on a long scrollback). */
-function AssistantAvatar({ isPending = false }: { isPending?: boolean }) {
-  return (
-    <div className="relative mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-300">
-      {isPending && (
-        <span
-          aria-hidden
-          className="absolute -inset-[3px] animate-[spin_2.2s_linear_infinite] rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.95)_100deg,rgba(37,99,235,0.6)_160deg,transparent_220deg)] [mask:radial-gradient(farthest-side,transparent_calc(100%-2px),#000_calc(100%-2px))] motion-reduce:animate-[spin_4.4s_linear_infinite]"
-        />
-      )}
-      <BrainCircuit className="h-5 w-5" strokeWidth={1.75} />
-      <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-        {isPending && (
-          <motion.span
-            className="absolute inline-flex h-full w-full rounded-full bg-sky-400"
-            initial={{ scale: 1, opacity: 0.55 }}
-            animate={{ scale: 2.4, opacity: 0 }}
-            transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
-          />
-        )}
-        <span
-          className={cn(
-            "relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-400 transition-shadow duration-300",
-            isPending && "shadow-[0_0_6px_2px_rgba(56,189,248,0.6)]"
-          )}
-        />
-      </span>
-    </div>
-  );
-}
-
-/** Streaming placeholder shown before the first token arrives — paired with a short reassurance label rather than a bare spinner, so a student watching a blank bubble knows the assistant is working, not stuck. */
-function TypingIndicator() {
-  return (
-    <div className="flex items-center gap-2.5 py-1" role="status">
-      <div className="flex items-center gap-1" aria-hidden>
-        {[0, 1, 2].map((i) => (
-          <motion.span
-            key={i}
-            className="h-1.5 w-1.5 rounded-full bg-sky-500 dark:bg-sky-400"
-            animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1.15, 0.8] }}
-            transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
-          />
-        ))}
-      </div>
-      <span className="copilot-shimmer bg-[linear-gradient(90deg,rgb(100_116_139)_0%,rgb(14_165_233)_45%,rgb(100_116_139)_90%)] bg-[length:220%_100%] bg-clip-text text-xs font-medium text-transparent dark:bg-[linear-gradient(90deg,rgb(148_163_184)_0%,rgb(125_211_252)_45%,rgb(148_163_184)_90%)]">
-        MedArt réfléchit…
-      </span>
     </div>
   );
 }
@@ -266,7 +195,7 @@ const ChatBubble = memo(function ChatBubble({
             // a pasted long token wraps instead of widening the thread.
             <div
               dir={dominantDirection(attachment ? attachment.caption ?? "" : message.content) ?? "auto"}
-              className="max-w-full whitespace-pre-wrap break-words rounded-3xl rounded-br-lg border border-sky-100 bg-sky-50 px-4 py-2.5 text-[0.9375rem] leading-[1.5] text-slate-800 sm:text-[16px] dark:border-white/[0.06] dark:bg-white/[0.07] dark:text-white/90"
+              className={COPILOT_USER_BUBBLE_CLASSES}
             >
               {attachment ? attachment.caption : message.content}
             </div>
@@ -1371,7 +1300,7 @@ export default function AssistantPage() {
         >
           <div className="mx-auto w-full max-w-3xl">
             <div className="px-3 sm:px-4">
-              <div data-tour="asst-composer" className="relative flex w-full flex-col rounded-[36px] border border-black/[0.06] bg-white/85 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_44px_-18px_rgba(15,23,42,0.28)] backdrop-blur-2xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_16px_48px_-16px_rgba(14,165,233,0.38)] dark:border-white/[0.09] dark:bg-[#0e1115]/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_24px_64px_-20px_rgba(0,0,0,0.9)] dark:focus-within:border-sky-400/25 dark:focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_0_0_1px_rgba(56,189,248,0.16),0_24px_64px_-20px_rgba(14,165,233,0.32)]">
+              <div data-tour="asst-composer" className={COPILOT_HUB_CLASSES}>
                 <AnimatePresence initial={false}>
                   {activeAction && (
                     <motion.div

@@ -105,7 +105,7 @@ function wrapWords(node: HastNode, counter: { index: number }) {
   node.children = next;
 }
 
-type RehypePlugin = NonNullable<Options["rehypePlugins"]>[number];
+export type RehypePlugin = NonNullable<Options["rehypePlugins"]>[number];
 
 const rehypeWordFade: RehypePlugin = () => (tree: unknown) => {
   wrapWords(tree as HastNode, { index: 0 });
@@ -250,10 +250,18 @@ class MarkdownErrorBoundary extends Component<{ content: string; children: React
   }
 }
 
-const MarkdownBlock = memo(function MarkdownBlock({ text, live }: { text: string; live: boolean }) {
+const MarkdownBlock = memo(function MarkdownBlock({
+  text,
+  rehypePlugins,
+  components,
+}: {
+  text: string;
+  rehypePlugins: Options["rehypePlugins"];
+  components: Options["components"];
+}) {
   return (
     <MarkdownErrorBoundary content={text}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={live ? LIVE_REHYPE_PLUGINS : REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehypePlugins} components={components}>
         {text}
       </ReactMarkdown>
     </MarkdownErrorBoundary>
@@ -300,19 +308,48 @@ const PROSE_CLASSES =
   "prose-hr:my-[1.1em] prose-hr:border-black/[0.07] dark:prose-hr:border-white/[0.08] " +
   "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
-export const StreamedMarkdown = forwardRef<HTMLDivElement, { content: string; isStreaming?: boolean }>(function StreamedMarkdown(
-  { content, isStreaming = false },
+interface StreamedMarkdownProps {
+  content: string;
+  isStreaming?: boolean;
+  /**
+   * Element renderers layered over the reply's own (the module workspace's
+   * citation chips and medical callouts). Keep the object stable: every
+   * block re-renders when it changes.
+   */
+  components?: Options["components"];
+  /**
+   * Rehype plugins run before the reading-direction and word-fade passes, so
+   * they still see each block's plain text. Keep the array stable.
+   */
+  rehypePlugins?: RehypePlugin[];
+}
+
+export const StreamedMarkdown = forwardRef<HTMLDivElement, StreamedMarkdownProps>(function StreamedMarkdown(
+  { content, isStreaming = false, components, rehypePlugins },
   ref
 ) {
   // LaTeX, stray HTML and near-miss Markdown made readable before anything is parsed (lib/assistant-markdown.ts).
   const cleaned = useMemo(() => cleanAssistantMarkdown(content ?? ""), [content]);
   const blocks = useMemo(() => splitIntoBlocks(cleaned), [cleaned]);
   const direction = useMemo(() => dominantDirection(cleaned) ?? "auto", [cleaned]);
+  const renderers = useMemo(() => (components ? { ...MARKDOWN_COMPONENTS, ...components } : MARKDOWN_COMPONENTS), [components]);
+  const [settledPlugins, livePlugins] = useMemo(
+    () =>
+      rehypePlugins?.length
+        ? [
+            [...rehypePlugins, rehypeDirection],
+            [...rehypePlugins, rehypeDirection, rehypeWordFade],
+          ]
+        : [REHYPE_PLUGINS, LIVE_REHYPE_PLUGINS],
+    [rehypePlugins]
+  );
   return (
     <div ref={ref} dir={direction} className={PROSE_CLASSES}>
       {blocks.map((block, index) => {
         const live = isStreaming && index === blocks.length - 1;
-        return <MarkdownBlock key={index} text={live ? tidyLiveBlock(block) : block} live={live} />;
+        return (
+          <MarkdownBlock key={index} text={live ? tidyLiveBlock(block) : block} rehypePlugins={live ? livePlugins : settledPlugins} components={renderers} />
+        );
       })}
     </div>
   );

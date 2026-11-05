@@ -1093,7 +1093,7 @@ export default function ModuleWorkspacePage() {
     () => ({ mode: chatMode, sourceCourseIds: Array.from(selectedSourceIds), structured: true }),
     [chatMode, selectedSourceIds]
   );
-  const { chatMessages, chatInput, setChatInput, isTyping, isStreaming, sendChatMessage, regenerateFrom, clearMessages } = useCourseChat(courseChatSlug, chatRequestExtras);
+  const { chatMessages, chatInput, setChatInput, isTyping, isStreaming, sendChatMessage, regenerateFrom, clearMessages, historyReady: isChatHistoryReady } = useCourseChat(courseChatSlug, chatRequestExtras);
   /** True from send until the reply has fully streamed — the guard against a second overlapping request. */
   const isChatBusy = isTyping || isStreaming;
 
@@ -2297,6 +2297,7 @@ export default function ModuleWorkspacePage() {
       messages={chatMessages}
       isTyping={isTyping}
       isBusy={isChatBusy}
+      isHistoryLoading={!isChatHistoryReady}
       input={chatInput}
       onInputChange={setChatInput}
       onSend={handleSend}
@@ -2310,7 +2311,6 @@ export default function ModuleWorkspacePage() {
       isSplitScreen={isSplitScreen}
       onToggleSplitScreen={() => setIsSplitScreen((prev) => !prev)}
       showSplitScreenToggle={!isZen}
-      dark={isDark}
       sources={courses.map((c) => ({ id: c.id, title: c.title }))}
       selectedSourceIds={selectedSourceIds}
       onToggleSource={handleToggleSelectedSource}
@@ -2339,6 +2339,7 @@ export default function ModuleWorkspacePage() {
       messages={chatMessages}
       isTyping={isTyping}
       isBusy={isChatBusy}
+      isHistoryLoading={!isChatHistoryReady}
       input={chatInput}
       onInputChange={setChatInput}
       onSend={handleSend}
@@ -2358,10 +2359,10 @@ export default function ModuleWorkspacePage() {
       isSplitScreen={false}
       onToggleSplitScreen={() => {}}
       showSplitScreenToggle={false}
-      dark={isDark}
       sources={courses.map((c) => ({ id: c.id, title: c.title }))}
       activeSourceId={activeCourse?.id ?? null}
       onSelectSource={handleSelectCourse}
+      selectedSourceIds={selectedSourceIds}
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
       courseSlug={courseChatSlug}

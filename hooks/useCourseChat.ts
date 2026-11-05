@@ -43,6 +43,8 @@ interface UseCourseChatResult {
   regenerateFrom: (assistantId: string) => Promise<void>;
   /** A real reset, not just a local one: wipes this course's `course_chat_history` rows server-side (DELETE /api/courses/chat) and only clears the on-screen conversation once that succeeds — a failed delete leaves the transcript on screen with an error toast instead of silently keeping stale rows the student was told were gone. */
   clearMessages: () => Promise<void>;
+  /** False while this course's saved conversation is being fetched — an empty `chatMessages` then means "not loaded yet", not "no conversation", so a welcome screen should wait instead of flashing. */
+  historyReady: boolean;
 }
 
 /**
@@ -60,6 +62,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
   const [chatInput, setChatInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [historyReady, setHistoryReady] = useState(!slug);
 
   // Guards the streaming loop in sendChatMessage below against setState on an
   // unmounted component — a student can send a message then immediately
@@ -84,7 +87,11 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
     // which is what gets resent as history on the next message) just
     // because the fetch below found nothing to overwrite it with.
     setChatMessages([]);
-    if (!slug) return;
+    if (!slug) {
+      setHistoryReady(true);
+      return;
+    }
+    setHistoryReady(false);
     let cancelled = false;
 
     fetch(`/api/courses/chat?slug=${encodeURIComponent(slug)}`)
@@ -106,6 +113,9 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
       .catch(() => {
         // No saved history available (not signed in, network hiccup, etc.) —
         // the chat still works, it just starts empty, exactly as before.
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryReady(true);
       });
 
     return () => {
@@ -292,5 +302,5 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
     }
   }
 
-  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, isStreaming, sendChatMessage, regenerateFrom, clearMessages };
+  return { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, isStreaming, sendChatMessage, regenerateFrom, clearMessages, historyReady };
 }

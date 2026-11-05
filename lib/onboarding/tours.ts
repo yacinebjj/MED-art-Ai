@@ -206,8 +206,8 @@ export const TOURS: Record<TourId, TourDefinition> = {
         badge: { fr: "Co-pilote", en: "Co-pilot" },
         title: { fr: "Le Co-pilote lit tes sources", en: "The Co-pilot reads your sources" },
         body: {
-          fr: "Pose ta question : il répond à partir de tes documents. Choisis son mode (Standard, Mode Examen, Explication détaillée, Synthèse express) et les sources qu'il doit lire.",
-          en: "Ask your question: it answers from your documents. Pick its answer mode and the sources it should read.",
+          fr: "Pose ta question : il répond à partir de tes documents, citations à l'appui. Le bouton + ajoute une source, change son mode (Standard, Mode Examen, Explication détaillée, Synthèse express) et choisit les sources qu'il lit.",
+          en: "Ask your question: it answers from your documents, with citations. The + button adds a source, changes its answer mode and picks the sources it reads.",
         },
       },
       {
