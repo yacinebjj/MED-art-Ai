@@ -4,6 +4,7 @@ import { Component, forwardRef, memo, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cleanAssistantMarkdown, tidyLiveBlock } from "@/lib/assistant-markdown";
+import { dominantDirection } from "@/lib/text-direction";
 
 /**
  * Markdown renderer for assistant replies, built for streaming.
@@ -110,25 +111,52 @@ const rehypeWordFade: RehypePlugin = () => (tree: unknown) => {
   wrapWords(tree as HastNode, { index: 0 });
 };
 
-const LIVE_REHYPE_PLUGINS: Options["rehypePlugins"] = [rehypeWordFade];
+// --- Reading direction ---------------------------------------------------------
+
+/** Blocks that get their own direction (lists and tables too, so their markers and columns follow). */
+const DIRECTED_TAGS = new Set(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "th", "td", "ul", "ol", "table"]);
+
+function textOf(node: HastNode): string {
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(textOf).join("");
+}
+
+function setDirections(node: HastNode) {
+  for (const child of node.children ?? []) {
+    if (child.type === "element" && child.tagName && DIRECTED_TAGS.has(child.tagName)) {
+      const dir = dominantDirection(textOf(child));
+      if (dir) child.properties = { ...(child.properties ?? {}), dir };
+    }
+    setDirections(child);
+  }
+}
+
+/** Each block reads the way most of its letters do (lib/text-direction.ts): Arabic right to left, French left to right, whatever word it opens on. */
+const rehypeDirection: RehypePlugin = () => (tree: unknown) => {
+  setDirections(tree as HastNode);
+};
+
+const REHYPE_PLUGINS: Options["rehypePlugins"] = [rehypeDirection];
+const LIVE_REHYPE_PLUGINS: Options["rehypePlugins"] = [rehypeDirection, rehypeWordFade];
 const REMARK_PLUGINS: Options["remarkPlugins"] = [remarkGfm];
 
 // --- Element overrides ---------------------------------------------------------
 
-// dir="auto" on every block: a single reply commonly mixes French with an
-// Arabic/Darija clarification, so each block resolves its OWN direction.
+// Every block gets its own direction (rehypeDirection above): a single reply
+// commonly mixes French with an Arabic/Darija clarification. dir="auto" is
+// only the fallback for a block with no letters.
 const MARKDOWN_COMPONENTS: Options["components"] = {
-  p: ({ children }) => <p dir="auto" className="animate-in fade-in duration-300">{children}</p>,
-  li: ({ children }) => <li dir="auto" className="animate-in fade-in duration-300">{children}</li>,
-  h1: ({ children }) => <h1 dir="auto" className="animate-in fade-in duration-300">{children}</h1>,
-  h2: ({ children }) => <h2 dir="auto" className="animate-in fade-in duration-300">{children}</h2>,
-  h3: ({ children }) => <h3 dir="auto" className="animate-in fade-in duration-300">{children}</h3>,
-  h4: ({ children }) => <h4 dir="auto" className="animate-in fade-in duration-300">{children}</h4>,
+  p: ({ children, dir }) => <p dir={dir ?? "auto"} className="animate-in fade-in duration-300">{children}</p>,
+  li: ({ children, dir }) => <li dir={dir ?? "auto"} className="animate-in fade-in duration-300">{children}</li>,
+  h1: ({ children, dir }) => <h1 dir={dir ?? "auto"} className="animate-in fade-in duration-300">{children}</h1>,
+  h2: ({ children, dir }) => <h2 dir={dir ?? "auto"} className="animate-in fade-in duration-300">{children}</h2>,
+  h3: ({ children, dir }) => <h3 dir={dir ?? "auto"} className="animate-in fade-in duration-300">{children}</h3>,
+  h4: ({ children, dir }) => <h4 dir={dir ?? "auto"} className="animate-in fade-in duration-300">{children}</h4>,
   // A quiet callout rather than a quotation: no italics, no added quote marks.
   // Logical sides, so an Arabic block puts its rule on the right.
-  blockquote: ({ children }) => (
+  blockquote: ({ children, dir }) => (
     <blockquote
-      dir="auto"
+      dir={dir ?? "auto"}
       className="my-[0.7em] animate-in fade-in rounded-e-xl border-s-2 border-s-sky-400/80 bg-sky-500/[0.05] py-[0.4em] pe-[0.9em] ps-[1em] font-normal not-italic text-slate-700 duration-300 dark:border-s-sky-400/60 dark:bg-sky-400/[0.06] dark:text-zinc-300 [&>p:first-of-type]:before:content-none [&>p:last-of-type]:after:content-none [&>p]:my-[0.25em]"
     >
       {children}
@@ -137,21 +165,21 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
   // The wrapper scrolls, not the page: overscroll-x-contain stops a table
   // swipe from chaining into the thread, and the table itself only widens as
   // far as its columns need (min-w on cells) before the wrapper takes over.
-  table: ({ children }) => (
-    <div className="my-[0.75em] w-full max-w-full animate-in fade-in overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.07] duration-300 dark:border-white/[0.08]">
-      <table className="my-0 min-w-full border-collapse text-left text-[13.5px] leading-[1.45] [font-variant-numeric:tabular-nums] [&_tbody>tr:last-child>td]:border-b-0">
+  table: ({ children, dir }) => (
+    <div dir={dir} className="my-[0.75em] w-full max-w-full animate-in fade-in overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.07] duration-300 dark:border-white/[0.08]">
+      <table className="my-0 min-w-full border-collapse text-start text-[13.5px] leading-[1.45] [font-variant-numeric:tabular-nums] [&_tbody>tr:last-child>td]:border-b-0">
         {children}
       </table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-sky-50/80 dark:bg-sky-400/[0.06]">{children}</thead>,
-  th: ({ children }) => (
-    <th dir="auto" className="min-w-[7rem] border-b border-black/[0.07] px-3 py-2 text-[12.5px] font-semibold text-slate-900 dark:border-white/[0.08] dark:text-white">
+  th: ({ children, dir }) => (
+    <th dir={dir ?? "auto"} className="min-w-[7rem] border-b border-black/[0.07] px-3 py-2 text-[12.5px] font-semibold text-slate-900 dark:border-white/[0.08] dark:text-white">
       {children}
     </th>
   ),
-  td: ({ children }) => (
-    <td dir="auto" className="min-w-[7rem] border-b border-black/[0.05] px-3 py-2 align-top text-slate-700 dark:border-white/[0.06] dark:text-zinc-300">
+  td: ({ children, dir }) => (
+    <td dir={dir ?? "auto"} className="min-w-[7rem] border-b border-black/[0.05] px-3 py-2 align-top text-slate-700 dark:border-white/[0.06] dark:text-zinc-300">
       {children}
     </td>
   ),
@@ -172,7 +200,7 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
       );
     }
     return (
-      <pre className="my-[0.7em] max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.06] bg-slate-50 p-3.5 text-[0.8125rem] leading-relaxed text-slate-800 dark:border-white/[0.07] dark:bg-white/[0.04] dark:text-zinc-200">
+      <pre dir="ltr" className="my-[0.7em] max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-black/[0.06] bg-slate-50 p-3.5 text-[0.8125rem] leading-relaxed text-slate-800 dark:border-white/[0.07] dark:bg-white/[0.04] dark:text-zinc-200">
         {children}
       </pre>
     );
@@ -225,7 +253,7 @@ class MarkdownErrorBoundary extends Component<{ content: string; children: React
 const MarkdownBlock = memo(function MarkdownBlock({ text, live }: { text: string; live: boolean }) {
   return (
     <MarkdownErrorBoundary content={text}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={live ? LIVE_REHYPE_PLUGINS : undefined} components={MARKDOWN_COMPONENTS}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={live ? LIVE_REHYPE_PLUGINS : REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
         {text}
       </ReactMarkdown>
     </MarkdownErrorBoundary>
@@ -262,7 +290,7 @@ const PROSE_CLASSES =
   "prose-h4:mb-[0.25em] prose-h4:mt-[0.9em] prose-h4:text-[1em] prose-h4:leading-[1.4] " +
   // Paragraphs and lists share one tight, even rhythm, and no line ends on an orphan word.
   "prose-p:my-[0.55em] prose-p:text-pretty prose-li:text-pretty " +
-  "prose-ul:my-[0.5em] prose-ul:pl-[1.25em] prose-ol:my-[0.5em] prose-ol:pl-[1.4em] prose-li:my-[0.15em] prose-li:pl-[0.25em] " +
+  "prose-ul:my-[0.5em] prose-ul:ps-[1.25em] prose-ol:my-[0.5em] prose-ol:ps-[1.4em] prose-li:my-[0.15em] prose-li:ps-[0.25em] " +
   "[&_li>p]:my-[0.15em] [&_li>ol]:my-[0.2em] [&_li>ul]:my-[0.2em] " +
   "marker:text-sky-500 dark:marker:text-sky-400 [&_ol>li]:marker:font-semibold " +
   "prose-strong:font-semibold prose-strong:text-slate-900 prose-em:text-inherit dark:prose-strong:text-white " +
@@ -277,9 +305,11 @@ export const StreamedMarkdown = forwardRef<HTMLDivElement, { content: string; is
   ref
 ) {
   // LaTeX, stray HTML and near-miss Markdown made readable before anything is parsed (lib/assistant-markdown.ts).
-  const blocks = useMemo(() => splitIntoBlocks(cleanAssistantMarkdown(content ?? "")), [content]);
+  const cleaned = useMemo(() => cleanAssistantMarkdown(content ?? ""), [content]);
+  const blocks = useMemo(() => splitIntoBlocks(cleaned), [cleaned]);
+  const direction = useMemo(() => dominantDirection(cleaned) ?? "auto", [cleaned]);
   return (
-    <div ref={ref} dir="auto" className={PROSE_CLASSES}>
+    <div ref={ref} dir={direction} className={PROSE_CLASSES}>
       {blocks.map((block, index) => {
         const live = isStreaming && index === blocks.length - 1;
         return <MarkdownBlock key={index} text={live ? tidyLiveBlock(block) : block} live={live} />;

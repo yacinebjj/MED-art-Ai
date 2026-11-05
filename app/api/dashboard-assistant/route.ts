@@ -25,6 +25,8 @@ import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { isAssistantMode, isAssistantStyle, type AssistantMode } from "@/lib/assistant-modes";
 import { buildAssistantSystemPrompt, DASHBOARD_ASSISTANT_SYSTEM_PROMPT } from "@/lib/ai/assistant-prompts";
+import { isReplyId } from "@/lib/copilot-background";
+import { streamReplyInBackground } from "@/lib/copilot-background-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,9 +151,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { message, history, image, document, mode, style, stepByStep } = (body ?? {}) as {
+  const { message, history, image, document, mode, style, stepByStep, replyId, language } = (body ?? {}) as {
     message?: unknown;
     history?: unknown;
+    /** The page's id for this reply: with it, the reply is carried on to its end if the student leaves, and kept for them to collect (lib/copilot-background.ts). */
+    replyId?: unknown;
+    language?: unknown;
     /** Quick-action chip / answer-style / step-by-step toggles from the assistant UI — each validated against a whitelist below (lib/assistant-modes.ts); an unknown value is ignored, never echoed into the prompt. */
     mode?: unknown;
     style?: unknown;
@@ -193,6 +198,15 @@ export async function POST(request: NextRequest) {
   }
 
   const historyTurns: HistoryTurn[] = Array.isArray(history) ? history.filter(isHistoryTurn).slice(-MAX_HISTORY_MESSAGES) : [];
+
+  // Every successful answer goes out through here. With a reply id from the
+  // page, the model's stream outlives the student's connection (an iPhone app
+  // switch, a closed tab) and the reply waits for them in their sync store.
+  const deliver = (stream: ReadableStream<Uint8Array>) =>
+    new NextResponse(isReplyId(replyId) ? streamReplyInBackground(stream, { userId: user.id, replyId, language: language === "en" ? "en" : "fr" }) : stream, {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
 
   // Daily paid-tier gate (see this file's header comment) — decides whether
   // THIS message tries CHEAP_MODEL first. Deliberately checked BEFORE (and
@@ -261,7 +275,7 @@ export async function POST(request: NextRequest) {
         reasoning: { effort: "low" },
         providerSort: "latency",
       });
-      return new NextResponse(stream, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+      return deliver(stream);
     } catch (error) {
       console.error("[dashboard-assistant] Analyse d'image échouée:", error instanceof Error ? error.message : error);
       return NextResponse.json({ error: "L'analyse de l'image n'a pas pu aboutir. Réessaie dans un instant." }, { status: 502 });
@@ -289,10 +303,7 @@ export async function POST(request: NextRequest) {
         reasoning: { enabled: false },
         providerSort: "latency",
       });
-      return new NextResponse(stream, {
-        status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
-      });
+      return deliver(stream);
     } catch (error) {
       lastError = error;
       console.error("[dashboard-assistant] CHAT_MODEL indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
@@ -311,10 +322,7 @@ export async function POST(request: NextRequest) {
   for (const model of FREE_MODEL_CHAIN) {
     try {
       const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: ANSWER_TEMPERATURE, reasoning: { effort: "low" }, providerSort: "latency" });
-      return new NextResponse(stream, {
-        status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
-      });
+      return deliver(stream);
     } catch (error) {
       lastError = error;
       console.error(

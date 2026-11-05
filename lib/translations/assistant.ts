@@ -28,6 +28,10 @@ export const ASSISTANT_TRANSLATIONS = {
   // Floating scroll-to-bottom button
   backToBottom: { fr: "Revenir en bas", en: "Back to bottom" },
   newResponseInProgress: { fr: "Nouvelle réponse en cours", en: "New response in progress" },
+  replyReadyTitle: { fr: "Ta réponse est prête", en: "Your answer is ready" },
+  replyReadyBody: { fr: "MedArt Copilot a fini de répondre.", en: "MedArt Copilot has finished answering." },
+  replyReadyOpen: { fr: "Voir", en: "View" },
+  replyInterrupted: { fr: "La réponse a été interrompue. Réessaie.", en: "The answer was interrupted. Try again." },
 
   // Composer
   addAttachment: { fr: "Ajouter une pièce jointe", en: "Add an attachment" },

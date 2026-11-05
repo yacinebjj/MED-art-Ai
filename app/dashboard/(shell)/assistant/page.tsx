@@ -61,6 +61,8 @@ import { useToast } from "@/components/ui/Toast";
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 import { ASSISTANT_PREFILL_KEY } from "@/lib/dashboard/assistant-prefill";
 import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
+import { dominantDirection } from "@/lib/text-direction";
+import { forgetReply, getReplySnapshot, resumeReply, settledReplyContent, startReply, stopReply, subscribeReply, type ReplyCopy } from "@/lib/copilot-reply-runner";
 
 interface HistoryTurn {
   role: "user" | "assistant";
@@ -263,7 +265,7 @@ const ChatBubble = memo(function ChatBubble({
             // message in Arabic/Darija must read right-to-left. break-words:
             // a pasted long token wraps instead of widening the thread.
             <div
-              dir="auto"
+              dir={dominantDirection(attachment ? attachment.caption ?? "" : message.content) ?? "auto"}
               className="max-w-full whitespace-pre-wrap break-words rounded-3xl rounded-br-lg border border-sky-100 bg-sky-50 px-4 py-2.5 text-[0.9375rem] leading-[1.5] text-slate-800 sm:text-[16px] dark:border-white/[0.06] dark:bg-white/[0.07] dark:text-white/90"
             >
               {attachment ? attachment.caption : message.content}
@@ -525,8 +527,10 @@ export default function AssistantPage() {
   // Quick action ("QCM", "Flashcards"…) armed for the NEXT message only.
   const [mode, setMode] = useState<AssistantMode | null>(null);
   const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
-  // Aborts the in-flight reply when the student taps Stop (see stopGeneration).
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // The reply this thread is waiting for (lib/copilot-reply-runner.ts runs it),
+  // and how to stop watching each reply the page follows.
+  const activeReplyIdRef = useRef<string | null>(null);
+  const replyWatchersRef = useRef(new Map<string, () => void>());
   // Whether the student is currently scrolled near the latest message.
   // Starts true (a freshly opened/empty thread has nothing to scroll away
   // from). Purely a scroll-position/UI concern — see the effect below and
@@ -602,11 +606,15 @@ export default function AssistantPage() {
     );
   }, []);
 
-  // Never leave a reply being read aloud (or a generation running) behind a page the student has left.
+  // Never leave a reply being read aloud behind a page the student has left.
+  // A reply still being generated is NOT stopped: it keeps running
+  // (lib/copilot-reply-runner.ts), settles into its saved conversation and is
+  // announced — the page only stops watching it.
   useEffect(() => {
+    const watchers = replyWatchersRef.current;
     return () => {
       stopSpeaking();
-      abortControllerRef.current?.abort();
+      watchers.forEach((stopWatching) => stopWatching());
     };
   }, []);
 
@@ -741,19 +749,39 @@ export default function AssistantPage() {
   useEffect(() => {
     if (!hydrated || !activeId) return;
     const active = conversations.find((c) => c.id === activeId);
-    if (active) setMessages(active.messages);
+    if (active) {
+      setMessages(active.messages);
+      resumePendingReply(active.messages);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
 
+  // While a reply streams, the thread is saved once as it starts (the question
+  // and the pending reply), not on every chunk: a student who leaves
+  // mid-answer finds both again, and the reply settles into them.
+  const savedThreadRef = useRef("");
   useEffect(() => {
-    if (isTyping) return;
+    const thread = messages.map((m) => m.id).join(",");
+    if (isTyping && thread === savedThreadRef.current) return;
+    savedThreadRef.current = thread;
     saveMessages(messages);
   }, [messages, isTyping, saveMessages]);
 
-  /** Leaving the current thread: stop whatever is still being read aloud or generated for it. */
+  /** Leaving the current thread on purpose: stop whatever is still being read aloud or generated for it — what already arrived stays with that thread. */
   function settleCurrentThread() {
     stopSpeaking();
-    abortControllerRef.current?.abort();
+    const replyId = activeReplyIdRef.current;
+    if (replyId) {
+      const snapshot = getReplySnapshot(replyId);
+      forgetReply(replyId);
+      stopReply(replyId);
+      replyWatchersRef.current.get(replyId)?.();
+      activeReplyIdRef.current = null;
+      const content = snapshot ? settledReplyContent(snapshot.status === "streaming" ? { ...snapshot, status: "stopped" } : snapshot) : null;
+      const thread = messagesRef.current;
+      saveMessages(content === null ? thread.filter((m) => m.id !== replyId) : thread.map((m) => (m.id === replyId ? { id: m.id, role: m.role, content } : m)));
+      setIsTyping(false);
+    }
     setMode(null);
   }
 
@@ -771,6 +799,7 @@ export default function AssistantPage() {
       settleCurrentThread();
       setMessages(found.messages);
       setIsAtBottom(true);
+      resumePendingReply(found.messages);
     }
   }
 
@@ -780,56 +809,84 @@ export default function AssistantPage() {
     if (wasActive) setMessages([]);
   }
 
-  const streamAssistantReply = useCallback(async (
-    userText: string,
-    historyForRequest: HistoryTurn[],
-    attachments?: { image?: { dataUrl: string; fileName?: string }; document?: { fileName: string; text: string } },
-    bypassCache?: boolean,
-    requestMode?: AssistantMode
-  ) => {
-    const assistantId = generateId();
-    setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+  const userId = auth.user?.id ?? null;
+  const replyCopy = useCallback(
+    (): ReplyCopy => ({
+      noReply: tAssistant("assistantNoReplyError", language),
+      empty: "L'assistant n'a rien renvoyé. Réessaie.",
+      interrupted: tAssistant("replyInterrupted", language),
+      readyTitle: tAssistant("replyReadyTitle", language),
+    }),
+    [language]
+  );
+
+  /**
+   * Shows a reply as it arrives (one paint per frame) and settles it in the
+   * thread. Resolves when it settles — or when the page stops watching (the
+   * thread left on purpose, or the page left while the reply carries on).
+   */
+  const watchReply = useCallback((replyId: string) => {
+    activeReplyIdRef.current = replyId;
     setIsTyping(true);
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    let rafId: number | null = null;
-    let latestText = "";
-
-    function flush(text: string) {
-      if (!isMountedRef.current) return;
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m)));
-    }
-
-    function scheduleFlush() {
-      if (rafId !== null || !isMountedRef.current) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        flush(latestText);
+    return new Promise<void>((resolve) => {
+      let frame: number | null = null;
+      let latest = "";
+      let unsubscribe: () => void = () => undefined;
+      const stopWatching = () => {
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        unsubscribe();
+        replyWatchersRef.current.delete(replyId);
+        resolve();
+      };
+      replyWatchersRef.current.set(replyId, stopWatching);
+      unsubscribe = subscribeReply(replyId, (snapshot) => {
+        if (snapshot.status === "streaming") {
+          latest = snapshot.text;
+          if (frame === null) {
+            frame = requestAnimationFrame(() => {
+              frame = null;
+              setMessages((prev) => prev.map((m) => (m.id === replyId ? { ...m, content: latest } : m)));
+            });
+          }
+          return;
+        }
+        // Settled: the text, the "⚠️ …" error line, or nothing (stopped before its first word).
+        const content = settledReplyContent(snapshot);
+        setMessages((prev) =>
+          content === null ? prev.filter((m) => m.id !== replyId) : prev.map((m) => (m.id === replyId ? { id: m.id, role: m.role, content } : m))
+        );
+        if (activeReplyIdRef.current === replyId) activeReplyIdRef.current = null;
+        setIsTyping(false);
+        stopWatching();
       });
-    }
+    });
+  }, []);
 
-    function cancelScheduledFlush() {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-    }
+  const streamAssistantReply = useCallback(
+    async (
+      userText: string,
+      historyForRequest: HistoryTurn[],
+      attachments?: { image?: { dataUrl: string; fileName?: string }; document?: { fileName: string; text: string } },
+      bypassCache?: boolean,
+      requestMode?: AssistantMode
+    ) => {
+      const assistantId = generateId();
+      // Pending until it settles — saved with the thread right away (see the save effect above).
+      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "", pending: true }]);
 
-    try {
       // Dashboard Assistant — free-tier only (see app/api/dashboard-assistant/
       // route.ts), never app/api/assistant/route.ts (paid, Sonnet/Haiku).
       // That route rejects `image` explicitly (the free model chain is
       // verified text-only, no vision) rather than silently ignoring it —
       // sendImageMessage below still exists in the UI, but a sent image now
-      // surfaces that route's honest 400 through this same catch block,
-      // same "⚠️ …" bubble convention as any other failure.
-      const res = await fetch("/api/dashboard-assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
+      // surfaces that route's honest 400 the same "⚠️ …" way as any other
+      // failure. The reply runs in lib/copilot-reply-runner.ts: it keeps
+      // going if the student leaves, and the page only watches it.
+      startReply(
+        assistantId,
+        userId,
+        {
           message: userText,
           history: historyForRequest,
           language,
@@ -842,55 +899,25 @@ export default function AssistantPage() {
           ...(attachments?.image ? { image: attachments.image } : {}),
           ...(attachments?.document ? { document: attachments.document } : {}),
           ...(bypassCache ? { bypassCache: true } : {}),
-        }),
-      });
-
-      if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? tAssistant("assistantNoReplyError", language));
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let fullText = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        fullText += decoder.decode(value, { stream: true });
-        latestText = fullText;
-        scheduleFlush();
-      }
-
-      cancelScheduledFlush();
-      flush(fullText);
-
-      if (!fullText.trim()) {
-        flush("⚠️ L'assistant n'a rien renvoyé. Réessaie.");
-      }
-    } catch (error) {
-      cancelScheduledFlush();
-      if (error instanceof DOMException && error.name === "AbortError") {
-        // The student tapped Stop (or left the thread): keep whatever already
-        // arrived. A reply stopped before its first word has nothing to show,
-        // so that empty placeholder is removed instead of left spinning.
-        if (isMountedRef.current) {
-          if (latestText.trim()) flush(latestText);
-          else setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-        }
-      } else {
-        const msg = error instanceof Error ? error.message : "L'assistant n'a pas pu répondre. Réessaie.";
-        flush(`⚠️ ${msg}`);
-      }
-    } finally {
-      if (abortControllerRef.current === controller) abortControllerRef.current = null;
-      if (isMountedRef.current) setIsTyping(false);
-    }
-  }, [language]);
+        },
+        replyCopy()
+      );
+      await watchReply(assistantId);
+    },
+    [language, userId, replyCopy, watchReply]
+  );
 
   function stopGeneration() {
     haptic();
-    abortControllerRef.current?.abort();
+    if (activeReplyIdRef.current) stopReply(activeReplyIdRef.current);
+  }
+
+  /** A thread saved with its last reply still pending (the page was left mid-answer): pick it up — still arriving in this tab, or finished on the server. */
+  function resumePendingReply(thread: ChatMessage[]) {
+    const last = thread[thread.length - 1];
+    if (!last || last.role !== "assistant" || !last.pending || activeReplyIdRef.current === last.id) return;
+    resumeReply(last.id, userId, replyCopy(), last.content);
+    void watchReply(last.id);
   }
 
   async function sendMessage(rawText: string) {
@@ -1415,16 +1442,14 @@ export default function AssistantPage() {
                       aria-label={tAssistant("addAttachment", language)}
                       aria-expanded={isAttachmentMenuOpen}
                       className={cn(
-                        "flex h-11 w-11 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
-                        isAttachmentBusy || isListening
-                          ? "cursor-not-allowed text-muted-foreground opacity-40"
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                        "flex h-11 w-11 items-center justify-center rounded-full text-slate-800 transition-[transform,background-color,color] duration-150 active:scale-90 dark:text-white",
+                        isAttachmentBusy || isListening ? "cursor-not-allowed opacity-40" : "hover:bg-black/[0.06] dark:hover:bg-white/[0.1]"
                       )}
                     >
                       {isAttachmentBusy ? (
-                        <RefreshCw className="h-5 w-5 animate-spin" />
+                        <RefreshCw strokeWidth={2} className="h-6 w-6 animate-spin" />
                       ) : (
-                        <Plus strokeWidth={1.75} className={cn("h-5 w-5 transition-transform duration-200", isAttachmentMenuOpen && "rotate-45")} />
+                        <Plus strokeWidth={2} className={cn("h-6 w-6 transition-transform duration-200", isAttachmentMenuOpen && "rotate-45")} />
                       )}
                     </button>
 
@@ -1530,16 +1555,16 @@ export default function AssistantPage() {
                     aria-label={isListening ? tAssistant("stopDictation", language) : tAssistant("startDictation", language)}
                     className={cn(
                       "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90",
-                      isListening ? "bg-sky-600 text-white shadow-[0_0_0_4px_rgba(14,165,233,0.18)]" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      isListening ? "bg-sky-600 text-white shadow-[0_0_0_4px_rgba(14,165,233,0.18)]" : "text-slate-800 hover:bg-black/[0.06] dark:text-white dark:hover:bg-white/[0.1]",
                       (!micSupported || isTranscribing) && "cursor-not-allowed opacity-40"
                     )}
                   >
                     {isTranscribing ? (
-                      <RefreshCw className="h-[18px] w-[18px] animate-spin" />
+                      <RefreshCw strokeWidth={2} className="h-5 w-5 animate-spin" />
                     ) : isListening ? (
-                      <Square className="h-4 w-4 fill-current" />
+                      <Square className="h-[18px] w-[18px] fill-current" />
                     ) : (
-                      <Mic strokeWidth={1.75} className="h-5 w-5" />
+                      <Mic strokeWidth={2} className="h-6 w-6" />
                     )}
                   </button>
 
@@ -1558,7 +1583,7 @@ export default function AssistantPage() {
                           aria-label={tAssistant("stopGeneration", language)}
                           className="absolute inset-0 flex items-center justify-center rounded-full bg-foreground text-background"
                         >
-                          <Square className="h-4 w-4 fill-current" />
+                          <Square className="h-[18px] w-[18px] fill-current" />
                         </motion.button>
                       ) : canSend && !isListening ? (
                         <motion.button
@@ -1572,7 +1597,7 @@ export default function AssistantPage() {
                           aria-label={tAssistant("sendMessage", language)}
                           className="absolute inset-0 flex items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-[0_8px_20px_-8px_rgba(14,165,233,0.75)]"
                         >
-                          <ArrowUp strokeWidth={2.25} className="h-5 w-5" />
+                          <ArrowUp strokeWidth={2.25} className="h-6 w-6" />
                         </motion.button>
                       ) : (
                         <motion.button
@@ -1589,9 +1614,9 @@ export default function AssistantPage() {
                           whileTap={{ scale: 0.9 }}
                           aria-label="Mode vocal"
                           title="Mode vocal (conversation à la voix)"
-                          className="absolute inset-0 flex items-center justify-center rounded-full bg-sky-500/10 text-sky-700 transition-colors duration-150 hover:bg-sky-500/[0.16] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:bg-sky-400/[0.16]"
+                          className="absolute inset-0 flex items-center justify-center rounded-full bg-black/[0.06] text-slate-800 transition-colors duration-150 hover:bg-black/[0.1] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white/[0.12] dark:text-white dark:hover:bg-white/[0.18]"
                         >
-                          <AudioLines strokeWidth={1.75} className="h-5 w-5" />
+                          <AudioLines strokeWidth={2} className="h-6 w-6" />
                         </motion.button>
                       )}
                     </AnimatePresence>

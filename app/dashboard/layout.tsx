@@ -7,6 +7,7 @@ import { PaywallProvider } from "@/components/billing/PaywallProvider";
 import { DeviceGuard } from "@/components/security/DeviceGuard";
 import { OnboardingProvider } from "@/lib/onboarding/onboarding-context";
 import { TourHost } from "@/components/onboarding/TourHost";
+import { CopilotReplyNotifier } from "@/components/assistant/CopilotReplyNotifier";
 import { RouteMotionProvider } from "@/providers/RouteMotionProvider";
 import { RouteProgress } from "@/components/layout/RouteProgress";
 
@@ -34,6 +35,8 @@ export default function DashboardLayout({
             {children}
             <TourHost />
           </OnboardingProvider>
+          {/* A Copilot answer that finished while the student was on another page. */}
+          <CopilotReplyNotifier />
           <DeviceGuard />
         </PaywallProvider>
       </RouteMotionProvider>

@@ -20,6 +20,8 @@ export interface ChatMessage {
   content: string;
   /** User messages only — the quick action (QCM, flashcards…) this message was sent with, kept so "Régénérer" re-runs it the same way. Absent on every message sent before quick actions existed. */
   mode?: AssistantMode;
+  /** Assistant messages only — the reply is still being generated. Saved with the thread as soon as it starts (the reply can finish in the background after the student leaves, see lib/copilot-reply-runner.ts); dropped once it settles. */
+  pending?: boolean;
 }
 
 export interface StoredConversation {
@@ -79,6 +81,31 @@ function writeConversationsToStorage(storageKey: string, conversations: StoredCo
     // this just means it won't survive a refresh this time.
     console.warn("[assistant] Échec sauvegarde de l'historique (quota localStorage ?):", error);
   }
+}
+
+/**
+ * Settles a reply that finished in the background while the Copilot page —
+ * and this hook with it — was not mounted (lib/copilot-reply-runner.ts):
+ * the saved conversation holding that message gets the final content, here
+ * and on the server. `content: null` removes the message (a reply stopped
+ * before its first word). False when no saved conversation holds it.
+ */
+export function patchStoredAssistantMessage(userId: string, messageId: string, content: string | null): boolean {
+  const storageKey = storageKeyFor(userId);
+  if (!storageKey) return false;
+  const stored = readConversationsFromStorage(storageKey);
+  const index = stored.findIndex((c) => c.messages.some((m) => m?.id === messageId));
+  if (index < 0) return false;
+  const conversation = stored[index];
+  const messages =
+    content === null
+      ? conversation.messages.filter((m) => m?.id !== messageId)
+      : conversation.messages.map((m) => (m?.id === messageId ? { id: m.id, role: m.role, content } : m));
+  const changed: StoredConversation = { ...conversation, messages, updatedAt: Date.now() };
+  const next = stored.map((c, i) => (i === index ? changed : c)).sort((a, b) => b.updatedAt - a.updatedAt);
+  writeConversationsToStorage(storageKey, next);
+  putSyncDoc(SYNC_NS, changed.id, changed, true);
+  return true;
 }
 
 function deriveTitle(messages: ChatMessage[]): string {

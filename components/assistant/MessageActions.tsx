@@ -17,13 +17,12 @@ import { useToast } from "@/components/ui/Toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { BottomSheetHandle, useBottomSheetMotion } from "@/components/ui/BottomSheet";
 
-// Quiet until touched: grey glyphs, a soft disc on hover, no colour change.
-// Desktop: 32 px discs with 16 px glyphs. Phones: 40 px boxes around the same
-// small glyphs, so thumbs still land. The row's negative margin lines the
-// first glyph up with the reply's text.
+// Clear at a glance: 40 px discs with 20 px glyphs on every screen, solid
+// white in dark mode (near-black in light), a soft disc on hover. The row's
+// negative margin lines the first glyph up with the reply's text.
 const ICON_BUTTON =
-  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 outline-none transition-[background-color,color,transform] duration-150 ease-out hover:bg-black/[0.05] hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-sky-500/40 active:scale-[0.92] active:bg-black/[0.06] disabled:pointer-events-none disabled:opacity-40 dark:text-white/40 dark:hover:bg-white/[0.07] dark:hover:text-white/85 dark:active:bg-white/[0.08] sm:h-8 sm:w-8";
-const ICON = "h-4 w-4";
+  "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-800 outline-none transition-[background-color,color,transform] duration-150 ease-out hover:bg-black/[0.06] hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-sky-500/40 active:scale-[0.92] active:bg-black/[0.08] disabled:pointer-events-none disabled:opacity-40 dark:text-white dark:hover:bg-white/[0.1] dark:active:bg-white/[0.14]";
+const ICON = "h-5 w-5";
 const MENU_ICON = "h-[18px] w-[18px] sm:h-4 sm:w-4";
 
 function escapeHtml(value: string): string {
@@ -241,7 +240,7 @@ export function MessageActions({
   );
 
   return (
-    <div className="-ml-3 mt-1 flex flex-row items-center sm:-ml-2 sm:gap-0.5">
+    <div className="-ml-2.5 mt-1 flex flex-row items-center gap-1">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -254,7 +253,7 @@ export function MessageActions({
               isSpeaking && "bg-sky-500/10 text-sky-600 hover:bg-sky-500/15 hover:text-sky-600 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:bg-sky-400/15 dark:hover:text-sky-300"
             )}
           >
-            {isSpeaking ? <Square className="h-3.5 w-3.5 animate-pulse fill-current" /> : <Volume2 strokeWidth={1.75} className={ICON} />}
+            {isSpeaking ? <Square className="h-4 w-4 animate-pulse fill-current" /> : <Volume2 strokeWidth={2} className={ICON} />}
           </button>
         </TooltipTrigger>
         <TooltipContent>{isSpeaking ? tAssistant("stopSpeaking", language) : tAssistant("speak", language)}</TooltipContent>
@@ -263,7 +262,7 @@ export function MessageActions({
       <Tooltip open={copied ? true : undefined}>
         <TooltipTrigger asChild>
           <button type="button" onClick={handleCopy} aria-label={tAssistant("copyMarkdown", language)} className={ICON_BUTTON}>
-            {copied ? <Check strokeWidth={2} className={cn(ICON, "text-sky-500")} /> : <Copy strokeWidth={1.75} className={ICON} />}
+            {copied ? <Check strokeWidth={2} className={cn(ICON, "text-sky-500")} /> : <Copy strokeWidth={2} className={ICON} />}
           </button>
         </TooltipTrigger>
         <TooltipContent>{copied ? tAssistant("copied", language) : tAssistant("copyMarkdown", language)}</TooltipContent>
@@ -283,7 +282,7 @@ export function MessageActions({
             ) : noteState === "saved" ? (
               <Check strokeWidth={2} className={cn(ICON, "text-sky-500")} />
             ) : (
-              <NotebookPen strokeWidth={1.75} className={ICON} />
+              <NotebookPen strokeWidth={2} className={ICON} />
             )}
           </button>
         </TooltipTrigger>
@@ -301,7 +300,7 @@ export function MessageActions({
             aria-label={tAssistant("regenerateResponse", language)}
             className={ICON_BUTTON}
           >
-            <RefreshCw strokeWidth={1.75} className={ICON} />
+            <RefreshCw strokeWidth={2} className={ICON} />
           </button>
         </TooltipTrigger>
         <TooltipContent>{tAssistant("regenerateResponse", language)}</TooltipContent>
@@ -320,7 +319,7 @@ export function MessageActions({
           aria-expanded={menuOpen}
           className={cn(ICON_BUTTON, feedback === "up" && "text-sky-500 dark:text-sky-400", feedback === "down" && "text-rose-500 dark:text-rose-400")}
         >
-          <MoreHorizontal strokeWidth={1.75} className={ICON} />
+          <MoreHorizontal strokeWidth={2} className={ICON} />
         </button>
 
         {/* Desktop: anchored popover. */}
