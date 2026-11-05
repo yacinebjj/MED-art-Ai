@@ -198,8 +198,8 @@ const ROOT_STYLE = {
   text: "fill-white",
   link: "stroke-primary-500 dark:stroke-primary-400",
   hex: {
-    light: { fill: "#0d9488", stroke: "#0f766e", text: "#ffffff" },
-    dark: { fill: "#0d9488", stroke: "#2dd4bf", text: "#ffffff" },
+    light: { fill: "#0284c7", stroke: "#0369a1", text: "#ffffff" },
+    dark: { fill: "#0284c7", stroke: "#38bdf8", text: "#ffffff" },
   },
 };
 

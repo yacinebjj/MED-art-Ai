@@ -126,7 +126,7 @@ export function ConcoursModeBar({
   return (
     <div className="sticky top-0 z-10 space-y-2 rounded-2xl border border-border bg-card p-3 shadow-soft" data-tour="qcm-mode">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-teal-700 dark:text-teal-400">
+        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-700 dark:text-sky-400">
           <Gauge className="h-4 w-4" />
           Mode Concours
         </span>
@@ -141,7 +141,7 @@ export function ConcoursModeBar({
                   onClick={() => onModeChange(m.id)}
                   className={cn(
                     "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors",
-                    mode === m.id ? "bg-teal-600 text-white dark:bg-teal-500" : "text-muted-foreground hover:text-foreground"
+                    mode === m.id ? "bg-sky-600 text-white dark:bg-sky-500" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   {m.label}
@@ -157,7 +157,7 @@ export function ConcoursModeBar({
             aria-live="off"
             className={cn(
               "ml-auto flex items-center gap-1.5 rounded-xl px-2.5 py-1 font-mono text-sm font-black tabular-nums",
-              isOvertime ? "bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" : "bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300"
+              isOvertime ? "bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" : "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
             )}
           >
             {isOvertime ? <AlarmClock className="h-4 w-4 animate-pulse" /> : <Timer className="h-4 w-4" />}
@@ -169,7 +169,7 @@ export function ConcoursModeBar({
         <>
           <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
             <motion.div
-              className={cn("h-full rounded-full", isOvertime ? "bg-rose-500" : ratio > 0.8 ? "bg-amber-500" : "bg-teal-500")}
+              className={cn("h-full rounded-full", isOvertime ? "bg-rose-500" : ratio > 0.8 ? "bg-amber-500" : "bg-sky-500")}
               animate={{ width: `${Math.max(2, ratio * 100)}%` }}
               transition={{ ease: "linear", duration: 0.9 }}
             />
@@ -221,9 +221,9 @@ export function CalibrationReport({
       aria-label="Calibration de ta certitude"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Crosshair className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+        <Crosshair className="h-4 w-4 text-sky-600 dark:text-sky-400" />
         <h3 className="text-sm font-bold text-foreground">Calibration de ta certitude</h3>
-        <span className="ml-auto rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-black tabular-nums text-teal-700 dark:bg-teal-950/40 dark:text-teal-300">{calibration}% calibré</span>
+        <span className="ml-auto rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-black tabular-nums text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">{calibration}% calibré</span>
       </div>
       {sureWrong.length > 0 && (
         <p className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200">

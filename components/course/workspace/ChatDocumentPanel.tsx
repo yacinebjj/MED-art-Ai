@@ -80,12 +80,14 @@ export interface ChatDocumentPanelHandle {
 const MAX_MESSAGE_CHARS = 4000;
 
 /**
- * Phones read the workspace chat one step larger than the MedArt Copilot's
- * dense 15 px: 16 px for replies and bubbles below sm (from sm both are
- * 16 px already). A `max-sm:` class, appended after the base size so it wins
- * there; rem, so app/globals.css's phone type scale leaves it alone.
+ * Phones read the workspace chat larger than the MedArt Copilot's: replies at
+ * 18 px (the Copilot's are 17 px there; from sm both are 18 px) and the
+ * student's bubbles at 16 px (15 px there). `max-sm:` classes, appended after
+ * the base size so they win there; rem, so app/globals.css's phone type scale
+ * leaves them alone.
  */
-const PHONE_CHAT_TEXT = "max-sm:text-[1rem]";
+const PHONE_REPLY_TEXT = "max-sm:text-[1.125rem]";
+const PHONE_BUBBLE_TEXT = "max-sm:text-[1rem]";
 
 /** How far a reading scroll must travel in one direction before the page's chrome reacts. */
 const READING_SCROLL_TRAVEL = 24;
@@ -796,7 +798,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
 
   return (
     <div
-      className="copilot-canvas relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden"
+      // No canvas of its own: it sits on the module page's .copilot-canvas, one surface with Sources and Studio.
+      className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden"
       onDragOver={handleDragOver}
       onDragLeave={(e) => {
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
@@ -924,7 +927,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                           className="flex w-full min-w-0 justify-end"
                         >
                           <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
-                            <div dir={dominantDirection(message.content) ?? "auto"} className={`${COPILOT_USER_BUBBLE_CLASSES} ${PHONE_CHAT_TEXT}`}>
+                            <div dir={dominantDirection(message.content) ?? "auto"} className={`${COPILOT_USER_BUBBLE_CLASSES} ${PHONE_BUBBLE_TEXT}`}>
                               {message.content}
                             </div>
                           </div>
@@ -982,10 +985,10 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                                 citationSources={citationSources ?? []}
                                 onOpenSource={onOpenCitationSource}
                                 isStreaming={isLive}
-                                className={PHONE_CHAT_TEXT}
+                                className={PHONE_REPLY_TEXT}
                               />
                             ) : (
-                              <StreamedMarkdown content={cleanContent} isStreaming={isLive} className={PHONE_CHAT_TEXT} />
+                              <StreamedMarkdown content={cleanContent} isStreaming={isLive} className={PHONE_REPLY_TEXT} />
                             )}
                           </div>
                         </div>

@@ -157,7 +157,7 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
   blockquote: ({ children, dir }) => (
     <blockquote
       dir={dir ?? "auto"}
-      className="my-[0.7em] animate-in fade-in rounded-e-xl border-s-2 border-s-sky-400/80 bg-sky-500/[0.05] py-[0.4em] pe-[0.9em] ps-[1em] font-normal not-italic text-slate-700 duration-300 dark:border-s-sky-400/60 dark:bg-sky-400/[0.06] dark:text-zinc-300 [&>p:first-of-type]:before:content-none [&>p:last-of-type]:after:content-none [&>p]:my-[0.25em]"
+      className="my-[0.7em] animate-in fade-in rounded-e-xl border-s-2 border-s-sky-400/80 bg-sky-500/[0.05] py-[0.4em] pe-[0.9em] ps-[1em] font-medium not-italic text-slate-700 duration-300 dark:border-s-sky-400/60 dark:bg-sky-400/[0.06] dark:text-zinc-300 [&>p:first-of-type]:before:content-none [&>p:last-of-type]:after:content-none [&>p]:my-[0.25em]"
     >
       {children}
     </blockquote>
@@ -271,10 +271,11 @@ const MarkdownBlock = memo(function MarkdownBlock({
 // --- Public component --------------------------------------------------------------
 
 // Sizing notes:
-//  - 15px on phones and 16px from sm, with a 1.55 line-height: Gemini's
-//    compact, dense measure. Written in rem (text-[0.9375rem]), not px:
-//    app/globals.css's phone type scale lifts text-[15px] (and text-sm /
-//    text-base) a step below md, which would undo the smaller size.
+//  - 17px on phones and 18px from sm (two steps up from 15/16 on 2026-11-05,
+//    for eyes reading long medical answers), in medium weight (500), with a
+//    1.55 line-height. Written in rem (text-[1.0625rem]), not px:
+//    app/globals.css's phone type scale lifts named and px sizes (text-sm,
+//    text-[15px]…) a step below md, which would shift the size again.
 //  - No prose-{size} modifier on purpose — Typography scales headings and
 //    spacing in `em` from the container's own font-size, so one font-size
 //    here tunes the whole scale at once, and every gap below is in em too.
@@ -289,7 +290,7 @@ const MarkdownBlock = memo(function MarkdownBlock({
 //    string that would otherwise overflow.
 //  - min-w-0/max-w-full/w-full so no long token can ever widen the thread.
 const PROSE_CLASSES =
-  "prose w-full min-w-0 max-w-full break-words text-[0.9375rem] leading-[1.55] text-slate-700 dark:prose-invert dark:text-zinc-300 sm:text-[16px] " +
+  "prose w-full min-w-0 max-w-full break-words text-[1.0625rem] font-medium leading-[1.55] text-slate-700 dark:prose-invert dark:text-zinc-300 sm:text-[1.125rem] " +
   // Headings introduce, they don't shout: one weight, a little air above, almost none below.
   "prose-headings:text-balance prose-headings:font-semibold prose-headings:tracking-[-0.011em] prose-headings:text-slate-900 dark:prose-headings:text-white " +
   "prose-h1:mb-[0.4em] prose-h1:mt-[1.15em] prose-h1:text-[1.25em] prose-h1:leading-[1.3] " +

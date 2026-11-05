@@ -48,7 +48,7 @@ function calloutTone(text: string): Exclude<Tone, "violet" | "sky"> | null {
 
 /** The Copilot's quiet callout (StreamedMarkdown's blockquote): a 2 px rule on the reading side and a faint wash, in the callout's tone. */
 const CALLOUT_BASE =
-  "my-[0.7em] animate-in fade-in rounded-e-xl border-s-2 py-[0.4em] pe-[0.9em] ps-[1em] font-normal not-italic text-slate-700 duration-300 dark:text-zinc-300 [&>p:first-of-type]:before:content-none [&>p:last-of-type]:after:content-none [&>p]:my-[0.25em]";
+  "my-[0.7em] animate-in fade-in rounded-e-xl border-s-2 py-[0.4em] pe-[0.9em] ps-[1em] font-medium not-italic text-slate-700 duration-300 dark:text-zinc-300 [&>p:first-of-type]:before:content-none [&>p:last-of-type]:after:content-none [&>p]:my-[0.25em]";
 
 const TONE_CLASSES: Record<Tone, string> = {
   sky: "border-s-sky-400/80 bg-sky-500/[0.05] dark:border-s-sky-400/60 dark:bg-sky-400/[0.06]",

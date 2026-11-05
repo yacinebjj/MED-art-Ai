@@ -319,10 +319,13 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
       {isActive && (
         <>
           <motion.span layoutId="sidebar-active-pill" className={cn("absolute inset-0 rounded-xl", hue.activeRow)} transition={{ type: "spring", stiffness: 500, damping: 40 }} />
-          {/* 4px accent rail in the feature's own color — the "border-l-4" of the active route. */}
+          {/* 4px accent rail in the feature's own color — the "border-l-4" of the active route.
+              Centred with inset-y-0 + my-auto, not top-1/2 + -translate-y-1/2: framer-motion
+              writes its own inline transform for the layoutId animation, which wiped the
+              translate and left the rail hanging half its height below the label. */}
           <motion.span
             layoutId="sidebar-active-rail"
-            className={cn("absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full shadow-[0_0_10px_currentColor]", hue.rail, hue.activeText)}
+            className={cn("absolute inset-y-0 left-0 my-auto h-6 w-1 rounded-full shadow-[0_0_10px_currentColor]", hue.rail, hue.activeText)}
             transition={{ type: "spring", stiffness: 500, damping: 40 }}
           />
         </>

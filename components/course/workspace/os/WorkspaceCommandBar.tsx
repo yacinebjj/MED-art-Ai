@@ -236,7 +236,7 @@ export function WorkspaceCommandBar({
           {courseTitle && (
             <>
               <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-[color-mix(in_oklab,var(--muted-foreground)_60%,transparent)] md:inline" />
-              <span className="truncate bg-gradient-to-r from-primary-600 to-sky-600 bg-clip-text font-semibold text-transparent dark:from-primary-300 dark:to-sky-300" title={courseTitle}>
+              <span className="truncate bg-gradient-to-r from-primary-600 to-blue-600 bg-clip-text font-semibold text-transparent dark:from-primary-300 dark:to-blue-300" title={courseTitle}>
                 {courseTitle}
               </span>
             </>

@@ -78,7 +78,7 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
       className={cn(
         "relative flex h-full flex-col overflow-visible p-5 sm:p-7",
         plan.featured && "pt-10 sm:pt-12",
-        plan.featured && "border-primary-400 shadow-[0_0_50px_rgba(20,184,166,0.22)] dark:border-primary-500"
+        plan.featured && "border-primary-400 shadow-[0_0_50px_rgba(14,165,233,0.22)] dark:border-primary-500"
       )}
     >
       {plan.featured && (

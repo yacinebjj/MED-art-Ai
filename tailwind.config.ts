@@ -67,27 +67,29 @@ const config: Config = {
           border: "var(--sidebar-border)",
           ring: "var(--sidebar-ring)",
         },
-        // Med Art AI "Clinical SaaS" design system — this is Tailwind's real
-        // teal palette (not a custom-tuned scale) so `primary-600` is
-        // exactly the spec'd #0d9488, `primary-50` #f0fdfa, etc. Deliberately
+        // Med Art AI accent — Tailwind's real sky palette (not a custom-tuned
+        // scale): `primary-600` is #0284c7, `primary-500` #0ea5e9, the same
+        // blues as the MedArt Copilot (its send button runs sky-500 →
+        // blue-600, its chips are sky-600), so every accent in the app reads
+        // as one blue on the dark/OLED theme. Teal until 2026-11-05 (the
+        // "green accents" the student saw clash with it). Deliberately
         // UNCHANGED by the shadcn preset token swap above — DEFAULT/
-        // foreground follow the new neutral palette, but every numbered
-        // shade (used pervasively — icon badges, hero glows, accents) stays
-        // the app's real teal.
+        // foreground follow the neutral palette; every numbered shade (used
+        // pervasively — icon badges, hero glows, accents) is this blue.
         primary: {
           DEFAULT: "var(--primary)",
           foreground: "var(--primary-foreground)",
-          50: "#f0fdfa",
-          100: "#ccfbf1",
-          200: "#99f6e4",
-          300: "#5eead4",
-          400: "#2dd4bf",
-          500: "#14b8a6",
-          600: "#0d9488",
-          700: "#0f766e",
-          800: "#115e59",
-          900: "#134e4a",
-          950: "#042f2e",
+          50: "#f0f9ff",
+          100: "#e0f2fe",
+          200: "#bae6fd",
+          300: "#7dd3fc",
+          400: "#38bdf8",
+          500: "#0ea5e9",
+          600: "#0284c7",
+          700: "#0369a1",
+          800: "#075985",
+          900: "#0c4a6e",
+          950: "#082f49",
         },
         secondary: {
           DEFAULT: "var(--secondary)",

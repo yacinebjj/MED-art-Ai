@@ -26,7 +26,7 @@ interface DashboardHeroProps {
  * backdrop-filter). An SVG has no background at all by construction — no
  * blend-mode math, no raster artifacts, genuinely transparent in every
  * browser and every theme. Colors match the app's own tokens exactly
- * (teal `primary-600` #0d9488, violet `violet-600` #7c3aed) rather than an
+ * (sky `primary-600` #0284c7, violet `violet-600` #7c3aed) rather than an
  * arbitrary palette. Verified by rendering this exact markup standalone
  * against both a light and a dark backdrop before wiring it in here — see
  * this session's own scratch preview, not committed anywhere.
@@ -37,7 +37,7 @@ export function HeroMascot({ className }: { className?: string }) {
       {/* coat body */}
       <path d="M 20 98 L 20 68 Q 20 58 30 55 L 40 52 Q 50 56 60 52 L 70 55 Q 80 58 80 68 L 80 98 Z" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
       {/* undershirt */}
-      <path d="M 42 55 L 50 66 L 58 55 L 54 52 L 46 52 Z" fill="#0d9488" />
+      <path d="M 42 55 L 50 66 L 58 55 L 54 52 L 46 52 Z" fill="#0284c7" />
       {/* coat lapels */}
       <path d="M 40 52 L 46 62 L 50 66 L 42 55 Z" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1" />
       <path d="M 60 52 L 54 62 L 50 66 L 58 55 Z" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1" />

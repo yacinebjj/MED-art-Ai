@@ -152,7 +152,7 @@ function QcmWidget() {
   return (
     <OsCard icon={Target} iconClassName="from-primary-500 to-cyan-500" title={tCockpit("qcmTitle", language)} glow="[@media(hover:hover)]:hover:shadow-primary-500/15">
       <div className="flex items-center gap-4">
-        <RadialGauge value={accuracy} gradient={["#14b8a6", "#06b6d4"]}>
+        <RadialGauge value={accuracy} gradient={["#0ea5e9", "#2563eb"]}>
           <span className="text-lg font-extrabold tabular-nums text-foreground">{accuracy === null ? "—" : `${accuracy}%`}</span>
           <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{tCockpit("accuracy", language)}</span>
         </RadialGauge>

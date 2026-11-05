@@ -131,7 +131,7 @@ export function CockpitHeader() {
             <GlassArt
               name="stethoscope"
               size={112}
-              className="h-24 w-24 animate-float drop-shadow-[0_12px_22px_rgba(13,148,136,0.25)] motion-reduce:animate-none lg:h-28 lg:w-28"
+              className="h-24 w-24 animate-float drop-shadow-[0_12px_22px_rgba(2,132,199,0.25)] motion-reduce:animate-none lg:h-28 lg:w-28"
             />
             <button
               type="button"

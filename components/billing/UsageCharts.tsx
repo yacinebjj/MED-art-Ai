@@ -19,9 +19,9 @@ const STUDY_TIME_DATA: { day: string; heures: number }[] = [];
 const USAGE_BREAKDOWN_DATA: { name: string; value: number }[] = [];
 
 const BRAND_INDIGO = "#6366f1";
-const BRAND_TEAL = "#14b8a6";
+const BRAND_SKY = "#0ea5e9";
 const BRAND_VIOLET = "#a78bfa";
-const PIE_COLORS = [BRAND_INDIGO, BRAND_TEAL, BRAND_VIOLET];
+const PIE_COLORS = [BRAND_INDIGO, BRAND_SKY, BRAND_VIOLET];
 
 /**
  * Isolated in its own client-only component, loaded via next/dynamic with

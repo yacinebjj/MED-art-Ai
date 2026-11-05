@@ -278,7 +278,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
           size="lg"
           onClick={handleGenerate}
           isLoading={isGenerating}
-          className="w-full bg-gradient-to-r from-primary to-violet-500 shadow-[0_0_30px_rgba(20,184,166,0.35)] sm:w-auto"
+          className="w-full bg-gradient-to-r from-primary to-violet-500 shadow-[0_0_30px_rgba(14,165,233,0.35)] sm:w-auto"
         >
           {!isGenerating && <Sparkles className="h-4 w-4" />}
           {tTodo("generateWithAI", language)}

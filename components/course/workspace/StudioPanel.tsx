@@ -203,7 +203,7 @@ const GLASS_ICON_BUTTON_CLASSES =
  * are 100% opaque solid colors, just a lighter/darker shade of the tint.
  */
 const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
-  explication: "bg-emerald-50 dark:bg-emerald-950",
+  explication: "bg-sky-50 dark:bg-sky-950",
   resume: "bg-blue-50 dark:bg-blue-950",
   cas_clinique: "bg-amber-50 dark:bg-amber-950",
   qcm: "bg-purple-50 dark:bg-purple-950",
@@ -223,10 +223,11 @@ const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
  * silently produce zero CSS and render invisible.
  */
 export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: string }> = {
+  // The flagship mode wears the app's own blue (sky; Résumé keeps the deeper blue) — no green accent beside the Co-pilot.
   explication: {
-    bg: "bg-emerald-50/80 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-900/40",
-    icon: "text-emerald-600 dark:text-emerald-400",
-    dot: "bg-emerald-500 dark:bg-emerald-400",
+    bg: "bg-sky-50/80 dark:bg-sky-950/20 border-sky-200/50 dark:border-sky-900/40",
+    icon: "text-sky-600 dark:text-sky-400",
+    dot: "bg-sky-500 dark:bg-sky-400",
   },
   resume: {
     bg: "bg-blue-50/80 dark:bg-blue-950/20 border-blue-200/50 dark:border-blue-900/40",
@@ -1176,7 +1177,7 @@ export function StudioPanel({
                 aria-label="Ajouter une note"
                 data-tour="ws-note"
                 className={cn(
-                  "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary-600 text-sm font-medium text-white shadow-glow transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-500 active:scale-[0.96] dark:bg-primary-500 dark:hover:bg-primary-400",
+                  "absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 text-sm font-medium text-white shadow-[0_8px_20px_-8px_rgba(14,165,233,0.75)] transition-all duration-300 hover:-translate-y-0.5 hover:brightness-110 active:scale-[0.96]",
                   isCollapsed ? "p-3" : "px-6 py-3"
                 )}
               >

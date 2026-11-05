@@ -13,7 +13,7 @@ export function BrandLoader({ className, label }: BrandLoaderProps) {
     <div className="flex flex-col items-center justify-center gap-4">
       <div
         className={cn(
-          "relative h-32 w-32 shrink-0 animate-pulse drop-shadow-[0_0_40px_rgba(20,184,166,0.5)]",
+          "relative h-32 w-32 shrink-0 animate-pulse drop-shadow-[0_0_40px_rgba(14,165,233,0.5)]",
           className
         )}
       >

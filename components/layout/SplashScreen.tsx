@@ -26,7 +26,7 @@ const SPLASH_CSS = `
 #medart-splash[data-leaving="true"]{opacity:0;pointer-events:none}
 #medart-splash .medart-splash-logo{animation:medart-splash-breathe 1.8s ease-in-out infinite}
 #medart-splash .medart-splash-track{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 56px);width:min(160px,40vw);height:3px;transform:translateX(-50%);overflow:hidden;border-radius:999px;background:#e0f2fe}
-#medart-splash .medart-splash-bar{position:absolute;inset:0 auto 0 0;width:40%;border-radius:999px;background:linear-gradient(90deg,#0ea5e9,#14b8a6);animation:medart-splash-slide 1.1s cubic-bezier(.65,0,.35,1) infinite}
+#medart-splash .medart-splash-bar{position:absolute;inset:0 auto 0 0;width:40%;border-radius:999px;background:linear-gradient(90deg,#0ea5e9,#2563eb);animation:medart-splash-slide 1.1s cubic-bezier(.65,0,.35,1) infinite}
 ${SHARED_KEYFRAMES}
 @media (prefers-reduced-motion:reduce){#medart-splash .medart-splash-logo{animation:none}#medart-splash .medart-splash-bar{animation-duration:2.4s}}
 `;

@@ -3,17 +3,16 @@
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BellRing, Check, Cpu, GraduationCap, Lock, Palette, Settings2, Smartphone } from "lucide-react";
-import { CyberHeader, CyberPanel, CyberStage, SegmentedControl } from "@/components/cyber/primitives";
-import { Input } from "@/components/ui/Input";
-import { Label } from "@/components/ui/Label";
+import { motion } from "framer-motion";
+import { BellRing, Check, Cpu, GraduationCap, Palette, Smartphone, UserRound, type LucideIcon } from "lucide-react";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { BrandLoader } from "@/components/ui/BrandLoader";
 import { AvatarUpload } from "@/components/settings/AvatarUpload";
+import { LockedBadge, LockedValue, SettingsCard, SettingsCardSkeleton, SettingsRow, SettingsRows, SettingsSectionHeader } from "@/components/settings/SettingsUI";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
 import type { StudentProfile } from "@/lib/types";
@@ -24,7 +23,7 @@ import { tSettings } from "@/lib/translations/settings";
 const FACULTY_OPTIONS = ALGERIAN_FACULTIES.map((name) => ({ value: name, label: name }));
 
 // Every section but "Profil & Cursus" is its own lazily-loaded chunk.
-const sectionLoading = () => <div className="h-64 animate-pulse rounded-3xl border border-white/[0.06] bg-white/[0.03]" />;
+const sectionLoading = () => <SettingsCardSkeleton rows={2} />;
 const RemindersSection = dynamic(() => import("@/components/settings/SettingsSections").then((m) => m.RemindersSection), { ssr: false, loading: sectionLoading });
 const AiEngineSection = dynamic(() => import("@/components/settings/SettingsSections").then((m) => m.AiEngineSection), { ssr: false, loading: sectionLoading });
 const AppearanceSection = dynamic(() => import("@/components/settings/SettingsSections").then((m) => m.AppearanceSection), { ssr: false, loading: sectionLoading });
@@ -37,6 +36,45 @@ function isSettingsSection(value: string | null): value is SettingsSection {
   return value !== null && (SECTIONS as readonly string[]).includes(value);
 }
 
+/** The settings menu: label, a hint under it (desktop), and the section's own title and one-line description. */
+const SECTION_META: Record<SettingsSection, { icon: LucideIcon; label: [string, string]; hint: [string, string]; title: [string, string]; description: [string, string] }> = {
+  profile: {
+    icon: GraduationCap,
+    label: ["Profil & Cursus", "Profile"],
+    hint: ["Compte, faculté, année", "Account, faculty, year"],
+    title: ["Profil & Cursus", "Profile & curriculum"],
+    description: ["Ton identité sur MedArt et le cursus qui adapte tes modules.", "Your identity on MedArt and the curriculum your modules follow."],
+  },
+  ai: {
+    icon: Cpu,
+    label: ["Moteur IA", "AI engine"],
+    hint: ["Langue des contenus", "Content language"],
+    title: ["Moteur IA", "AI engine"],
+    description: ["La langue des contenus générés et les modèles qui les produisent.", "The language of generated content and the models behind it."],
+  },
+  reminders: {
+    icon: BellRing,
+    label: ["Rappels", "Reminders"],
+    hint: ["Flashcards en notification", "Flashcards as notifications"],
+    title: ["Rappels", "Reminders"],
+    description: ["Des flashcards qui viennent à toi, au rythme que tu choisis.", "Flashcards that come to you, at the pace you choose."],
+  },
+  appearance: {
+    icon: Palette,
+    label: ["Apparence", "Appearance"],
+    hint: ["Thème et langue", "Theme and language"],
+    title: ["Apparence", "Appearance"],
+    description: ["Thème, langue de l'interface et visite guidée.", "Theme, interface language and guided tour."],
+  },
+  devices: {
+    icon: Smartphone,
+    label: ["Appareils", "Devices"],
+    hint: ["Sessions et sécurité", "Sessions and security"],
+    title: ["Appareils", "Devices"],
+    description: ["Les navigateurs liés à ton compte, et ta sécurité.", "The browsers linked to your account, and your security."],
+  },
+};
+
 const EMPTY_FORM: StudentProfile = {
   fullName: "",
   email: "",
@@ -45,47 +83,9 @@ const EMPTY_FORM: StudentProfile = {
   academicYear: "",
 };
 
-// Shared visual treatment for the permanently-locked fields (Email, Nom
-// complet, Spécialité) — a dashed muted-tint surface instead of a
-// flat opacity-50 fade, so the saved value stays legible while the locked
-// state stays unambiguous (see task brief: "clairs... sans être moches").
-// `disabled:opacity-100` cancels Select's own baked-in `disabled:opacity-60`
-// (tailwind-merge resolves the conflict in favor of whichever is passed
-// last, i.e. this one) so the text doesn't get double-faded on top of it.
-const LOCKED_INPUT_CLASS = "cursor-not-allowed border-dashed bg-muted/50 pr-9 text-foreground/80 shadow-none disabled:opacity-100";
-const LOCKED_SELECT_CLASS = "cursor-not-allowed border-dashed bg-muted/50 text-foreground/80 shadow-none disabled:opacity-100";
-
-/** Label row for Spécialité/Année — adds the "Verrouillé" pill once a field has ever been locked, without touching the shared Select/Input components used app-wide. */
-function FieldLabelRow({ htmlFor, locked, children }: { htmlFor: string; locked?: boolean; children: string }) {
-  const { language } = useLanguage();
-  return (
-    <div className="mb-1.5 flex items-center justify-between gap-2">
-      <Label htmlFor={htmlFor} className="mb-0">
-        {children}
-      </Label>
-      {locked && (
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          <Lock className="h-2.5 w-2.5" />
-          {tSettings("lockedPill", language)}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Same label-row treatment for Email/Nom complet, which are ALWAYS locked (no conditional state to thread through). */
-function LockedFieldLabel({ children }: { children: string }) {
-  const { language } = useLanguage();
-  return (
-    <div className="mb-1.5 flex items-center justify-between gap-2">
-      <span className="text-sm font-medium text-foreground">{children}</span>
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        <Lock className="h-2.5 w-2.5" />
-        {tSettings("lockedPill", language)}
-      </span>
-    </div>
-  );
-}
+/** The premium blue call to action (the MedArt Copilot's send button). */
+const SAVE_BUTTON_CLASS =
+  "w-full bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-[0_8px_20px_-8px_rgba(14,165,233,0.75)] hover:brightness-110 hover:shadow-[0_10px_24px_-8px_rgba(14,165,233,0.85)] sm:w-auto";
 
 /**
  * Spécialité + Année are sourced live from Supabase (curriculum_specialties /
@@ -103,12 +103,18 @@ function LockedFieldLabel({ children }: { children: string }) {
  * fix: fetch specialties + profile + (if a specialty was saved) its years
  * ALL BEFORE the form's first render, gated by `ready` below — so every
  * <Select>'s `options` and `value` are correct from the very first paint.
+ *
+ * Layout (2026-11-05): grouped cards in the Apple / Stripe manner
+ * (components/settings/SettingsUI.tsx) — a menu on the left from lg (a strip
+ * of pills above the content below it), each section a title, a line of
+ * context and its cards.
  */
 function SettingsHub() {
   const { profile, refreshUser, refreshCurriculumProfile } = useAuth();
   const { toast } = useToast();
   const { language } = useLanguage();
   const fr = language === "fr";
+  const pick = (pair: [string, string]) => (fr ? pair[0] : pair[1]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const sectionParam = searchParams.get("section");
@@ -279,6 +285,7 @@ function SettingsHub() {
 
   const specialtyOptions = specialties.map((s) => ({ value: String(s.id), label: s.name }));
   const selectedSpecialtyName = specialties.find((s) => s.id === specialtyId)?.name;
+  const selectedYearName = years.find((y) => y.id === academicYearId)?.name;
   const yearOptions = years.map((y) => ({
     value: String(y.id),
     label: y.name,
@@ -289,132 +296,227 @@ function SettingsHub() {
     toast({ variant: "info", title: INTERN_YEAR_LOCKED_MESSAGE });
   }
 
+  const lockedLabel = tSettings("lockedPill", language);
+  const identityChips = ready ? [form.university, selectedSpecialtyName, selectedYearName].filter((value): value is string => Boolean(value)) : [];
+
   const profileSection = (
-    <CyberPanel data-tour="settings-profile" className="p-5 sm:p-6">
-      <div className="mb-5 flex items-center gap-3">
-        <AvatarUpload />
-        <div className="min-w-0">
-          <h2 className="text-sm font-black text-white">{tSettings("accountInfoTitle", language)}</h2>
-          <p className="text-xs text-slate-400">Visibles par toi seul(e) &middot; JPG, PNG, WEBP ou GIF, 5&nbsp;Mo max pour la photo.</p>
+    <div data-tour="settings-profile" className="space-y-5">
+      {/* Who you are on MedArt: the photo (its own upload, outside the form), the name, the e-mail and the curriculum at a glance. */}
+      <SettingsCard>
+        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:gap-5 sm:p-6">
+          <AvatarUpload size={20} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[1.125rem] font-semibold tracking-[-0.01em] text-slate-900 dark:text-white">{form.fullName || (fr ? "Ton profil" : "Your profile")}</p>
+            {form.email && <p className="truncate text-[0.875rem] text-slate-500 dark:text-white/50">{form.email}</p>}
+            {identityChips.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {identityChips.map((chip) => (
+                  <span
+                    key={chip}
+                    className="inline-flex max-w-full items-center truncate rounded-full bg-sky-500/10 px-2.5 py-1 text-[0.75rem] font-semibold text-sky-700 ring-1 ring-inset ring-sky-500/15 dark:bg-sky-400/10 dark:text-sky-200 dark:ring-sky-400/20"
+                  >
+                    {chip}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="text-[0.75rem] leading-relaxed text-slate-400 dark:text-white/40 sm:max-w-[13rem] sm:text-right">
+            {fr ? "Visibles par toi seul(e) · Photo : JPG, PNG, WEBP ou GIF, 5 Mo max." : "Visible only to you · Photo: JPG, PNG, WEBP or GIF, 5 MB max."}
+          </p>
         </div>
-      </div>
+      </SettingsCard>
 
       {/* The loader only shows after a beat (route-pending); the form settles in (motion-swap) — app/globals.css. */}
       {!ready ? (
-        <div className="route-pending flex flex-col items-center justify-center gap-2 py-16 text-sm text-slate-400">
-          <BrandLoader className="h-6 w-6" />
-          Chargement de ton profil...
+        <div className="route-pending space-y-5" aria-busy="true">
+          <span className="sr-only">Chargement de ton profil...</span>
+          <SettingsCardSkeleton rows={2} />
+          <SettingsCardSkeleton rows={3} />
         </div>
       ) : (
         <form className="motion-swap space-y-5" onSubmit={handleSubmit}>
-          {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
-
-          <div>
-            <LockedFieldLabel>Adresse e-mail</LockedFieldLabel>
-            <div className="relative">
-              <Input name="email" value={form.email ?? ""} disabled className={LOCKED_INPUT_CLASS} />
-              <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+          {error && (
+            <div role="alert" className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-[0.875rem] text-rose-700 dark:border-rose-400/25 dark:bg-rose-400/[0.08] dark:text-rose-300">
+              {error}
             </div>
-          </div>
+          )}
 
-          <div>
-            <LockedFieldLabel>{tSettings("fullNameLabel", language)}</LockedFieldLabel>
-            <div className="relative">
-              <Input name="fullName" value={form.fullName} disabled className={LOCKED_INPUT_CLASS} />
-              <Lock className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
-            </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">Le nom associé à ton compte ne peut pas être modifié ici.</p>
-          </div>
+          <SettingsCard
+            icon={UserRound}
+            title={tSettings("accountInfoTitle", language)}
+            description={fr ? "Liées à ta connexion : elles ne se modifient pas ici." : "Tied to your sign-in: they can't be changed here."}
+          >
+            <SettingsRows>
+              <SettingsRow label={fr ? "Adresse e-mail" : "Email address"} aside={<LockedBadge label={lockedLabel} />}>
+                <LockedValue value={form.email ?? ""} />
+              </SettingsRow>
+              <SettingsRow
+                label={tSettings("fullNameLabel", language)}
+                aside={<LockedBadge label={lockedLabel} />}
+                description={fr ? "Le nom associé à ton compte ne peut pas être modifié ici." : "The name on your account can't be changed here."}
+              >
+                <LockedValue value={form.fullName} />
+              </SettingsRow>
+            </SettingsRows>
+          </SettingsCard>
 
-          <Select label="Faculté (Algérie)" name="university" options={FACULTY_OPTIONS} value={form.university} onValueChange={(value) => update("university", value)} />
+          <SettingsCard
+            icon={GraduationCap}
+            title={fr ? "Cursus" : "Curriculum"}
+            description={
+              fr
+                ? "Ta faculté, ta spécialité et ton année adaptent tes modules. Vérifie-les bien : la spécialité et l'année se verrouillent une fois enregistrées."
+                : "Your faculty, specialty and year shape your modules. Check them carefully: specialty and year lock once saved."
+            }
+            footer={
+              <Button type="submit" isLoading={isSaving} disabled={isSaving} className={SAVE_BUTTON_CLASS}>
+                {saved && !isSaving && <Check className="h-4 w-4" />}
+                {saved && !isSaving ? tSettings("saved", language) : tSettings("saveChanges", language)}
+              </Button>
+            }
+          >
+            <SettingsRows>
+              <SettingsRow label={fr ? "Faculté (Algérie)" : "Faculty (Algeria)"} htmlFor="university">
+                <Select name="university" options={FACULTY_OPTIONS} value={form.university} onValueChange={(value) => update("university", value)} />
+              </SettingsRow>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="min-w-0">
-              <FieldLabelRow htmlFor="specialty" locked={specialtyLocked}>
-                Spécialité
-              </FieldLabelRow>
-              <Select
-                name="specialty"
-                placeholder={tSettings("choosePlaceholder", language)}
-                options={specialtyOptions}
-                value={specialtyId != null ? String(specialtyId) : ""}
-                onValueChange={handleSpecialtyChange}
-                disabled={specialtyLocked}
-                className={specialtyLocked ? LOCKED_SELECT_CLASS : undefined}
-              />
-              {specialtyLocked && <p className="mt-1.5 text-xs text-muted-foreground">La spécialité ne peut pas être modifiée après l&apos;inscription.</p>}
-            </div>
-            <div className="min-w-0">
-              <FieldLabelRow htmlFor="academicYear" locked={yearLocked}>
-                Année
-              </FieldLabelRow>
-              <Select
-                name="academicYear"
-                placeholder={
-                  specialtyId == null
-                    ? tSettings("chooseSpecialtyFirstPlaceholder", language)
-                    : yearsLoading
-                      ? tSettings("loadingEllipsis", language)
-                      : tSettings("choosePlaceholder", language)
-                }
-                options={yearOptions}
-                value={academicYearId != null ? String(academicYearId) : ""}
-                onValueChange={handleYearChange}
-                disabled={yearLocked || specialtyId == null || yearsLoading}
-                className={yearLocked ? LOCKED_SELECT_CLASS : undefined}
-                onDisabledOptionClick={handleDisabledYearClick}
-              />
-              {yearLocked && <p className="mt-1.5 text-xs text-muted-foreground">L&apos;année ne peut pas être modifiée après l&apos;inscription.</p>}
-            </div>
-          </div>
+              <SettingsRow
+                label={fr ? "Spécialité" : "Specialty"}
+                htmlFor={specialtyLocked ? undefined : "specialty"}
+                aside={specialtyLocked ? <LockedBadge label={lockedLabel} /> : undefined}
+                description={specialtyLocked ? (fr ? "La spécialité ne peut pas être modifiée après l'inscription." : "Your specialty can't be changed after sign-up.") : undefined}
+              >
+                {specialtyLocked ? (
+                  <LockedValue value={selectedSpecialtyName ?? ""} />
+                ) : (
+                  <Select
+                    name="specialty"
+                    placeholder={tSettings("choosePlaceholder", language)}
+                    options={specialtyOptions}
+                    value={specialtyId != null ? String(specialtyId) : ""}
+                    onValueChange={handleSpecialtyChange}
+                  />
+                )}
+              </SettingsRow>
 
-          <Button type="submit" isLoading={isSaving} disabled={isSaving} className="w-full sm:w-auto">
-            {saved && !isSaving && <Check className="h-4 w-4" />}
-            {saved && !isSaving ? tSettings("saved", language) : tSettings("saveChanges", language)}
-          </Button>
+              <SettingsRow
+                label={fr ? "Année" : "Year"}
+                htmlFor={yearLocked ? undefined : "academicYear"}
+                aside={yearLocked ? <LockedBadge label={lockedLabel} /> : undefined}
+                description={yearLocked ? (fr ? "L'année ne peut pas être modifiée après l'inscription." : "Your year can't be changed after sign-up.") : undefined}
+              >
+                {yearLocked ? (
+                  <LockedValue value={selectedYearName ?? ""} />
+                ) : (
+                  <Select
+                    name="academicYear"
+                    placeholder={
+                      specialtyId == null
+                        ? tSettings("chooseSpecialtyFirstPlaceholder", language)
+                        : yearsLoading
+                          ? tSettings("loadingEllipsis", language)
+                          : tSettings("choosePlaceholder", language)
+                    }
+                    options={yearOptions}
+                    value={academicYearId != null ? String(academicYearId) : ""}
+                    onValueChange={handleYearChange}
+                    disabled={specialtyId == null || yearsLoading}
+                    onDisabledOptionClick={handleDisabledYearClick}
+                  />
+                )}
+              </SettingsRow>
+            </SettingsRows>
+          </SettingsCard>
         </form>
       )}
-    </CyberPanel>
+    </div>
   );
 
+  const meta = SECTION_META[section];
+
   return (
-    <CyberStage className="mx-auto max-w-4xl overflow-x-clip">
-      <CyberHeader
-        icon={Settings2}
-        kicker={fr ? "Centre de contrôle" : "Control center"}
-        title={tSettings("profileSettingsTitle", language)}
-        subtitle={fr ? "Profil, moteur IA, rappels, apparence et appareils — tout au même endroit." : "Profile, AI engine, reminders, appearance and devices — all in one place."}
-      />
+    <div className="mx-auto w-full max-w-5xl pb-10">
+      {/* Phones: the shell's Topbar already names the page. */}
+      <header className="mb-8 max-md:hidden">
+        <h1 className="text-[1.75rem] font-semibold tracking-[-0.02em] text-slate-900 dark:text-white">{fr ? "Paramètres" : "Settings"}</h1>
+        <p className="mt-1 text-[0.9375rem] text-slate-500 dark:text-white/50">
+          {fr ? "Profil, moteur IA, rappels, apparence et appareils — tout au même endroit." : "Profile, AI engine, reminders, appearance and devices — all in one place."}
+        </p>
+      </header>
 
-      <SegmentedControl<SettingsSection>
-        className="mt-6"
-        dataTour="settings-tabs"
-        ariaLabel={fr ? "Sections des paramètres" : "Settings sections"}
-        value={section}
-        onChange={openSection}
-        options={[
-          { value: "profile", label: fr ? "Profil & Cursus" : "Profile", icon: GraduationCap },
-          { value: "ai", label: fr ? "Moteur IA" : "AI engine", icon: Cpu },
-          { value: "reminders", label: fr ? "Rappels" : "Reminders", icon: BellRing },
-          { value: "appearance", label: fr ? "Apparence" : "Appearance", icon: Palette },
-          { value: "devices", label: fr ? "Appareils" : "Devices", icon: Smartphone },
-        ]}
-      />
+      <div className="lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-10">
+        <aside className="mb-6 min-w-0 lg:mb-0">
+          {/* Phones and tablets: a strip of pills that scrolls sideways; from lg, a menu that stays in view. */}
+          <nav
+            data-tour="settings-tabs"
+            aria-label={fr ? "Sections des paramètres" : "Settings sections"}
+            className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:-mx-4 sm:px-4 lg:sticky lg:top-[calc(var(--topbar-clearance)+0.75rem)] lg:mx-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0 [&::-webkit-scrollbar]:hidden"
+          >
+            {SECTIONS.map((value) => {
+              const item = SECTION_META[value];
+              const Icon = item.icon;
+              const active = value === section;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => openSection(value)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "group relative flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-[0.875rem] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 lg:w-full lg:gap-3 lg:rounded-xl lg:px-2.5 lg:py-2 lg:text-left",
+                    active
+                      ? "bg-sky-600 text-white shadow-[0_6px_16px_-8px_rgba(2,132,199,0.7)] lg:bg-transparent lg:text-slate-900 lg:shadow-none lg:dark:text-white"
+                      : "bg-white/80 text-slate-600 ring-1 ring-black/[0.06] hover:text-slate-900 dark:bg-white/[0.05] dark:text-white/60 dark:ring-white/[0.08] dark:hover:text-white lg:bg-transparent lg:ring-0 lg:hover:bg-black/[0.03] lg:dark:bg-transparent lg:dark:hover:bg-white/[0.04]"
+                  )}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="settings-nav-active"
+                      aria-hidden
+                      className="absolute inset-0 hidden rounded-xl bg-white shadow-[0_1px_2px_rgba(15,23,42,0.06),0_8px_20px_-12px_rgba(15,23,42,0.3)] ring-1 ring-black/[0.05] dark:bg-white/[0.07] dark:shadow-none dark:ring-white/[0.08] lg:block"
+                      transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                    />
+                  )}
+                  <span
+                    className={cn(
+                      "relative flex shrink-0 items-center justify-center lg:h-8 lg:w-8 lg:rounded-lg",
+                      active
+                        ? "lg:bg-gradient-to-br lg:from-sky-500 lg:to-blue-600 lg:text-white lg:shadow-[0_6px_14px_-6px_rgba(14,165,233,0.7)]"
+                        : "lg:bg-slate-100 lg:text-slate-500 lg:dark:bg-white/[0.06] lg:dark:text-white/60"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" strokeWidth={2} />
+                  </span>
+                  <span className="relative min-w-0">
+                    <span className="block truncate">{pick(item.label)}</span>
+                    <span className={cn("hidden truncate text-[0.75rem] font-medium lg:block", active ? "text-slate-500 dark:text-white/50" : "text-slate-400 dark:text-white/35")}>
+                      {pick(item.hint)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
 
-      <div className="mt-6">
-        {section === "profile" && profileSection}
-        {section === "ai" && <AiEngineSection />}
-        {section === "reminders" && <RemindersSection />}
-        {section === "appearance" && <AppearanceSection />}
-        {section === "devices" && <DevicesSection />}
+        {/* motion-swap: each section settles in where the last one was. */}
+        <div key={section} className="motion-swap min-w-0">
+          <SettingsSectionHeader title={pick(meta.title)} description={pick(meta.description)} />
+          {section === "profile" && profileSection}
+          {section === "ai" && <AiEngineSection />}
+          {section === "reminders" && <RemindersSection />}
+          {section === "appearance" && <AppearanceSection />}
+          {section === "devices" && <DevicesSection />}
+        </div>
       </div>
-    </CyberStage>
+    </div>
   );
 }
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={<div className="mx-auto h-40 max-w-4xl animate-pulse rounded-[1.75rem] bg-muted" />}>
+    <Suspense fallback={<div className="mx-auto h-40 max-w-5xl animate-pulse rounded-2xl bg-muted" />}>
       <SettingsHub />
     </Suspense>
   );

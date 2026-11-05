@@ -2141,7 +2141,7 @@ export default function ModuleWorkspacePage() {
 
   if (loading) {
     return (
-      <div className="aurora-canvas-bg flex h-dvh items-center justify-center">
+      <div className="copilot-canvas flex h-dvh items-center justify-center">
         <BrandLoader />
       </div>
     );
@@ -2149,7 +2149,7 @@ export default function ModuleWorkspacePage() {
 
   if (notFound || !module) {
     return (
-      <div className="aurora-canvas-bg flex h-dvh flex-col items-center justify-center gap-4">
+      <div className="copilot-canvas flex h-dvh flex-col items-center justify-center gap-4">
         <p className="text-sm font-medium text-muted-foreground">Ce module est introuvable.</p>
         <Link
           href="/dashboard"
@@ -2581,8 +2581,11 @@ export default function ModuleWorkspacePage() {
     </StudioPanel>
   );
 
+  // Every pane sits straight on the page's one canvas (.copilot-canvas, painted by the
+  // root below): no surface of its own, just a hairline edge — so Sources, the
+  // Co-pilot and Studio read as one seamless OLED/gradient space, in both themes.
   const panelShellClasses = cn(
-    "glass-card flex flex-col overflow-hidden shadow-glass transition-[border-radius,box-shadow] duration-300 dark:shadow-glass-dark",
+    "flex flex-col overflow-hidden border border-black/[0.06] transition-[border-radius] duration-300 dark:border-white/[0.08]",
     isCompact ? "rounded-2xl" : "rounded-3xl"
   );
   const showSourcesPane = !isZen && !isSplitScreen;
@@ -2596,8 +2599,8 @@ export default function ModuleWorkspacePage() {
         : openedSection || openedLabTool || isNoteOpen
           ? "studio-detail"
           : "studio-browse";
-  // Phones on the chat: the whole screen is the Co-pilot's canvas, edge to
-  // edge, under the top bar and the glass tab bar alike.
+  // Phones on the chat: no frame at all — the page's canvas runs to the
+  // screen's edges, under the top bar and the glass tab bar alike.
   const isMobileChatPane = !isDesktop && mobilePaneKey === "chat";
 
   const sourcesPanelProps = {
@@ -2618,8 +2621,7 @@ export default function ModuleWorkspacePage() {
   };
 
   return (
-    <div className={cn("relative flex h-dvh flex-col overflow-hidden", isMobileChatPane ? "copilot-canvas" : "aurora-canvas-bg")} data-density={layout.density}>
-      {!isMobileChatPane && <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />}
+    <div className="copilot-canvas relative flex h-dvh flex-col overflow-hidden" data-density={layout.density}>
       <WorkspaceCommandBar
         moduleTitle={moduleTitle}
         moduleId={moduleId}
@@ -2738,7 +2740,7 @@ export default function ModuleWorkspacePage() {
           <div
             className={cn(
               "min-h-0 flex-1",
-              isMobileChatPane ? "flex flex-col overflow-hidden" : cn(panelShellClasses, "rounded-none border-x-0 shadow-none")
+              isMobileChatPane ? "flex flex-col overflow-hidden" : cn(panelShellClasses, "rounded-none border-0")
             )}
             style={!isMobileChatPane && isMobileTabBarShown ? { paddingBottom: tabBarHeight } : undefined}
           >
@@ -2786,7 +2788,7 @@ export default function ModuleWorkspacePage() {
                       type="button"
                       onClick={openQuickNote}
                       data-tour="ws-note"
-                      className="mt-1 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-600 py-3 text-sm font-semibold text-white shadow-glow dark:bg-primary-500"
+                      className="mt-1 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 py-3 text-sm font-semibold text-white shadow-[0_8px_20px_-8px_rgba(14,165,233,0.75)]"
                     >
                       <SquarePen className="h-4 w-4" />
                       Ajouter une note
