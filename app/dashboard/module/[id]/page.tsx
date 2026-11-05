@@ -90,6 +90,7 @@ import { MobileStudioCards } from "@/components/course/workspace/MobileStudioCar
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useCourseChat } from "@/hooks/useCourseChat";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
+import { useSafeAreaInsetBottom } from "@/hooks/useSafeAreaInsetBottom";
 import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { MAX_LEITNER_BOX } from "@/lib/srs";
 import { DARK_MARKDOWN_COMPONENTS, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, PROSE_CLASSES, normalizeCallouts } from "@/lib/markdown";
@@ -922,6 +923,26 @@ export default function ModuleWorkspacePage() {
   //     space instead.
   const keyboardInset = useKeyboardInset();
   const [isMobileChatInputFocused, setIsMobileChatInputFocused] = useState(false);
+  // The phone tab bar is a glass sheet laid over the panes (MobileWorkspaceTabBar):
+  // its measured height is reserved below the Sources/Studio panes and lifts
+  // the chat's composer, and it slides away while the student reads down
+  // the chat (onReadingScroll), back as soon as they scroll up.
+  const [tabBarHeight, setTabBarHeight] = useState(0);
+  const [isTabBarScrollHidden, setIsTabBarScrollHidden] = useState(false);
+  const safeAreaBottom = useSafeAreaInsetBottom();
+  const handleChatReadingScroll = useCallback((direction: "up" | "down") => setIsTabBarScrollHidden(direction === "down"), []);
+  // Measured whenever the bar mounts (it doesn't while the page loads), then on every resize.
+  const tabBarObserverRef = useRef<ResizeObserver | null>(null);
+  const setTabBarNode = useCallback((node: HTMLElement | null) => {
+    tabBarObserverRef.current?.disconnect();
+    tabBarObserverRef.current = null;
+    if (!node) return;
+    const measure = () => setTabBarHeight(node.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    tabBarObserverRef.current = new ResizeObserver(measure);
+    tabBarObserverRef.current.observe(node);
+  }, []);
 
   const chatPanelRef = useRef<ChatDocumentPanelHandle>(null);
   const [isSplitScreen, setIsSplitScreen] = useState(false);
@@ -1096,6 +1117,11 @@ export default function ModuleWorkspacePage() {
   const { chatMessages, chatInput, setChatInput, isTyping, isStreaming, sendChatMessage, regenerateFrom, clearMessages, historyReady: isChatHistoryReady } = useCourseChat(courseChatSlug, chatRequestExtras);
   /** True from send until the reply has fully streamed — the guard against a second overlapping request. */
   const isChatBusy = isTyping || isStreaming;
+
+  // A cleared, switched or not-yet-loaded conversation starts with the phone tab bar in view.
+  useEffect(() => {
+    if (chatMessages.length === 0) setIsTabBarScrollHidden(false);
+  }, [chatMessages.length]);
 
   useEffect(() => {
     if (!Number.isFinite(moduleId)) return;
@@ -1558,6 +1584,8 @@ export default function ModuleWorkspacePage() {
 
   /** Stable reference so MobileWorkspaceTabBar's React.memo actually holds. */
   const handleMobileTabChange = useCallback((tab: MobileWorkspaceTab) => {
+    // A tab is always opened with the tab bar in view.
+    setIsTabBarScrollHidden(false);
     startNavTransition(() => setMobileTab(tab));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2288,6 +2316,20 @@ export default function ModuleWorkspacePage() {
       })),
   ];
 
+  // Phones: the glass tab bar shows unless the student is typing (keyboard
+  // up, or the chat composer focused) or reading down a conversation; Zen
+  // mode has none.
+  const hasMobileTabBar = !isDesktop && !isZen;
+  const isMobileTabBarShown =
+    hasMobileTabBar &&
+    keyboardInset === 0 &&
+    !(mobileTab === "chat" && isMobileChatInputFocused) &&
+    !(mobileTab === "chat" && isTabBarScrollHidden && chatMessages.length > 0);
+  // What the chat's composer must clear at the screen's bottom edge: the tab
+  // bar while it shows, else the home-indicator strip beyond the composer's
+  // own 12 px gap, and nothing above an open keyboard.
+  const mobileChatBottomInset = keyboardInset > 0 ? 0 : isMobileTabBarShown ? tabBarHeight : Math.max(0, safeAreaBottom - 12);
+
   const chatPanel = (
     <ChatDocumentPanel
       ref={chatPanelRef}
@@ -2350,6 +2392,8 @@ export default function ModuleWorkspacePage() {
       onSaveToNotes={handleSaveMessageToNotes}
       onSendPrompt={handleSendPrompt}
       onInputFocusChange={setIsMobileChatInputFocused}
+      bottomInset={mobileChatBottomInset}
+      onReadingScroll={handleChatReadingScroll}
       mode={chatMode}
       onModeChange={handleChatModeChange}
       citationSources={citationSources}
@@ -2552,6 +2596,9 @@ export default function ModuleWorkspacePage() {
         : openedSection || openedLabTool || isNoteOpen
           ? "studio-detail"
           : "studio-browse";
+  // Phones on the chat: the whole screen is the Co-pilot's canvas, edge to
+  // edge, under the top bar and the glass tab bar alike.
+  const isMobileChatPane = !isDesktop && mobilePaneKey === "chat";
 
   const sourcesPanelProps = {
     courses,
@@ -2571,8 +2618,8 @@ export default function ModuleWorkspacePage() {
   };
 
   return (
-    <div className="aurora-canvas-bg relative flex h-dvh flex-col overflow-hidden" data-density={layout.density}>
-      <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />
+    <div className={cn("relative flex h-dvh flex-col overflow-hidden", isMobileChatPane ? "copilot-canvas" : "aurora-canvas-bg")} data-density={layout.density}>
+      {!isMobileChatPane && <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />}
       <WorkspaceCommandBar
         moduleTitle={moduleTitle}
         moduleId={moduleId}
@@ -2680,11 +2727,21 @@ export default function ModuleWorkspacePage() {
           mobile treatment. */}
       {!isDesktop && (
         <div
-          className="flex min-h-0 flex-1 flex-col overflow-hidden transition-[padding-bottom] duration-200 ease-out"
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden transition-[padding-bottom] duration-200 ease-out"
           style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : undefined}
         >
-          {/* Edge-to-edge on phones: the whole width goes to Sources / Chat / Studio. */}
-          <div className={cn(panelShellClasses, "min-h-0 flex-1 rounded-none border-x-0 shadow-none")}>
+          {/* Edge-to-edge on phones: the whole width goes to Sources / Chat /
+              Studio. The chat has no frame at all — its canvas runs to the
+              screen's edges and under the glass tab bar, which lifts the
+              composer instead (bottomInset); the other panes keep their
+              surface and end above the bar. */}
+          <div
+            className={cn(
+              "min-h-0 flex-1",
+              isMobileChatPane ? "flex flex-col overflow-hidden" : cn(panelShellClasses, "rounded-none border-x-0 shadow-none")
+            )}
+            style={!isMobileChatPane && isMobileTabBarShown ? { paddingBottom: tabBarHeight } : undefined}
+          >
             {/* One keyed pane per tab (and per Studio browse / detail view):
                 each switch replays motion-swap (app/globals.css) instead of
                 swapping the whole screen in a single frame. */}
@@ -2705,7 +2762,7 @@ export default function ModuleWorkspacePage() {
                     sectionMasteryPct={sectionMasteryPct}
                   />
                   </div>
-                  {/* The tab bar below is in the flow (MobileWorkspaceTabBar), not over this list: no clearance, just air. */}
+                  {/* The pane ends above the glass tab bar (its height is reserved as padding below the pane): no clearance, just air. */}
                   <section aria-label="MedArt Lab" className="space-y-2 px-3 pb-6 pt-1" data-tour="ws-lab">
                     <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">MedArt Lab</p>
                     <div className="grid grid-cols-2 gap-2">
@@ -2740,9 +2797,9 @@ export default function ModuleWorkspacePage() {
             </div>
           </div>
 
-          {/* Hidden while the chat composer is focused (keyboard open) and in Zen mode. */}
-          {!isZen && !(mobileTab === "chat" && isMobileChatInputFocused) && (
-            <MobileWorkspaceTabBar active={mobileTab} onChange={handleMobileTabChange} />
+          {/* Glass, over the pane; slides away while the student types or reads down the chat. None in Zen mode. */}
+          {hasMobileTabBar && (
+            <MobileWorkspaceTabBar ref={setTabBarNode} active={mobileTab} onChange={handleMobileTabChange} hidden={!isMobileTabBarShown} />
           )}
         </div>
       )}

@@ -79,6 +79,17 @@ export interface ChatDocumentPanelHandle {
 /** Server-side cap on one chat message (app/api/courses/chat/route.ts's MAX_MESSAGE_CHARS). */
 const MAX_MESSAGE_CHARS = 4000;
 
+/**
+ * Phones read the workspace chat one step larger than the MedArt Copilot's
+ * dense 15 px: 16 px for replies and bubbles below sm (from sm both are
+ * 16 px already). A `max-sm:` class, appended after the base size so it wins
+ * there; rem, so app/globals.css's phone type scale leaves it alone.
+ */
+const PHONE_CHAT_TEXT = "max-sm:text-[1rem]";
+
+/** How far a reading scroll must travel in one direction before the page's chrome reacts. */
+const READING_SCROLL_TRAVEL = 24;
+
 export const CHAT_MODE_OPTIONS: { id: ChatMode; label: string; description: string; icon: LucideIcon; placeholder: string }[] = [
   { id: "standard", label: "Standard", description: "Réponse structurée et équilibrée", icon: MessageSquareText, placeholder: "Pose ta question sur le cours…" },
   { id: "examen", label: "Mode Examen", description: "Plan de copie, pièges, QCM d'auto-évaluation", icon: GraduationCap, placeholder: "Quel sujet veux-tu traiter comme à l'examen ?" },
@@ -387,6 +398,17 @@ interface ChatDocumentPanelProps {
   onOpenCitationSource?: (sourceId: number) => void;
   /** Files dropped on (or picked from) the chat are imported as new sources of the module. */
   onImportFiles?: (files: File[]) => void;
+  /**
+   * Phones: how much of the panel's bottom the page's own chrome covers
+   * right now (its glass tab bar, or the home-indicator strip), in px. The
+   * composer floats that much higher, sliding as it changes.
+   */
+  bottomInset?: number;
+  /**
+   * Phones: the student scrolled the thread by hand, down (reading on) or up.
+   * The page slides its tab bar away and back with it.
+   */
+  onReadingScroll?: (direction: "up" | "down") => void;
 }
 
 /**
@@ -437,6 +459,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     citationSources,
     onOpenCitationSource,
     onImportFiles,
+    bottomInset = 0,
+    onReadingScroll,
   },
   ref
 ) {
@@ -472,6 +496,19 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   // Follow the stream only while the student is already at the bottom —
   // scrolling up to re-read must not be yanked back down on every token.
   const stickToBottomRef = useRef(true);
+  // Reading-scroll tracking (phones, onReadingScroll): only scrolls the
+  // student drives by hand count — the thread following a streaming reply
+  // must not hide the page's tab bar on its own.
+  const lastScrollTopRef = useRef(0);
+  const scrollTravelRef = useRef(0);
+  const scrollIntentAtRef = useRef(0);
+  const lastReadingDirectionRef = useRef<"up" | "down" | null>(null);
+  // The composer takes its first position without sliding there (the page measures its tab bar after mount).
+  const [isDockAnimated, setIsDockAnimated] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setIsDockAnimated(true), 600);
+    return () => clearTimeout(timer);
+  }, []);
 
   const dictationBaseRef = useRef("");
   const dictation = useVoiceDictation({
@@ -508,7 +545,9 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   // The header ("…") and the composer float over the thread, which dissolves
   // before it reaches them (.copilot-thread-fade, app/globals.css): their
   // measured heights are published on the column as --copilot-header-h /
-  // --copilot-composer-h, exactly as on the MedArt Copilot page.
+  // --copilot-composer-h, exactly as on the MedArt Copilot page. On phones
+  // the composer floats bottomInset higher (above the page's tab bar), so
+  // that much counts as composer too.
   useLayoutEffect(() => {
     const column = columnRef.current;
     if (!column) return;
@@ -516,7 +555,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     const dock = dockRef.current;
     const publish = () => {
       column.style.setProperty("--copilot-header-h", `${header?.offsetHeight ?? 0}px`);
-      column.style.setProperty("--copilot-composer-h", `${dock?.offsetHeight ?? 0}px`);
+      column.style.setProperty("--copilot-composer-h", `${(dock?.offsetHeight ?? 0) + bottomInset}px`);
       // Following along: the latest message stays right above the composer as it grows.
       const thread = scrollRef.current;
       if (thread && stickToBottomRef.current) thread.scrollTop = thread.scrollHeight;
@@ -527,7 +566,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     if (header) observer.observe(header);
     if (dock) observer.observe(dock);
     return () => observer.disconnect();
-  }, [hasOptions]);
+  }, [hasOptions, bottomInset]);
 
   useEffect(() => {
     if (!stickToBottomRef.current) return;
@@ -572,16 +611,46 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   }, [menuOpen, isCompactMenu]);
 
   function setMessagesRef(node: HTMLDivElement | null) {
+    if (node !== scrollRef.current) {
+      // A new thread (or none): reading-scroll tracking starts over with it.
+      lastScrollTopRef.current = node?.scrollTop ?? 0;
+      scrollTravelRef.current = 0;
+      lastReadingDirectionRef.current = null;
+    }
     scrollRef.current = node;
     containerRef(node);
+  }
+
+  function markScrollIntent() {
+    scrollIntentAtRef.current = Date.now();
+  }
+
+  function reportReadingScroll(direction: "up" | "down") {
+    if (lastReadingDirectionRef.current === direction) return;
+    lastReadingDirectionRef.current = direction;
+    onReadingScroll?.(direction);
   }
 
   function handleScroll() {
     const el = scrollRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const top = el.scrollTop;
+    const distanceFromBottom = el.scrollHeight - top - el.clientHeight;
     stickToBottomRef.current = distanceFromBottom < 120;
     setShowJumpToLatest(distanceFromBottom > 300);
+
+    if (onReadingScroll) {
+      const delta = top - lastScrollTopRef.current;
+      // Travel adds up while the direction holds; a turn starts it over.
+      scrollTravelRef.current = delta * scrollTravelRef.current >= 0 ? scrollTravelRef.current + delta : delta;
+      // A touch, wheel or momentum fling within the last moment: the student is scrolling, not the stream.
+      const byHand = Date.now() - scrollIntentAtRef.current < 1200;
+      if (top <= 8) reportReadingScroll("up");
+      // Not within the last screenful's end: hiding there would shrink the thread under the student's eyes.
+      else if (byHand && scrollTravelRef.current > READING_SCROLL_TRAVEL && distanceFromBottom > 160) reportReadingScroll("down");
+      else if (byHand && scrollTravelRef.current < -READING_SCROLL_TRAVEL) reportReadingScroll("up");
+    }
+    lastScrollTopRef.current = top;
   }
 
   function jumpToLatest() {
@@ -837,6 +906,9 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
             <div
               ref={setMessagesRef}
               onScroll={handleScroll}
+              onTouchStart={markScrollIntent}
+              onTouchMove={markScrollIntent}
+              onWheel={markScrollIntent}
               className="copilot-thread-fade h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
             >
               <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 px-3 pb-[calc(var(--copilot-composer-h,0px)+1rem)] pt-[calc(var(--copilot-header-h,0px)+1rem)] sm:px-5 md:px-6 md:pb-[calc(var(--copilot-composer-h,0px)+1.5rem)] md:pt-[calc(var(--copilot-header-h,0px)+1.5rem)]">
@@ -852,7 +924,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                           className="flex w-full min-w-0 justify-end"
                         >
                           <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
-                            <div dir={dominantDirection(message.content) ?? "auto"} className={COPILOT_USER_BUBBLE_CLASSES}>
+                            <div dir={dominantDirection(message.content) ?? "auto"} className={`${COPILOT_USER_BUBBLE_CLASSES} ${PHONE_CHAT_TEXT}`}>
                               {message.content}
                             </div>
                           </div>
@@ -905,9 +977,15 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                                 </div>
                               </div>
                             ) : useRichRenderer ? (
-                              <ChatRichMarkdown content={cleanContent} citationSources={citationSources ?? []} onOpenSource={onOpenCitationSource} isStreaming={isLive} />
+                              <ChatRichMarkdown
+                                content={cleanContent}
+                                citationSources={citationSources ?? []}
+                                onOpenSource={onOpenCitationSource}
+                                isStreaming={isLive}
+                                className={PHONE_CHAT_TEXT}
+                              />
                             ) : (
-                              <StreamedMarkdown content={cleanContent} isStreaming={isLive} />
+                              <StreamedMarkdown content={cleanContent} isStreaming={isLive} className={PHONE_CHAT_TEXT} />
                             )}
                           </div>
                         </div>
@@ -1051,7 +1129,12 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
         )}
 
         {/* The composer floats on the canvas — no bar behind it; the thread dissolves before it gets there. */}
-        <div ref={dockRef} className="absolute inset-x-0 bottom-0 z-20 pb-3 pt-4 md:pb-4">
+        {/* Phones: lifted above the page's glass tab bar (bottomInset), sliding down with it when it hides — a transform, so nothing reflows. */}
+        <div
+          ref={dockRef}
+          className={cn("absolute inset-x-0 bottom-0 z-20 pb-3 pt-4 md:pb-4", isDockAnimated && "transition-transform duration-300 ease-out motion-reduce:transition-none")}
+          style={bottomInset ? { transform: `translateY(-${bottomInset}px)` } : { transform: "translateY(0px)" }}
+        >
           {input.length > MAX_MESSAGE_CHARS * 0.85 && (
             <span
               className={cn(

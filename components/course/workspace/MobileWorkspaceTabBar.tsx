@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { forwardRef, memo } from "react";
 import { motion } from "framer-motion";
 import { Folder, LayoutGrid, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,61 +22,68 @@ const TABS: { id: MobileWorkspaceTab; label: string; icon: typeof Folder }[] = [
 interface MobileWorkspaceTabBarProps {
   active: MobileWorkspaceTab;
   onChange: (tab: MobileWorkspaceTab) => void;
+  /** Slid down out of view: the student is reading down the chat, or typing. */
+  hidden?: boolean;
 }
 
 /**
- * NotebookLM-mobile-style bottom tab bar — a normal `shrink-0` flex sibling
- * at the bottom of the mobile column (see app/dashboard/module/[id]/page.tsx),
- * not `position: fixed`. The page root is already a `h-dvh overflow-hidden`
- * flex column (same pattern WorkspaceTopbar uses at the top), so a flex
- * sibling is always visible without any of `fixed`'s usual mobile quirks
- * (browser address-bar resize jitter, needing a safe-area padding hack on the
- * scrollable content below it) while looking and behaving identically to a
- * "fixed" nav from the user's perspective.
+ * The phone workspace's bottom tab bar (app/dashboard/module/[id]/page.tsx).
  *
- * Wrapped in React.memo — cheap to render on its own (3 buttons), but the
- * caller passes a useCallback-stabilized `onChange`, so this also skips
- * re-rendering on unrelated parent state changes for free.
+ * A glass sheet flush with the screen's bottom edge, laid OVER the pane
+ * (absolute, inside the mobile column) rather than below it: the Co-pilot's
+ * canvas runs on underneath and shows through the blur, and when the bar
+ * slides away (`hidden`, a transform only) the space it leaves is really
+ * the chat's. The page reserves the bar's measured height for the other
+ * panes, and lifts the chat's composer by it while it is shown.
  *
- * Visual language matches components/layout/MobileBottomNav.tsx exactly (the
- * app-shell's own bottom tab bar) — same glass chrome, same
- * layoutId-animated active pill sliding between tabs, same primary-600/300
- * active color — so a student never has to relearn "which bar am I in":
- * Sources/Chat/Studio here reads as one more instance of the same bottom-nav
- * pattern used everywhere else in the app, not a bespoke one-off.
+ * Wrapped in React.memo — the caller passes a useCallback-stabilized
+ * `onChange`. The active pill slides between tabs with the same layoutId
+ * animation as components/layout/MobileBottomNav.tsx, in the same
+ * primary-600/300 active colour.
  */
-export const MobileWorkspaceTabBar = memo(function MobileWorkspaceTabBar({ active, onChange }: MobileWorkspaceTabBarProps) {
-  return (
-    <nav className="glass-chrome relative z-10 flex shrink-0 items-stretch justify-around gap-1 rounded-t-3xl border-b-0 px-1 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-1 shadow-glass dark:shadow-glass-dark">
-      {TABS.map((tab) => {
-        const Icon = tab.icon;
-        const isActive = tab.id === active;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onChange(tab.id)}
-            aria-pressed={isActive}
-            data-tour={`ws-tab-${tab.id}`}
-            className="relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl py-1.5 text-xs font-medium"
-          >
-            {isActive && (
-              <motion.span
-                layoutId="workspace-tab-active-pill"
-                className="absolute inset-1 rounded-2xl bg-primary-500/15 dark:bg-primary-400/15"
-                transition={{ type: "spring", stiffness: 500, damping: 40 }}
+export const MobileWorkspaceTabBar = memo(
+  forwardRef<HTMLElement, MobileWorkspaceTabBarProps>(function MobileWorkspaceTabBar({ active, onChange, hidden = false }, ref) {
+    return (
+      <nav
+        ref={ref}
+        aria-hidden={hidden || undefined}
+        className={cn(
+          "glass-chrome absolute inset-x-0 bottom-0 z-30 flex items-stretch justify-around gap-1 border-x-0 border-b-0 px-1 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-1",
+          "transition-transform duration-300 ease-out motion-reduce:transition-none",
+          hidden ? "pointer-events-none translate-y-full" : "translate-y-0"
+        )}
+      >
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = tab.id === active;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onChange(tab.id)}
+              aria-pressed={isActive}
+              tabIndex={hidden ? -1 : undefined}
+              data-tour={`ws-tab-${tab.id}`}
+              className="relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl py-1.5 text-xs font-medium"
+            >
+              {isActive && (
+                <motion.span
+                  layoutId="workspace-tab-active-pill"
+                  className="absolute inset-1 rounded-2xl bg-primary-500/15 dark:bg-primary-400/15"
+                  transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                />
+              )}
+              <Icon
+                className={cn("relative z-10 h-5 w-5", isActive ? "fill-primary-100 text-primary-600 dark:fill-primary-950 dark:text-primary-300" : "text-muted-foreground")}
+                strokeWidth={isActive ? 2.25 : 2}
               />
-            )}
-            <Icon
-              className={cn("relative z-10 h-5 w-5", isActive ? "fill-primary-100 text-primary-600 dark:fill-primary-950 dark:text-primary-300" : "text-muted-foreground")}
-              strokeWidth={isActive ? 2.25 : 2}
-            />
-            <span className={cn("relative z-10", isActive ? "font-semibold text-primary-600 dark:text-primary-300" : "text-muted-foreground")}>
-              {tab.label}
-            </span>
-          </button>
-        );
-      })}
-    </nav>
-  );
-});
+              <span className={cn("relative z-10", isActive ? "font-semibold text-primary-600 dark:text-primary-300" : "text-muted-foreground")}>
+                {tab.label}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+    );
+  })
+);

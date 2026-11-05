@@ -322,10 +322,17 @@ interface StreamedMarkdownProps {
    * they still see each block's plain text. Keep the array stable.
    */
   rehypePlugins?: RehypePlugin[];
+  /**
+   * Classes added after the reply's own. Only for a variant-scoped tweak
+   * (e.g. `max-sm:text-[1rem]`): it is appended, not merged, because
+   * tailwind-merge would drop `leading-[1.55]` along with a plain
+   * `text-[…]` size.
+   */
+  className?: string;
 }
 
 export const StreamedMarkdown = forwardRef<HTMLDivElement, StreamedMarkdownProps>(function StreamedMarkdown(
-  { content, isStreaming = false, components, rehypePlugins },
+  { content, isStreaming = false, components, rehypePlugins, className },
   ref
 ) {
   // LaTeX, stray HTML and near-miss Markdown made readable before anything is parsed (lib/assistant-markdown.ts).
@@ -344,7 +351,7 @@ export const StreamedMarkdown = forwardRef<HTMLDivElement, StreamedMarkdownProps
     [rehypePlugins]
   );
   return (
-    <div ref={ref} dir={direction} className={PROSE_CLASSES}>
+    <div ref={ref} dir={direction} className={className ? `${PROSE_CLASSES} ${className}` : PROSE_CLASSES}>
       {blocks.map((block, index) => {
         const live = isStreaming && index === blocks.length - 1;
         return (

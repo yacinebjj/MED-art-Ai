@@ -259,9 +259,11 @@ interface ChatRichMarkdownProps {
   /** Course texts the citations are checked against — the sources currently loaded client-side. */
   citationSources: CitationSourceText[];
   onOpenSource?: (sourceId: number) => void;
+  /** Passed on to StreamedMarkdown (a variant-scoped tweak, e.g. the phone text size). */
+  className?: string;
 }
 
-export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, citationSources, onOpenSource, isStreaming = false }: ChatRichMarkdownProps) {
+export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, citationSources, onOpenSource, isStreaming = false, className }: ChatRichMarkdownProps) {
   // Citations come out first, from the reply exactly as written (their quotes
   // are matched against the course text), before the renderer tidies the rest.
   const { markdown, citations } = useMemo(() => extractCitations(normalizeCallouts(content)), [content]);
@@ -308,5 +310,5 @@ export const ChatRichMarkdown = memo(function ChatRichMarkdown({ content, citati
     [citationSources, onOpenSource, isStreaming]
   );
 
-  return <StreamedMarkdown content={markdown} isStreaming={isStreaming} components={components} rehypePlugins={CALLOUT_PLUGINS} />;
+  return <StreamedMarkdown content={markdown} isStreaming={isStreaming} components={components} rehypePlugins={CALLOUT_PLUGINS} className={className} />;
 });

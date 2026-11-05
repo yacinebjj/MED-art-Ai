@@ -205,7 +205,10 @@ export function WorkspaceCommandBar({
   }
 
   return (
-    <header className="glass-chrome relative z-20 flex h-14 shrink-0 items-center gap-2 rounded-b-3xl border-t-0 px-2 shadow-glass dark:shadow-glass-dark sm:px-4">
+    // Phones (the workspace's tabbed layout, below md): a full-width bar flush
+    // with the top edge — a hairline at the bottom only, the status-bar inset
+    // inside it — like the app's own Topbar. From md: the floating sheet.
+    <header className="glass-chrome relative z-20 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 rounded-none border-x-0 border-t-0 px-2 pt-[env(safe-area-inset-top)] sm:px-4 md:h-14 md:rounded-b-3xl md:border-x md:pt-0 md:shadow-glass md:dark:shadow-glass-dark">
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <Tooltip>
           <TooltipTrigger asChild>
