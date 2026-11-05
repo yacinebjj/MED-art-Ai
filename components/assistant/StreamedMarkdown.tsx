@@ -290,15 +290,18 @@ const MarkdownBlock = memo(function MarkdownBlock({
 //    string that would otherwise overflow.
 //  - min-w-0/max-w-full/w-full so no long token can ever widen the thread.
 const PROSE_CLASSES =
-  "prose w-full min-w-0 max-w-full break-words text-[1.0625rem] font-medium leading-[1.55] text-slate-700 dark:prose-invert dark:text-zinc-300 sm:text-[1.125rem] " +
+  // text-wrap (plain 'wrap'): every line runs to the end before breaking. Safari's
+  // text-wrap: pretty / balance re-flows a whole paragraph to even its lines, which on
+  // a phone left replies in a narrow, ragged half-width column (3-4 words a line).
+  "prose w-full min-w-0 max-w-full text-wrap break-words text-[1.0625rem] font-medium leading-[1.55] text-slate-700 dark:prose-invert dark:text-zinc-300 sm:text-[1.125rem] " +
   // Headings introduce, they don't shout: one weight, a little air above, almost none below.
-  "prose-headings:text-balance prose-headings:font-semibold prose-headings:tracking-[-0.011em] prose-headings:text-slate-900 dark:prose-headings:text-white " +
+  "prose-headings:font-semibold prose-headings:tracking-[-0.011em] prose-headings:text-slate-900 dark:prose-headings:text-white " +
   "prose-h1:mb-[0.4em] prose-h1:mt-[1.15em] prose-h1:text-[1.25em] prose-h1:leading-[1.3] " +
   "prose-h2:mb-[0.35em] prose-h2:mt-[1.1em] prose-h2:text-[1.15em] prose-h2:leading-[1.3] " +
   "prose-h3:mb-[0.3em] prose-h3:mt-[1em] prose-h3:text-[1.05em] prose-h3:leading-[1.35] " +
   "prose-h4:mb-[0.25em] prose-h4:mt-[0.9em] prose-h4:text-[1em] prose-h4:leading-[1.4] " +
-  // Paragraphs and lists share one tight, even rhythm, and no line ends on an orphan word.
-  "prose-p:my-[0.55em] prose-p:text-pretty prose-li:text-pretty " +
+  // Paragraphs and lists share one tight, even rhythm.
+  "prose-p:my-[0.55em] " +
   "prose-ul:my-[0.5em] prose-ul:ps-[1.25em] prose-ol:my-[0.5em] prose-ol:ps-[1.4em] prose-li:my-[0.15em] prose-li:ps-[0.25em] " +
   "[&_li>p]:my-[0.15em] [&_li>ol]:my-[0.2em] [&_li>ul]:my-[0.2em] " +
   "marker:text-sky-500 dark:marker:text-sky-400 [&_ol>li]:marker:font-semibold " +

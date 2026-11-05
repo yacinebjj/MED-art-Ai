@@ -18,20 +18,17 @@ import {
   Moon,
   MoreHorizontal,
   NotebookPen,
-  Pause,
-  Play,
-  RotateCcw,
   Rows3,
   Rows4,
   Search,
   Settings,
   SquarePen,
   Sun,
-  Timer,
   Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/layout/Logo";
+import { PomodoroPill } from "@/components/layout/PomodoroPill";
 import { useToast } from "@/components/ui/Toast";
 import { usePomodoro } from "@/providers/PomodoroProvider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
@@ -123,47 +120,19 @@ function BarButton({
   );
 }
 
-/** Isolated so the per-second Pomodoro tick re-renders only this chip, never the whole bar. */
+/** Isolated so the per-second Pomodoro tick re-renders only this chip, never the whole bar. The pill itself: components/layout/PomodoroPill.tsx (the app Topbar's too). */
 const WorkspacePomodoro = memo(function WorkspacePomodoro() {
   const { seconds, isActive, toggleActive, resetTimer } = usePomodoro();
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds % 60;
   return (
-    <div className="hidden h-8 items-center gap-0.5 rounded-xl border border-[color-mix(in_oklab,var(--border)_70%,transparent)] bg-[color-mix(in_oklab,var(--background)_50%,transparent)] pl-2 pr-0.5 md:flex">
-      <Timer className={cn("h-3.5 w-3.5 text-primary-500", isActive && "animate-pulse")} />
-      <span className="w-11 text-center font-mono text-xs font-bold tabular-nums text-foreground">
-        {String(minutes).padStart(2, "0")}:{String(remaining).padStart(2, "0")}
-      </span>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={toggleActive}
-            aria-label={isActive ? "Mettre en pause le chrono d'étude" : "Démarrer le chrono d'étude"}
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-lg text-white transition-colors",
-              isActive ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700"
-            )}
-          >
-            {isActive ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{isActive ? "Pause" : "Démarrer le chrono d'étude"} — partagé avec l&apos;Espace d&apos;étude</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={resetTimer}
-            aria-label="Réinitialiser le chrono d'étude"
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <RotateCcw className="h-3 w-3" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>Réinitialiser le chrono</TooltipContent>
-      </Tooltip>
-    </div>
+    <PomodoroPill
+      size="sm"
+      className="hidden md:inline-flex"
+      seconds={seconds}
+      isActive={isActive}
+      onToggle={toggleActive}
+      onReset={resetTimer}
+      labels={{ start: "Démarrer le chrono d'étude", pause: "Mettre en pause le chrono d'étude", reset: "Réinitialiser le chrono d'étude" }}
+    />
   );
 });
 

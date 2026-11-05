@@ -3,8 +3,9 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Settings, LogOut, PlayCircle, Play, Pause, RotateCcw, EyeOff, Timer, CreditCard, Crown, Cpu } from "lucide-react";
+import { Settings, LogOut, PlayCircle, CreditCard, Crown, Cpu } from "lucide-react";
 import { AnimatedBrandMark } from "./AnimatedBrandMark";
+import { PomodoroChip, PomodoroPill } from "./PomodoroPill";
 import { THEME_MODE_ICONS, THEME_MODE_LABELS, ThemeModeSwitcher, useThemeMode, type ThemeMode } from "./cockpit/ThemeModeSwitcher";
 import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
 import { NotificationCenter } from "./cockpit/NotificationCenter";
@@ -30,42 +31,26 @@ import { usePomodoro } from "@/providers/PomodoroProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { t } from "@/lib/translations";
 
-// Focus ring shared by every icon-only control in this widget — keyboard
-// users get the same visible affordance mouse users get from hover.
-const ICON_BUTTON_FOCUS =
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
-
-// 👈 ويدجت البومودورو مدمج مباشرة هنا بدون الحاجة لملف خارجي
+// The study chrono: one glass pill (components/layout/PomodoroPill.tsx), folded into
+// a "Chrono" chip while hidden. Phones keep the idle chrono in Réviser → Pomodoro;
+// it shows here only while running, compact (time + Play/Pause), so the page title
+// stays readable.
 function PomodoroWidget() {
   const { seconds, isActive, isVisible, toggleActive, toggleVisible, resetTimer } = usePomodoro();
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  const formattedTime = `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
 
   return (
     <AnimatePresence mode="wait" initial={false}>
       {!isVisible ? (
-        <motion.button
+        <motion.div
           key="collapsed"
-          type="button"
           initial={{ opacity: 0, scale: 0.92 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.92 }}
           transition={{ duration: 0.15 }}
-          onClick={toggleVisible}
-          title="Afficher le chronomètre"
-          aria-label="Afficher le chronomètre d'étude"
-          className={cn(
-            // Phones: the idle chrono is one more icon to parse in a 5-icon bar —
-            // it lives in Réviser → Pomodoro there, and shows up here once running.
-            "flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent/70 hover:text-foreground max-sm:hidden",
-            ICON_BUTTON_FOCUS
-          )}
+          className="flex max-sm:hidden"
         >
-          <Timer className="h-4 w-4 text-primary-500" />
-          <span className="hidden sm:inline">Chrono</span>
-        </motion.button>
+          <PomodoroChip onShow={toggleVisible} />
+        </motion.div>
       ) : (
         <motion.div
           key="expanded"
@@ -73,56 +58,17 @@ function PomodoroWidget() {
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.92 }}
           transition={{ duration: 0.15 }}
-          // Phones: the idle chrono lives in Réviser → Pomodoro (see the chip above); here it shows
-          // only while running, compact (time + pause), so the page title stays readable.
-          className={cn("glass-card flex items-center gap-1.5 rounded-2xl px-2.5 py-1 shadow-soft sm:gap-2", !isActive && "max-sm:hidden")}
+          className={cn("flex", !isActive && "max-sm:hidden")}
         >
-          {/* Pulses only while the timer is actually running — a
-              permanently-pulsing icon reads as ambient urgency, which is
-              exactly the "extra pressure" feeling a study-wellbeing tool
-              should never add. Paused/idle stays calm and static. */}
-          <Timer className={cn("h-4 w-4 shrink-0 text-primary-500", isActive && "animate-pulse")} />
-          <span className="font-mono text-xs sm:text-sm font-bold text-foreground">{formattedTime}</span>
-
-          <button
-            type="button"
-            onClick={toggleActive}
-            title={isActive ? "Pause" : "Démarrer"}
-            aria-label={isActive ? "Mettre en pause le chrono" : "Démarrer le chrono"}
-            className={cn(
-              "rounded-lg p-1 text-white transition-colors duration-200",
-              isActive ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700",
-              ICON_BUTTON_FOCUS
-            )}
-          >
-            {isActive ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={resetTimer}
-            title="Réinitialiser"
-            aria-label="Réinitialiser le chrono"
-            className={cn(
-              "rounded-lg p-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground max-sm:hidden",
-              ICON_BUTTON_FOCUS
-            )}
-          >
-            <RotateCcw className="h-3 w-3" />
-          </button>
-
-          <button
-            type="button"
-            onClick={toggleVisible}
-            title="Masquer le chrono"
-            aria-label="Masquer le chrono"
-            className={cn(
-              "rounded-lg border-l border-border p-1 pl-1 text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground max-sm:hidden",
-              ICON_BUTTON_FOCUS
-            )}
-          >
-            <EyeOff className="h-3 w-3" />
-          </button>
+          <PomodoroPill
+            seconds={seconds}
+            isActive={isActive}
+            onToggle={toggleActive}
+            onReset={resetTimer}
+            onHide={toggleVisible}
+            compactOnPhones
+            labels={{ start: "Démarrer le chrono", pause: "Mettre en pause le chrono", reset: "Réinitialiser le chrono", hide: "Masquer le chrono" }}
+          />
         </motion.div>
       )}
     </AnimatePresence>
