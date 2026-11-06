@@ -1,44 +1,40 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
-import { useTheme } from "next-themes";
-import { ArrowLeft, Copy, Moon, Settings, Sun } from "lucide-react";
-import { Logo } from "@/components/layout/Logo";
-import { Button } from "@/components/ui/Button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/DropdownMenu";
+import { ArrowLeft, Link2 } from "lucide-react";
+import { AnimatedBrandMark } from "@/components/layout/AnimatedBrandMark";
+import { TopbarCluster } from "@/components/layout/Topbar";
+import { NightModeOverlay } from "@/components/layout/cockpit/ThemeModeSwitcher";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tWorkspaceTopbar } from "@/lib/translations/workspaceTopbar";
+import { cn } from "@/lib/utils";
 
 interface WorkspaceTopbarProps {
   title: string;
-  /** Page-specific controls (e.g. the "?" guide button), shown first in the right-side cluster. */
+  /** Page-specific controls (e.g. the "?" guide button), shown right after the title — where the main top bar keeps its own. */
   actions?: ReactNode;
 }
 
-/** NotebookLM-style topbar: logo + course title on the left, action cluster on the right. */
+/** Same footprint as the bar's other small controls (TourReplayButton). */
+const BAR_ICON_BUTTON_CLASSES =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+/**
+ * Top bar of the full-screen module pages (Examen de module, Résumé de
+ * module), which live outside the dashboard shell. It is the main app bar
+ * (components/layout/Topbar.tsx): the same glass pill — flush with the top on
+ * phones, floating from sm — the same height, padding and title type, and
+ * the same right-hand cluster (chrono, language, appearance, notifications,
+ * account). A back arrow leads the left side, since these pages have no
+ * sidebar.
+ */
 export function WorkspaceTopbar({ title, actions }: WorkspaceTopbarProps) {
-  const { resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
   const { language } = useLanguage();
-  const isDark = resolvedTheme === "dark";
-  // next-themes only knows the real theme after mount (it reads
-  // localStorage client-side) — rendering Sun/Moon from `isDark` before that
-  // resolves means the server's default-theme guess can differ from the
-  // client's first render, which React flags as a hydration mismatch. Same
-  // guard as components/layout/ThemeToggle.tsx.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
 
-  /** Was a dead button (no onClick at all) — found during a static review pass. Copies the current workspace URL so a student can share/bookmark this exact course. */
+  /** Copies the current page URL so a student can share/bookmark this exact module page. */
   function handleCopyLink() {
     navigator.clipboard
       ?.writeText(window.location.href)
@@ -53,106 +49,48 @@ export function WorkspaceTopbar({ title, actions }: WorkspaceTopbarProps) {
   }
 
   return (
-    <header className="glass-chrome relative z-20 flex h-14 shrink-0 items-center justify-between rounded-b-3xl border-t-0 px-2 py-1 shadow-glass dark:shadow-glass-dark sm:h-16 sm:px-6 sm:py-2">
-      <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
-        {/* Explicit back control — distinct from the logo below, which reads
-            as branding rather than navigation to a hurried student. Neither
-            module/[id]/page.tsx nor demo/[slug]/page.tsx render any other
-            "back to dashboard" affordance in their normal (loaded) state, so
-            without this the only way out was the browser's own back button. */}
-        <Link
-          href="/dashboard"
-          aria-label={tWorkspaceTopbar("backToDashboard", language)}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-all duration-300 hover:-translate-x-0.5 hover:bg-accent hover:text-foreground sm:px-2 sm:py-1.5"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span className="hidden sm:inline">{tWorkspaceTopbar("back", language)}</span>
-        </Link>
-        <span className="hidden h-6 w-px shrink-0 bg-border sm:block" />
-        <Link href="/dashboard" className="hidden shrink-0 transition-transform duration-300 hover:scale-105 sm:flex">
-          <Logo size="sm" />
-        </Link>
-        <span className="hidden h-6 w-px shrink-0 bg-border sm:block" />
-        <h1 className="truncate bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-sm font-bold tracking-tight text-transparent sm:text-lg">
-          <span className="hidden text-muted-foreground/70 font-medium md:inline">MedArt Workspace — </span>
-          {title || tWorkspaceTopbar("courseFallbackTitle", language)}
-        </h1>
-      </div>
-
-      <div className="flex items-center gap-1 sm:gap-1.5">
-        {actions}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5 rounded-full border border-border/60 px-2 text-muted-foreground transition-colors duration-200 hover:border-border hover:text-foreground sm:px-3"
-          aria-label={tWorkspaceTopbar("copyLinkAriaLabel", language)}
-          onClick={handleCopyLink}
-        >
-          <Copy className="h-4 w-4" />
-          <span className="hidden lg:inline">{tWorkspaceTopbar("copyLinkAriaLabel", language)}</span>
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5 rounded-full border border-border/60 px-2 text-muted-foreground transition-colors duration-200 hover:border-border hover:text-foreground sm:px-3"
-          aria-label={
-            isDark
-              ? tWorkspaceTopbar("switchToLightMode", language)
-              : tWorkspaceTopbar("switchToDarkMode", language)
-          }
-          onClick={() => setTheme(isDark ? "light" : "dark")}
-        >
-          {!mounted ? <Moon className="h-4 w-4" /> : isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          <span className="hidden lg:inline">
-            {!mounted
-              ? tWorkspaceTopbar("switchToDarkMode", language)
-              : isDark
-                ? tWorkspaceTopbar("switchToLightMode", language)
-                : tWorkspaceTopbar("switchToDarkMode", language)}
-          </span>
-        </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 rounded-full border border-border/60 px-2 text-muted-foreground transition-colors duration-200 hover:border-border hover:text-foreground sm:px-3"
-              aria-label={tWorkspaceTopbar("settings", language)}
+    <>
+      <header
+        className={cn(
+          // Main top bar recipe; in this page's flow (not floating over a
+          // scrolling shell), so its offsets are margins, lined up with the panels below.
+          "glass-chrome relative z-30 flex h-[var(--topbar-height)] shrink-0 items-center justify-between gap-3 pl-3 pr-2",
+          "rounded-none border-x-0 border-t-0 pt-[env(safe-area-inset-top)] sm:mx-3 sm:mt-3 sm:rounded-2xl sm:border sm:px-5 sm:pt-0 sm:shadow-glass sm:dark:shadow-glass-dark md:mx-4 md:mt-4"
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <Link
+            href="/dashboard"
+            aria-label={tWorkspaceTopbar("backToDashboard", language)}
+            title={tWorkspaceTopbar("backToDashboard", language)}
+            className={BAR_ICON_BUTTON_CLASSES}
+          >
+            <ArrowLeft className="h-[18px] w-[18px]" />
+          </Link>
+          <AnimatedBrandMark size="sm" className="hidden sm:flex" />
+          <div className="flex min-w-0 items-center gap-1">
+            <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
+              {title || tWorkspaceTopbar("courseFallbackTitle", language)}
+            </h1>
+            {actions}
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              aria-label={tWorkspaceTopbar("copyLinkAriaLabel", language)}
+              title={tWorkspaceTopbar("copyLinkAriaLabel", language)}
+              className={cn(BAR_ICON_BUTTON_CLASSES, "h-8 w-8")}
             >
-              <Settings className="h-4 w-4" />
-              <span className="hidden lg:inline">{tWorkspaceTopbar("settings", language)}</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>{tWorkspaceTopbar("settings", language)}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {/* Inertes de manière confirmée (aucune destination Aide/Feedback/Langue
-                n'existe ailleurs dans le projet) — masqués plutôt que câblés
-                sur un faux lien. Gardés dans le JSX (juste `hidden`) pour
-                réactivation triviale une fois les vraies pages prêtes. */}
-            <DropdownMenuItem className="hidden">Aide</DropdownMenuItem>
-            <DropdownMenuItem className="hidden">Envoyer un avis</DropdownMenuItem>
-            <DropdownMenuItem className="hidden">Langue de sortie</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {/* Same real destination as the main app's account dropdown
-                (components/layout/Topbar.tsx) — reuses the existing
-                /dashboard/settings page instead of leaving this leaf item inert. */}
-            <DropdownMenuItem asChild>
-              <Link href="/dashboard/settings">{tWorkspaceTopbar("accountSettings", language)}</Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <Link2 className="h-[18px] w-[18px]" />
+            </button>
+          </div>
+        </div>
 
-        {/* Was a hardcoded "ET" initial — not derived from the signed-in
-            student's actual name (unlike components/layout/Topbar.tsx's real
-            Avatar), just a static placeholder. Swapped for the official
-            MedArt mark (same <Logo size="sm" /> instance already rendered on
-            the left side of this header, for a guaranteed-consistent look)
-            so this corner reads as the brand, not a fake/stale identity badge. */}
-        <Logo size="sm" className="shrink-0" />
-      </div>
-    </header>
+        <TopbarCluster standalone />
+      </header>
+      {/* « Nuit médicale » from this bar's appearance menu needs its veil here
+          too (the dashboard shell mounts its own). Outside the header: the
+          header's backdrop-filter would make it the veil's containing block. */}
+      <NightModeOverlay />
+    </>
   );
 }

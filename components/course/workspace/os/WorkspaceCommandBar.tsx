@@ -221,10 +221,6 @@ export function WorkspaceCommandBar({
       >
         <Search className="h-4 w-4 shrink-0" />
         <span className="flex-1 truncate text-left">Outils, sources, actions…</span>
-        <span className="flex items-center gap-0.5">
-          <Kbd>{modKey}</Kbd>
-          <Kbd>K</Kbd>
-        </span>
       </button>
 
       <div className="flex shrink-0 items-center gap-1">

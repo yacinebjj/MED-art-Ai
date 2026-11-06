@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, BookOpenText, Brain, Check, ChevronRight, Copy, Download, FileSpreadsheet, History, Layers, Library, ListChecks, Loader2, Search, Sparkles, Target, Wand2 } from "lucide-react";
+import { AlertTriangle, BookOpenText, Check, Copy, Download, FileSpreadsheet, History, Layers, Library, ListChecks, Loader2, Search, Sparkles, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkspaceTopbar } from "@/components/course/workspace/WorkspaceTopbar";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -14,7 +14,6 @@ import { useToast } from "@/components/ui/Toast";
 import { SynthesisExplorer } from "@/components/dashboard/synthesis/SynthesisExplorer";
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
 import { putSyncDoc, reconcileList } from "@/lib/user-sync";
-import { PomodoroStudyBanner } from "@/components/layout/PomodoroStudyBanner";
 import { createClient } from "@/lib/supabase/client";
 import type { StudioCourseSummary } from "@/types/studio-course";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -23,14 +22,13 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { SourcesResultsTabs, type SourcesResultsTab } from "@/components/course/workspace/SourcesResultsTabs";
 import { FullscreenToggleButton } from "@/components/ui/FullscreenToggleButton";
 import { FullscreenViewerModal } from "@/components/ui/FullscreenViewerModal";
-import { NeonRing, SegmentedControl } from "@/components/cyber/primitives";
+import { NeonRing } from "@/components/cyber/primitives";
 import { GenerationAura, TelemetryChip } from "@/components/cyber/GenerationAura";
-import { useStoredPreference } from "@/components/cyber/hooks";
 import { GenerationConfirmDialog } from "@/components/billing/GenerationConfirmDialog";
 import { usePaywall } from "@/components/billing/PaywallProvider";
 import { notifyUsageChanged, remaining as remainingOf, useUsage } from "@/hooks/useUsage";
 import { PAID_LIMITS } from "@/lib/pricing";
-import { SUMMARY_DEPTHS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type SummaryDepth, type SynthesisOptions } from "@/lib/synthesis-options";
+import { DEFAULT_SYNTHESIS_OPTIONS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type SynthesisOptions } from "@/lib/synthesis-options";
 import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 
@@ -177,10 +175,6 @@ export default function ModuleWorkspacePage() {
   const [dictionaryFailedNotice, setDictionaryFailedNotice] = useState<string[] | null>(null);
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  // Résumé Global customization (remembered on this device; focus is per session).
-  const [summaryDepth, setSummaryDepth] = useStoredPreference<SummaryDepth>("medart:synthesis-depth", "fiche_complete", SUMMARY_DEPTHS);
-  const [mnemonicsPref, setMnemonicsPref] = useStoredPreference<"on" | "off">("medart:synthesis-mnemonics", "off", ["on", "off"] as const);
-  const [summaryFocus, setSummaryFocus] = useState("");
   const [courseQuery, setCourseQuery] = useState("");
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
 
@@ -363,7 +357,11 @@ export default function ModuleWorkspacePage() {
   const MIN_COURSES_REQUIRED = 5;
   /** Above this, a synthesis runs as plan → micro-batches → assemble (see runBatchedSynthesis). */
   const DIRECT_SYNTHESIS_MAX_COURSES = 6;
-  const summaryOptions: SynthesisOptions = { depth: summaryDepth, focus: summaryFocus.trim(), mnemonics: mnemonicsPref === "on" };
+  // The "Personnaliser le Résumé Global" block was removed by product order
+  // (2026-11-06): every Résumé Global is the standard full fiche. A format
+  // a student picked earlier (still in this device's storage) is no longer
+  // read, so nothing hidden can reshape the summary.
+  const summaryOptions: SynthesisOptions = DEFAULT_SYNTHESIS_OPTIONS;
   const summaryPersonalized = needsSynthesisTransform(summaryOptions);
   const hasSelection = selectedIds.size >= MIN_COURSES_REQUIRED;
   const isGenerating = isGeneratingSummary || isGeneratingKeywords || isGeneratingDictionary;
@@ -666,54 +664,13 @@ export default function ModuleWorkspacePage() {
   );
 
   const GENERATION_TILES = [
-    { type: "global_summary" as const, icon: Sparkles, title: "Résumé Global", short: "Résumé", hint: summaryPersonalized ? SUMMARY_DEPTH_LABELS[summaryDepth].label : "Fiche complète par cours", tone: "from-cyan-300 to-sky-500", loading: isGeneratingSummary, onClick: handleGenerateGlobalSummary },
+    { type: "global_summary" as const, icon: Sparkles, title: "Résumé Global", short: "Résumé", hint: summaryPersonalized ? SUMMARY_DEPTH_LABELS[summaryOptions.depth].label : "Fiche complète par cours", tone: "from-cyan-300 to-sky-500", loading: isGeneratingSummary, onClick: handleGenerateGlobalSummary },
     { type: "keywords_table" as const, icon: FileSpreadsheet, title: "Tableau des Mots-Clés", short: "Mots-clés", hint: "Notions classées par catégorie", tone: "from-violet-400 to-fuchsia-500", loading: isGeneratingKeywords, onClick: handleGenerateKeywordTable },
     { type: "medical_dictionary" as const, icon: Library, title: "Dictionnaire Médical", short: "Dictionnaire", hint: "Termes expliqués FR / عربي", tone: "from-amber-300 to-orange-500", loading: isGeneratingDictionary, onClick: handleGenerateMedicalDictionary },
   ];
 
-  // Desktop: open until a first result exists. Phones: collapsed (it would squeeze the course list).
-  const renderSummaryOptions = (openByDefault: boolean) => (
-    <details data-tour="syn-options" open={openByDefault} className="group rounded-2xl border border-white/[0.08] bg-white/[0.02] [&_summary::-webkit-details-marker]:hidden">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3.5 text-sm font-bold text-foreground">
-        <span className="flex items-center gap-2">
-          <Wand2 className="h-4 w-4 text-cyan-400" />
-          Personnaliser le Résumé Global
-          {summaryPersonalized && <span className="rounded-full bg-cyan-400/15 px-2 py-0.5 text-[10px] font-black text-cyan-600 dark:text-cyan-200">Actif</span>}
-        </span>
-        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
-      </summary>
-      <div className="space-y-3 px-3.5 pb-3.5">
-        <SegmentedControl<SummaryDepth>
-          size="sm"
-          ariaLabel="Format du résumé"
-          value={summaryDepth}
-          onChange={setSummaryDepth}
-          options={SUMMARY_DEPTHS.map((value) => ({ value, label: SUMMARY_DEPTH_LABELS[value].label }))}
-        />
-        <p className="text-[11px] text-muted-foreground">{SUMMARY_DEPTH_LABELS[summaryDepth].hint}</p>
-        <div className="relative">
-          <Target className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={summaryFocus}
-            onChange={(e) => setSummaryFocus(e.target.value.slice(0, 160))}
-            placeholder="Cibler (optionnel) : ex. traitement, sémiologie, examens…"
-            className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-cyan-400/50"
-          />
-        </div>
-        <label className="flex min-h-10 cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/[0.08] px-3">
-          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Brain className="h-4 w-4 text-violet-400" />
-            Ajouter des moyens mnémotechniques
-          </span>
-          <input type="checkbox" checked={mnemonicsPref === "on"} onChange={(e) => setMnemonicsPref(e.target.checked ? "on" : "off")} className="h-4 w-4 accent-cyan-500" />
-        </label>
-      </div>
-    </details>
-  );
-
   const generateButtonsRow = (
     <div className="space-y-3 border-b border-white/[0.07] px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-6 md:bg-transparent md:pb-4">
-      {isDesktopOrTablet && renderSummaryOptions(!output)}
       <div data-tour="syn-generate" className="grid grid-cols-3 gap-2 sm:gap-3">
         {GENERATION_TILES.map(({ type, icon: Icon, title, short, hint, tone, loading, onClick }) => (
           <button
@@ -847,7 +804,7 @@ export default function ModuleWorkspacePage() {
               chips={
                 <>
                   <TelemetryChip icon={ListChecks}>{selectedIds.size} cours</TelemetryChip>
-                  {isGeneratingSummary && <TelemetryChip icon={Wand2}>{SUMMARY_DEPTH_LABELS[summaryDepth].label}</TelemetryChip>}
+                  {isGeneratingSummary && <TelemetryChip icon={Wand2}>{SUMMARY_DEPTH_LABELS[summaryOptions.depth].label}</TelemetryChip>}
                 </>
               }
             />
@@ -878,11 +835,10 @@ export default function ModuleWorkspacePage() {
               <p className="cyber-kicker">Atelier de synthèse</p>
               <p className="mt-1 text-lg font-black text-foreground">Transforme tes cours en fiches de révision</p>
             </div>
-            <ol className="grid w-full max-w-2xl gap-3 text-left sm:grid-cols-3">
+            <ol className="grid w-full max-w-xl gap-3 text-left sm:grid-cols-2">
               {[
                 { icon: ListChecks, title: "1. Sélectionne", text: `Au moins ${MIN_COURSES_REQUIRED} cours du module.` },
-                { icon: Wand2, title: "2. Personnalise", text: "Format, ciblage, moyens mnémotechniques." },
-                { icon: Sparkles, title: "3. Génère", text: "Résumé, mots-clés ou dictionnaire." },
+                { icon: Sparkles, title: "2. Génère", text: "Résumé, mots-clés ou dictionnaire." },
               ].map(({ icon: Icon, title, text }) => (
                 <li key={title} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
                   <Icon className="h-5 w-5 text-cyan-400" />
@@ -996,8 +952,6 @@ export default function ModuleWorkspacePage() {
     <div className="cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
       <WorkspaceTopbar title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)} actions={<TourReplayButton className="h-8 w-8" />} />
 
-      <PomodoroStudyBanner />
-
       {/* Mobile-first UX rework — below `md`, aside/main never render side
           by side any more (there was too little room for either once one
           held a real generated result). A "Sources" / "Résultats" tab
@@ -1040,7 +994,6 @@ export default function ModuleWorkspacePage() {
           // keys React would reuse the panel and its entrance would never replay.
           <div key="sources" className="cyber-glass flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
             {sourcesHeader}
-            <div className="shrink-0 px-3 pt-3">{renderSummaryOptions(false)}</div>
             {selectAllRow}
             {courseListPanel}
             {generateButtonsRow}

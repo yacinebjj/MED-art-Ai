@@ -15,6 +15,7 @@ import {
   FileDown,
   Heading2,
   Italic,
+  LayoutGrid,
   Link2,
   List,
   Loader2,
@@ -194,72 +195,56 @@ const GLASS_ICON_BUTTON_CLASSES =
   "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-foreground shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-white/20 active:scale-90";
 
 /**
- * Solid (non-alpha) background tint for the detail view — one per section,
- * covering the whole right panel while it's open. Deliberately NOT using
- * `/NN` opacity suffixes (e.g. `bg-emerald-50/50`) — on the fixed,
- * full-viewport expanded overlay below, a translucent background lets the
- * Chat/Sources text underneath show through and overlap with this view's own
- * text, making both unreadable. `bg-emerald-50`/`dark:bg-emerald-950` etc.
- * are 100% opaque solid colors, just a lighter/darker shade of the tint.
+ * Solid (non-alpha) background for the detail view, covering the whole right
+ * panel while a section is open. Deliberately NOT using `/NN` opacity
+ * suffixes — on the fixed, full-viewport expanded overlay below, a
+ * translucent background lets the Chat/Sources text underneath show through
+ * and overlap with this view's own text, making both unreadable.
+ * One neutral zinc for every section (product order, 2026-11-06): the Studio
+ * no longer gives each mode its own pastel, and never blue.
  */
+const SECTION_DETAIL_SURFACE = "bg-zinc-50 dark:bg-zinc-950";
 const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
-  explication: "bg-sky-50 dark:bg-sky-950",
-  resume: "bg-blue-50 dark:bg-blue-950",
-  cas_clinique: "bg-amber-50 dark:bg-amber-950",
-  qcm: "bg-purple-50 dark:bg-purple-950",
-  exemples_analogies: "bg-yellow-50 dark:bg-yellow-950",
-  infographic: "bg-rose-50 dark:bg-rose-950",
-  audio: "bg-orange-50 dark:bg-orange-950",
+  explication: SECTION_DETAIL_SURFACE,
+  resume: SECTION_DETAIL_SURFACE,
+  cas_clinique: SECTION_DETAIL_SURFACE,
+  qcm: SECTION_DETAIL_SURFACE,
+  exemples_analogies: SECTION_DETAIL_SURFACE,
+  infographic: SECTION_DETAIL_SURFACE,
+  audio: SECTION_DETAIL_SURFACE,
 };
 
 /**
- * Soft tint per study mode — light-mode pastel + a discreet dark-mode
- * counterpart. Exported for reuse by MobileStudioCards' large-card grid, so
- * both surfaces share the exact same per-section color identity. `dot` is a
- * SOLID counterpart of `icon`'s color, spelled out as its own literal
- * classes (not derived from `icon` at runtime via string replace) —
- * Tailwind's JIT scanner only generates CSS for class names it can see
- * verbatim in source, so a computed "bg-" + a runtime-extracted hue would
- * silently produce zero CSS and render invisible.
+ * One graphite identity for every Studio tile (product order, 2026-11-06:
+ * "mature, professional, never blue"): the same quiet zinc surface and
+ * zinc icon for all seven modes — the label and the icon tell them apart.
+ * Colour is kept for state only: `dot`, the "already generated" mark, is a
+ * muted emerald. Exported for MobileStudioCards' large-card grid, so both
+ * surfaces stay identical. Spelled out as literal classes: Tailwind's JIT
+ * scanner only generates CSS for class names it can see verbatim in source.
  */
-export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: string }> = {
-  // The flagship mode wears the app's own blue (sky; Résumé keeps the deeper blue) — no green accent beside the Co-pilot.
-  explication: {
-    bg: "bg-sky-50/80 dark:bg-sky-950/20 border-sky-200/50 dark:border-sky-900/40",
-    icon: "text-sky-600 dark:text-sky-400",
-    dot: "bg-sky-500 dark:bg-sky-400",
-  },
-  resume: {
-    bg: "bg-blue-50/80 dark:bg-blue-950/20 border-blue-200/50 dark:border-blue-900/40",
-    icon: "text-blue-600 dark:text-blue-400",
-    dot: "bg-blue-500 dark:bg-blue-400",
-  },
-  cas_clinique: {
-    bg: "bg-amber-50/80 dark:bg-amber-950/20 border-amber-200/50 dark:border-amber-900/40",
-    icon: "text-amber-600 dark:text-amber-400",
-    dot: "bg-amber-500 dark:bg-amber-400",
-  },
-  qcm: {
-    bg: "bg-purple-50/80 dark:bg-purple-950/20 border-purple-200/50 dark:border-purple-900/40",
-    icon: "text-purple-600 dark:text-purple-400",
-    dot: "bg-purple-500 dark:bg-purple-400",
-  },
-  exemples_analogies: {
-    bg: "bg-yellow-50/80 dark:bg-yellow-950/20 border-yellow-200/50 dark:border-yellow-900/40",
-    icon: "text-yellow-600 dark:text-yellow-400",
-    dot: "bg-yellow-500 dark:bg-yellow-400",
-  },
-  infographic: {
-    bg: "bg-rose-50/80 dark:bg-rose-950/20 border-rose-200/50 dark:border-rose-900/40",
-    icon: "text-rose-600 dark:text-rose-400",
-    dot: "bg-rose-500 dark:bg-rose-400",
-  },
-  audio: {
-    bg: "bg-orange-50/80 dark:bg-orange-950/20 border-orange-200/50 dark:border-orange-900/40",
-    icon: "text-orange-600 dark:text-orange-400",
-    dot: "bg-orange-500 dark:bg-orange-400",
-  },
+const STUDIO_TILE_TINT = {
+  bg: "border-zinc-200/80 bg-white/70 dark:border-white/[0.08] dark:bg-white/[0.035]",
+  icon: "text-zinc-600 dark:text-zinc-300",
+  dot: "bg-emerald-500/90 dark:bg-emerald-400/90",
 };
+export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: string }> = {
+  explication: STUDIO_TILE_TINT,
+  resume: STUDIO_TILE_TINT,
+  cas_clinique: STUDIO_TILE_TINT,
+  qcm: STUDIO_TILE_TINT,
+  exemples_analogies: STUDIO_TILE_TINT,
+  infographic: STUDIO_TILE_TINT,
+  audio: STUDIO_TILE_TINT,
+};
+
+/** Hover for a Studio or Lab tile: the surface firms up and lifts on a soft neutral shadow — no blue glow, no motion of the tile itself (its icon carries the micro-interaction). */
+const STUDIO_TILE_HOVER_CLASSES =
+  "hover:border-zinc-300 hover:bg-white hover:shadow-[0_10px_24px_-14px_rgba(24,24,27,0.4)] dark:hover:border-white/[0.16] dark:hover:bg-white/[0.06] dark:hover:shadow-[0_10px_28px_-14px_rgba(0,0,0,0.9)]";
+
+/** The icon inside a Studio or Lab tile rises and grows a touch while its tile is hovered. */
+const STUDIO_TILE_ICON_MOTION_CLASSES =
+  "transition-transform duration-200 ease-out group-hover:-translate-y-1 group-hover:scale-110";
 
 /**
  * "..." trigger + menu for the OPENED section's own detail-view header (both
@@ -752,7 +737,7 @@ export function StudioPanel({
                 <span className="hidden text-muted-foreground transition-colors group-hover:text-foreground sm:inline">{tStudio("studioHeading", language)}</span>
                 <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:inline" />
                 {openedTint && openedSectionData && (
-                  <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg shadow-glow", openedTint.bg, openedTint.icon)}>
+                  <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border shadow-sm", openedTint.bg, openedTint.icon)}>
                     <openedSectionData.icon className="h-3.5 w-3.5" />
                   </span>
                 )}
@@ -771,7 +756,7 @@ export function StudioPanel({
               <>
                 <span className="hidden text-muted-foreground transition-colors group-hover:text-foreground sm:inline">Lab</span>
                 <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:inline" />
-                <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border shadow-glow", openedLab.tint.bg, openedLab.tint.icon)}>
+                <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border shadow-sm", STUDIO_TILE_TINT.bg, STUDIO_TILE_TINT.icon)}>
                   <openedLab.icon className="h-3.5 w-3.5" />
                 </span>
                 <span className="truncate">{openedLab.label}</span>
@@ -781,11 +766,14 @@ export function StudioPanel({
         ) : (
           // Browse-grid header: the "Studio" title, aligned with the middle
           // column's "MedArt Assistant" header (same top border + p-4 header
-          // bar), so both columns read as titled panels. Hidden in the w-20
+          // bar), so both columns read as titled panels. Same type and icon
+          // treatment as the left pane's "Sources" heading (module/[id]/page.tsx),
+          // so the two side panels mirror each other. Hidden in the w-20
           // collapsed rail, matching the other header controls' !isCollapsed
           // guards below.
           !isCollapsed ? (
-            <h2 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <LayoutGrid className="h-4 w-4 text-primary-500" />
               {tStudio("studioHeading", language)}
             </h2>
           ) : (
@@ -806,7 +794,7 @@ export function StudioPanel({
           ) : (
             <>
               {/* Global AI-content language — one switch for every tile and Lab tool. */}
-              {!isCollapsed && <AiLanguageSelect compact className="mr-0.5" />}
+              {!isCollapsed && <AiLanguageSelect variant="toggle" className="mr-0.5" />}
               {openedSection && !isCollapsed && (
                 <SectionOptionsMenu triggerClassName={PANEL_ICON_BUTTON_CLASSES} />
               )}
@@ -929,9 +917,14 @@ export function StudioPanel({
                           // p-3/md:p-4 + text-sm/md:text-base, reading as
                           // oversized blocks instead of an elegant, dense
                           // tool list.
-                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-[color-mix(in_oklab,var(--foreground)_80%,transparent)] transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-primary/50 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-none md:text-sm",
+                          // The tile itself stays put on hover (its icon moves
+                          // instead, STUDIO_TILE_ICON_MOTION_CLASSES): a
+                          // hovered box that shifts can slide out from under
+                          // the cursor and flicker.
+                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-[color-mix(in_oklab,var(--foreground)_80%,transparent)] transition-[background-color,border-color,box-shadow,opacity] duration-200 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:shadow-none md:text-sm",
+                          STUDIO_TILE_HOVER_CLASSES,
                           isGenerating && "disabled:cursor-wait",
-                          isLocked && "opacity-50 saturate-[0.4] hover:translate-y-0 hover:shadow-none",
+                          isLocked && "opacity-50 saturate-[0.4] hover:shadow-none",
                           // Fixed h-14 (uncollapsed) — CSS Grid rows stretch
                           // items WITHIN one row to match automatically, but
                           // each ROW still auto-sizes to ITS OWN tallest
@@ -965,7 +958,8 @@ export function StudioPanel({
                           <span className="flex shrink-0 items-center gap-1">
                             <Icon
                               className={cn(
-                                "shrink-0 transition-transform duration-300 group-hover:scale-110",
+                                "shrink-0",
+                                STUDIO_TILE_ICON_MOTION_CLASSES,
                                 isCollapsed ? "h-6 w-6" : "h-4 w-4",
                                 tint.icon
                               )}
@@ -1133,17 +1127,27 @@ export function StudioPanel({
                               initial={{ opacity: 0, y: 6 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: index * 0.04, type: "spring", stiffness: 420, damping: 32 }}
-                              whileHover={{ y: -2 }}
                               whileTap={{ scale: 0.97 }}
                               onClick={() => onOpenLabTool(tool.id)}
                               aria-label={tool.label}
+                              // Same graphite surface and hover as the Studio
+                              // tiles above (the tool's own hue stays for the
+                              // dashboard's Lab launcher).
                               className={cn(
-                                "group relative flex min-w-0 items-center gap-2.5 rounded-xl border text-left transition-shadow duration-200 hover:border-primary/50 hover:shadow-glow",
+                                "group relative flex min-w-0 items-center gap-2.5 rounded-xl border text-left transition-[background-color,border-color,box-shadow] duration-200",
                                 isCollapsed ? "aspect-square justify-center p-2" : "px-3 py-2.5",
-                                tool.tint.bg
+                                STUDIO_TILE_TINT.bg,
+                                STUDIO_TILE_HOVER_CLASSES
                               )}
                             >
-                              <span className={cn("flex shrink-0 items-center justify-center rounded-lg bg-white/70 shadow-sm dark:bg-white/5", isCollapsed ? "h-9 w-9" : "h-8 w-8", tool.tint.icon)}>
+                              <span
+                                className={cn(
+                                  "flex shrink-0 items-center justify-center rounded-lg bg-zinc-900/[0.04] ring-1 ring-inset ring-zinc-900/[0.05] dark:bg-white/[0.06] dark:ring-white/[0.06]",
+                                  STUDIO_TILE_ICON_MOTION_CLASSES,
+                                  isCollapsed ? "h-9 w-9" : "h-8 w-8",
+                                  STUDIO_TILE_TINT.icon
+                                )}
+                              >
                                 <ToolIcon className={isCollapsed ? "h-5 w-5" : "h-4 w-4"} />
                               </span>
                               {!isCollapsed && (
@@ -1393,12 +1397,12 @@ export function StudioPanel({
           >
             <div className="flex items-center gap-2 border-b border-border p-4">
               {openedSection && openedTint && openedSectionData && (
-                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-xl shadow-glow", openedTint.bg, openedTint.icon)}>
+                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border shadow-sm", openedTint.bg, openedTint.icon)}>
                   <openedSectionData.icon className="h-4 w-4" />
                 </span>
               )}
               {openedLab && (
-                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border shadow-glow", openedLab.tint.bg, openedLab.tint.icon)}>
+                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border shadow-sm", STUDIO_TILE_TINT.bg, STUDIO_TILE_TINT.icon)}>
                   <openedLab.icon className="h-4 w-4" />
                 </span>
               )}

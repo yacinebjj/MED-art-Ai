@@ -405,16 +405,6 @@ export const TOURS: Record<TourId, TourDefinition> = {
         },
       },
       {
-        id: "options",
-        targets: ["syn-options"],
-        optional: true,
-        icon: SlidersHorizontal,
-        ...HUE.violet,
-        badge: { fr: "Options", en: "Options" },
-        title: { fr: "Personnalise le Résumé Global", en: "Tune the Global Summary" },
-        body: { fr: "Ouvre ce bloc pour régler le Résumé Global avant de le lancer.", en: "Open this block to tune the Global Summary before launching it." },
-      },
-      {
         id: "generate",
         targets: ["syn-generate"],
         icon: Sparkles,

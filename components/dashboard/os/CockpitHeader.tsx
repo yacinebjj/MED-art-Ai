@@ -2,14 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Cpu, Crown, GraduationCap, Hourglass, Sparkles } from "lucide-react";
+import { Cpu, Crown, GraduationCap, Hourglass, Search, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { useCockpitUi } from "@/store/useCockpitUi";
 import { GlassArt } from "@/components/ui/GlassArt";
-import { Kbd } from "@/components/course/workspace/os/Kbd";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit } from "@/lib/translations/cockpit";
 import { FLASHCARD_ENGINE_LABEL } from "@/lib/dashboard/engine";
@@ -138,8 +137,7 @@ export function CockpitHeader() {
               onClick={() => setSpotlightOpen(true)}
               className="hidden items-center gap-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground md:flex"
             >
-              <Kbd>Ctrl</Kbd>
-              <Kbd>K</Kbd>
+              <Search aria-hidden className="h-3.5 w-3.5" />
               {tCockpit("spotlightHint", language)}
             </button>
           </div>

@@ -284,21 +284,26 @@ function scopeToActiveCourse(byKey: Set<string>, activeCourseId: number | null):
  * renderer.
  */
 
-// Color-coded by real file extension (this app's own lucide set has no
+// Labelled by real file extension (this app's own lucide set has no
 // brand-specific PDF/Word/PowerPoint glyphs, so the honest way to visually
 // distinguish source types — matching the request's "distinct file type
-// badges" ask — is by color + a short type label, not a fake per-format
-// icon). A course's title IS its original filename (see the upload flow),
-// so its own extension is real, not inferred/guessed.
+// badges" ask — is a short type label, not a fake per-format icon). A
+// course's title IS its original filename (see the upload flow), so its own
+// extension is real, not inferred/guessed. Every badge sits on the same
+// neutral tile (FILE_TYPE_BADGE_CLASSES) and only its label carries a muted
+// hue, so the list reads as one calm palette rather than a patchwork of
+// coloured squares.
+const FILE_TYPE_BADGE_CLASSES =
+  "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-900/[0.04] text-[9px] font-bold tracking-wide ring-1 ring-inset ring-zinc-900/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]";
 const FILE_TYPE_STYLES: Record<string, { label: string; className: string }> = {
-  pdf: { label: "PDF", className: "bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400" },
-  docx: { label: "DOCX", className: "bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400" },
-  pptx: { label: "PPTX", className: "bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400" },
-  txt: { label: "TXT", className: "bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400" },
+  pdf: { label: "PDF", className: "text-rose-600/90 dark:text-rose-300/90" },
+  docx: { label: "DOCX", className: "text-indigo-600/90 dark:text-indigo-300/90" },
+  pptx: { label: "PPTX", className: "text-amber-700/90 dark:text-amber-300/90" },
+  txt: { label: "TXT", className: "text-zinc-500 dark:text-zinc-400" },
 };
 function fileTypeStyleFor(title: string): { label: string; className: string } {
   const ext = title.split(".").pop()?.toLowerCase() ?? "";
-  return FILE_TYPE_STYLES[ext] ?? { label: "DOC", className: "bg-primary-50 text-primary-600 dark:bg-primary-950/30 dark:text-primary-400" };
+  return FILE_TYPE_STYLES[ext] ?? { label: "DOC", className: "text-zinc-500 dark:text-zinc-400" };
 }
 
 /** One full-text hit inside a source's extracted text (Sources panel search). */
@@ -648,10 +653,10 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                   disabled={isSwitchingCourse}
                   title={course.title}
                   className={cn(
-                    "flex aspect-square w-full items-center justify-center rounded-xl border transition-all duration-300 disabled:cursor-wait",
+                    "flex aspect-square w-full items-center justify-center rounded-xl border transition-[background-color,border-color,box-shadow,color] duration-200 disabled:cursor-wait",
                     isActive
-                      ? "border-primary-300 bg-primary-50 text-primary-600 shadow-glow dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-400"
-                      : "border-border bg-card text-muted-foreground hover:bg-accent"
+                      ? "border-primary-500/30 bg-white text-primary-600 shadow-[0_8px_20px_-14px_rgba(2,132,199,0.6)] dark:border-primary-400/25 dark:bg-white/[0.06] dark:text-primary-300"
+                      : "border-black/[0.06] bg-white/55 text-zinc-500 hover:border-black/[0.1] hover:bg-white/90 hover:text-zinc-800 dark:border-white/[0.07] dark:bg-white/[0.025] dark:text-zinc-400 dark:hover:border-white/[0.12] dark:hover:bg-white/[0.05] dark:hover:text-zinc-200"
                   )}
                 >
                   <FileText className="h-5 w-5" />
@@ -691,12 +696,13 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                   key={course.id}
                   data-tour="ws-course"
                   className={cn(
-                    "group flex items-start gap-2 rounded-2xl border p-3 transition-all duration-300",
+                    "group relative flex items-start gap-2 rounded-2xl border p-3 transition-[background-color,border-color,box-shadow] duration-200",
                     isActive
-                      ? "border-primary-300 bg-primary-50 shadow-glow dark:border-primary-800 dark:bg-primary-950/30"
-                      : "border-border bg-card hover:-translate-y-0.5 hover:bg-accent hover:shadow-soft"
+                      ? "border-primary-500/30 bg-white shadow-[0_10px_28px_-18px_rgba(2,132,199,0.6)] dark:border-primary-400/25 dark:bg-white/[0.06] dark:shadow-[0_10px_28px_-16px_rgba(0,0,0,0.9)]"
+                      : "border-black/[0.06] bg-white/55 hover:border-black/[0.1] hover:bg-white/90 hover:shadow-[0_8px_22px_-16px_rgba(15,23,42,0.45)] dark:border-white/[0.07] dark:bg-white/[0.025] dark:hover:border-white/[0.12] dark:hover:bg-white/[0.05]"
                   )}
                 >
+                  {isActive && <span aria-hidden className="pointer-events-none absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-primary-500" />}
                   {onToggleSource && (
                     <button
                       type="button"
@@ -724,23 +730,17 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                     disabled={isSwitchingCourse}
                     className="flex min-w-0 flex-1 items-start gap-3 text-left disabled:cursor-wait"
                   >
-                    <span
-                      className={cn(
-                        "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[9px] font-bold tracking-wide",
-                        fileTypeStyleFor(course.title).className
-                      )}
-                      aria-hidden
-                    >
+                    <span className={cn(FILE_TYPE_BADGE_CLASSES, fileTypeStyleFor(course.title).className)} aria-hidden>
                       {fileTypeStyleFor(course.title).label}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className={cn("truncate text-sm font-medium", isActive ? "text-primary-900 dark:text-primary-200" : "text-foreground")} title={course.title}>
+                      <p className={cn("truncate text-sm text-foreground", isActive ? "font-semibold" : "font-medium")} title={course.title}>
                         {course.title}
                       </p>
                       <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
                         {isActive && (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-600 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white dark:bg-primary-500">
-                            <span className="h-1 w-1 rounded-full bg-white" />
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-500/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-primary-700 ring-1 ring-inset ring-primary-500/20 dark:bg-primary-400/10 dark:text-primary-300 dark:ring-primary-400/25">
+                            <span className="h-1 w-1 rounded-full bg-current" />
                             Ouvert
                           </span>
                         )}
