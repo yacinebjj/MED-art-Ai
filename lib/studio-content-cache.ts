@@ -32,6 +32,7 @@
 
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { computeMinHashSignature, estimateSimilarity, normalizeText, sha256 } from "@/lib/content-similarity";
+import { STUDIO_QCM_PROMPT_VERSION } from "@/lib/ai/studio-prompts";
 import type { JsonSectionId } from "@/lib/demo-content";
 
 /**
@@ -44,6 +45,17 @@ import type { JsonSectionId } from "@/lib/demo-content";
  * suboptimal; the latter is a real correctness bug.
  */
 const SIMILARITY_THRESHOLD = 0.85;
+
+/**
+ * The `section` value a section's rows are filed under. QCM sets carry the
+ * version of the prompt that wrote them ("qcm:v2" — STUDIO_QCM_PROMPT_VERSION
+ * in lib/ai/studio-prompts.ts): once the Examen QCM prompt changes, sets
+ * written under the old one simply stop matching, exact and fuzzy alike,
+ * instead of being served to new students. Every other section keeps its id.
+ */
+function cacheSection(section: JsonSectionId): string {
+  return section === "qcm" ? `qcm:v${STUDIO_QCM_PROMPT_VERSION}` : section;
+}
 
 interface StudioCacheRow {
   id: string;
@@ -90,7 +102,7 @@ export async function lookupStudioContentCache(
   const { data: exactRow, error: exactError } = await supabase
     .from("studio_content_cache")
     .select("id, data")
-    .eq("section", section)
+    .eq("section", cacheSection(section))
     .eq("content_hash", hash)
     .maybeSingle();
 
@@ -115,7 +127,7 @@ export async function lookupStudioContentCache(
   const { data: candidates, error: candidatesError } = await supabase
     .from("studio_content_cache")
     .select("id, data, minhash_signature")
-    .eq("section", section)
+    .eq("section", cacheSection(section))
     .order("hit_count", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(FUZZY_CANDIDATE_LIMIT);
@@ -159,7 +171,7 @@ export async function storeStudioContentCache(section: JsonSectionId, rawText: s
 
   const { error } = await supabase.from("studio_content_cache").upsert(
     {
-      section,
+      section: cacheSection(section),
       content_hash: hash,
       minhash_signature: signature,
       normalized_length: normalized.length,
