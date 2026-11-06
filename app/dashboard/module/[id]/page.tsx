@@ -73,6 +73,7 @@ import { SOURCES_WIDTH, STUDIO_WIDTH, useWorkspaceLayout } from "@/hooks/useWork
 import { useHotkeys, useModKeyLabel } from "@/hooks/useHotkeys";
 import { LAB_TOOLS, type LabToolId } from "@/lib/workspace-lab";
 import { recordLastOpenedCourse } from "@/lib/dashboard/local-activity";
+import { readWorkspaceState, writeWorkspaceState, type WorkspaceReadingState } from "@/lib/reading/workspace-state";
 // Global AI-content language: read at REQUEST time (getContentLanguage), so a
 // plain tile click generates in the language chosen anywhere in the app — not
 // only when the student opens a tile's options popover.
@@ -1906,15 +1907,26 @@ export default function ModuleWorkspacePage() {
   activeCourseRef.current = activeCourse;
 
   const deepLinkHandledRef = useRef(false);
+  // Where the student was reading in this module last time (lib/reading/workspace-state.ts),
+  // applied once that course is loaded (see the effect below).
+  const pendingReadingRestoreRef = useRef<WorkspaceReadingState | null>(null);
   useEffect(() => {
     if (deepLinkHandledRef.current || courses.length === 0) return;
     deepLinkHandledRef.current = true;
     const params = new URLSearchParams(window.location.search);
     const requested = Number(params.get("course"));
-    if (Number.isInteger(requested) && courses.some((c) => c.id === requested)) void handleSelectCourse(requested);
+    const requestedIsValid = Number.isInteger(requested) && courses.some((c) => c.id === requested);
     // ?lab=<tool> — the dashboard's Lab launcher opens a Lab tool directly on the requested course.
     const requestedLab = params.get("lab");
     const labTool = LAB_TOOLS.find((tool) => tool.id === requestedLab);
+    // Without a ?course= link: back to the course the student had open here last time.
+    const saved = authUser?.id ? readWorkspaceState(authUser.id, moduleId) : null;
+    const savedIsValid = saved !== null && courses.some((c) => c.id === saved.courseId);
+    if (requestedIsValid) void handleSelectCourse(requested);
+    else if (savedIsValid) void handleSelectCourse(saved.courseId);
+    // …and to the section / Lab tool they were reading in it, unless a link asks for a tool itself.
+    const targetCourseId = requestedIsValid ? requested : savedIsValid ? saved.courseId : null;
+    if (!labTool && saved && saved.courseId === targetCourseId && (saved.section || saved.lab)) pendingReadingRestoreRef.current = saved;
     if (labTool) openLabTool(labTool.id);
     if (requestedLab !== null) {
       // One-shot: a reload or a copied link must not re-open the tool.
@@ -1932,6 +1944,32 @@ export default function ModuleWorkspacePage() {
     if (!activeCourse || !authUser?.id) return;
     recordLastOpenedCourse(authUser.id, { courseId: activeCourse.id, moduleId, title: activeCourse.title });
   }, [activeCourse, authUser?.id, moduleId]);
+
+  // Back to the section / Lab tool the student was reading in this course
+  // last time — only content that already exists (never a generation), once
+  // the course itself is loaded. Its reading surface then restores the
+  // position (hooks/useReadingSurface.ts).
+  useEffect(() => {
+    const pending = pendingReadingRestoreRef.current;
+    if (!pending || !activeCourse || activeCourse.id !== pending.courseId) return;
+    pendingReadingRestoreRef.current = null;
+    const section = visibleStudioSections().find((s) => s.id === pending.section)?.id ?? null;
+    if (section && getSectionValue(activeCourse, section)) {
+      startNavTransition(() => setOpenedSection(section));
+      if (!isDesktop && pending.tab === "studio") setMobileTab("studio");
+      return;
+    }
+    const tool = LAB_TOOLS.find((t) => t.id === pending.lab);
+    if (tool) openLabTool(tool.id);
+    // openLabTool is stable for a given layout; this runs once per restore.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCourse]);
+
+  // What is open right now, for the next visit (lib/reading/workspace-state.ts).
+  useEffect(() => {
+    if (!activeCourse || !authUser?.id) return;
+    writeWorkspaceState(authUser.id, moduleId, { courseId: activeCourse.id, section: openedSection, lab: openedLabTool, tab: mobileTab });
+  }, [activeCourse, openedSection, openedLabTool, mobileTab, authUser?.id, moduleId]);
 
   // Keeps ?course= in the address bar in sync with the open course, so a
   // copied workspace link reopens the same polycop.
@@ -2442,6 +2480,8 @@ export default function ModuleWorkspacePage() {
       onTranslateSelection={handleTranslateSelection}
       moduleId={moduleId}
       courseTitle={activeCourse?.title}
+      readingKey={activeCourse ? `course-${activeCourse.id}` : null}
+      readingReady={!isSwitchingCourse && !(openedSection !== null && generatingSections.has(openedSection))}
       onCollapsedChange={setIsStudioCollapsed}
       collapsed={isStudioCollapsed}
       sectionMasteryPct={sectionMasteryPct}

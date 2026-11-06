@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import { computeOffsets, escapeHtml, getSelectionMarkAncestor, removeHighlight, wrapRangeInMark, HIGHLIGHT_COLORS } from "@/lib/highlight";
+import { readingSurfaceFor } from "@/lib/reading/surface-registry";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { cn } from "@/lib/utils";
@@ -80,6 +81,7 @@ const LABELS = {
     speechUnsupported: "La lecture vocale n'est pas disponible sur ce navigateur.",
     cardFailed: "Impossible de créer la carte image.",
     clipboardFailed: "Copie impossible sur ce navigateur.",
+    highlightTooLong: "Sélection trop longue pour être surlignée — surligne un passage plus court.",
   },
   en: {
     toolbar: "Selection actions",
@@ -107,6 +109,7 @@ const LABELS = {
     speechUnsupported: "Read-aloud isn't available in this browser.",
     cardFailed: "Couldn't create the image card.",
     clipboardFailed: "Copy isn't available in this browser.",
+    highlightTooLong: "Selection too long to highlight — pick a shorter passage.",
   },
 } as const;
 
@@ -293,8 +296,9 @@ async function renderQuoteCard(text: string, source: string | undefined): Promis
 
 interface TextSelectionToolbarProps {
   selection: TextSelectionState;
-  onAsk: (text: string) => void;
-  onTranslate: (text: string) => void;
+  /** The two AI actions — a reading view with no chat to send them to leaves them out (the card then offers the local actions only). */
+  onAsk?: (text: string) => void;
+  onTranslate?: (text: string) => void;
   onHighlightChange?: () => void;
   moduleId?: number;
   courseTitle?: string;
@@ -396,6 +400,16 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
     // selection on touch screens, which would flip Unhighlight to Highlight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const markAncestor = useMemo(() => (typeof window === "undefined" ? null : getSelectionMarkAncestor()), [selection.text]);
+    // Saved highlights (hooks/useReadingSurface.ts) the selection touches — read once per selection, like markAncestor.
+    const surfaceHighlightIds = useMemo(() => {
+      if (typeof window === "undefined") return [];
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
+      const range = sel.getRangeAt(0);
+      return readingSurfaceFor(range.commonAncestorContainer)?.highlightsIn(range) ?? [];
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selection.text]);
+    const canUnhighlight = Boolean(markAncestor) || surfaceHighlightIds.length > 0;
 
     const wordCount = useMemo(() => selection.text.split(/\s+/).filter(Boolean).length, [selection.text]);
 
@@ -578,6 +592,20 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
     }
 
     async function handleUnhighlight() {
+      if (surfaceHighlightIds.length > 0) {
+        // Saved in the student's account: removed there, on every device.
+        const sel = window.getSelection();
+        const live = sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.getRangeAt(0) : null;
+        const range = live ?? savedRangeRef.current;
+        const surface = range ? readingSurfaceFor(range.commonAncestorContainer) : null;
+        if (surface) {
+          surface.removeHighlights(surfaceHighlightIds);
+          sel?.removeAllRanges();
+          setDismissed(true);
+          onHighlightChange?.();
+          return;
+        }
+      }
       if (markAncestor) {
         const highlightId = markAncestor.dataset.highlightId;
         removeHighlight(markAncestor);
@@ -604,6 +632,19 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
       const live = sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.getRangeAt(0) : null;
       const range = live ?? savedRangeRef.current;
       if (!range || range.collapsed) return;
+
+      // A reading surface (hooks/useReadingSurface.ts) keeps the highlight in
+      // the student's account and paints it back on every visit, without
+      // touching the text React rendered.
+      const surface = readingSurfaceFor(range.commonAncestorContainer);
+      if (surface) {
+        const outcome = surface.addHighlight(range, color.id);
+        sel?.removeAllRanges();
+        setDismissed(true);
+        onHighlightChange?.();
+        if (outcome === "too-long") toast({ variant: "info", title: t.highlightTooLong });
+        return;
+      }
 
       // Captured BEFORE the DOM mutation below — surroundContents/
       // extractContents change the tree, which would invalidate range
@@ -740,35 +781,41 @@ export const TextSelectionToolbar = forwardRef<HTMLDivElement, TextSelectionTool
           </button>
         </div>
 
-        {/* Primary actions — the only two that reach the AI, through the parent */}
-        <div className="flex gap-2 px-3">
-          <button
-            type="button"
-            onClick={() => onAsk(selection.text)}
-            className="group relative flex min-h-[2.75rem] flex-1 items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-cyan-400 via-sky-400 to-violet-500 px-3 text-sm font-black text-slate-950 shadow-[0_0_26px_-6px_rgba(34,211,238,0.85)] transition-transform active:scale-[0.98]"
-          >
-            <span aria-hidden className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
-            <Sparkles className="relative h-4 w-4" />
-            <span className="relative">Ask MedArt</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onTranslate(selection.text)}
-            className="flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.06] px-3.5 text-sm font-semibold text-slate-100 transition-colors hover:border-white/20 hover:bg-white/10 active:scale-[0.98]"
-          >
-            <Languages className="h-4 w-4 text-sky-300" />
-            {t.translate}
-          </button>
-        </div>
+        {/* Primary actions — the only two that reach the AI, through the parent (absent where there is no chat to send them to) */}
+        {(onAsk || onTranslate) && (
+          <div className="flex gap-2 px-3">
+            {onAsk && (
+              <button
+                type="button"
+                onClick={() => onAsk(selection.text)}
+                className="group relative flex min-h-[2.75rem] flex-1 items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-cyan-400 via-sky-400 to-violet-500 px-3 text-sm font-black text-slate-950 shadow-[0_0_26px_-6px_rgba(34,211,238,0.85)] transition-transform active:scale-[0.98]"
+              >
+                <span aria-hidden className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                <Sparkles className="relative h-4 w-4" />
+                <span className="relative">Ask MedArt</span>
+              </button>
+            )}
+            {onTranslate && (
+              <button
+                type="button"
+                onClick={() => onTranslate(selection.text)}
+                className="flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.06] px-3.5 text-sm font-semibold text-slate-100 transition-colors hover:border-white/20 hover:bg-white/10 active:scale-[0.98]"
+              >
+                <Languages className="h-4 w-4 text-sky-300" />
+                {t.translate}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Tiles */}
         <div className="grid grid-cols-4 gap-1.5 px-3 pb-3 pt-2">
           <Tile icon={<NotebookPen className="h-[18px] w-[18px]" />} label={t.note} onClick={() => setNoteDraft(selection.text)} />
           <Tile
-            icon={markAncestor ? <Eraser className="h-[18px] w-[18px]" /> : <Highlighter className="h-[18px] w-[18px] text-yellow-300" />}
-            label={markAncestor ? t.unhighlight : t.highlight}
+            icon={canUnhighlight ? <Eraser className="h-[18px] w-[18px]" /> : <Highlighter className="h-[18px] w-[18px] text-yellow-300" />}
+            label={canUnhighlight ? t.unhighlight : t.highlight}
             active={tray === "highlight"}
-            onClick={() => (markAncestor ? void handleUnhighlight() : toggleTray("highlight"))}
+            onClick={() => (canUnhighlight ? void handleUnhighlight() : toggleTray("highlight"))}
           />
           <Tile icon={<Search className="h-[18px] w-[18px]" />} label={t.search} active={tray === "search"} onClick={() => toggleTray("search")} />
           <Tile icon={<LayoutGrid className="h-[18px] w-[18px]" />} label={t.tools} active={tray === "tools"} onClick={() => toggleTray("tools")} />

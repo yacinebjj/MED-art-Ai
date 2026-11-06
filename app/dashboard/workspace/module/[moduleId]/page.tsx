@@ -31,6 +31,10 @@ import { PAID_LIMITS } from "@/lib/pricing";
 import { DEFAULT_SYNTHESIS_OPTIONS, SUMMARY_DEPTH_LABELS, needsSynthesisTransform, type SynthesisOptions } from "@/lib/synthesis-options";
 import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
+import { useTextSelection } from "@/hooks/useTextSelection";
+import { useReadingSurface } from "@/hooks/useReadingSurface";
+import { readingKey } from "@/lib/reading/keys";
+import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
 
 /**
  * PHASE 2 — real generation calls wired to
@@ -193,6 +197,14 @@ export default function ModuleWorkspacePage() {
   // Purely a local UI micro-interaction (Copy button's checkmark) — reset by
   // its own timeout, never persisted, never affects `output` itself.
   const [justCopied, setJustCopied] = useState(false);
+
+  // The open result is a reading surface (hooks/useReadingSurface.ts):
+  // highlights kept in the account and the reading position restored, in the
+  // inline panel and in the fullscreen view alike. The selection card follows
+  // whichever of the two is on screen.
+  const [inlineOutputEl, setInlineOutputEl] = useState<HTMLDivElement | null>(null);
+  const [fullscreenOutputEl, setFullscreenOutputEl] = useState<HTMLDivElement | null>(null);
+  const { containerRef: outputSelectionRef, container: outputSelectionHost, tooltipRef: outputTooltipRef, selection: outputSelection } = useTextSelection();
 
   // Resolved once on mount — see workspaceHistoryStorageKey's own comment
   // for why every localStorage read/write below is gated on this being
@@ -366,6 +378,14 @@ export default function ModuleWorkspacePage() {
   const hasSelection = selectedIds.size >= MIN_COURSES_REQUIRED;
   const isGenerating = isGeneratingSummary || isGeneratingKeywords || isGeneratingDictionary;
   useTourBlocker(isGenerating);
+
+  const outputReadingKey = output && activeHistoryId && !isGenerating ? readingKey(`module-${moduleId}`, "synthesis", activeHistoryId) : null;
+  useReadingSurface(inlineOutputEl, { key: outputReadingKey });
+  useReadingSurface(isOutputFullscreen ? fullscreenOutputEl : null, { key: outputReadingKey });
+  const outputSurfaceOnScreen = isOutputFullscreen ? fullscreenOutputEl : inlineOutputEl;
+  useEffect(() => {
+    outputSelectionRef(outputSurfaceOnScreen);
+  }, [outputSurfaceOnScreen, outputSelectionRef]);
 
   /**
    * LARGE SELECTIONS (more than DIRECT_SYNTHESIS_MAX_COURSES): a single
@@ -934,7 +954,7 @@ export default function ModuleWorkspacePage() {
           invisible on mobile, not a missing bottom-nav offset. Nothing
           floats over this panel, so its bottom padding only has to keep the
           last line above the home indicator (safe area) with some air. */}
-      <div className="min-h-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none px-1 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-2 lg:px-8">
+      <div ref={setInlineOutputEl} className="min-h-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none px-1 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-2 lg:px-8">
         {outputBody}
       </div>
     </div>
@@ -1011,8 +1031,15 @@ export default function ModuleWorkspacePage() {
       </div>
 
       <FullscreenViewerModal open={isOutputFullscreen} onClose={() => setIsOutputFullscreen(false)} title={outputTitle}>
-        <div className="px-3 pt-4 sm:px-6 lg:px-10">{outputBody}</div>
+        <div ref={setFullscreenOutputEl} className="px-3 pt-4 sm:px-6 lg:px-10">
+          {outputBody}
+        </div>
       </FullscreenViewerModal>
+
+      {/* Selection card over the open result: highlight, note, search, tools (this page has no chat for Ask/Translate). */}
+      {outputSelection && outputReadingKey && (
+        <TextSelectionToolbar ref={outputTooltipRef} selection={outputSelection} moduleId={moduleId} courseTitle={moduleTitle || undefined} container={outputSelectionHost} />
+      )}
 
       <GenerationConfirmDialog
         open={pendingType !== null}

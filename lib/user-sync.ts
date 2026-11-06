@@ -87,6 +87,22 @@ export function putSyncDoc(ns: string, key: string, data: unknown, immediate = f
   pending.set(id, { ns, key, data, timer });
 }
 
+/**
+ * Sends one document right away, bypassing the debounce (keepalive when it is
+ * small enough) — for the moment a page is hidden or left, when a queued
+ * timer may never get to run.
+ */
+export function putSyncDocNow(ns: string, key: string, data: unknown): void {
+  const id = `${ns}|${key}`;
+  const existing = pending.get(id);
+  if (existing) {
+    clearTimeout(existing.timer);
+    pending.delete(id);
+  }
+  const small = JSON.stringify(data).length < 60_000;
+  void send("PUT", { ns, key, data }, small);
+}
+
 /** Deletes on every device (tombstone). */
 export function deleteSyncDoc(ns: string, key: string): void {
   const id = `${ns}|${key}`;

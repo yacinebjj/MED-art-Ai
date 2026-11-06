@@ -50,6 +50,8 @@ import { INFOGRAPHIC_MODEL_OPTIONS, type InfographicModelKey } from "@/lib/ai/in
 import { type PodcastDialect } from "@/lib/ai/podcast-prompts";
 import { cn } from "@/lib/utils";
 import { useTextSelection } from "@/hooks/useTextSelection";
+import { useReadingSurface } from "@/hooks/useReadingSurface";
+import { readingKey as buildReadingKey } from "@/lib/reading/keys";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { tStudio, getSectionLabel } from "@/lib/translations/studio";
 import { GeneratingRotatingLabel } from "@/components/course/workspace/GeneratingRotatingLabel";
@@ -122,6 +124,16 @@ interface StudioPanelProps {
   courseTitle?: string;
   /** Passed straight through to TextSelectionToolbar so a saved highlight POSTs against the right course (see /api/highlights) — omitted by callers with no fixed slug (e.g. the generic numeric-id module workspace, which has no equivalent yet). Without this, TextSelectionToolbar's save silently no-ops. */
   courseSlug?: string;
+  /**
+   * Identifies the course being read (e.g. `course-42`, lib/reading/keys.ts):
+   * every opened section and Lab tool becomes a reading surface under it
+   * (hooks/useReadingSurface.ts) — highlights saved to the account and the
+   * reading position restored. Omitted, `courseSlug` is used; with neither,
+   * nothing is remembered.
+   */
+  readingKey?: string | null;
+  /** False while the opened section is still loading or being generated: its reading position is restored once it is true. */
+  readingReady?: boolean;
   /** Notified whenever the internal collapse toggle fires — the panel's own root controls its ephemeral (w-20 vs w-full) width, but the page-level `<aside>` wrapping it may want to shrink/grow its own fixed width in lockstep (see app/dashboard/module/[id]/page.tsx). Optional: a caller that omits this still gets a fully working collapse, just without the outer wrapper reacting. */
   onCollapsedChange?: (collapsed: boolean) => void;
   /** Controlled collapse — when provided, the caller owns the state (onCollapsedChange then just requests a change). Lets the page re-open the panel itself, e.g. for a quick note. Omitted, the panel keeps its own internal state. */
@@ -498,6 +510,8 @@ export function StudioPanel({
   moduleId,
   courseTitle,
   courseSlug,
+  readingKey,
+  readingReady = true,
   onCollapsedChange,
   collapsed,
   studyYear,
@@ -531,6 +545,14 @@ export function StudioPanel({
   const openedLab = !openedSection && openedLabTool ? labTools?.find((tool) => tool.id === openedLabTool) ?? null : null;
   const isDetailOpen = Boolean(openedSection || openedLab);
   const detailContent = openedSection ? children : openedLab ? labContent : null;
+
+  // The opened section (or Lab tool) is a reading surface: its highlights are
+  // kept in the student's account and its reading position is restored —
+  // inline or in the expanded overlay alike (both use `containerRef`).
+  const readingBase = readingKey ?? (courseSlug ? buildReadingKey("slug", courseSlug) : null);
+  const openedReadingPart = openedSection ?? (openedLab ? `lab-${openedLab.id}` : null);
+  const surfaceKey = readingBase && openedReadingPart ? buildReadingKey(readingBase, openedReadingPart) : null;
+  useReadingSurface(isNoteOpen ? null : container, { key: surfaceKey, ready: readingReady });
 
   /** Inserts `text` at the cursor (replacing any selection) — used by the heading/list/source-link buttons. */
   function insertAtNoteCursor(text: string) {

@@ -48,6 +48,8 @@ import { stripCitationMarkers, type CitationSourceText } from "@/lib/chat-citati
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
 import { useTextSelection } from "@/hooks/useTextSelection";
+import { useReadingSurface } from "@/hooks/useReadingSurface";
+import { readingKey } from "@/lib/reading/keys";
 import { useVoiceDictation } from "@/hooks/useVoiceDictation";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { isSpeechSupported, speak, stopSpeaking, useSpeakingId } from "@/hooks/useSpeechSynthesis";
@@ -475,6 +477,10 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   const plusButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
+  // The conversation is a reading surface for highlights (kept in the account,
+  // painted back on every visit). Its scroll stays the thread's own: it
+  // follows the latest message, never a remembered position.
+  useReadingSurface(container, { key: readingKey("chat", courseSlug ?? (moduleId !== undefined ? `module-${moduleId}` : null)), scroll: false });
   const { language } = useLanguage();
   const { profile } = useAuth();
   const firstName = profile?.fullName?.split(" ")[0] || "Étudiant(e)";

@@ -227,3 +227,8 @@ export function useAuth() {
   }
   return ctx;
 }
+
+/** Like useAuth, but null outside an AuthProvider — for shared components that must never crash a page that has none. */
+export function useOptionalAuth() {
+  return useContext(AuthContext);
+}

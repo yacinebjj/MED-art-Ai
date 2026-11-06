@@ -74,6 +74,12 @@ import { runExamGeneration, type ExamRunProgress } from "@/lib/exam-run-client";
 import { isAnswerCorrect, parseAnswerLabels, serializeAnswerLabels } from "@/lib/exam-scoring";
 import { useTourBlocker, useToolTour } from "@/lib/onboarding/onboarding-context";
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
+import { useAuth } from "@/providers/AuthProvider";
+import { useTextSelection } from "@/hooks/useTextSelection";
+import { useReadingSurface } from "@/hooks/useReadingSurface";
+import { readingKey } from "@/lib/reading/keys";
+import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
+import { clearExamProgress, readExamProgress, resolveExamProgress, saveExamProgress } from "@/lib/reading/exam-progress";
 
 type ExamState = "idle" | "generating" | "testing" | "results";
 type ResultStatus = "correct" | "incorrect" | "skipped";
@@ -204,6 +210,19 @@ export default function ExamGeneratorPage() {
 
   const activeExam = useMemo(() => savedExams.find((e) => e.id === activeExamId) ?? null, [savedExams, activeExamId]);
   const questions = useMemo(() => sanitizeQuestions(activeExam?.content?.questions), [activeExam]);
+
+  const { user: authUser } = useAuth();
+  const userId = authUser?.id ?? null;
+
+  // The correction is a reading surface: highlights kept in the account, the
+  // reading position restored (hooks/useReadingSurface.ts).
+  const {
+    containerRef: resultsSurfaceRef,
+    container: resultsSurface,
+    tooltipRef: resultsTooltipRef,
+    selection: resultsSelection,
+  } = useTextSelection();
+  useReadingSurface(resultsSurface, { key: examState === "results" && activeExamId ? readingKey(`module-${moduleId}`, "exam", activeExamId) : null });
 
   // "Un-contre-un" testing cockpit — one question in focus at a time
   // (instead of one giant scroll), with a jump-to-any-question navigator.
@@ -364,6 +383,47 @@ export default function ExamGeneratorPage() {
   useTourBlocker(!historyLoaded || examState === "testing" || examState === "generating" || isGenerating || isSavingAttempt || pendingGeneration !== null || isExamFullscreen);
   useToolTour("exam-results", historyLoaded && examState === "results" && !isExamFullscreen);
 
+  // A sitting in progress survives leaving the page, closing the app or
+  // switching device (lib/reading/exam-progress.ts): the answers ticked so far
+  // and the question on screen come back when the same exam is reopened.
+  const progressRestoredForRef = useRef<string | null>(null);
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const sittingRef = useRef<{ examId: string | null; state: ExamState }>({ examId: null, state: "idle" });
+  sittingRef.current = { examId: activeExamId, state: examState };
+  useEffect(() => {
+    if (examState !== "testing") {
+      // Any later return to a sitting (another exam, a retake) looks for its progress again.
+      progressRestoredForRef.current = null;
+      return;
+    }
+    if (!userId || !activeExamId || progressRestoredForRef.current === activeExamId) return;
+    progressRestoredForRef.current = activeExamId;
+    const examId = activeExamId;
+    const apply = (progress: { answers: Record<string, string | null>; index: number }) => {
+      setAnswers(progress.answers);
+      setSlideDirection(1);
+      setCurrentQuestionIndex(Math.max(0, progress.index));
+    };
+    const before = answersRef.current;
+    const local = readExamProgress(userId, examId);
+    if (local) apply(local.value);
+    void resolveExamProgress(examId, local).then((winner) => {
+      if (!winner || winner === local || (local && winner.savedAt <= local.savedAt)) return;
+      // Only onto the same, untouched sitting: never over an answer ticked meanwhile.
+      const now = sittingRef.current;
+      if (now.examId !== examId || now.state !== "testing") return;
+      const current = answersRef.current;
+      if (current !== before && current !== local?.value.answers) return;
+      apply(winner.value);
+    });
+  }, [userId, examState, activeExamId]);
+  useEffect(() => {
+    if (!userId || examState !== "testing" || !activeExamId || progressRestoredForRef.current !== activeExamId) return;
+    if (!Object.values(answers).some(Boolean) && currentQuestionIndex === 0) return;
+    saveExamProgress(userId, activeExamId, { answers, index: currentQuestionIndex });
+  }, [userId, examState, activeExamId, answers, currentQuestionIndex]);
+
   function toggleAll() {
     if (!courses) return;
     setSelectedCourseIds(allSelected ? new Set() : new Set(courses.map((c) => c.id)));
@@ -512,6 +572,8 @@ export default function ExamGeneratorPage() {
       const body = await res.json().catch(() => null);
       if (res.ok && body?.success) {
         setAttemptsByExamId((prev) => ({ ...prev, [activeExam.id]: body.attempt as ExamAttempt }));
+        // Saved for good: the in-progress copy is no longer needed (kept when the save failed, so a retry still has it).
+        if (userId) clearExamProgress(userId, activeExam.id);
       } else {
         toast({
           variant: "error",
@@ -1313,6 +1375,7 @@ export default function ExamGeneratorPage() {
   const resultsContent = (
     <motion.div
       key="results"
+      ref={resultsSurfaceRef}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
@@ -1480,6 +1543,11 @@ export default function ExamGeneratorPage() {
             Afficher la correction
           </Button>
         </div>
+      )}
+
+      {/* Selection card over the correction: highlight, note, search, tools (no chat on this page to send Ask/Translate to). */}
+      {resultsSelection && examState === "results" && (
+        <TextSelectionToolbar ref={resultsTooltipRef} selection={resultsSelection} moduleId={moduleId} container={resultsSurface} />
       )}
 
       <FullscreenViewerModal

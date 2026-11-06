@@ -200,8 +200,10 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
 
   return (
     <div className={cn(jakarta.variable, lora.variable, "relative")}>
-      {/* Control bar — sticks to the top of whichever pane scrolls the lesson. */}
-      <div ref={toolbarRef} data-tour="exp-toolbar" className="sticky top-0 z-30 rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b1016]/90">
+      {/* Control bar — sticks to the top of whichever pane scrolls the lesson.
+          data-reading-skip: its live labels ("16px", "42 % lu") are not part of
+          the lesson's text that highlights are anchored in (lib/reading/text-index.ts). */}
+      <div ref={toolbarRef} data-tour="exp-toolbar" data-reading-skip="" className="sticky top-0 z-30 rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b1016]/90">
         <div className="flex flex-wrap items-center gap-2 px-3 py-2">
           <div className="flex items-center gap-1.5">
             <Type className="h-3.5 w-3.5 text-slate-400" aria-hidden />

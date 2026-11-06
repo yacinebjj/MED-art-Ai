@@ -15,6 +15,8 @@ import {
   normalizeCallouts,
 } from "@/lib/markdown";
 import { useTextSelection } from "@/hooks/useTextSelection";
+import { useReadingSurface } from "@/hooks/useReadingSurface";
+import { readingKey } from "@/lib/reading/keys";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useCourseChat } from "@/hooks/useCourseChat";
 import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
@@ -29,7 +31,9 @@ export default function DemoWorkspacePage() {
   const today = new Date().toLocaleDateString("fr-FR");
   const activeSection = DEMO_SECTIONS.find((s) => s.id === activeId) ?? DEMO_SECTIONS[0];
 
-  const { containerRef, tooltipRef, selection, clearSelection } = useTextSelection();
+  const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
+  // Each demo section is a reading surface: highlights and the reading position are remembered.
+  useReadingSurface(container, { key: readingKey("demo", activeId) });
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
 
   const { chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, isTyping, sendChatMessage } = useCourseChat();
