@@ -1,18 +1,14 @@
-/* Synthesis explorer — neo-glass cards with an animated luminous border.
-   The rotating conic border only runs on hover/focus/open cards, so a page
-   of 200 dictionary terms never animates 200 gradients at once. */
+/* Synthesis explorer — neo-glass cards with a luminous accent ring.
 
-@property --syn-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
-@keyframes syn-spin {
-  to {
-    --syn-angle: 360deg;
-  }
-}
+   No animation follows the pointer, and hovering costs one repaint at most.
+   The ring used to SPIN on the hovered card: a conic gradient driven by an
+   animated custom property cannot run on the compositor, so the whole card
+   (an open fiche covers most of the screen) was repainted on every frame
+   for as long as the mouse rested on it, and again on each card the mouse
+   crossed. The page's sticky search bar blurred everything beneath it, and
+   re-blurred on each of those frames. That was the lag felt on PC when
+   moving the mouse over the Résumé global. The ring is now still: shown on
+   open, hovered and focused cards, fading in once. Hover is CSS only. */
 
 @keyframes syn-rise {
   from {
@@ -35,7 +31,6 @@
   border: 1px solid transparent;
   box-shadow: 0 10px 30px -18px rgb(15 23 42 / 0.35);
   animation: syn-rise 0.35s ease-out both;
-  transition: box-shadow 0.25s ease, transform 0.25s ease;
 }
 
 :is(.dark *) .syn-card,
@@ -53,43 +48,24 @@
   z-index: -1;
   border-radius: inherit;
   padding: 1px;
-  background: conic-gradient(from var(--syn-angle), transparent 0deg, var(--syn-accent, #22d3ee) 70deg, transparent 140deg, var(--syn-accent-2, #a78bfa) 220deg, transparent 300deg);
+  background: conic-gradient(from 0deg, transparent 0deg, var(--syn-accent, #22d3ee) 70deg, transparent 140deg, var(--syn-accent-2, #a78bfa) 220deg, transparent 300deg);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.2s ease;
 }
 
-/* An open fiche shows its accent ring still; only the card being pointed at
-   or focused spins it. Every open fiche spinning at once (all of them, by
-   default, on a Résumé global) repainted dozens of gradient rings on every
-   frame for as long as the page was open — the lag felt on PC. */
-.syn-card[data-open="true"]::before {
-  opacity: 1;
-}
-
+/* The accent ring, still: an open card, a focused one, and (real hover only —
+   a tapped card on a touch screen keeps no stuck ring) the one under the mouse. */
+.syn-card[data-open="true"]::before,
 .syn-card:focus-within::before {
   opacity: 1;
-  animation: syn-spin 4s linear infinite;
 }
 
-/* Real hover only: on a touch screen a tapped card never keeps a stuck glow. */
 @media (hover: hover) {
   .syn-card:hover::before {
     opacity: 1;
-    animation: syn-spin 4s linear infinite;
-  }
-
-  .syn-card:hover {
-    box-shadow: 0 18px 44px -20px color-mix(in srgb, var(--syn-accent, #22d3ee) 55%, transparent);
-  }
-}
-
-/* Calm motion (app/globals.css): cards keep their short rise; only the decorative border light stops spinning. */
-@media (prefers-reduced-motion: reduce) {
-  .syn-card::before {
-    animation: none !important;
   }
 }
 

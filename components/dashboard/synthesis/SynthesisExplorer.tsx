@@ -1,7 +1,7 @@
 "use client";
 
 import "./synthesis.css";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BookOpenText,
@@ -214,19 +214,24 @@ function printAsPdf(element: HTMLElement, title: string): boolean {
 
 /* ─────────────────────────── text-to-speech ─────────────────────────── */
 
+type SpeechSegment = { text: string; lang: "fr-FR" | "ar" };
+
 function useSpeech() {
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   // Detected after mount: the server render has no speechSynthesis, so reading it during render would break hydration.
   const [supported, setSupported] = useState(false);
+  // Read through a ref: `speak` keeps one identity, so the memoized cards that receive it never re-render for it.
+  const speakingIdRef = useRef<string | null>(null);
+  speakingIdRef.current = speakingId;
   useEffect(() => {
     setSupported("speechSynthesis" in window);
     return () => window.speechSynthesis?.cancel();
   }, []);
   const speak = useCallback(
-    (id: string, segments: { text: string; lang: "fr-FR" | "ar" }[]) => {
-      if (!supported) return;
+    (id: string, segments: SpeechSegment[]) => {
+      if (!("speechSynthesis" in window)) return;
       window.speechSynthesis.cancel();
-      if (speakingId === id) {
+      if (speakingIdRef.current === id) {
         setSpeakingId(null);
         return;
       }
@@ -244,7 +249,7 @@ function useSpeech() {
         });
       setSpeakingId(id);
     },
-    [speakingId, supported]
+    []
   );
   return { speak, speakingId, supported };
 }
@@ -285,7 +290,14 @@ const BAR_SCROLL_THRESHOLD_PX = 8;
 /** Near the top of the output, the bar always shows. */
 const BAR_ALWAYS_VISIBLE_PX = 80;
 
-function SectionCard({
+/** Toggles one card / copies one card's text — stable callbacks, so a memoized card only re-renders when its own data changes. */
+type ToggleById = (id: string) => void;
+type CopyById = (id: string, text: string) => void;
+
+// Memoized (as every card below): hovering, scrolling, typing in the search
+// or opening another fiche never re-renders the others — only the card whose
+// own props changed (its open state, its "copied" tick) renders again.
+const SectionCard = memo(function SectionCard({
   section,
   index,
   open,
@@ -293,16 +305,20 @@ function SectionCard({
   decorate,
   onCopy,
   copied,
+  copyBodyOnly = false,
 }: {
   section: SynthesisSection;
   index: number;
   open: boolean;
-  onToggle: () => void;
+  onToggle: ToggleById;
   decorate?: (text: string) => ReactNode;
-  onCopy: () => void;
+  onCopy: CopyById;
   copied: boolean;
+  /** The dictionary's extra sections copy their body alone; a fiche copies with its title. */
+  copyBodyOnly?: boolean;
 }) {
   const title = section.isCrossCourse ? section.title : cleanCourseTitle(section.title);
+  const markdown = useMemo(() => normalizeCallouts(section.body), [section.body]);
   return (
     // content-visibility: a fiche scrolled out of view is neither laid out nor painted (the card already clips its content).
     <article
@@ -311,7 +327,7 @@ function SectionCard({
       style={section.isCrossCourse ? { ["--syn-accent" as string]: "#a78bfa", ["--syn-accent-2" as string]: "#f472b6" } : accentStyle(index)}
     >
       <header className="flex items-center gap-3 px-4 py-3 sm:px-5">
-        <button type="button" onClick={onToggle} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <button type="button" onClick={() => onToggle(section.id)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 text-left">
           <span
             className={cn(
               "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-[0_8px_20px_-8px_rgba(34,211,238,0.8)]",
@@ -326,7 +342,14 @@ function SectionCard({
           </span>
           <ChevronDown className={cn("ml-auto h-4 w-4 shrink-0 text-slate-400 transition-transform", open && "rotate-180")} />
         </button>
-        <button type="button" onClick={onCopy} data-print-hide title="Copier cette fiche" aria-label="Copier cette fiche" className="rounded-lg p-1.5 text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
+        <button
+          type="button"
+          onClick={() => onCopy(section.id, copyBodyOnly ? section.body : `## ${section.title}\n\n${section.body}`)}
+          data-print-hide
+          title="Copier cette fiche"
+          aria-label="Copier cette fiche"
+          className="rounded-lg p-1.5 text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
+        >
           {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
         </button>
       </header>
@@ -334,16 +357,16 @@ function SectionCard({
         {open && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden">
             <div className="border-t border-black/5 px-3 pb-5 pt-3 text-[15px] sm:px-6 dark:border-white/[0.06]">
-              <MedicalMarkdown markdown={normalizeCallouts(section.body)} decorate={decorate} />
+              <MedicalMarkdown markdown={markdown} decorate={decorate} />
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </article>
   );
-}
+});
 
-function DictionaryCard({
+const DictionaryCard = memo(function DictionaryCard({
   entry,
   index,
   open,
@@ -351,21 +374,26 @@ function DictionaryCard({
   decorate,
   onCopy,
   copied,
-  speech,
+  speechSupported,
+  speaking,
+  onSpeak,
 }: {
   entry: DictionaryEntry;
   index: number;
   open: boolean;
-  onToggle: () => void;
+  onToggle: ToggleById;
   decorate?: (text: string) => ReactNode;
-  onCopy: () => void;
+  onCopy: CopyById;
   copied: boolean;
-  speech: ReturnType<typeof useSpeech>;
+  speechSupported: boolean;
+  /** This term is the one being read aloud. */
+  speaking: boolean;
+  onSpeak: (id: string, segments: SpeechSegment[]) => void;
 }) {
   const deco = (text: string) => (decorate ? decorate(text) : text);
   return (
     <article className="syn-card flex min-w-0 flex-col" data-open={open} style={accentStyle(index)}>
-      <button type="button" onClick={onToggle} aria-expanded={open} className="flex items-start gap-3 px-4 pb-2 pt-4 text-left">
+      <button type="button" onClick={() => onToggle(entry.id)} aria-expanded={open} className="flex items-start gap-3 px-4 pb-2 pt-4 text-left">
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="min-w-0 text-[15px] font-black leading-snug text-slate-900 [overflow-wrap:anywhere] dark:text-white">{deco(entry.term)}</span>
@@ -392,39 +420,43 @@ function DictionaryCard({
         )}
       </AnimatePresence>
       <footer className="mt-auto flex items-center gap-1 px-3 pb-3 pt-3" data-print-hide>
-        {speech.supported && (
+        {speechSupported && (
           <button
             type="button"
             onClick={() =>
-              speech.speak(entry.id, [
+              onSpeak(entry.id, [
                 { text: `${entry.term}. ${entry.fr}`, lang: "fr-FR" },
                 ...(open && entry.ar ? [{ text: entry.ar, lang: "ar" as const }] : []),
               ])
             }
             className={cn(
               "flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-bold transition-colors",
-              speech.speakingId === entry.id ? "bg-cyan-500/15 text-cyan-700 dark:text-cyan-200" : "text-slate-500 hover:bg-black/5 dark:hover:bg-white/10"
+              speaking ? "bg-cyan-500/15 text-cyan-700 dark:text-cyan-200" : "text-slate-500 hover:bg-black/5 dark:hover:bg-white/10"
             )}
           >
-            {speech.speakingId === entry.id ? <Square className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-            {speech.speakingId === entry.id ? "Stop" : open && entry.ar ? "Écouter FR + AR" : "Écouter"}
+            {speaking ? <Square className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            {speaking ? "Stop" : open && entry.ar ? "Écouter FR + AR" : "Écouter"}
           </button>
         )}
-        <button type="button" onClick={onCopy} className="ml-auto flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-bold text-slate-500 hover:bg-black/5 dark:hover:bg-white/10">
+        <button
+          type="button"
+          onClick={() => onCopy(entry.id, `${entry.term} — ${stripInlineMarkdown(entry.fr)}${entry.ar ? `\n${stripInlineMarkdown(entry.ar)}` : ""}`)}
+          className="ml-auto flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-bold text-slate-500 hover:bg-black/5 dark:hover:bg-white/10"
+        >
           {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
           Copier
         </button>
       </footer>
     </article>
   );
-}
+});
 
-function KeywordChip({ item, decorate, open, onToggle }: { item: KeywordItem; decorate?: (text: string) => ReactNode; open: boolean; onToggle: () => void }) {
+const KeywordChip = memo(function KeywordChip({ item, decorate, open, onToggle }: { item: KeywordItem; decorate?: (text: string) => ReactNode; open: boolean; onToggle: ToggleById }) {
   return (
     <li>
       <button
         type="button"
-        onClick={onToggle}
+        onClick={() => onToggle(item.id)}
         aria-expanded={open}
         className={cn(
           "w-full rounded-xl border px-3 py-2 text-left transition-colors",
@@ -439,7 +471,7 @@ function KeywordChip({ item, decorate, open, onToggle }: { item: KeywordItem; de
       </button>
     </li>
   );
-}
+});
 
 /* ─────────────────────────── explorer ─────────────────────────── */
 
@@ -461,7 +493,6 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
   const kind = kindProp ?? detectSynthesisKind(markdown);
   const rootRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
-  const [barHidden, setBarHidden] = useState(false);
   const [query, setQuery] = useState("");
   const [medical, setMedical] = useState(true);
   const [priorities, setPriorities] = useState<Set<Priority>>(new Set());
@@ -490,25 +521,30 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
 
   // Smart command bar: it slides away while the student reads downward and
   // comes back on the first scroll up — always shown near the top, and while
-  // it has focus (a keyboard user tabbing into the search).
-  // Scroll events already arrive at most once per frame, and an unchanged
-  // value never re-renders, so the handler works straight on each one.
+  // it has focus (a keyboard user tabbing into the search). Driven by a data
+  // attribute on the bar itself, never React state: scrolling the Résumé
+  // re-renders nothing (it used to re-render the whole explorer on every
+  // change of direction).
   useEffect(() => {
     const bar = barRef.current;
     const scroller = bar ? findScrollParent(bar) : null;
     if (!bar || !scroller) return;
     let last = scroller.scrollTop;
+    const setHidden = (hidden: boolean) => {
+      const value = hidden ? "true" : "false";
+      if (bar.dataset.hidden !== value) bar.dataset.hidden = value;
+    };
     const handleScroll = () => {
       const top = scroller.scrollTop;
       if (top < BAR_ALWAYS_VISIBLE_PX) {
         last = top;
-        setBarHidden(false);
+        setHidden(false);
         return;
       }
       const delta = top - last;
       if (Math.abs(delta) < BAR_SCROLL_THRESHOLD_PX) return;
       last = top;
-      setBarHidden(delta > 0 && !bar.contains(document.activeElement));
+      setHidden(delta > 0 && !bar.contains(document.activeElement));
     };
     scroller.addEventListener("scroll", handleScroll, { passive: true });
     return () => scroller.removeEventListener("scroll", handleScroll);
@@ -524,19 +560,23 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
   }, [markdown, kind]);
 
   const isOpen = (id: string) => (allOpen ? !openIds.has(id) : openIds.has(id));
-  const toggle = (id: string) =>
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Stable: handed to the memoized cards.
+  const toggle = useCallback(
+    (id: string) =>
+      setOpenIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    []
+  );
   const setAll = (open: boolean) => {
     setAllOpen(open);
     setOpenIds(new Set());
   };
 
-  async function copy(id: string, text: string) {
+  const copy = useCallback(async (id: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedId(id);
@@ -544,7 +584,9 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
     } catch {
       setCopiedId(null);
     }
-  }
+  }, []);
+  // The cards' copy action (fire and forget).
+  const copyCard = useCallback((id: string, text: string) => void copy(id, text), [copy]);
 
   const priorityOk = (p: Priority) => priorities.size === 0 || priorities.has(p);
 
@@ -583,14 +625,15 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
 
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-4">
-      {/* Command bar — hides on scroll down, returns on scroll up (effect above). */}
+      {/* Command bar — hides on scroll down, returns on scroll up (effect above, data-hidden).
+          Near-opaque, no backdrop blur: a sticky blurred bar is re-composited on every frame
+          anything moves beneath it. */}
       <div
         ref={barRef}
-        onFocusCapture={() => setBarHidden(false)}
-        className={cn(
-          "sticky top-0 z-20 rounded-2xl border border-black/10 bg-white/90 p-2.5 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.5)] backdrop-blur-xl transition-[transform,opacity] duration-300 ease-out dark:border-white/10 dark:bg-[#0b1016]/90 sm:-mx-1",
-          barHidden && "pointer-events-none -translate-y-[calc(100%+1rem)] opacity-0"
-        )}
+        onFocusCapture={(event) => {
+          event.currentTarget.dataset.hidden = "false";
+        }}
+        className="sticky top-0 z-20 rounded-2xl border border-black/10 bg-white/95 p-2.5 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.5)] transition-[transform,opacity] duration-300 ease-out data-[hidden=true]:pointer-events-none data-[hidden=true]:-translate-y-[calc(100%+1rem)] data-[hidden=true]:opacity-0 dark:border-white/10 dark:bg-[#0b1016]/95 sm:-mx-1"
         data-print-hide
       >
         <div className="flex flex-wrap items-center gap-2">
@@ -692,9 +735,9 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
                 section={section}
                 index={sectionOrder.get(section.id) ?? 0}
                 open={isOpen(section.id)}
-                onToggle={() => toggle(section.id)}
+                onToggle={toggle}
                 decorate={decorate}
-                onCopy={() => void copy(section.id, `## ${section.title}\n\n${section.body}`)}
+                onCopy={copyCard}
                 copied={copiedId === section.id}
               />
             ))
@@ -713,11 +756,13 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
                     entry={entry}
                     index={termOrder.get(entry.id) ?? 0}
                     open={isOpen(entry.id)}
-                    onToggle={() => toggle(entry.id)}
+                    onToggle={toggle}
                     decorate={decorate}
-                    onCopy={() => void copy(entry.id, `${entry.term} — ${stripInlineMarkdown(entry.fr)}${entry.ar ? `\n${stripInlineMarkdown(entry.ar)}` : ""}`)}
+                    onCopy={copyCard}
                     copied={copiedId === entry.id}
-                    speech={speech}
+                    speechSupported={speech.supported}
+                    speaking={speech.speakingId === entry.id}
+                    onSpeak={speech.speak}
                   />
                 ))}
               </div>
@@ -732,10 +777,11 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
                   section={section}
                   index={i}
                   open={isOpen(section.id)}
-                  onToggle={() => toggle(section.id)}
+                  onToggle={toggle}
                   decorate={decorate}
-                  onCopy={() => void copy(section.id, section.body)}
+                  onCopy={copyCard}
                   copied={copiedId === section.id}
+                  copyBodyOnly
                 />
               ))}
           </>
@@ -764,7 +810,7 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
                             {forCourse
                               .filter((i) => i.category === cat)
                               .map((item) => (
-                                <KeywordChip key={item.id} item={item} decorate={decorate} open={isOpen(item.id)} onToggle={() => toggle(item.id)} />
+                                <KeywordChip key={item.id} item={item} decorate={decorate} open={isOpen(item.id)} onToggle={toggle} />
                               ))}
                           </ul>
                         </section>
