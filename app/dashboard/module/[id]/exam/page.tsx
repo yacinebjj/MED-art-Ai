@@ -148,7 +148,10 @@ function friendlyGenerationError(raw: unknown, fallback: string): string {
 
 // Phones: the panel runs to the screen's edges (no side frame); from sm a rounded glass card.
 // `!` because .cyber-glass's own `border` shorthand (components/cyber/cyber.css) loads after the utilities.
-const panelShellClasses = "cyber-glass flex min-w-0 max-w-full flex-col overflow-hidden rounded-none max-sm:!border-x-0 max-sm:!border-b-0 sm:rounded-3xl";
+// animate-none: no global "surface-in" fade (app/globals.css) on these two full-height panels. On
+// desktop Chrome a panel fading in from opacity 0 while it carried a backdrop blur could stay
+// unpainted — a blank page until the window was resized. They are simply there on the first frame.
+const panelShellClasses = "cyber-glass flex min-w-0 max-w-full animate-none flex-col overflow-hidden rounded-none max-sm:!border-x-0 max-sm:!border-b-0 sm:rounded-3xl";
 
 const RESULTS_STAGGER_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
 const RESULT_CARD_VARIANTS = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
@@ -1454,7 +1457,8 @@ export default function ExamGeneratorPage() {
               {(examState === "testing" || examState === "results") && fullscreenToggleRow}
               {examState === "idle" && generationErrorBanner && <div className="px-4 pt-4">{generationErrorBanner}</div>}
               <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
-                <AnimatePresence mode="wait">
+                {/* initial={false}: what the page opens on is painted at once, never waiting on an entrance animation; later switches still animate. */}
+                <AnimatePresence mode="wait" initial={false}>
                   {examState === "idle" && idleContent}
                   {examState === "generating" && generatingContent}
                   {examState === "testing" && testingContent}
@@ -1464,11 +1468,10 @@ export default function ExamGeneratorPage() {
             </main>
           </>
         ) : mobileTab === "sources" ? (
-          // Keyed per tab: both panels share one slot, so without keys React
-          // would reuse the panel and its glass entrance would never replay.
+          // Keyed per tab: both panels share one slot, and each tab is its own panel.
           <div key="sources" className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
             {examState === "generating" ? (
-              <AnimatePresence mode="wait">{generatingContent}</AnimatePresence>
+              <AnimatePresence mode="wait" initial={false}>{generatingContent}</AnimatePresence>
             ) : (
               <>
                 {generationErrorBanner && <div className="px-3 pt-3">{generationErrorBanner}</div>}
@@ -1490,7 +1493,7 @@ export default function ExamGeneratorPage() {
               <>
                 {fullscreenToggleRow}
                 <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
-                  <AnimatePresence mode="wait">
+                  <AnimatePresence mode="wait" initial={false}>
                     {examState === "testing" && testingContent}
                     {examState === "results" && resultsContent}
                   </AnimatePresence>
