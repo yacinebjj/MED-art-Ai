@@ -778,7 +778,8 @@ export function ActiveFlashcardsDeck() {
           {current ? ` · ${current.courseTitle}` : ""}
         </p>
       </div>
-      <AiLanguageSelect compact />
+      {/* The same FR | EN segmented switch as the Studio header: one tap, both choices in view (the dropdown's flag emojis rendered as letters on Windows). */}
+      <AiLanguageSelect variant="toggle" />
       <FlashcardCoursePicker onSelectionChanged={handleSelectionChanged} />
     </div>
   );
