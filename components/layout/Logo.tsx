@@ -9,6 +9,8 @@ interface LogoProps {
    * without it. */
   variant?: "default" | "light";
   size?: "sm" | "md" | "lg" | "xl";
+  /** Overrides the mark's box size (e.g. a size that follows the viewport height). */
+  markClassName?: string;
 }
 
 const SIZE_CLASSES: Record<NonNullable<LogoProps["size"]>, string> = {
@@ -29,7 +31,7 @@ const SIZE_CLASSES: Record<NonNullable<LogoProps["size"]>, string> = {
  * source image (including the "MedArt.ai" wordmark) with no clipping,
  * letterboxing on whichever axis the 332x431 source doesn't fill exactly.
  */
-export function Logo({ className, variant = "default", size = "md" }: LogoProps) {
+export function Logo({ className, variant = "default", size = "md", markClassName }: LogoProps) {
   const isLight = variant === "light";
   return (
     <div className={cn("flex items-center", className)}>
@@ -37,6 +39,7 @@ export function Logo({ className, variant = "default", size = "md" }: LogoProps)
         className={cn(
           "relative shrink-0",
           SIZE_CLASSES[size],
+          markClassName,
           isLight && "rounded-xl bg-white/10 p-1.5 backdrop-blur-sm"
         )}
       >

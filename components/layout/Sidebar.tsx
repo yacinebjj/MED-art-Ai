@@ -263,7 +263,7 @@ function NavSections({ collapsed, pathname, tab, language }: { collapsed: boolea
           {collapsed ? (
             <div aria-hidden className="mx-auto mb-1.5 h-px w-6 bg-border/70" />
           ) : (
-            <p className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/80">{tCockpit(section.titleKey, language)}</p>
+            <p className="mb-1 px-3 text-[10px] font-bold uppercase leading-4 tracking-[0.14em] text-muted-foreground/80">{tCockpit(section.titleKey, language)}</p>
           )}
           <div className="space-y-0.5">
             {section.items.map((entry) => (
@@ -292,7 +292,8 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
   const hue = HUES[entry.hue];
 
   const className = cn(
-    "group relative flex w-full items-center gap-3 rounded-xl py-1.5 text-[13px] transition-all duration-200 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    // Vertical padding follows the window height (2-6px): every row fits on a laptop screen without a scrollbar.
+    "group relative flex w-full items-center gap-3 rounded-xl py-[clamp(0.125rem,0.55vh,0.375rem)] text-[13px] transition-all duration-200 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
     collapsed ? "justify-center px-0" : "px-2.5",
     isActive
       ? cn("font-semibold", hue.activeText)
@@ -315,10 +316,11 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
           />
         </>
       )}
-      {/* 3D icon chip: gradient body + inner top highlight + ring; on hover a gentle swell and a colored aura (no lift or tilt chasing the cursor). */}
+      {/* 3D icon chip: gradient body + inner top highlight + ring; on hover a gentle swell and a colored aura (no lift or tilt chasing the cursor).
+          24-32px, following the window height like the row padding. */}
       <span
         className={cn(
-          "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br ring-1 ring-inset",
+          "relative z-10 flex h-[clamp(1.5rem,3.6vh,2rem)] w-[clamp(1.5rem,3.6vh,2rem)] shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br ring-1 ring-inset",
           "shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_4px_10px_-4px_rgba(0,0,0,0.35)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_6px_14px_-6px_rgba(0,0,0,0.8)]",
           "transition-[transform,filter] duration-200 ease-out group-hover:scale-[1.06] motion-reduce:transform-none",
           hue.tile,
@@ -356,7 +358,7 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
 function QuotaGauge({ collapsed, language }: { collapsed: boolean; language: Language }) {
   const plan = useCockpitStore((state) => state.overview?.plan ?? null);
   if (!plan) {
-    return collapsed ? null : <div className="h-[58px] animate-pulse rounded-xl bg-white/30 dark:bg-white/5" />;
+    return collapsed ? null : <div className="h-[54px] animate-pulse rounded-xl bg-white/30 dark:bg-white/5" />;
   }
   const unlimited = plan.unlimitedThisPeriod;
   const pct = unlimited || plan.generationsCap <= 0 ? 0 : Math.min(100, Math.round((plan.generationsUsed / plan.generationsCap) * 100));
@@ -382,8 +384,8 @@ function QuotaGauge({ collapsed, language }: { collapsed: boolean; language: Lan
   }
 
   return (
-    <Link href="/dashboard/billing" className="block rounded-xl border border-white/30 bg-white/30 p-2.5 transition-colors hover:bg-white/50 dark:border-white/5 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]">
-      <div className="mb-1.5 flex items-center justify-between text-[11px]">
+    <Link href="/dashboard/billing" className="block rounded-xl border border-white/30 bg-white/30 px-2.5 py-2 transition-colors hover:bg-white/50 dark:border-white/5 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]">
+      <div className="mb-1 flex items-center justify-between text-[11px]">
         <span className="font-semibold text-foreground">{tCockpit("quotaTitle", language)}</span>
         <span className="font-medium text-muted-foreground">{plan.label}</span>
       </div>
@@ -432,7 +434,8 @@ function SyncStatus({ collapsed, language }: { collapsed: boolean; language: Lan
       aria-label={label}
       className={cn(
         "flex items-center gap-2 rounded-lg py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground",
-        collapsed ? "mx-auto justify-center px-2" : "w-full px-2"
+        // Shares its row with the rail toggle (Sidebar below).
+        collapsed ? "mx-auto justify-center px-2" : "min-w-0 flex-1 px-2"
       )}
     >
       <Icon className={cn("h-3.5 w-3.5 shrink-0", tone, status === "syncing" && "animate-spin")} />
@@ -451,9 +454,10 @@ function SyncStatus({ collapsed, language }: { collapsed: boolean; language: Lan
 /**
  * "Medical Cockpit 3.0" — desktop-only floating glass sidebar (lg+); mobile
  * uses MobileBottomNav. Thematic sections (Cockpit / Lab / Révision /
- * Communauté — Abonnement & Paramètres live in the account menu at the
- * bottom, never as nav rows), an icon-only rail mode remembered per device, and
- * live widgets at the bottom (AI quota, data sync). Lab tools and the
+ * Communauté — Abonnement & Paramètres live in the top bar's account menu,
+ * never as nav rows), an icon-only rail mode remembered per device, and
+ * live widgets at the bottom (AI quota, data sync). Sized to the window
+ * height, so it never needs a scrollbar on a laptop screen. Lab tools and the
  * evaluation entry open the course/module picker (LabLauncher), since they
  * work on a specific course.
  */
@@ -472,22 +476,27 @@ export function Sidebar() {
     <aside className={cn("hidden h-full shrink-0 transition-[width] duration-300 ease-out lg:block", isDesktopSidebarOpen ? width : "w-0")}>
       <div className={cn("h-full overflow-hidden transition-[width,opacity] duration-300 ease-out", width, !isDesktopSidebarOpen && "opacity-0")}>
         <div className={cn("glass-panel shadow-glass dark:shadow-glass-dark flex h-full flex-col rounded-3xl transition-[width] duration-300 ease-out", width)}>
-          <div className={cn("flex shrink-0 items-center", collapsed ? "h-20 justify-center" : "h-24 px-5")}>
-            {collapsed ? <AnimatedBrandMark size="sm" /> : <Logo size="lg" />}
+          {/* Fits the window instead of scrolling: the header, the logo, the
+              rows (NavRow) and the gaps all follow the window height between a
+              compact size (short laptop screens) and the full one (1080p and up). */}
+          <div className={cn("flex shrink-0 items-center", collapsed ? "h-[clamp(3.25rem,9vh,5rem)] justify-center" : "h-[clamp(3.25rem,9vh,6rem)] px-5")}>
+            {collapsed ? <AnimatedBrandMark size="sm" /> : <Logo size="lg" markClassName="h-[clamp(2.5rem,7vh,5rem)] w-[clamp(2.5rem,7vh,5rem)]" />}
           </div>
 
-          <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-3 pb-2 [scrollbar-color:rgba(100,116,139,0.35)_transparent] [scrollbar-width:thin]" aria-label="Navigation principale">
+          {/* On a window too short for everything the list still scrolls (wheel, touch, keyboard), with no scrollbar track drawn. */}
+          <nav className="min-h-0 flex-1 space-y-[clamp(0.375rem,1.6vh,1rem)] overflow-y-auto overflow-x-hidden px-3 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Navigation principale">
             <Suspense fallback={<NavSections collapsed={collapsed} pathname={pathname} tab={null} language={language} />}>
               <NavSectionsWithTab collapsed={collapsed} pathname={pathname} language={language} />
             </Suspense>
           </nav>
 
-          <div className="shrink-0 space-y-1.5 border-t border-white/20 p-3 dark:border-white/5">
+          <div className="shrink-0 space-y-1.5 border-t border-white/20 p-[clamp(0.5rem,1.4vh,0.75rem)] dark:border-white/5">
             <QuotaGauge collapsed={collapsed} language={language} />
-            <SyncStatus collapsed={collapsed} language={language} />
 
-            {/* The account (photo, Abonnement, Paramètres, Déconnexion) lives in the top bar's menu only. */}
-            <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-end")}>
+            {/* The sync state and the rail toggle share one row — no near-empty row left at
+                the bottom. The account (photo, Abonnement, Paramètres, Déconnexion) lives in the top bar's menu. */}
+            <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
+              <SyncStatus collapsed={collapsed} language={language} />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
