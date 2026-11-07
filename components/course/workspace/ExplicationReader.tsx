@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Lora, Plus_Jakarta_Sans } from "next/font/google";
 import { AnimatePresence, motion } from "framer-motion";
@@ -411,7 +411,20 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
  * distraction-free "Mode Lecture Zen" that lifts the lesson into a centered
  * full-screen canvas above every sidebar.
  */
-export function ExplicationReader({ markdown, footer }: { markdown: string; footer?: ReactNode }) {
+/** Same element type, key and (shallowly) the same props: the footer the workspace re-creates on every render is still "the same footer". */
+function sameElement(a: ReactNode, b: ReactNode): boolean {
+  if (a === b) return true;
+  if (!isValidElement(a) || !isValidElement(b) || a.type !== b.type || a.key !== b.key) return false;
+  const propsA = a.props as Record<string, unknown>;
+  const propsB = b.props as Record<string, unknown>;
+  const keys = Object.keys(propsA);
+  return keys.length === Object.keys(propsB).length && keys.every((key) => Object.is(propsA[key], propsB[key]));
+}
+
+// Memoized: the module workspace re-renders on every keystroke in the
+// Co-pilot and every sync tick; an open lesson (toolbar, Sommaire, reader)
+// has nothing to redo then.
+export const ExplicationReader = memo(function ExplicationReader({ markdown, footer }: { markdown: string; footer?: ReactNode }) {
   const [prefs, setPrefsState] = useState<ReaderPrefs>(DEFAULT_PREFS);
   const [zen, setZen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -490,4 +503,4 @@ export function ExplicationReader({ markdown, footer }: { markdown: string; foot
         )}
     </>
   );
-}
+}, (prev, next) => prev.markdown === next.markdown && sameElement(prev.footer, next.footer));

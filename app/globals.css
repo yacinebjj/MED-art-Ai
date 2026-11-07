@@ -796,6 +796,31 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* LONG LESSONS (components/reader/MedicalMarkdown.tsx, 12 000 characters and
+   more — an Explication can pass 100 000): the browser styles, lays out and
+   paints only the blocks near the screen. Every paragraph, list, callout and
+   table away from it keeps a placeholder height until it comes close, then
+   its real one (remembered once it has been shown). A phone no longer lays
+   out a whole lesson on every change — opening it, each chunk mounted, each
+   measurement of the reading position — which froze long courses.
+   The DOM and its text are untouched: highlights, the Sommaire, search in
+   the page and the reading position still see the whole lesson. Headings
+   stay out (the h2's accent bar sits outside its box, which containment
+   would clip). Sibling margins still collapse: containment only stops a
+   block's own children from collapsing through it. */
+.medical-markdown[data-long] > :is(p, ul, ol, aside, blockquote, pre, table, figure, div) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 7em;
+}
+
+.medical-markdown[data-long] > :is(ul, ol) {
+  contain-intrinsic-size: auto 12em;
+}
+
+.medical-markdown[data-long] > :is(aside, div) {
+  contain-intrinsic-size: auto 10em;
+}
+
 /* Browsers without dynamic viewport units (Chrome before 108, Safari before
    15.4, older Android browsers) drop every `100dvh` declaration: a full-screen
    layout (the dashboard shell, the module workspace, Examen, Résumé) then

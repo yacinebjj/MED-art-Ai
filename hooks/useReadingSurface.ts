@@ -103,7 +103,10 @@ export function useReadingSurface(element: HTMLElement | null, { key, highlights
       // <mark> fallback: only on settled content (never while React is still streaming text into it).
       if (!readyRef.current) return;
       const wanted = new Set(items.map((highlight) => highlight.id));
-      markedHighlightIds(element).forEach((id) => {
+      const marked = markedHighlightIds(element);
+      // Nothing saved and nothing painted: no need to index the whole surface on every change.
+      if (items.length === 0 && marked.size === 0) return;
+      marked.forEach((id) => {
         if (!wanted.has(id)) unwrapMarks(element, id);
       });
       const present = markedHighlightIds(element);

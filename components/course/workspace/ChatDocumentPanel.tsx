@@ -49,6 +49,7 @@ import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
 import { useTextSelection } from "@/hooks/useTextSelection";
 import { useReadingSurface } from "@/hooks/useReadingSurface";
+import { useThreadWindow } from "@/hooks/useThreadWindow";
 import { readingKey } from "@/lib/reading/keys";
 import { useVoiceDictation } from "@/hooks/useVoiceDictation";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -504,6 +505,22 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   // Follow the stream only while the student is already at the bottom —
   // scrolling up to re-read must not be yanked back down on every token.
   const stickToBottomRef = useRef(true);
+  const threadWindow = useThreadWindow(messages);
+  // Older messages mounted above (useThreadWindow) must not move the thread:
+  // pinned to the latest message when the student is there, else the same
+  // messages stay under their eyes. overflow-anchor is off on the thread, so
+  // this is the only correction, the same on every engine (Safari has none).
+  const threadMeasureRef = useRef({ firstId: messages[0]?.id ?? null, from: threadWindow.from, height: 0 });
+  useLayoutEffect(() => {
+    const thread = scrollRef.current;
+    const firstId = messages[0]?.id ?? null;
+    const previous = threadMeasureRef.current;
+    if (thread && previous.firstId === firstId && threadWindow.from < previous.from) {
+      if (stickToBottomRef.current) thread.scrollTop = thread.scrollHeight;
+      else thread.scrollTop += thread.scrollHeight - previous.height;
+    }
+    threadMeasureRef.current = { firstId, from: threadWindow.from, height: thread?.scrollHeight ?? 0 };
+  });
   // Reading-scroll tracking (phones, onReadingScroll): only scrolls the
   // student drives by hand count — the thread following a streaming reply
   // must not hide the page's tab bar on its own.
@@ -922,16 +939,20 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
               onTouchStart={markScrollIntent}
               onTouchMove={markScrollIntent}
               onWheel={markScrollIntent}
-              className="copilot-thread-fade h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
+              // overflow-anchor: none — older messages mounting above are compensated by hand (threadMeasureRef).
+              className="copilot-thread-fade h-full w-full max-w-full overflow-y-auto overflow-x-hidden overscroll-none [-ms-overflow-style:none] [overflow-anchor:none] [scrollbar-width:none] [touch-action:pan-y_pinch-zoom] [&::-webkit-scrollbar]:hidden"
             >
               <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 px-3 pb-[calc(var(--copilot-composer-h,0px)+1rem)] pt-[calc(var(--copilot-header-h,0px)+1rem)] sm:px-5 md:px-6 md:pb-[calc(var(--copilot-composer-h,0px)+1.5rem)] md:pt-[calc(var(--copilot-header-h,0px)+1.5rem)]">
                 <AnimatePresence initial={false}>
-                  {messages.map((message, index) => {
+                  {messages.slice(threadWindow.from).map((message, offset) => {
+                    const index = threadWindow.from + offset;
+                    // History (mounted progressively above) simply appears; a message that just arrived rises in.
+                    const entrance = index < threadWindow.animateFrom ? false : { opacity: 0, y: 16 };
                     if (message.role === "user") {
                       return (
                         <motion.div
                           key={message.id}
-                          initial={{ opacity: 0, y: 16 }}
+                          initial={entrance}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                           className="flex w-full min-w-0 justify-end"
@@ -956,7 +977,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                     return (
                       <motion.div
                         key={message.id}
-                        initial={{ opacity: 0, y: 16 }}
+                        initial={entrance}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
                         className="flex w-full min-w-0 flex-col items-start"

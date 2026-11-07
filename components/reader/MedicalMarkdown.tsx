@@ -270,7 +270,12 @@ export const MedicalMarkdown = memo(function MedicalMarkdown({ markdown, classNa
   const chunks = useMemo(() => (markdown.length >= PROGRESSIVE_MIN_CHARS ? splitMarkdownChunks(markdown, CHUNK_TARGET_CHARS) : [markdown]), [markdown]);
   const visible = useProgressiveCount(markdown, chunks.length);
   return (
-    <div dir="auto" className={cn("medical-markdown break-words text-slate-800 [&>*:first-child]:mt-0 [&>h2:first-child]:border-t-0 [&>h2:first-child]:pt-0 [line-height:var(--reader-leading,1.85)] dark:text-slate-200", className)}>
+    <div
+      dir="auto"
+      // data-long: only the blocks near the screen are laid out and painted (app/globals.css, "LONG LESSONS").
+      data-long={chunks.length > 1 ? "" : undefined}
+      className={cn("medical-markdown break-words text-slate-800 [&>*:first-child]:mt-0 [&>h2:first-child]:border-t-0 [&>h2:first-child]:pt-0 [line-height:var(--reader-leading,1.85)] dark:text-slate-200", className)}
+    >
       {chunks.slice(0, visible).map((chunk, index) => (
         <Fragment key={index}>
           {index > 0 && "\n"}

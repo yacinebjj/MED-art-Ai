@@ -87,25 +87,66 @@ function bestOccurrence(full: string, quote: Pick<TextQuote, "text" | "start" | 
   return { start: best.start, end: best.start + text.length };
 }
 
+/** Whether the UTF-16 unit `code` is whitespace for JavaScript's `\s`. */
+function isWhitespaceCode(code: number): boolean {
+  if (code <= 0x20) return code === 0x20 || (code >= 0x09 && code <= 0x0d);
+  if (code < 0xa0) return false;
+  return (
+    code === 0xa0 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000 ||
+    code === 0xfeff
+  );
+}
+
+interface CollapsedText {
+  text: string;
+  /** Where each kept character came from in the uncollapsed text. */
+  origin: Int32Array;
+}
+
+// One repaint locates every saved highlight of a surface in the same text, and
+// each one not found as is (a lesson still mounting, an edited one) used to
+// collapse the whole lesson again, character by character, with a regex test
+// per character — seconds on a phone for a long course with a few highlights.
+// The last collapsed text is kept for the next passage of the same text.
+let lastCollapsedSource: string | null = null;
+let lastCollapsed: CollapsedText | null = null;
+
 /** `value` with every whitespace run collapsed to one space, plus where each kept character came from. */
-function collapseWhitespace(value: string): { text: string; origin: number[] } {
-  let text = "";
-  const origin: number[] = [];
+function collapseWhitespace(value: string): CollapsedText {
+  if (lastCollapsed && value === lastCollapsedSource) return lastCollapsed;
+  const parts: string[] = [];
+  const origin = new Int32Array(value.length);
+  let kept = 0;
+  let runStart = 0;
   let inSpace = false;
   for (let i = 0; i < value.length; i++) {
-    const ch = value[i];
-    if (/\s/.test(ch)) {
+    if (isWhitespaceCode(value.charCodeAt(i))) {
       if (inSpace) continue;
+      // The plain run before it as is, then one space for the whole whitespace run.
+      if (i > runStart) parts.push(value.slice(runStart, i));
+      parts.push(" ");
       inSpace = true;
-      text += " ";
-      origin.push(i);
+      origin[kept++] = i;
     } else {
-      inSpace = false;
-      text += ch;
-      origin.push(i);
+      if (inSpace) {
+        inSpace = false;
+        runStart = i;
+      }
+      origin[kept++] = i;
     }
   }
-  return { text, origin };
+  if (!inSpace && value.length > runStart) parts.push(value.slice(runStart));
+  const collapsed: CollapsedText = { text: parts.join(""), origin: origin.subarray(0, kept) };
+  lastCollapsedSource = value;
+  lastCollapsed = collapsed;
+  return collapsed;
 }
 
 function collapse(value: string): string {
