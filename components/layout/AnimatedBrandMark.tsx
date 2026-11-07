@@ -36,8 +36,8 @@ export function AnimatedBrandMark({
       />
 
       {/* CSS rotation, not framer-motion: an infinite JS animation ticks on
-          the main thread every frame (this mark is always visible in the
-          mobile top bar), while a CSS transform animation runs on the
+          the main thread every frame (this mark stays on screen in the
+          collapsed sidebar), while a CSS transform animation runs on the
           compositor and costs the page nothing. */}
       <div className="absolute inset-0 animate-[spin_6s_linear_infinite] motion-reduce:animate-none" aria-hidden>
         <span className={cn("absolute left-1/2 top-0 -translate-x-1/2 rounded-full bg-cyan-400 shadow-[0_0_8px_2px_rgba(34,211,238,0.7)]", dims.dot)} />

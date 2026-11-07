@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft, Link2 } from "lucide-react";
-import { AnimatedBrandMark } from "@/components/layout/AnimatedBrandMark";
 import { TopbarCluster } from "@/components/layout/Topbar";
 import { NightModeOverlay } from "@/components/layout/cockpit/ThemeModeSwitcher";
 import { useToast } from "@/components/ui/Toast";
@@ -67,7 +66,7 @@ export function WorkspaceTopbar({ title, actions }: WorkspaceTopbarProps) {
           >
             <ArrowLeft className="h-[18px] w-[18px]" />
           </Link>
-          <AnimatedBrandMark size="sm" className="hidden sm:flex" />
+          {/* No logo in the bar (product order 2026-11-07): back arrow, then the title. */}
           <div className="flex min-w-0 items-center gap-1">
             <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
               {title || tWorkspaceTopbar("courseFallbackTitle", language)}

@@ -27,7 +27,6 @@ import {
   Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Logo } from "@/components/layout/Logo";
 import { PomodoroPill } from "@/components/layout/PomodoroPill";
 import { useToast } from "@/components/ui/Toast";
 import { usePomodoro } from "@/providers/PomodoroProvider";
@@ -191,9 +190,7 @@ export function WorkspaceCommandBar({
           </TooltipTrigger>
           <TooltipContent>Retour au tableau de bord</TooltipContent>
         </Tooltip>
-        <Link href="/dashboard" className="hidden shrink-0 transition-transform duration-300 hover:scale-105 lg:flex" aria-label="MedArt — accueil">
-          <Logo size="sm" />
-        </Link>
+        {/* No logo in the bar (product order 2026-11-07): back arrow, then the breadcrumb. */}
         <nav aria-label="Fil d'Ariane" className="flex min-w-0 items-center gap-1 text-sm">
           <Link href="/dashboard" className="hidden shrink-0 text-muted-foreground transition-colors hover:text-foreground md:inline">
             Modules

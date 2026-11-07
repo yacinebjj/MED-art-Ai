@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { Settings, LogOut, PlayCircle, CreditCard, Crown, Cpu } from "lucide-react";
-import { AnimatedBrandMark } from "./AnimatedBrandMark";
 import { PomodoroChip, PomodoroPill } from "./PomodoroPill";
 import { THEME_MODE_ICONS, THEME_MODE_LABELS, ThemeModeSwitcher, useThemeMode, type ThemeMode } from "./cockpit/ThemeModeSwitcher";
 import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
@@ -317,8 +316,8 @@ export function Topbar({ title, className }: { title: string; className?: string
         className
       )}
     >
+      {/* No logo in the bar (product order 2026-11-07): the brand sits in the sidebar, once. */}
       <div className="flex min-w-0 items-center gap-3 lg:w-48 lg:shrink-0 xl:w-56">
-        <AnimatedBrandMark size="sm" className="lg:hidden" />
         <div className="flex min-w-0 items-center gap-1">
           <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">{title}</h1>
           <TourReplayButton className="h-8 w-8" />
