@@ -146,7 +146,9 @@ function friendlyGenerationError(raw: unknown, fallback: string): string {
   return raw;
 }
 
-const panelShellClasses = "cyber-glass flex min-w-0 max-w-full flex-col overflow-hidden rounded-3xl";
+// Phones: the panel runs to the screen's edges (no side frame); from sm a rounded glass card.
+// `!` because .cyber-glass's own `border` shorthand (components/cyber/cyber.css) loads after the utilities.
+const panelShellClasses = "cyber-glass flex min-w-0 max-w-full flex-col overflow-hidden rounded-none max-sm:!border-x-0 max-sm:!border-b-0 sm:rounded-3xl";
 
 const RESULTS_STAGGER_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
 const RESULT_CARD_VARIANTS = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
@@ -943,14 +945,15 @@ export default function ExamGeneratorPage() {
               if (info.offset.x < -80) goToQuestion(currentQuestionIndex + 1);
               else if (info.offset.x > 80) goToQuestion(currentQuestionIndex - 1);
             }}
-            className="cursor-grab touch-pan-y rounded-2xl border border-white/[0.08] cyber-surface-deep p-3 shadow-[0_20px_60px_-30px_rgba(34,211,238,0.5)] active:cursor-grabbing sm:p-6"
+            // No card frame: the question sits straight on the panel, using its full width.
+            className="cursor-grab touch-pan-y px-1 py-1 active:cursor-grabbing sm:px-2"
           >
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <Badge variant="primary">Q{currentQuestionIndex + 1} / {questions.length}</Badge>
               <ExamFormatBadges kind={currentKind} />
               {answers[currentQuestion.id] && <Badge variant="success">Répondue</Badge>}
             </div>
-            <p className="mb-4 break-words text-base font-medium leading-relaxed text-white [overflow-wrap:anywhere]">{currentQuestion.vignette}</p>
+            <p className="mb-5 break-words text-[1.0625rem] font-medium leading-[1.7] text-white [overflow-wrap:anywhere] sm:text-lg lg:text-xl lg:leading-[1.65]">{currentQuestion.vignette}</p>
             {currentKind.propositions && <ExamPropositionsList propositions={currentKind.propositions} className="mb-4" />}
             <p className="mb-2 text-xs font-semibold text-cyan-200">{examFormatHint(currentKind)}</p>
             <p className="mb-3 hidden text-[10px] font-semibold text-slate-500 sm:block">
@@ -967,7 +970,7 @@ export default function ExamGeneratorPage() {
                   <label
                     key={opt.label}
                     className={cn(
-                      "relative flex min-h-12 min-w-0 cursor-pointer items-center gap-3 overflow-hidden rounded-xl border p-3 text-sm transition-[transform,border-color,background-color,box-shadow] duration-200 active:scale-[0.99]",
+                      "relative flex min-h-12 min-w-0 cursor-pointer items-center gap-3 overflow-hidden rounded-xl border p-3 text-[0.98rem] leading-relaxed transition-[transform,border-color,background-color,box-shadow] duration-200 active:scale-[0.99] sm:p-3.5 sm:text-base lg:text-[1.0625rem]",
                       selected
                         ? "border-cyan-300/80 bg-cyan-400/10 shadow-[0_0_26px_-6px_rgba(34,211,238,0.7)]"
                         : "border-white/[0.08] bg-slate-950/40 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-white/[0.03]"
@@ -1045,9 +1048,9 @@ export default function ExamGeneratorPage() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      // Bottom: the fixed submit bar below (1rem + a 3rem button + 1rem + the safe area) plus 0.75rem of
-      // air — at every width: `sm:p-6` alone used to put the last question behind that bar.
-      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4 sm:p-6 sm:pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
+      // Bottom: exactly the fixed submit bar below (1rem + a 3rem button + 1rem + the safe area) plus
+      // 0.5rem of air — no more — at every width. Sides: a slim gutter, the question gets the width.
+      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pt-4 lg:px-8"
     >
       {testingInnerContent}
     </motion.div>
@@ -1269,7 +1272,7 @@ export default function ExamGeneratorPage() {
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <ExamFormatBadges kind={kind} className="mb-2" />
-                    <p className="min-w-0 break-words text-sm font-medium leading-relaxed text-slate-100 [overflow-wrap:anywhere]">
+                    <p className="min-w-0 break-words text-[0.98rem] font-medium leading-relaxed text-slate-100 [overflow-wrap:anywhere] sm:text-base lg:text-[1.0625rem]">
                       <span className="mr-2 font-black text-cyan-300">Q{index + 1}.</span>
                       {q.vignette}
                     </p>
@@ -1289,7 +1292,7 @@ export default function ExamGeneratorPage() {
                       <div
                         key={opt.label}
                         className={cn(
-                          "flex min-h-12 items-center gap-3 rounded-xl border p-3 text-sm",
+                          "flex min-h-12 items-center gap-3 rounded-xl border p-3 text-[0.95rem] leading-relaxed sm:text-[0.98rem] lg:text-base",
                           isUserChoice && opt.isCorrect && "border-emerald-400/70 bg-emerald-500/10 shadow-[0_0_20px_-8px_rgba(52,211,153,0.7)]",
                           isUserChoice && !opt.isCorrect && "border-rose-400/70 bg-rose-500/10 shadow-[0_0_20px_-8px_rgba(251,113,133,0.7)]",
                           !isUserChoice && opt.isCorrect && "border-dashed border-emerald-400/60",
@@ -1316,7 +1319,7 @@ export default function ExamGeneratorPage() {
                   <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-sky-300">
                     <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
                   </p>
-                  <ul className="space-y-1.5 break-words text-sm text-slate-200 [overflow-wrap:anywhere]">
+                  <ul className="space-y-2 break-words text-[0.95rem] leading-relaxed text-slate-200 [overflow-wrap:anywhere] sm:text-[0.98rem] lg:text-base">
                     {q.options.map((opt) => (
                       <li key={opt.label}>
                         <span className="font-bold text-white">{opt.label}.</span> {opt.explanation}
@@ -1380,7 +1383,8 @@ export default function ExamGeneratorPage() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-[calc(3rem+env(safe-area-inset-bottom))] pt-4 sm:p-6"
+      // A slim gutter for the width, and only the safe area (plus a little air) below the last card.
+      className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pt-4 lg:px-8"
     >
       {resultsInnerContent}
     </motion.div>
@@ -1405,7 +1409,8 @@ export default function ExamGeneratorPage() {
     // Point 2 fix — explicit w-full max-w-full alongside the existing
     // overflow-hidden, matching the sibling workspace/module page's own
     // identical root treatment.
-    <div className="cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
+    // cyber-stage-plain (components/cyber/cyber.css): the stage colour without the grid pattern or panel blur.
+    <div className="cyber-stage cyber-stage-plain relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
       <WorkspaceTopbar title="Générateur d'Examen" actions={<TourReplayButton tour={examState === "results" ? "exam-results" : "exam"} className="h-8 w-8" />} />
 
       {/* Mobile-first UX rework — below `md`, aside/main never render side
@@ -1426,11 +1431,12 @@ export default function ExamGeneratorPage() {
         </div>
       )}
 
-      <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-4 overflow-hidden p-3 sm:p-4 md:flex-row">
+      {/* Tighter frame (product order 2026-11-07): the exam gets the width — phones run edge to edge, larger screens keep a slim gutter. */}
+      <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden pt-2 sm:p-3 md:flex-row">
         {isDesktopOrTablet ? (
           <>
             {/* Panneau Gauche — Sources + Historique (desktop) */}
-            <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-72 xl:w-80")}>
+            <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-64 xl:w-72")}>
               {courseHeaderBlock}
               <ReferenceExamUploader styleProfile={styleProfile} onStyleProfileChange={handleStyleProfileChange} disabled={isGenerating} />
               {/* min-h-0 — a flex child with overflow-y-auto silently
@@ -1555,7 +1561,7 @@ export default function ExamGeneratorPage() {
         onClose={() => setIsExamFullscreen(false)}
         title={examState === "results" ? "Résultats de l'examen" : examState === "generating" ? "Génération de l'examen…" : "Épreuve Clinique"}
       >
-        <div className="cyber-stage min-h-full max-w-full overflow-x-hidden rounded-none border-0 p-4 text-foreground sm:p-6">
+        <div className="cyber-stage cyber-stage-plain min-h-full max-w-full overflow-x-hidden rounded-none border-0 px-3 py-4 text-foreground sm:px-6 sm:py-5 lg:px-10">
           <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
             {examState === "testing" ? testingInnerContent : examState === "results" ? resultsInnerContent : generatingContent}
           </LocalErrorBoundary>

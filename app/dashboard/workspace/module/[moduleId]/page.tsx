@@ -954,7 +954,7 @@ export default function ModuleWorkspacePage() {
           invisible on mobile, not a missing bottom-nav offset. Nothing
           floats over this panel, so its bottom padding only has to keep the
           last line above the home indicator (safe area) with some air. */}
-      <div ref={setInlineOutputEl} className="min-h-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none px-1 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-2 lg:px-8">
+      <div ref={setInlineOutputEl} className="min-h-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-x-none px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 sm:px-5 sm:pt-2 lg:px-8">
         {outputBody}
       </div>
     </div>
@@ -969,7 +969,8 @@ export default function ModuleWorkspacePage() {
     // actually needs it (see the résumé view's own overflow-x-auto table
     // wrappers). Matches app/dashboard/module/[id]/exam/page.tsx's own
     // identical root treatment.
-    <div className="cyber-stage relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
+    // cyber-stage-plain (components/cyber/cyber.css): the stage colour without the grid pattern or panel blur.
+    <div className="cyber-stage cyber-stage-plain relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
       <WorkspaceTopbar title={moduleTitle || tWorkspaceSynthesis("defaultModuleTitle", language)} actions={<TourReplayButton className="h-8 w-8" />} />
 
       {/* Mobile-first UX rework — below `md`, aside/main never render side
@@ -992,7 +993,7 @@ export default function ModuleWorkspacePage() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-2 sm:p-3 md:flex-row">
         {isDesktopOrTablet ? (
           <>
             {/* ── Sources sidebar (desktop) ───────────────────────────── */}

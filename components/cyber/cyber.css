@@ -115,6 +115,20 @@
   display: none;
 }
 
+/* Plain stage (Examen de module, Résumé de module): the stage's own colour
+   and soft glows stay, the 48px grid pattern goes. Its glass panels drop the
+   backdrop blur too: with nothing sharp behind them it made no visible
+   difference, but a full-height blurred panel is re-composited on every frame
+   (scroll, animations) — the lag students felt on these two pages. */
+.cyber-stage.cyber-stage-plain::before {
+  display: none;
+}
+
+.cyber-stage.cyber-stage-plain .cyber-glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 /* ── Glass surfaces ──────────────────────────────────────────────────── */
 .cyber-glass {
   position: relative;
