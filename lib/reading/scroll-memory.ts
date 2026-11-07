@@ -35,6 +35,8 @@ const BLOCK_SELECTOR = "p,li,h1,h2,h3,h4,h5,h6,blockquote,pre,table,tr,dt,dd,fig
 const HEAD_CHARS = 48;
 /** Fewer blocks than this is a loader or a placeholder, not something being read: never recorded. */
 const MIN_BLOCKS_TO_RECORD = 3;
+/** How far (in blocks) a moved paragraph is looked for around its saved place. */
+const HEAD_SEARCH_WINDOW = 300;
 /** Pixel offsets are trusted as is only when the layout differs by no more than this. */
 const SAME_LAYOUT_TOLERANCE_PX = 2;
 
@@ -96,9 +98,25 @@ function headOf(el: Element): string {
   return (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, HEAD_CHARS);
 }
 
+/** Blocks to anchor on, in document order — without anything inside a `data-reading-skip` element (a reader's toolbar). */
 function anchorBlocks(surface: HTMLElement): HTMLElement[] {
-  return Array.from(surface.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)).filter((el) => !el.closest(`[${READING_SKIP_ATTRIBUTE}]`));
+  const blocks = Array.from(surface.querySelectorAll<HTMLElement>(BLOCK_SELECTOR));
+  const skipped = Array.from(surface.querySelectorAll<HTMLElement>(`[${READING_SKIP_ATTRIBUTE}]`));
+  // One containment test per skipped container (usually one toolbar), not an ancestor walk per block.
+  return skipped.length === 0 ? blocks : blocks.filter((el) => !skipped.some((skip) => skip.contains(el)));
 }
+
+/** First block, from `from` on, that reaches below `topLine` — the one being read. */
+function blockAtLine(blocks: HTMLElement[], from: number, topLine: number, maxSteps: number): { index: number; rect: DOMRect } | null {
+  for (let i = from; i < blocks.length && i < from + maxSteps; i++) {
+    const rect = blocks[i].getBoundingClientRect();
+    if (rect.height > 0 && rect.bottom > topLine) return { index: i, rect };
+  }
+  return null;
+}
+
+/** Steps walked forward from the binary search's landing point before falling back to a full scan. */
+const FORWARD_STEPS = 64;
 
 /** Where the student is now in `surface`, or null when it cannot be measured (detached, not laid out). */
 export function capturePosition(surface: HTMLElement, scroller: HTMLElement): ReadingPosition | null {
@@ -111,15 +129,28 @@ export function capturePosition(surface: HTMLElement, scroller: HTMLElement): Re
   let within = 0;
   const blocks = anchorBlocks(surface);
   if (blocks.length < MIN_BLOCKS_TO_RECORD) return null;
-  for (let i = 0; i < blocks.length; i++) {
-    const rect = blocks[i].getBoundingClientRect();
-    if (rect.height <= 0) continue;
-    if (rect.bottom > topLine) {
-      block = i;
-      head = headOf(blocks[i]);
-      within = Math.min(1, Math.max(0, (topLine - rect.top) / rect.height));
-      break;
+  // In normal flow, blocks in document order never start higher than the one
+  // before them: a binary search finds the last one starting above the line in
+  // ~log2(n) measurements, instead of measuring every block above the student
+  // on every scroll frame (thousands, deep in a long lesson).
+  let lo = 0;
+  let hi = blocks.length - 1;
+  let landing = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (blocks[mid].getBoundingClientRect().top <= topLine) {
+      landing = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
     }
+  }
+  // Unusual layouts (columns, floats) can break that order: the full scan stays as the fallback.
+  const found = blockAtLine(blocks, landing, topLine, FORWARD_STEPS) ?? blockAtLine(blocks, 0, topLine, blocks.length);
+  if (found) {
+    block = found.index;
+    head = headOf(blocks[found.index]);
+    within = Math.min(1, Math.max(0, (topLine - found.rect.top) / found.rect.height));
   }
   const maxScroll = Math.max(0, metrics.height - metrics.client);
   return {
@@ -160,9 +191,13 @@ export function restorePosition(surface: HTMLElement, scroller: HTMLElement, pos
     if (direct && headOf(direct) === position.head) {
       target = direct;
     } else if (position.head) {
-      // The paragraph moved (content edited above it): the same text nearest its old place.
+      // The paragraph moved (content edited above it): the same text nearest
+      // its old place — looked for nearby only, never by reading the text of
+      // every block of a long lesson on each attempt.
       let bestDistance = Infinity;
-      for (let i = 0; i < blocks.length; i++) {
+      const from = Math.max(0, position.block - HEAD_SEARCH_WINDOW);
+      const to = Math.min(blocks.length, position.block + HEAD_SEARCH_WINDOW + 1);
+      for (let i = from; i < to; i++) {
         if (headOf(blocks[i]) !== position.head) continue;
         const distance = Math.abs(i - position.block);
         if (distance < bestDistance) {

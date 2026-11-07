@@ -61,8 +61,15 @@
   transition: opacity 0.3s ease;
 }
 
-.syn-card:focus-within::before,
+/* An open fiche shows its accent ring still; only the card being pointed at
+   or focused spins it. Every open fiche spinning at once (all of them, by
+   default, on a Résumé global) repainted dozens of gradient rings on every
+   frame for as long as the page was open — the lag felt on PC. */
 .syn-card[data-open="true"]::before {
+  opacity: 1;
+}
+
+.syn-card:focus-within::before {
   opacity: 1;
   animation: syn-spin 4s linear infinite;
 }

@@ -1,11 +1,19 @@
 "use client";
 
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Components } from "react-markdown";
 import { AlertTriangle, BadgeCheck, ExternalLink, Lightbulb, Pill, ScanSearch, Siren, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { normalizeCallouts } from "@/lib/markdown";
-import { citationIndexFromHref, extractCitations, locateCitation, type ChatCitation, type CitationSourceText } from "@/lib/chat-citations";
+import {
+  citationIndexFromHref,
+  extractCitations,
+  locateCitationAsync,
+  peekCitationLocation,
+  type ChatCitation,
+  type CitationLocation,
+  type CitationSourceText,
+} from "@/lib/chat-citations";
 import { StreamedMarkdown, type RehypePlugin } from "@/components/assistant/StreamedMarkdown";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 
@@ -168,14 +176,39 @@ function CitationChip({
 }) {
   const [open, setOpen] = useState(false);
   const [lastPointer, setLastPointer] = useState<string>("mouse");
-  // Recomputed only when the chip or the loaded sources change — the
-  // normalization pass over a long course is the expensive part.
+  // Checked OFF the render path: the normalization of a long course is the
+  // expensive part, and doing it while the chat rendered froze a phone for
+  // seconds (every past reply with a citation re-checks on mount). A result
+  // already known shows at once; otherwise the chip says "Vérification…"
+  // until the sliced, shared check (lib/chat-citations.ts) answers.
   const { sourceTitle, quote } = citation;
-  const location = useMemo(
-    () => (verify ? locateCitation({ index: 0, sourceTitle, quote }, sources) : null),
-    [verify, sourceTitle, quote, sources]
+  const [location, setLocation] = useState<CitationLocation | null | undefined>(() =>
+    verify ? peekCitationLocation({ index: 0, sourceTitle, quote }, sources) : undefined
   );
-  const status = !verify ? "pending" : !location ? "missing" : location.partial ? "partial" : "verified";
+  useEffect(() => {
+    if (!verify) {
+      setLocation(undefined);
+      return;
+    }
+    const known = peekCitationLocation({ index: 0, sourceTitle, quote }, sources);
+    if (known !== undefined) {
+      setLocation(known);
+      return;
+    }
+    let cancelled = false;
+    setLocation(undefined);
+    void locateCitationAsync({ index: 0, sourceTitle, quote }, sources)
+      .then((found) => {
+        if (!cancelled) setLocation(found);
+      })
+      .catch(() => {
+        if (!cancelled) setLocation(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [verify, sourceTitle, quote, sources]);
+  const status = !verify ? "pending" : location === undefined ? "checking" : !location ? "missing" : location.partial ? "partial" : "verified";
 
   function handleClick() {
     // Touch has no hover: the first tap previews, a second tap opens.
@@ -197,7 +230,7 @@ function CitationChip({
           aria-label={`Citation ${citation.index} — ${citation.sourceTitle}`}
           className={cn(
             "mx-0.5 inline-flex h-[18px] min-w-[18px] -translate-y-0.5 items-center justify-center rounded-md px-1 align-baseline text-[10.5px] font-semibold leading-none no-underline transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40",
-            status === "pending" && "bg-black/[0.06] text-slate-500 dark:bg-white/[0.1] dark:text-white/60",
+            (status === "pending" || status === "checking") && "bg-black/[0.06] text-slate-500 dark:bg-white/[0.1] dark:text-white/60",
             status === "verified" && "bg-sky-600 text-white hover:bg-sky-700 dark:bg-sky-500 dark:hover:bg-sky-400",
             status === "partial" && "bg-sky-500/10 text-sky-700 ring-1 ring-sky-500/30 dark:bg-sky-400/15 dark:text-sky-200 dark:ring-sky-400/30",
             status === "missing" && "bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/30 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/30"
@@ -225,6 +258,7 @@ function CitationChip({
               {status === "partial" && "Correspondance partielle dans ton cours"}
               {status === "missing" && "Citation introuvable dans tes sources chargées — vérifie-la"}
               {status === "pending" && "Vérification dès la fin de la réponse…"}
+              {status === "checking" && "Vérification dans ton cours…"}
             </p>
           </div>
         </div>

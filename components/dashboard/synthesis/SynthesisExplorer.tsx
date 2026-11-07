@@ -1,7 +1,7 @@
 "use client";
 
 import "./synthesis.css";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BookOpenText,
@@ -75,20 +75,41 @@ function buildDecorator(query: string, medical: boolean): ((text: string) => Rea
     .map(foldWord)
     .filter((w) => w.length >= 2);
   if (!medical && queryWords.length === 0) return undefined;
+  // Plain text between two marked words stays ONE string: the old version
+  // made a React element for every word and gap of the whole résumé (tens of
+  // thousands on a big module) — most of the lag when the Résumé global opened
+  // or the search changed.
   return (text: string) => {
     const parts = text.split(WORD_SPLIT);
     if (parts.length === 1) return text;
-    return parts.map((part, i) => {
-      if (i % 2 === 0 || !part) return <Fragment key={i}>{part}</Fragment>;
-      const folded = foldWord(part);
-      if (queryWords.some((q) => folded.includes(q))) return <mark key={i} className="syn-mark-query">{part}</mark>;
-      if (medical) {
-        const lower = part.toLowerCase();
-        if (ANATOMY.has(lower)) return <span key={i} className="syn-mark-anat" title="Structure anatomique / biologique">{part}</span>;
-        if (part.length >= 5 && PATHO_SUFFIX.test(lower) && !NOT_PATHO.has(lower)) return <span key={i} className="syn-mark-patho" title="Terme pathologique">{part}</span>;
+    const out: ReactNode[] = [];
+    let plain = "";
+    parts.forEach((part, i) => {
+      if (!part) return;
+      let marked: ReactNode = null;
+      if (i % 2 === 1) {
+        const folded = foldWord(part);
+        if (queryWords.some((q) => folded.includes(q))) {
+          marked = <mark key={i} className="syn-mark-query">{part}</mark>;
+        } else if (medical) {
+          const lower = part.toLowerCase();
+          if (ANATOMY.has(lower)) marked = <span key={i} className="syn-mark-anat" title="Structure anatomique / biologique">{part}</span>;
+          else if (part.length >= 5 && PATHO_SUFFIX.test(lower) && !NOT_PATHO.has(lower)) marked = <span key={i} className="syn-mark-patho" title="Terme pathologique">{part}</span>;
+        }
       }
-      return <Fragment key={i}>{part}</Fragment>;
+      if (marked === null) {
+        plain += part;
+        return;
+      }
+      if (plain) {
+        out.push(plain);
+        plain = "";
+      }
+      out.push(marked);
     });
+    if (out.length === 0) return text;
+    if (plain) out.push(plain);
+    return out;
   };
 }
 
@@ -283,7 +304,12 @@ function SectionCard({
 }) {
   const title = section.isCrossCourse ? section.title : cleanCourseTitle(section.title);
   return (
-    <article className="syn-card overflow-hidden" data-open={open} style={section.isCrossCourse ? { ["--syn-accent" as string]: "#a78bfa", ["--syn-accent-2" as string]: "#f472b6" } : accentStyle(index)}>
+    // content-visibility: a fiche scrolled out of view is neither laid out nor painted (the card already clips its content).
+    <article
+      className="syn-card overflow-hidden [contain-intrinsic-size:auto_560px] [content-visibility:auto]"
+      data-open={open}
+      style={section.isCrossCourse ? { ["--syn-accent" as string]: "#a78bfa", ["--syn-accent-2" as string]: "#f472b6" } : accentStyle(index)}
+    >
       <header className="flex items-center gap-3 px-4 py-3 sm:px-5">
         <button type="button" onClick={onToggle} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 text-left">
           <span
@@ -449,7 +475,12 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
   const sections = useMemo(() => (kind === "global_summary" ? parseSections(markdown) : []), [kind, markdown]);
   const dictionary = useMemo(() => (kind === "medical_dictionary" ? parseDictionary(markdown) : null), [kind, markdown]);
   const keywords = useMemo(() => (kind === "keywords_table" ? parseKeywords(markdown) : null), [kind, markdown]);
-  const decorate = useMemo(() => buildDecorator(query, medical), [query, medical]);
+  // The field updates on every keystroke; re-highlighting and re-filtering a
+  // whole module follows in the background (React's deferred value), so typing
+  // never waits on it.
+  const deferredQuery = useDeferredValue(query);
+  const deferredMedical = useDeferredValue(medical);
+  const decorate = useMemo(() => buildDecorator(deferredQuery, deferredMedical), [deferredQuery, deferredMedical]);
   // Stable card positions (see accentStyle): fiches in document order, terms A-Z, boards by course.
   const sectionOrder = useMemo(() => new Map(sections.map((s, i) => [s.id, i])), [sections]);
   const termOrder = useMemo(
@@ -517,13 +548,13 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
 
   const priorityOk = (p: Priority) => priorities.size === 0 || priorities.has(p);
 
-  const visibleSections = sections.filter((s) => matchesQuery(query, s.title, s.body));
+  const visibleSections = sections.filter((s) => matchesQuery(deferredQuery, s.title, s.body));
   const dictEntries = (dictionary?.entries ?? [])
-    .filter((e) => priorityOk(e.priority) && (!course || e.course === course) && matchesQuery(query, e.term, e.fr, e.ar))
+    .filter((e) => priorityOk(e.priority) && (!course || e.course === course) && matchesQuery(deferredQuery, e.term, e.fr, e.ar))
     .sort((a, b) => a.term.localeCompare(b.term, "fr", { sensitivity: "base" }));
   const dictCourses = [...new Set((dictionary?.entries ?? []).map((e) => e.course))];
   const kwItems = (keywords?.items ?? []).filter(
-    (i) => priorityOk(i.priority) && (!category || i.category === category) && (!course || i.course === course) && matchesQuery(query, i.keyword, i.explanation, i.category)
+    (i) => priorityOk(i.priority) && (!category || i.category === category) && (!course || i.course === course) && matchesQuery(deferredQuery, i.keyword, i.explanation, i.category)
   );
 
   const resultCount = kind === "global_summary" ? visibleSections.length : kind === "medical_dictionary" ? dictEntries.length : kwItems.length;
@@ -694,7 +725,7 @@ export function SynthesisExplorer({ markdown, kind: kindProp, title }: { markdow
               <EmptyResult />
             )}
             {(dictionary?.extras ?? [])
-              .filter((s) => matchesQuery(query, s.title, s.body))
+              .filter((s) => matchesQuery(deferredQuery, s.title, s.body))
               .map((section, i) => (
                 <SectionCard
                   key={section.id}

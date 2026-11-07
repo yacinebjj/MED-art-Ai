@@ -1,10 +1,11 @@
 "use client";
 
-import { Children, cloneElement, isValidElement, memo, useMemo, type ReactNode } from "react";
+import { Children, Fragment, cloneElement, isValidElement, memo, startTransition, useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, Activity, Info, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { splitMarkdownChunks } from "@/lib/markdown-chunks";
 
 /**
  * Long-form medical renderer shared by the Studio Reader (Explication
@@ -199,6 +200,64 @@ function withDecoration(decorate: Decorate): Components {
   };
 }
 
+// ─── Progressive rendering ──────────────────────────────────────────────
+//
+// A long lesson (an Explication can pass 100 000 characters) used to be
+// parsed and committed to the DOM in ONE task: seconds of frozen main thread
+// on a low-end phone — the "Reprendre en 1 clic" freeze. Long documents are
+// now cut at headings (lib/markdown-chunks.ts) and rendered a couple of
+// chunks at a time: the first ones at once, the rest in idle slots, as
+// interruptible transitions. The chunks are joined by the same "\n" text node
+// a whole render puts between blocks, so the DOM ends up identical
+// (unit-tested), and so do highlight offsets (lib/reading/text-index.ts).
+
+const REMARK_PLUGINS = [remarkGfm];
+/** Shorter documents render in one go, exactly as before. */
+const PROGRESSIVE_MIN_CHARS = 12_000;
+/** One rendering step: a few milliseconds of parsing and DOM work on a slow phone. */
+const CHUNK_TARGET_CHARS = 5_000;
+/** Chunks on screen in the very first frame (what the student reads first). */
+const FIRST_CHUNKS = 2;
+/** Chunks added per idle slot after that. */
+const CHUNKS_PER_STEP = 2;
+
+const MarkdownChunk = memo(function MarkdownChunk({ markdown, components }: { markdown: string; components: Components }) {
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+      {markdown}
+    </ReactMarkdown>
+  );
+});
+
+/** How many of `total` chunks are mounted — grows in idle time until all are. */
+function useProgressiveCount(markdown: string, total: number): number {
+  const [state, setState] = useState(() => ({ markdown, count: Math.min(total, FIRST_CHUNKS) }));
+  let count = state.count;
+  if (state.markdown !== markdown) {
+    // Text appended (a lesson still being generated): what is already on
+    // screen stays on screen. A different document starts over.
+    count = markdown.startsWith(state.markdown) ? Math.max(state.count, FIRST_CHUNKS) : FIRST_CHUNKS;
+    setState({ markdown, count });
+  }
+  count = Math.min(count, total);
+
+  useEffect(() => {
+    if (count >= total) return;
+    const step = () =>
+      startTransition(() =>
+        setState((current) => (current.markdown === markdown ? { markdown, count: Math.min(total, current.count + CHUNKS_PER_STEP) } : current))
+      );
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(step, { timeout: 250 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(step, 16);
+    return () => window.clearTimeout(id);
+  }, [count, total, markdown]);
+
+  return count;
+}
+
 /**
  * `markdown` should already be callout-normalized by the caller
  * (lib/markdown.ts's normalizeCallouts) when it comes from the Studio.
@@ -208,11 +267,16 @@ function withDecoration(decorate: Decorate): Components {
  */
 export const MedicalMarkdown = memo(function MedicalMarkdown({ markdown, className, decorate }: { markdown: string; className?: string; decorate?: Decorate }) {
   const components = useMemo(() => (decorate ? withDecoration(decorate) : COMPONENTS), [decorate]);
+  const chunks = useMemo(() => (markdown.length >= PROGRESSIVE_MIN_CHARS ? splitMarkdownChunks(markdown, CHUNK_TARGET_CHARS) : [markdown]), [markdown]);
+  const visible = useProgressiveCount(markdown, chunks.length);
   return (
     <div dir="auto" className={cn("medical-markdown break-words text-slate-800 [&>*:first-child]:mt-0 [&>h2:first-child]:border-t-0 [&>h2:first-child]:pt-0 [line-height:var(--reader-leading,1.85)] dark:text-slate-200", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {markdown}
-      </ReactMarkdown>
+      {chunks.slice(0, visible).map((chunk, index) => (
+        <Fragment key={index}>
+          {index > 0 && "\n"}
+          <MarkdownChunk markdown={chunk} components={components} />
+        </Fragment>
+      ))}
     </div>
   );
 });

@@ -54,6 +54,8 @@ const REPAINT_DELAY_MS = 120;
 const USER_INTENT_WINDOW_MS = 3000;
 /** Momentum scrolling: scroll events keep coming at least this often until it stops. */
 const MOMENTUM_GAP_MS = 400;
+/** The reading position is measured at most this often while scrolling (never on every frame). */
+const CAPTURE_INTERVAL_MS = 150;
 
 export function useReadingSurface(element: HTMLElement | null, { key, highlights = true, scroll = true, ready = true }: ReadingSurfaceOptions): void {
   const auth = useOptionalAuth();
@@ -254,9 +256,12 @@ export function useReadingSurface(element: HTMLElement | null, { key, highlights
       else putSyncDoc(READING_POSITION_NS, surfaceKey, lastCaptured, true);
     };
 
+    let lastCaptureAt = 0;
+    let trailingTimer: ReturnType<typeof setTimeout> | null = null;
     const capture = () => {
       frame = 0;
       if (disposed || !capturing || !showsThisSurface()) return;
+      lastCaptureAt = performance.now();
       const position = capturePosition(element, scroller);
       if (!position) return;
       lastCaptured = position;
@@ -279,7 +284,16 @@ export function useReadingSurface(element: HTMLElement | null, { key, highlights
       // A gesture: right after a wheel/touch/key/pointer, or the momentum scroll that follows it.
       gestureScrolling = now - lastIntentAt < USER_INTENT_WINDOW_MS || (gestureScrolling && now - lastScrollAt < MOMENTUM_GAP_MS);
       lastScrollAt = now;
-      if (!gestureScrolling || !capturing || frame) return;
+      if (!gestureScrolling || !capturing || frame || trailingTimer) return;
+      // At most one measurement per CAPTURE_INTERVAL_MS while scrolling, and always one after it stops.
+      const wait = CAPTURE_INTERVAL_MS - (now - lastCaptureAt);
+      if (wait > 0) {
+        trailingTimer = setTimeout(() => {
+          trailingTimer = null;
+          if (!disposed && !frame) frame = requestAnimationFrame(capture);
+        }, wait);
+        return;
+      }
       frame = requestAnimationFrame(capture);
     };
     const onIntent = () => {
@@ -337,6 +351,7 @@ export function useReadingSurface(element: HTMLElement | null, { key, highlights
     return () => {
       disposed = true;
       if (frame) cancelAnimationFrame(frame);
+      if (trailingTimer) clearTimeout(trailingTimer);
       clearTimeout(giveUpTimer);
       if (settleTimer) clearTimeout(settleTimer);
       if (localTimer) clearTimeout(localTimer);

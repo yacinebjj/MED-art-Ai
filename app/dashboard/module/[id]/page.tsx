@@ -304,9 +304,36 @@ function fileTypeStyleFor(title: string): { label: string; className: string } {
 
 const GENERATED_SECTION_FIELDS: (keyof StudioCourseFull)[] = ["explication", "resume", "casClinique", "qcms", "exemplesAnalogies", "infographicUrl", "audioUrl"];
 
+/** Word counts per course text, computed once: splitting a long course on every render of the Sources list allocated one string per word, each time. */
+const wordCountCache = new Map<string, number>();
+const WORD_COUNT_CACHE_LIMIT = 64;
+
+function countWords(text: string): number {
+  const cached = wordCountCache.get(text);
+  if (cached !== undefined) return cached;
+  let words = 0;
+  let inWord = false;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    // The same separators as /\s+/ for course text: spaces, tabs, line breaks, no-break and other Unicode spaces.
+    const space = code === 32 || (code >= 9 && code <= 13) || code === 160 || code === 0x1680 || (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x3000 || code === 0xfeff;
+    if (space) inWord = false;
+    else if (!inWord) {
+      inWord = true;
+      words++;
+    }
+  }
+  wordCountCache.set(text, words);
+  if (wordCountCache.size > WORD_COUNT_CACHE_LIMIT) {
+    const oldest = wordCountCache.keys().next().value;
+    if (oldest !== undefined) wordCountCache.delete(oldest);
+  }
+  return words;
+}
+
 function courseMeta(course: StudioCourseFull | undefined): string | null {
   if (!course) return null;
-  const words = course.rawText ? course.rawText.trim().split(/\s+/).length : 0;
+  const words = course.rawText ? countWords(course.rawText) : 0;
   const generated = GENERATED_SECTION_FIELDS.filter((field) => Boolean(course[field])).length;
   return `${words.toLocaleString("fr-FR")} mots · ${generated}/${GENERATED_SECTION_FIELDS.length} sections`;
 }

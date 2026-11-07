@@ -128,7 +128,7 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
   const fonts = FONT_STACKS[prefs.font];
 
   // Build the Sommaire from the rendered headings (robust to any markdown inside them).
-  useLayoutEffect(() => {
+  const buildToc = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
     const headings = Array.from(body.querySelectorAll<HTMLElement>("h2, h3"));
@@ -140,8 +140,29 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
       if (!text || /^sommaire$/i.test(text)) return;
       entries.push({ id: h.id, text, level: h.tagName === "H3" ? 3 : 2 });
     });
-    setToc(entries);
-  }, [markdown]);
+    setToc((prev) => (prev.length === entries.length && prev.every((entry, i) => entry.id === entries[i].id && entry.text === entries[i].text) ? prev : entries));
+  }, []);
+
+  useLayoutEffect(() => {
+    buildToc();
+  }, [markdown, buildToc]);
+
+  // A long lesson mounts progressively (components/reader/MedicalMarkdown.tsx):
+  // the Sommaire follows as its later chapters arrive.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof MutationObserver === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const observer = new MutationObserver(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(buildToc, 150);
+    });
+    observer.observe(body, { childList: true, subtree: true });
+    return () => {
+      if (timer) clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [buildToc]);
 
   const measure = useCallback(() => {
     const scroller = scrollerRef.current;
