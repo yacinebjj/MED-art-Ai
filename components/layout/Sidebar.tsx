@@ -2,24 +2,20 @@
 
 import { Suspense } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   Brain,
   ChevronsLeft,
   ChevronsRight,
-  ChevronsUpDown,
   Cloud,
   CloudOff,
-  CreditCard,
   FileQuestion,
   Infinity as InfinityIcon,
   LayoutDashboard,
   ListTodo,
   LoaderCircle,
-  LogOut,
   Mic,
   NotebookPen,
-  Settings,
   Sparkles,
   Timer,
   Users,
@@ -30,26 +26,15 @@ import { Logo } from "./Logo";
 import { AnimatedBrandMark } from "./AnimatedBrandMark";
 import { cn } from "@/lib/utils";
 import { useRouteIntent } from "@/lib/motion";
-import { useAuth } from "@/providers/AuthProvider";
 import { useSidebarState } from "@/providers/SidebarProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { useCockpitUi, type LauncherTarget } from "@/store/useCockpitUi";
 import { LAB_TOOLS } from "@/lib/workspace-lab";
 import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
-import { t } from "@/lib/translations";
 import { tCockpit, type CockpitKey } from "@/lib/translations/cockpit";
 import { STUDY_GROUPS_ENABLED } from "@/lib/features";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/DropdownMenu";
 
 /**
  * One vibrant identity per feature. Every class is a literal so the Tailwind
@@ -477,18 +462,9 @@ export function Sidebar() {
   const intent = useRouteIntent();
   const currentPathname = usePathname();
   const pathname = intent?.pathname ?? currentPathname;
-  const router = useRouter();
-  const { profile, signOut } = useAuth();
   const { isDesktopSidebarOpen, isRailCollapsed, toggleRail } = useSidebarState();
   const { language } = useLanguage();
-  const initial = (profile?.fullName ?? "").trim().charAt(0).toUpperCase() || "E";
   const collapsed = isRailCollapsed;
-
-  async function handleSignOut() {
-    await signOut();
-    router.push("/login");
-    router.refresh();
-  }
 
   const width = collapsed ? "w-[4.5rem]" : "w-64";
 
@@ -510,50 +486,8 @@ export function Sidebar() {
             <QuotaGauge collapsed={collapsed} language={language} />
             <SyncStatus collapsed={collapsed} language={language} />
 
-            <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  className={cn(
-                    "flex min-w-0 items-center gap-2.5 rounded-xl p-1.5 text-left transition-colors hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/5",
-                    collapsed ? "justify-center" : "flex-1"
-                  )}
-                >
-                  <Avatar className="h-8 w-8">
-                    {profile?.avatarUrl && <AvatarImage src={profile.avatarUrl} alt="" />}
-                    <AvatarFallback>{initial}</AvatarFallback>
-                  </Avatar>
-                  {!collapsed && (
-                    <>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-semibold text-foreground">{profile?.fullName || "Étudiant(e)"}</p>
-                        <p className="truncate text-[10px] text-muted-foreground">{profile?.email}</p>
-                      </div>
-                      <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    </>
-                  )}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="start" className="w-56">
-                  <DropdownMenuLabel className="truncate">{profile?.fullName || profile?.email || "Étudiant(e)"}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard/billing">
-                      <CreditCard className="h-4 w-4" />
-                      {t("billing", language)}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard/settings">
-                      <Settings className="h-4 w-4" />
-                      {t("settings", language)}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleSignOut}>
-                    <LogOut className="h-4 w-4" />
-                    {t("signOut", language)}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
+            {/* The account (photo, Abonnement, Paramètres, Déconnexion) lives in the top bar's menu only. */}
+            <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-end")}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

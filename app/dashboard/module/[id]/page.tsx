@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent } from "react";
+import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
@@ -11,13 +11,11 @@ import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
   BookOpen,
-  Check,
   ClipboardCheck,
   Columns2,
   FileText,
   Focus,
   FolderOpen,
-  Globe,
   LayoutDashboard,
   Loader2,
   MessageSquarePlus,
@@ -29,14 +27,12 @@ import {
   Plus,
   RotateCcw,
   Rows3,
-  Search,
   Settings,
   SquarePen,
   SunMoon,
   Trash2,
   TrendingUp,
   Workflow,
-  X,
 } from "lucide-react";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { ClinicalConnectionsPanel } from "@/components/course/workspace/ClinicalConnectionsPanel";
@@ -55,7 +51,6 @@ import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { Button } from "@/components/ui/Button";
 import { GlassArt } from "@/components/ui/GlassArt";
-import { Input } from "@/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/Dialog";
 import {
   DropdownMenu,
@@ -307,63 +302,6 @@ function fileTypeStyleFor(title: string): { label: string; className: string } {
   return FILE_TYPE_STYLES[ext] ?? { label: "DOC", className: "text-zinc-500 dark:text-zinc-400" };
 }
 
-/** One full-text hit inside a source's extracted text (Sources panel search). */
-export interface SourceSearchHit {
-  courseId: number;
-  courseTitle: string;
-  before: string;
-  match: string;
-  after: string;
-}
-
-const SEARCH_COMBINING_MARKS = new RegExp("[\\u0300-\\u036f]", "g");
-const MAX_HITS_PER_SOURCE = 3;
-
-/**
- * Accent/case-insensitive search through every loaded course's extracted
- * text. Normalization keeps string length 1:1 (each character is folded on
- * its own), so a match index in the folded text is the same index in the
- * original — the snippet is cut from the real text.
- */
-function searchCourseTexts(courses: StudioCourseFull[], query: string): SourceSearchHit[] {
-  // Per UTF-16 code unit, so the folded string's indices line up exactly
-  // with the original's (a character whose folded form isn't exactly one
-  // unit — a lone combining mark, a surrogate half — is kept as-is).
-  const fold = (text: string) => {
-    let out = "";
-    for (let i = 0; i < text.length; i++) {
-      const folded = text[i].normalize("NFD").replace(SEARCH_COMBINING_MARKS, "").toLowerCase();
-      out += folded.length === 1 ? folded : text[i];
-    }
-    return out;
-  };
-  const needle = fold(query.trim());
-  if (needle.length < 3) return [];
-  const hits: SourceSearchHit[] = [];
-  for (const course of courses) {
-    const original = course.rawText ?? "";
-    const folded = fold(original);
-    let from = 0;
-    let found = 0;
-    while (found < MAX_HITS_PER_SOURCE) {
-      const at = folded.indexOf(needle, from);
-      if (at === -1) break;
-      const start = Math.max(0, at - 70);
-      const end = Math.min(original.length, at + needle.length + 90);
-      hits.push({
-        courseId: course.id,
-        courseTitle: course.title,
-        before: `${start > 0 ? "…" : ""}${original.slice(start, at)}`.replace(/\s+/g, " "),
-        match: original.slice(at, at + needle.length),
-        after: `${original.slice(at + needle.length, end)}${end < original.length ? "…" : ""}`.replace(/\s+/g, " "),
-      });
-      found++;
-      from = at + needle.length;
-    }
-  }
-  return hits;
-}
-
 const GENERATED_SECTION_FIELDS: (keyof StudioCourseFull)[] = ["explication", "resume", "casClinique", "qcms", "exemplesAnalogies", "infographicUrl", "audioUrl"];
 
 function courseMeta(course: StudioCourseFull | undefined): string | null {
@@ -393,11 +331,8 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   isCollapsed = false,
   onToggleCollapse,
   selectedSourceIds,
-  onToggleSource,
   uploadRequestNonce = 0,
   loadedCourses,
-  onSearchSources,
-  onViewSourceFile,
 }: {
   courses: StudioCourseSummary[];
   activeCourseId: number | null;
@@ -423,27 +358,18 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
   /** Desktop-only icon rail, mirroring StudioPanel's own collapse — see this page's isSourcesCollapsed. Ignored on the mobile variant (its own tab bar already IS the collapse). */
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
-  /** Multi-select chat-context sources (Point 2) — a course can be "open" (the Studio tile source) independently of being "checked" (included in the Chat's context). Optional: a caller that omits both simply renders no checkboxes at all. */
+  /** Courses included in the Co-pilot's context (chosen from the Co-pilot's own "+" menu) — shown as a count in this panel's header. */
   selectedSourceIds?: Set<number>;
-  onToggleSource?: (id: number) => void;
   /** Bumped by the caller (command palette "Ajouter une source") to open the upload modal from outside this panel. */
   uploadRequestNonce?: number;
   /** Full rows already loaded client-side — powers each card's word-count / generated-sections line. */
   loadedCourses?: Map<number, StudioCourseFull>;
-  /** Full-text search through the module's sources (loads any course not fetched yet). Optional: omitted, the search box only searches the web. */
-  onSearchSources?: (query: string) => Promise<SourceSearchHit[]>;
-  /** Opens a source's document without making it the active course (search hits). Falls back to onShowCourseFile. */
-  onViewSourceFile?: (id: number) => void;
 }) {
   const { language } = useLanguage();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [statsCourse, setStatsCourse] = useState<StudioCourseSummary | null>(null);
   const [deleteCourse, setDeleteCourse] = useState<StudioCourseSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [webSearchQuery, setWebSearchQuery] = useState("");
-  const [searchHits, setSearchHits] = useState<SourceSearchHit[] | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const searchRunRef = useRef(0);
   // Starts at the nonce current on mount — a request consumed by a previous
   // instance (before Zen / split-screen / a mobile tab switch remounted this
   // panel) must not pop the modal open again.
@@ -454,50 +380,6 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
     consumedUploadNonceRef.current = uploadRequestNonce;
     setUploadOpen(true);
   }, [uploadRequestNonce]);
-
-  // Debounced in-source search — every keystroke past 3 characters reruns
-  // it 250 ms after typing stops; a stale (superseded) run never overwrites
-  // a newer one's results.
-  useEffect(() => {
-    const query = webSearchQuery.trim();
-    if (!onSearchSources || query.length < 3) {
-      searchRunRef.current++;
-      setSearchHits(null);
-      setIsSearching(false);
-      return;
-    }
-    const run = ++searchRunRef.current;
-    setIsSearching(true);
-    const timer = setTimeout(() => {
-      onSearchSources(query)
-        .then((hits) => {
-          if (run === searchRunRef.current) setSearchHits(hits);
-        })
-        .catch(() => {
-          if (run === searchRunRef.current) setSearchHits([]);
-        })
-        .finally(() => {
-          if (run === searchRunRef.current) setIsSearching(false);
-        });
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [webSearchQuery, onSearchSources]);
-
-  function openWebSearch() {
-    const query = webSearchQuery.trim();
-    if (!query) return;
-    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer");
-  }
-
-  function handleWebSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Escape") {
-      setWebSearchQuery("");
-      return;
-    }
-    if (e.key !== "Enter") return;
-    // Enter searches the web only when there's no in-source search to show.
-    if (!onSearchSources) openWebSearch();
-  }
 
   async function handleConfirmDelete() {
     if (!deleteCourse) return;
@@ -553,79 +435,6 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
               <Plus className="h-4 w-4" />
               {tModulePage("addSourceLabel", language)}
             </Button>
-
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder={onSearchSources ? "Rechercher dans tes sources…" : tModulePage("searchWebPlaceholder", language)}
-                value={webSearchQuery}
-                onChange={(e) => setWebSearchQuery(e.target.value)}
-                onKeyDown={handleWebSearchKeyDown}
-                aria-label="Rechercher dans tes sources"
-                className="border-none bg-muted pl-9 pr-16 shadow-none"
-              />
-              <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-                {isSearching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                {webSearchQuery && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={openWebSearch}
-                        aria-label="Rechercher sur le web"
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                      >
-                        <Globe className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Rechercher « {webSearchQuery.trim()} » sur le web</TooltipContent>
-                  </Tooltip>
-                )}
-                {webSearchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setWebSearchQuery("")}
-                    aria-label="Effacer la recherche"
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <AnimatePresence initial={false}>
-              {searchHits !== null && (
-                <motion.div
-                  key="search-results"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="space-y-1.5 rounded-2xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--background)_60%,transparent)] p-2">
-                    <p className="px-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground">
-                      {searchHits.length === 0 ? "Aucun passage trouvé" : `${searchHits.length} passage${searchHits.length > 1 ? "s" : ""} trouvé${searchHits.length > 1 ? "s" : ""}`}
-                    </p>
-                    {searchHits.map((hit, index) => (
-                      <button
-                        key={`${hit.courseId}-${index}`}
-                        type="button"
-                        onClick={() => (onViewSourceFile ?? onShowCourseFile)(hit.courseId)}
-                        className="block w-full rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent"
-                      >
-                        <span className="block truncate text-[11px] font-semibold text-primary-700 dark:text-primary-300">{hit.courseTitle}</span>
-                        <span className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-                          {hit.before}
-                          <mark className="rounded bg-primary-200/70 px-0.5 font-semibold text-foreground dark:bg-primary-500/30">{hit.match}</mark>
-                          {hit.after}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </>
         )}
 
@@ -682,7 +491,6 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
           <div className="space-y-2">
             {courses.map((course) => {
               const isActive = course.id === activeCourseId;
-              const isChecked = selectedSourceIds?.has(course.id) ?? false;
               // Real course_mastery data (qcm_attempts-derived) — only ever
               // present once the student has real attempts logged for this
               // course; a course with none simply renders no ring at all,
@@ -704,27 +512,6 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                   )}
                 >
                   {isActive && <span aria-hidden className="pointer-events-none absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-primary-500" />}
-                  {onToggleSource && (
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={isChecked}
-                      aria-label={tModulePage("selectSourceAriaLabel", language)}
-                      title={isChecked ? "Retirer du contexte du co-pilote" : "Ajouter au contexte du co-pilote"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleSource(course.id);
-                      }}
-                      className={cn(
-                        "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
-                        isChecked
-                          ? "border-primary-500 bg-primary-500 text-white"
-                          : "border-[color-mix(in_oklab,var(--muted-foreground)_40%,transparent)] bg-transparent hover:border-primary-400"
-                      )}
-                    >
-                      {isChecked && <Check className="h-3 w-3" />}
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => onSelectCourse(course.id)}
@@ -1998,28 +1785,6 @@ export default function ModuleWorkspacePage() {
     [activeCourse, cacheVersion, courses]
   );
 
-  const handleSearchSources = useCallback(
-    async (query: string): Promise<SourceSearchHit[]> => {
-      const missing = courses.filter((c) => !courseCacheRef.current.has(c.id));
-      if (missing.length > 0) {
-        await Promise.all(
-          missing.map((c) =>
-            fetch(`/api/studio/courses/${c.id}`)
-              .then((res) => res.json())
-              .then((data) => {
-                if (data?.success) courseCacheRef.current.set(c.id, data.course);
-              })
-              .catch(() => {})
-          )
-        );
-        setCacheVersion((v) => v + 1);
-      }
-      const loaded = courses.map((c) => courseCacheRef.current.get(c.id)).filter((c): c is StudioCourseFull => Boolean(c));
-      return searchCourseTexts(loaded, query);
-    },
-    [courses]
-  );
-
   /** Files dropped on (or attached in) the co-pilot become new sources — same direct-to-storage pipeline as the Add-source modal. */
   const handleImportFiles = useCallback(
     async (files: File[]) => {
@@ -2656,8 +2421,6 @@ export default function ModuleWorkspacePage() {
     courseMasteryBySlug,
     uploadRequestNonce,
     loadedCourses,
-    onSearchSources: handleSearchSources,
-    onViewSourceFile: handleViewSourceFile,
   };
 
   return (
@@ -2706,7 +2469,6 @@ export default function ModuleWorkspacePage() {
                   isCollapsed={isSourcesCollapsed}
                   onToggleCollapse={handleToggleSourcesCollapsed}
                   selectedSourceIds={selectedSourceIds}
-                  onToggleSource={handleToggleSelectedSource}
                 />
               </motion.aside>
             )}

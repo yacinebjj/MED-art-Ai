@@ -213,16 +213,6 @@ export function WorkspaceCommandBar({
         </nav>
       </div>
 
-      <button
-        type="button"
-        onClick={onOpenPalette}
-        aria-label="Ouvrir la palette de commandes"
-        className="hidden h-9 w-full max-w-[17rem] shrink items-center gap-2 rounded-xl border border-[color-mix(in_oklab,var(--border)_80%,transparent)] bg-[color-mix(in_oklab,var(--background)_60%,transparent)] px-3 text-sm text-muted-foreground shadow-soft transition-all duration-200 hover:border-primary-300 hover:text-foreground hover:shadow-glow dark:bg-white/[0.03] dark:hover:border-primary-700 md:flex"
-      >
-        <Search className="h-4 w-4 shrink-0" />
-        <span className="flex-1 truncate text-left">Outils, sources, actions…</span>
-      </button>
-
       <div className="flex shrink-0 items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>

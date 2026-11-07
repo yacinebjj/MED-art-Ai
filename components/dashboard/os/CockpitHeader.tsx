@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Cpu, Crown, GraduationCap, Hourglass, Search, Sparkles } from "lucide-react";
+import { GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
-import { useCockpitStore } from "@/store/useCockpitStore";
-import { useCockpitUi } from "@/store/useCockpitUi";
 import { GlassArt } from "@/components/ui/GlassArt";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit } from "@/lib/translations/cockpit";
-import { FLASHCARD_ENGINE_LABEL } from "@/lib/dashboard/engine";
 import { useNow } from "./primitives";
 
 const QUOTES = {
@@ -38,7 +35,7 @@ function greetingKey(hour: number) {
   return "greetEvening" as const;
 }
 
-function Pill({ icon: Icon, children, className }: { icon: typeof Cpu; children: React.ReactNode; className?: string }) {
+function Pill({ icon: Icon, children, className }: { icon: typeof GraduationCap; children: React.ReactNode; className?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur", className)}>
       <Icon className="h-3 w-3" />
@@ -48,17 +45,16 @@ function Pill({ icon: Icon, children, className }: { icon: typeof Cpu; children:
 }
 
 /**
- * Contextual greeting + live identity badges (study level, plan, AI engine
- * connectivity) + Spotlight entry. On phones it is just the date and the
- * greeting, set straight on the page (no card) — the Resume card right below
- * is what the student came for.
+ * Contextual greeting + the student's study level. The plan ("Membre …") and
+ * engine badges and the "Recherche globale" link were removed by product
+ * order (2026-11-07): the plan lives in the top bar, and the Spotlight still
+ * opens with Ctrl/⌘ K. On phones it is just the date and the greeting, set
+ * straight on the page (no card) — the Resume card right below is what the
+ * student came for.
  */
 export function CockpitHeader() {
   const { profile, curriculumProfile } = useAuth();
   const { language } = useLanguage();
-  const plan = useCockpitStore((state) => state.overview?.plan ?? null);
-  const status = useCockpitStore((state) => state.status);
-  const setSpotlightOpen = useCockpitUi((state) => state.setSpotlightOpen);
   const now = useNow();
   const [quoteIndex, setQuoteIndex] = useState(0);
   useEffect(() => setQuoteIndex(Math.floor(Math.random() * QUOTES.fr.length)), []);
@@ -71,7 +67,6 @@ export function CockpitHeader() {
 
   const year = curriculumProfile?.academicYear?.name ?? null;
   const specialty = curriculumProfile?.specialty?.name ?? null;
-  const engineOnline = status !== "offline" && status !== "error";
 
   return (
     <motion.div
@@ -103,44 +98,15 @@ export function CockpitHeader() {
                 {tCockpit("levelNotSet", language)}
               </Pill>
             )}
-            {plan &&
-              (plan.paidActive ? (
-                <Pill icon={Crown} className="border-amber-300/70 bg-gradient-to-r from-amber-100/80 to-orange-100/80 text-amber-800 dark:border-amber-700/50 dark:from-amber-950/40 dark:to-orange-950/40 dark:text-amber-300">
-                  {tCockpit("memberBadge", language).replace("{plan}", plan.label)} ⚡
-                </Pill>
-              ) : plan.trialActive ? (
-                <Pill icon={Hourglass} className="border-amber-300/70 bg-amber-50/70 text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-300">
-                  {tCockpit("trialBadge", language).replace("{n}", String(plan.trialDaysRemaining))}
-                </Pill>
-              ) : (
-                <Pill icon={Sparkles} className="border-border/70 bg-background/50 text-muted-foreground">
-                  {plan.label}
-                </Pill>
-              ))}
-            <Pill icon={Cpu} className="border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
-              {FLASHCARD_ENGINE_LABEL}
-              <span className={cn("ml-0.5 h-1.5 w-1.5 rounded-full", engineOnline ? "animate-pulse bg-emerald-500" : "bg-slate-400")} />
-              <span className="sr-only">{engineOnline ? tCockpit("engineOnline", language) : tCockpit("engineOffline", language)}</span>
-            </Pill>
           </div>
         </div>
 
         <div className="hidden items-center gap-4 sm:flex">
-          <div className="hidden flex-col items-end gap-2 sm:flex">
-            <GlassArt
-              name="stethoscope"
-              size={112}
-              className="h-24 w-24 animate-float drop-shadow-[0_12px_22px_rgba(2,132,199,0.25)] motion-reduce:animate-none lg:h-28 lg:w-28"
-            />
-            <button
-              type="button"
-              onClick={() => setSpotlightOpen(true)}
-              className="hidden items-center gap-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground md:flex"
-            >
-              <Search aria-hidden className="h-3.5 w-3.5" />
-              {tCockpit("spotlightHint", language)}
-            </button>
-          </div>
+          <GlassArt
+            name="stethoscope"
+            size={112}
+            className="h-24 w-24 animate-float drop-shadow-[0_12px_22px_rgba(2,132,199,0.25)] motion-reduce:animate-none lg:h-28 lg:w-28"
+          />
         </div>
       </div>
     </motion.div>
