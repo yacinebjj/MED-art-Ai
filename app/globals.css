@@ -110,19 +110,35 @@
     @apply border-border;
   }
 
+  /* THE PAGE CANVAS — the app's own background colour fills the whole screen,
+     always. It used to be the body's `bg-background`: pure white in light
+     mode, while every app surface is tinted (aurora #f8fafc + glows, Copilot
+     #f6f8fb). Anything that showed past a page's own surface — below a page
+     shorter than the screen, a pull at the end of a scroll, the edges of an
+     area's entrance zoom, a phone whose browser drops 100dvh — read as a
+     dead white band at the bottom of the screen. The canvas is now the
+     aurora's base colour (the other surfaces are within a shade of it), held
+     by <html>, which paints the entire viewport; <body> stays transparent
+     over it, and both are at least one screen tall. Pages with their own
+     canvas (the landing) still set theirs. */
   html {
     scroll-behavior: smooth;
+    min-height: 100%;
+    min-height: 100dvh;
+    background-color: #f8fafc;
+  }
+
+  html.dark {
+    background-color: #030712;
   }
 
   body {
-    /* bg-background/text-foreground, not the old hardcoded bg-slate-50
-       text-slate-900 dark:bg-slate-950 dark:text-slate-100 — this app's
-       own rule (see tailwind.config.ts) is semantic tokens only, precisely
-       so dark mode can never be missed; the slate-* here was a leftover
-       from before the oklch token set above existed. The oklch background/
-       foreground values were tuned to the same near-white/near-black
-       slate look, so this is a consistency fix, not a recolor. */
-    @apply bg-background text-foreground;
+    /* text-foreground: semantic tokens only (see tailwind.config.ts), so
+       dark mode can never be missed. No background of its own: the canvas
+       above shows through. */
+    @apply text-foreground;
+    min-height: 100vh;
+    min-height: 100dvh;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     /* Long-form reading comfort — course/Workspace/Studio pages are dense
        medical text read in extended sessions. A slightly more open
@@ -778,6 +794,23 @@ body {
   /* viewport-fit=cover draws under the landscape notch; keep flow content out. */
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+}
+
+/* Browsers without dynamic viewport units (Chrome before 108, Safari before
+   15.4, older Android browsers) drop every `100dvh` declaration: a full-screen
+   layout (the dashboard shell, the module workspace, Examen, Résumé) then
+   shrinks to its content and leaves the rest of the screen empty below it.
+   The plain viewport height stands in there. */
+@supports not (height: 100dvh) {
+  .h-dvh,
+  .h-\[100dvh\] {
+    height: 100vh;
+  }
+
+  .min-h-dvh,
+  .min-h-\[100dvh\] {
+    min-height: 100vh;
+  }
 }
 
 /* Every inner scroll area too (threads, source lists, panels, sheets): no

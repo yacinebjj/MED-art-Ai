@@ -33,7 +33,8 @@ export default function DashboardTemplate({ children }: { children: React.ReactN
   }, []);
 
   return (
-    <div ref={areaRef} className="route-area">
+    // At least one screen tall: whatever a page leaves below its own surface is the canvas (app/globals.css), not a gap.
+    <div ref={areaRef} className="route-area min-h-dvh">
       {children}
     </div>
   );

@@ -207,7 +207,7 @@ export default function DashboardShellLayout({
 
   return (
     <SidebarProvider>
-      <div className={cn("relative flex h-dvh w-full overflow-hidden", ownsCanvas ? "copilot-canvas" : "aurora-canvas-bg")}>
+      <div className={cn("relative flex h-dvh min-h-dvh w-full overflow-hidden", ownsCanvas ? "copilot-canvas" : "aurora-canvas-bg")}>
         {!ownsCanvas && <div aria-hidden className="aurora-mesh-bg animate-mesh-pulse pointer-events-none fixed inset-0 -z-10" />}
         {/* Pages sit on this same canvas — their cyber stages are bare now, see CyberStage. */}
         {!ownsCanvas && <DnaBackground opacityClassName="opacity-25 dark:opacity-15" />}
