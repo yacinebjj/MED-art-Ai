@@ -25,6 +25,10 @@ interface ReaderPrefs {
 const PREFS_KEY = "medart:reader-prefs";
 const MIN_SIZE = 15;
 const MAX_SIZE = 22;
+/** Scroll travel (px) in one direction before the options bar reacts — tiny wobbles never flip it. */
+const BAR_SCROLL_THRESHOLD_PX = 8;
+/** Within this distance of the lesson's start, the options bar always shows. */
+const BAR_ALWAYS_VISIBLE_PX = 96;
 const DEFAULT_PREFS: ReaderPrefs = { font: "jakarta", size: 17, density: "comfortable" };
 
 const FONT_STACKS: Record<FontChoice, { label: string; hint: string; body: string; heading: string }> = {
@@ -113,6 +117,12 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
   const [toc, setToc] = useState<TocEntry[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
+  // Smart options bar: it slides away while the student reads downward and
+  // comes back on the first scroll up — always shown near the lesson's start,
+  // while the Sommaire is open, and while it has keyboard focus.
+  const [barHidden, setBarHidden] = useState(false);
+  const lastScrollTopRef = useRef(0);
+  const barShownHidden = barHidden && !tocOpen;
 
   const density = DENSITIES[prefs.density];
   const fonts = FONT_STACKS[prefs.font];
@@ -154,14 +164,40 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
     setActiveId(current);
   }, []);
 
+  /** Hides the options bar on a scroll down, shows it on a scroll up (transform only — nothing reflows). */
+  const updateBar = useCallback(() => {
+    const scroller = scrollerRef.current;
+    const body = bodyRef.current;
+    const bar = toolbarRef.current;
+    if (!scroller || !body || !bar) return;
+    const isPage = scroller === document.scrollingElement || scroller === document.documentElement;
+    const top = isPage ? window.scrollY : scroller.scrollTop;
+    const scrollerTop = isPage ? 0 : scroller.getBoundingClientRect().top;
+    // How far the lesson itself has gone up under the pane's top edge.
+    const intoLesson = scrollerTop - body.getBoundingClientRect().top;
+    if (intoLesson < BAR_ALWAYS_VISIBLE_PX) {
+      lastScrollTopRef.current = top;
+      setBarHidden(false);
+      return;
+    }
+    const delta = top - lastScrollTopRef.current;
+    if (Math.abs(delta) < BAR_SCROLL_THRESHOLD_PX) return;
+    lastScrollTopRef.current = top;
+    setBarHidden(delta > 0 && !bar.contains(document.activeElement));
+  }, []);
+
   useEffect(() => {
     const scroller = scrollRootRef?.current ?? findScrollParent(bodyRef.current);
     scrollerRef.current = scroller;
+    lastScrollTopRef.current = scroller === document.scrollingElement || scroller === document.documentElement ? window.scrollY : scroller.scrollTop;
     const target: HTMLElement | Window = scroller === document.scrollingElement || scroller === document.documentElement ? window : scroller;
     let frame = 0;
     const onScroll = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
+      frame = requestAnimationFrame(() => {
+        measure();
+        updateBar();
+      });
     };
     target.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
@@ -171,7 +207,7 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
       target.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
     };
-  }, [measure, scrollRootRef, zen]);
+  }, [measure, updateBar, scrollRootRef, zen]);
 
   useEffect(() => {
     measure();
@@ -200,10 +236,20 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
 
   return (
     <div className={cn(jakarta.variable, lora.variable, "relative")}>
-      {/* Control bar — sticks to the top of whichever pane scrolls the lesson.
+      {/* Control bar — sticks to the top of whichever pane scrolls the lesson,
+          and slides out of the way while the student reads down (updateBar).
           data-reading-skip: its live labels ("16px", "42 % lu") are not part of
           the lesson's text that highlights are anchored in (lib/reading/text-index.ts). */}
-      <div ref={toolbarRef} data-tour="exp-toolbar" data-reading-skip="" className="sticky top-0 z-30 rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b1016]/90">
+      <div
+        ref={toolbarRef}
+        data-tour="exp-toolbar"
+        data-reading-skip=""
+        onFocusCapture={() => setBarHidden(false)}
+        className={cn(
+          "sticky top-0 z-30 rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.4)] backdrop-blur-xl transition-[transform,opacity] duration-300 ease-out will-change-transform dark:border-white/10 dark:bg-[#0b1016]/90",
+          barShownHidden && "pointer-events-none -translate-y-[calc(100%+1rem)] opacity-0"
+        )}
+      >
         <div className="flex flex-wrap items-center gap-2 px-3 py-2">
           <div className="flex items-center gap-1.5">
             <Type className="h-3.5 w-3.5 text-slate-400" aria-hidden />
@@ -319,6 +365,14 @@ function ReaderSurface({ markdown, prefs, setPrefs, zen, onToggleZen, footer, sc
             </motion.nav>
           )}
         </AnimatePresence>
+      </div>
+
+      {/* While the bar is away, only a hairline of reading progress stays pinned at the top. */}
+      <div
+        aria-hidden
+        className={cn("pointer-events-none sticky top-0 z-20 -mb-[3px] h-[3px] overflow-hidden rounded-full transition-opacity duration-300", barShownHidden ? "opacity-100" : "opacity-0")}
+      >
+        <div className="h-full origin-left bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-500" style={{ transform: `scaleX(${progress})` }} />
       </div>
 
       <div ref={bodyRef} className={cn("mx-auto pb-16 pt-6", density.pad)} style={{ ...style, maxWidth: `calc(${density.measure} + 5rem)` }}>
