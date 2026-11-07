@@ -268,6 +268,24 @@ export default function ExamGeneratorPage() {
   // side-by-side split, both panels always visible, unchanged.
   const isDesktopOrTablet = useMediaQuery("(min-width: 768px)");
   const [mobileTab, setMobileTab] = useState<SourcesResultsTab>("sources");
+
+  // White screen on PC until a resize (product order 2026-11-07): the
+  // panels mount only after the page itself is mounted, never during the
+  // server render or hydration. Then the page frame and its explicit size
+  // (see the return) already exist, and the layout is the one the real
+  // viewport calls for (useMediaQuery answers "phone" on the server, which
+  // used to render the phone layout first, then switch).
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+  // Last resort, once the panels are in: a synthetic resize, so anything that
+  // sizes itself on `resize` measures the final layout one more time.
+  useEffect(() => {
+    if (!isMounted) return;
+    const timer = window.setTimeout(() => window.dispatchEvent(new Event("resize")), 120);
+    return () => window.clearTimeout(timer);
+  }, [isMounted]);
   // Lets the open exam (testing or results view) expand into the portaled
   // FullscreenViewerModal below — shared between desktop's `main` and
   // mobile's "Résultats" tab triggers (only one of the two ever mounts at a
@@ -803,14 +821,7 @@ export default function ExamGeneratorPage() {
 
   // Desktop idle state: hero + configuration + telemetry + launch.
   const idleContent = (
-    <motion.div
-      key="idle"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full flex-col overflow-y-auto overflow-x-hidden p-5 sm:p-8"
-    >
+    <div key="idle" className="flex h-full flex-col overflow-y-auto overflow-x-hidden p-5 sm:p-8">
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="relative flex h-20 w-20 shrink-0 items-center justify-center">
           <span aria-hidden className="cyber-breathe absolute inset-0 rounded-3xl bg-cyan-400/20 blur-xl" />
@@ -841,7 +852,7 @@ export default function ExamGeneratorPage() {
         </Button>
         {selectedCourseIds.size === 0 && <p className="text-xs text-muted-foreground">Sélectionne au moins un cours pour continuer.</p>}
       </div>
-    </motion.div>
+    </div>
   );
 
   const generationErrorBanner = generationError && (
@@ -855,7 +866,7 @@ export default function ExamGeneratorPage() {
   );
 
   const generatingContent = (
-    <motion.div key="generating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
+    <div key="generating" className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
       <GenerationAura
         title={
           generationProgress?.phase === "questions" && generationProgress.total > 0
@@ -879,7 +890,7 @@ export default function ExamGeneratorPage() {
           </>
         }
       />
-    </motion.div>
+    </div>
   );
 
   // Split into "inner content" (reused, unwrapped, inside the portaled
@@ -932,7 +943,8 @@ export default function ExamGeneratorPage() {
       />
 
       {currentQuestion && currentKind && (
-        <AnimatePresence mode="wait" custom={slideDirection}>
+        // initial={false}: the question the exam opens on is painted at once; moving between questions still slides.
+        <AnimatePresence mode="wait" initial={false} custom={slideDirection}>
           <motion.div
             key={currentQuestion.id}
             custom={slideDirection}
@@ -1044,19 +1056,19 @@ export default function ExamGeneratorPage() {
     </>
     );
 
+  // The four panel states (idle, generating, testing, results) are plain keyed
+  // blocks, painted on their very first frame: no opacity-0 entrance and no
+  // AnimatePresence "wait" between them, which held the new panel back until
+  // the old one's exit animation reported done (an empty panel when it never did).
   const testingContent = (
-    <motion.div
+    <div
       key="testing"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.3 }}
       // Bottom: exactly the fixed submit bar below (1rem + a 3rem button + 1rem + the safe area) plus
       // 0.5rem of air — no more — at every width. Sides: a slim gutter, the question gets the width.
       className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pt-4 lg:px-8"
     >
       {testingInnerContent}
-    </motion.div>
+    </div>
   );
 
   const scorePct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
@@ -1255,7 +1267,8 @@ export default function ExamGeneratorPage() {
           </p>
         </div>
 
-        <motion.div initial="hidden" animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4">
+        {/* initial={false}: every card is painted at once. The stagger (0.05 s a card) kept the last of 120 questions invisible for 6 s — blank space for a student scrolling down the correction. */}
+        <motion.div initial={false} animate="show" variants={RESULTS_STAGGER_VARIANTS} className="space-y-4">
           {filteredResults.length === 0 && (
             <p className="rounded-2xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-slate-500">Aucune question ne correspond à ces filtres.</p>
           )}
@@ -1379,18 +1392,14 @@ export default function ExamGeneratorPage() {
   );
 
   const resultsContent = (
-    <motion.div
+    <div
       key="results"
       ref={resultsSurfaceRef}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       // A slim gutter for the width, and only the safe area (plus a little air) below the last card.
       className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pt-4 lg:px-8"
     >
       {resultsInnerContent}
-    </motion.div>
+    </div>
   );
 
   // Opens the portaled FullscreenViewerModal — no longer toggles this
@@ -1409,11 +1418,12 @@ export default function ExamGeneratorPage() {
   );
 
   return (
-    // Point 2 fix — explicit w-full max-w-full alongside the existing
-    // overflow-hidden, matching the sibling workspace/module page's own
-    // identical root treatment.
+    // Explicit size on every level (product order 2026-11-07): the page is one
+    // full screen, wide and tall (h-dvh + min-h-[100dvh], 100vh where dvh is
+    // unknown — app/globals.css), and the panel row fills what the top bar
+    // leaves (flex-1 min-h-0 w-full). Nothing in it waits on a measurement.
     // cyber-stage-plain (components/cyber/cyber.css): the stage colour without the grid pattern or panel blur.
-    <div className="cyber-stage cyber-stage-plain relative flex h-dvh w-full max-w-full flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
+    <div className="cyber-stage cyber-stage-plain relative flex h-dvh min-h-[100dvh] w-full max-w-full flex-1 flex-col overflow-hidden overflow-x-hidden rounded-none border-0 text-foreground [touch-action:manipulation]">
       <WorkspaceTopbar title="Générateur d'Examen" actions={<TourReplayButton tour={examState === "results" ? "exam-results" : "exam"} className="h-8 w-8" />} />
 
       {/* Mobile-first UX rework — below `md`, aside/main never render side
@@ -1422,7 +1432,7 @@ export default function ExamGeneratorPage() {
           decides which single panel shows. Desktop (md:+) keeps the
           original permanent side-by-side split, both panels always
           visible, completely unchanged. */}
-      {!isDesktopOrTablet && (
+      {isMounted && !isDesktopOrTablet && (
         <div className="px-3 pt-3 sm:px-4">
           <SourcesResultsTabs
             active={mobileTab}
@@ -1435,8 +1445,17 @@ export default function ExamGeneratorPage() {
       )}
 
       {/* Tighter frame (product order 2026-11-07): the exam gets the width — phones run edge to edge, larger screens keep a slim gutter. */}
-      <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden pt-2 sm:p-3 md:flex-row">
-        {isDesktopOrTablet ? (
+      <div className="flex min-h-0 w-full min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden pt-2 sm:p-3 md:flex-row">
+        {!isMounted ? (
+          // Server render and hydration: the two panels' frames, painted at once
+          // in the stage's colours. The panels themselves mount on the first
+          // client frame (isMounted), already in the layout the real viewport
+          // calls for — never the phone layout first, then a switch.
+          <>
+            <div aria-hidden className={cn(panelShellClasses, "hidden shrink-0 md:flex md:w-64 xl:w-72")} />
+            <div aria-hidden className={cn(panelShellClasses, "min-h-0 w-full flex-1")} />
+          </>
+        ) : isDesktopOrTablet ? (
           <>
             {/* Panneau Gauche — Sources + Historique (desktop) */}
             <aside className={cn(panelShellClasses, "max-h-[35vh] w-full shrink-0 md:h-auto md:max-h-none md:w-64 xl:w-72")}>
@@ -1457,13 +1476,11 @@ export default function ExamGeneratorPage() {
               {(examState === "testing" || examState === "results") && fullscreenToggleRow}
               {examState === "idle" && generationErrorBanner && <div className="px-4 pt-4">{generationErrorBanner}</div>}
               <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
-                {/* initial={false}: what the page opens on is painted at once, never waiting on an entrance animation; later switches still animate. */}
-                <AnimatePresence mode="wait" initial={false}>
-                  {examState === "idle" && idleContent}
-                  {examState === "generating" && generatingContent}
-                  {examState === "testing" && testingContent}
-                  {examState === "results" && resultsContent}
-                </AnimatePresence>
+                {/* The current state's panel, painted on its first frame (see testingContent). */}
+                {examState === "idle" && idleContent}
+                {examState === "generating" && generatingContent}
+                {examState === "testing" && testingContent}
+                {examState === "results" && resultsContent}
               </LocalErrorBoundary>
             </main>
           </>
@@ -1471,7 +1488,7 @@ export default function ExamGeneratorPage() {
           // Keyed per tab: both panels share one slot, and each tab is its own panel.
           <div key="sources" className={cn(panelShellClasses, "min-h-0 w-full flex-1")}>
             {examState === "generating" ? (
-              <AnimatePresence mode="wait" initial={false}>{generatingContent}</AnimatePresence>
+              generatingContent
             ) : (
               <>
                 {generationErrorBanner && <div className="px-3 pt-3">{generationErrorBanner}</div>}
@@ -1493,10 +1510,8 @@ export default function ExamGeneratorPage() {
               <>
                 {fullscreenToggleRow}
                 <LocalErrorBoundary resetKey={`${activeExamId}:${examState}`}>
-                  <AnimatePresence mode="wait" initial={false}>
-                    {examState === "testing" && testingContent}
-                    {examState === "results" && resultsContent}
-                  </AnimatePresence>
+                  {examState === "testing" && testingContent}
+                  {examState === "results" && resultsContent}
                 </LocalErrorBoundary>
               </>
             ) : (
