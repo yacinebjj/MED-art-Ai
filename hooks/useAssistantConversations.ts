@@ -280,5 +280,35 @@ export function useAssistantConversations(userId: string | null) {
     [activeId, userId]
   );
 
-  return { conversations, activeId, hydrated, saveMessages, startNewConversation, selectConversation, deleteConversation };
+  /**
+   * "Annuler" right after a delete: puts the conversation back exactly as it
+   * was, on every device (the upload replaces the deletion tombstone), and
+   * makes it the open one again when it was open.
+   */
+  const restoreConversation = useCallback(
+    (conversation: StoredConversation, activate: boolean) => {
+      const storageKey = storageKeyFor(userId);
+      const activeIdKey = activeIdKeyFor(userId);
+      if (!storageKey || !activeIdKey) return;
+
+      setConversations((prev) => {
+        if (prev.some((c) => c.id === conversation.id)) return prev;
+        const next = [conversation, ...prev].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_STORED_CONVERSATIONS);
+        writeConversationsToStorage(storageKey, next);
+        return next;
+      });
+      putSyncDoc(SYNC_NS, conversation.id, conversation, true);
+      if (activate) {
+        setActiveId(conversation.id);
+        try {
+          window.localStorage.setItem(activeIdKey, conversation.id);
+        } catch {
+          // Non-fatal.
+        }
+      }
+    },
+    [userId]
+  );
+
+  return { conversations, activeId, hydrated, saveMessages, startNewConversation, selectConversation, deleteConversation, restoreConversation };
 }

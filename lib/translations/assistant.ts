@@ -33,6 +33,10 @@ export const ASSISTANT_TRANSLATIONS = {
   replyReadyOpen: { fr: "Voir", en: "View" },
   replyInterrupted: { fr: "La réponse a été interrompue. Réessaie.", en: "The answer was interrupted. Try again." },
 
+  // Conversation delete (one click, "Annuler" in the toast)
+  conversationDeleted: { fr: "Conversation supprimée", en: "Conversation deleted" },
+  undoDelete: { fr: "Annuler", en: "Undo" },
+
   // Composer
   addAttachment: { fr: "Ajouter une pièce jointe", en: "Add an attachment" },
   startDictation: { fr: "Dicter un message", en: "Dictate a message" },

@@ -406,7 +406,7 @@ export default function AssistantPage() {
   const { language } = useLanguage();
   const auth = useAuth() ?? {};
   const firstName = auth.profile?.fullName?.split(" ")[0] || "Étudiant(e)";
-  const { conversations, activeId, hydrated, saveMessages, startNewConversation, selectConversation, deleteConversation } =
+  const { conversations, activeId, hydrated, saveMessages, startNewConversation, selectConversation, deleteConversation, restoreConversation } =
     useAssistantConversations(auth.user?.id ?? null);
   const activeConversationTitle = conversations.find((conversation) => conversation.id === activeId)?.title;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -732,10 +732,28 @@ export default function AssistantPage() {
     }
   }
 
+  /** One click deletes; the toast's "Annuler" brings the conversation back (and reopens it if it was open). */
   function handleDeleteConversation(id: string) {
+    const snapshot = conversations.find((conversation) => conversation.id === id) ?? null;
     const wasActive = id === activeId;
     deleteConversation(id);
     if (wasActive) setMessages([]);
+    if (!snapshot) return;
+    toast({
+      variant: "info",
+      title: tAssistant("conversationDeleted", language),
+      description: snapshot.title,
+      action: {
+        label: tAssistant("undoDelete", language),
+        onClick: () => {
+          restoreConversation(snapshot, wasActive);
+          if (wasActive) {
+            setMessages(snapshot.messages);
+            setIsAtBottom(true);
+          }
+        },
+      },
+    });
   }
 
   const userId = auth.user?.id ?? null;

@@ -158,6 +158,7 @@ export const COCKPIT_TRANSLATIONS = {
   cancel: { fr: "Annuler", en: "Cancel" },
   save: { fr: "Enregistrer", en: "Save" },
   delete: { fr: "Supprimer", en: "Delete" },
+  deleteUndone: { fr: "Suppression annulée", en: "Deletion cancelled" },
 
   // ---- Quick launch
   quickLaunchHeading: { fr: "Quick-Launch · MedArt Lab", en: "Quick launch · MedArt Lab" },

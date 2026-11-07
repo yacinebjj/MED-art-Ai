@@ -25,9 +25,8 @@ import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { useToast } from "@/components/ui/Toast";
 import { Select } from "@/components/ui/Select";
-import { Button } from "@/components/ui/Button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/DropdownMenu";
+import { isActionPending, scheduleUndoableAction } from "@/lib/undoable-action";
 import dynamic from "next/dynamic";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { getCartoonIllustration } from "@/lib/curriculum-illustrations";
@@ -91,27 +90,51 @@ const ModuleCard = memo(function ModuleCard({
   const { toast } = useToast();
   const { module: mod, stats } = entry;
   const [statsOpen, setStatsOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const deleteKey = `module-sources:${mod.id}`;
+  // True during the "Annuler" window: the card dims and can't be opened.
+  const [pendingDelete, setPendingDelete] = useState(() => isActionPending(deleteKey));
+  // A card re-mounted during the window (a filter change) clears itself once the refreshed stats arrive.
+  useEffect(() => {
+    if (pendingDelete && !isActionPending(deleteKey)) setPendingDelete(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats]);
   const refresh = useCockpitStore((state) => state.refresh);
   const title = translateCurriculumName(mod.title, language);
   const progress = stats?.progressPct ?? 0;
   const href = `/dashboard/module/${mod.id}`;
 
-  async function handleConfirmDelete() {
-    setIsDeleting(true);
-    try {
-      const res = await fetch(`/api/studio/courses?moduleId=${mod.id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data?.error ?? "Erreur inconnue.");
-      toast({ variant: "success", title: tDiscovery("sourcesDeleted", language), description: `« ${mod.title} »` });
-      setDeleteOpen(false);
-      void refresh({ force: true });
-    } catch (error) {
-      toast({ variant: "error", title: tDiscovery("deleteSourcesFailed", language), description: error instanceof Error ? error.message : "Erreur inconnue." });
-    } finally {
-      setIsDeleting(false);
-    }
+  /**
+   * One click, no confirmation dialog: the deletion is scheduled with an
+   * "Annuler" toast (lib/undoable-action.ts) and only sent when that window
+   * closes — or at once if the tab is closed meanwhile.
+   */
+  function handleDeleteSources() {
+    setPendingDelete(true);
+    const undo = scheduleUndoableAction(deleteKey, async (keepalive) => {
+      try {
+        const res = await fetch(`/api/studio/courses?moduleId=${mod.id}`, { method: "DELETE", keepalive });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data?.error ?? "Erreur inconnue.");
+        void refresh({ force: true });
+      } catch (error) {
+        toast({ variant: "error", title: tDiscovery("deleteSourcesFailed", language), description: error instanceof Error ? error.message : "Erreur inconnue." });
+      } finally {
+        setPendingDelete(false);
+      }
+    });
+    toast({
+      variant: "info",
+      title: tDiscovery("sourcesDeleted", language),
+      description: `« ${title} »`,
+      action: {
+        label: tCockpit("cancel", language),
+        onClick: () => {
+          if (!undo()) return;
+          setPendingDelete(false);
+          toast({ variant: "success", title: tCockpit("deleteUndone", language) });
+        },
+      },
+    });
   }
 
   return (
@@ -124,7 +147,8 @@ const ModuleCard = memo(function ModuleCard({
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.25 }}
       // .module-card (./module-card.css): the gradient ring, lift and neon hover.
-      className="module-card group relative rounded-3xl p-[1.5px]"
+      className={cn("module-card group relative rounded-3xl p-[1.5px] transition-opacity duration-300", pendingDelete && "pointer-events-none opacity-45 saturate-50")}
+      aria-busy={pendingDelete || undefined}
     >
       <div
         role="link"
@@ -166,9 +190,15 @@ const ModuleCard = memo(function ModuleCard({
               {/* Only the destructive action stays behind the menu: statistics and the
                   résumé are tiles below. Flashcards stay switchable per UE (toolbar above),
                   in Settings and in the Study page's course picker. */}
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleteOpen(true)}>
-                  <Trash2 className="h-4 w-4" />
+              <DropdownMenuContent align="end" className="min-w-[15rem] p-1.5">
+                {/* Quiet until pointed at: neutral text and a hairline icon tile, then a soft rose wash — one click deletes, the toast offers "Annuler". */}
+                <DropdownMenuItem
+                  onSelect={handleDeleteSources}
+                  className="group gap-2.5 rounded-xl px-2 py-1.5 text-[13px] font-medium text-slate-600 hover:translate-x-0 focus:bg-rose-500/[0.07] focus:text-rose-700 data-[highlighted]:bg-rose-500/[0.07] data-[highlighted]:text-rose-700 dark:text-slate-300 dark:focus:bg-rose-500/[0.12] dark:focus:text-rose-300 dark:data-[highlighted]:bg-rose-500/[0.12] dark:data-[highlighted]:text-rose-300"
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-900/[0.04] text-slate-500 ring-1 ring-inset ring-slate-900/[0.06] transition-colors duration-150 group-data-[highlighted]:bg-rose-500/10 group-data-[highlighted]:text-rose-600 group-data-[highlighted]:ring-rose-500/20 dark:bg-white/[0.06] dark:text-slate-400 dark:ring-white/[0.08] dark:group-data-[highlighted]:bg-rose-400/15 dark:group-data-[highlighted]:text-rose-300 dark:group-data-[highlighted]:ring-rose-400/25">
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </span>
                   {tCockpit("menuDeleteSources", language)}
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -273,22 +303,6 @@ const ModuleCard = memo(function ModuleCard({
 
       <div onClick={(e) => e.stopPropagation()}>
         {statsOpen && <ModuleStatsModal open={statsOpen} onOpenChange={setStatsOpen} moduleTitle={mod.title} moduleId={mod.id} />}
-        <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle>{tCockpit("deleteTitle", language)}</DialogTitle>
-              <DialogDescription>{tCockpit("deleteBody", language).replace("{module}", mod.title)}</DialogDescription>
-            </DialogHeader>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)} disabled={isDeleting}>
-                {tCockpit("cancel", language)}
-              </Button>
-              <Button type="button" variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
-                {tCockpit("delete", language)}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
     </motion.div>
   );

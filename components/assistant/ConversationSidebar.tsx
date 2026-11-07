@@ -15,7 +15,7 @@
  * of any OS/browser chrome around it.
  */
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MessageSquare, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -57,29 +57,11 @@ function ConversationRow({
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  // Deleting a whole conversation (and its history) is high-regret and, on
-  // this row, a single click away — so a click first ARMS the button
-  // (distinct destructive styling + tooltip) and only a second click within
-  // the window actually deletes. Purely local UI state; the delete itself
-  // still goes through the same onDelete the parent already provides.
-  const [confirming, setConfirming] = useState(false);
-  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
-    };
-  }, []);
-
+  // One click deletes: the parent shows a toast with "Annuler" that brings
+  // the conversation back (app/dashboard/(shell)/assistant/page.tsx), so
+  // there is no arm-then-confirm second click any more.
   function handleDeleteClick(e: MouseEvent) {
     e.stopPropagation();
-    if (!confirming) {
-      setConfirming(true);
-      confirmTimeoutRef.current = setTimeout(() => setConfirming(false), 2800);
-      return;
-    }
-    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
-    setConfirming(false);
     onDelete(conversation.id);
   }
 
@@ -116,20 +98,18 @@ function ConversationRow({
           <button
             type="button"
             onClick={handleDeleteClick}
-            onBlur={() => setConfirming(false)}
-            aria-label={confirming ? "Confirmer la suppression" : "Supprimer la conversation"}
+            aria-label="Supprimer la conversation"
             className={cn(
               // Hover-reveal only where a real hover exists — on touch tablets `sm:opacity-0` hid it for good.
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-md opacity-100 transition-[opacity,background-color,color,transform] duration-200 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
-              confirming
-                ? "scale-105 bg-destructive/15 text-destructive opacity-100 ring-1 ring-destructive/40"
-                : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 opacity-100 transition-[opacity,background-color,color] duration-150 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
+              // A quiet hairline glyph that only warms to rose under the pointer — no red block, no second click.
+              "hover:bg-rose-500/[0.08] hover:text-rose-600 focus-visible:bg-rose-500/[0.08] focus-visible:text-rose-600 focus-visible:outline-none active:bg-rose-500/[0.14] dark:text-white/40 dark:hover:bg-rose-400/[0.12] dark:hover:text-rose-300 dark:focus-visible:bg-rose-400/[0.12] dark:focus-visible:text-rose-300"
             )}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="h-[15px] w-[15px]" strokeWidth={1.75} />
           </button>
         </TooltipTrigger>
-        <TooltipContent>{confirming ? "Cliquer à nouveau pour confirmer" : "Supprimer"}</TooltipContent>
+        <TooltipContent>Supprimer</TooltipContent>
       </Tooltip>
     </motion.div>
   );

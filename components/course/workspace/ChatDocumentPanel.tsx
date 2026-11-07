@@ -844,8 +844,12 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                   Exporter la conversation (.md)
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onClearHistory} disabled={!hasConversation}>
-                  <Trash2 className="h-4 w-4" />
+                <DropdownMenuItem
+                  onSelect={onClearHistory}
+                  disabled={!hasConversation}
+                  className="hover:translate-x-0 focus:bg-rose-500/[0.07] focus:text-rose-700 data-[highlighted]:bg-rose-500/[0.07] data-[highlighted]:text-rose-700 dark:focus:bg-rose-500/[0.12] dark:focus:text-rose-300 dark:data-[highlighted]:bg-rose-500/[0.12] dark:data-[highlighted]:text-rose-300"
+                >
+                  <Trash2 className="h-4 w-4" strokeWidth={1.75} />
                   Nouvelle conversation
                 </DropdownMenuItem>
               </DropdownMenuContent>
