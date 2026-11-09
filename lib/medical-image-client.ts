@@ -2,6 +2,7 @@ import {
   MAX_IMAGE_ALT_CHARS,
   MEDICAL_IMAGE_API,
   MEDICAL_IMAGE_FILE_API,
+  MEDICAL_IMAGE_VIEW_API,
   canonicalImageSrc,
   imageFileSlug,
   isCaptionSearchUrl,
@@ -33,6 +34,29 @@ const inFlight = new Map<string, Promise<Answer>>();
 const shownByLink = new Map<string, VerifiedMedicalImage | null>();
 /** Pictures already painted once: shown again (a re-mounted block), they don't fade in a second time. */
 const painted = new Set<string>();
+
+/** Part of every view address (the CDN keeps pictures by address): raising it fetches every picture anew. */
+const VIEW_VERSION = "1";
+
+/**
+ * Where a reply's picture is loaded from: MedArt's own address, which fetches
+ * it from the repository (app/api/assistant/medical-image/view). The browser
+ * never has to reach the repository itself — from some students' connections
+ * it can't: on 2026-11-09 every Wikimedia host timed out there, and the
+ * picture waited, invisible, under its caption and credit.
+ */
+export function medicalImageViewHref(src: string): string {
+  return `${MEDICAL_IMAGE_VIEW_API}?${new URLSearchParams({ src, v: VIEW_VERSION }).toString()}`;
+}
+
+/**
+ * How long a figure waits for its picture before trying the next address
+ * (components/assistant/MedicalFigure.tsx). MedArt's address fails fast when
+ * it fails (an HTTP error), so its wait is only a safety net. The repository's
+ * own address is the one that hangs: on a connection that can't reach it, the
+ * request neither loads nor fails. An object, so tests can shorten the waits.
+ */
+export const MEDICAL_IMAGE_LOAD_TIMEOUT_MS = { viaMedArt: 45_000, direct: 15_000 };
 
 function rememberIn<V>(map: Map<string, V>, key: string, value: V): void {
   if (!map.has(key) && map.size >= MAX_REMEMBERED) {

@@ -11,8 +11,11 @@
  * NLM's Open-i) and Wellcome Collection — keeping only licenses that allow
  * commercial reuse. The reply shows that verified picture
  * (components/assistant/MedicalFigure.tsx), flush, with an in-app full-screen
- * view and download — or nothing at all, never a broken image. $0: public
- * APIs and the repositories' own image hosting.
+ * view and download — or nothing at all, never a broken image, never a
+ * caption without its picture. The browser loads it from MedArt's own address
+ * (app/api/assistant/medical-image/view), never from the repository: from
+ * some students' connections the repositories' hosts can't be reached at all
+ * (2026-11-09). $0: public APIs, the repositories' pictures, our CDN.
  *
  * Client-safe: shared by the renderer and the server.
  */
@@ -27,7 +30,7 @@ export const MEDICAL_IMAGE_SOURCE_LABELS: Record<MedicalImageSource, string> = {
 };
 
 export interface VerifiedMedicalImage {
-  /** The picture shown in the reply, on its repository's own image host. */
+  /** The picture shown in the reply: its link on the repository's own image host (loaded through MEDICAL_IMAGE_VIEW_API, carried as is in copies). */
   src: string;
   /** A sharper version for the full-screen view and the download (same host), when the repository has one. */
   zoomSrc: string | null;
@@ -62,6 +65,8 @@ export interface MedicalImageQuery {
 export const MEDICAL_IMAGE_API = "/api/assistant/medical-image";
 /** The same-origin download of a verified picture (app/api/assistant/medical-image/file). */
 export const MEDICAL_IMAGE_FILE_API = "/api/assistant/medical-image/file";
+/** A verified picture as the reply shows it, from MedArt's own address (app/api/assistant/medical-image/view). */
+export const MEDICAL_IMAGE_VIEW_API = "/api/assistant/medical-image/view";
 export const MAX_IMAGE_SRC_CHARS = 2000;
 export const MAX_IMAGE_ALT_CHARS = 200;
 export const MAX_IMAGE_ALTERNATIVES = 3;

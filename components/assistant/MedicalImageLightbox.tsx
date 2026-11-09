@@ -1,11 +1,11 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Download, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/Dialog";
 import { MEDICAL_IMAGE_SOURCE_LABELS, type VerifiedMedicalImage } from "@/lib/medical-images";
-import { medicalImageDownloadHref } from "@/lib/medical-image-client";
+import { medicalImageDownloadHref, medicalImageViewHref } from "@/lib/medical-image-client";
 
 const ICON_BUTTON =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/75 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40";
@@ -20,7 +20,9 @@ export function medicalImageCredit(image: VerifiedMedicalImage): string {
  * click never sends the student to another site): the sharpest version the
  * repository has, a click (or the button) zooms in on the clicked spot, and
  * "Télécharger" saves it through MedArt's own address. Escape, the close
- * button or a click on the backdrop close it.
+ * button or a click on the backdrop close it. Like the figure, it loads the
+ * picture from MedArt's own address first (some connections can't reach the
+ * repositories at all), then from the repository's.
  */
 export function MedicalImageLightbox({
   image,
@@ -34,11 +36,16 @@ export function MedicalImageLightbox({
   onOpenChange: (open: boolean) => void;
 }) {
   const [zoomWidth, setZoomWidth] = useState<number | null>(null);
-  const [sharpFailed, setSharpFailed] = useState(false);
+  // The sharp version, then the reply's one — each from MedArt's address, then from the repository's.
+  const addresses = useMemo(() => {
+    const versions = Array.from(new Set([image.zoomSrc, image.src].filter((version): version is string => Boolean(version))));
+    return [...versions.map(medicalImageViewHref), ...versions];
+  }, [image.zoomSrc, image.src]);
+  const [attempt, setAttempt] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const focusRef = useRef({ x: 0.5, y: 0.5 });
-  const full = image.zoomSrc && !sharpFailed ? image.zoomSrc : image.src;
+  const full = addresses[Math.min(attempt, addresses.length - 1)];
   const label = caption || image.title;
 
   function zoomTo(focus: { x: number; y: number }) {
@@ -105,7 +112,7 @@ export function MedicalImageLightbox({
           ref={scrollRef}
           className={cn("min-h-0 flex-1 overflow-auto overscroll-contain", zoomWidth === null && "flex items-center justify-center p-3 sm:p-6")}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- a verified repository picture, served by the repository itself */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- a verified repository picture, served by MedArt's own image route */}
           <img
             ref={imageRef}
             src={full}
@@ -113,7 +120,7 @@ export function MedicalImageLightbox({
             draggable={false}
             decoding="async"
             onClick={handleImageClick}
-            onError={() => setSharpFailed(true)}
+            onError={() => setAttempt((current) => Math.min(current + 1, addresses.length - 1))}
             style={zoomWidth === null ? undefined : { width: zoomWidth }}
             // A light paper behind the picture: only a transparent diagram lets it show, and its black labels need it on this dark view.
             className={cn(

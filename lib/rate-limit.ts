@@ -126,6 +126,8 @@ export const RATE_LIMITS = {
   assistantDictation: { limit: 30, windowMs: 5 * 60 * 1000 },
   /** app/api/assistant/medical-image/route.ts — no AI, no cost: one Wikimedia Commons lookup per image of a Copilot reply. Opening a long conversation checks all its images at once, hence the room; the bound keeps one account from hammering Wikimedia through us. */
   medicalImage: { limit: 120, windowMs: 60 * 1000 },
+  /** app/api/assistant/medical-image/view/route.ts — each picture of a Copilot reply, served from MedArt's own address (no AI, no cost; the CDN answers repeats). Reopening a long conversation loads all its pictures at once and a failed one tries an alternative, hence the room; the bound keeps one account from pulling repository pictures through us at will. */
+  medicalImageView: { limit: 240, windowMs: 60 * 1000 },
 } satisfies Record<string, RateLimitConfig>;
 
 /** Seconds until the window resets, for a Retry-After header. */
