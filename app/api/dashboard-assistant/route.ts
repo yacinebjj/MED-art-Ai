@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { PAID_FALLBACK_MAX_TOKENS, streamFreeOmni, withPaidFallbackBrevity } from "@/lib/ai/omni-routing";
 import { isSmallTalk } from "@/lib/chat-intent";
 
 // ── Vision (images in the assistant) ────────────────────────────────────
-// Images go to ECONOMY_MODEL (multimodal) — the free text chain can't see
-// them. The client downsizes to ~1568 px JPEG first; this cap keeps the whole
-// JSON body under the platform's ~4.5 MB request ceiling.
+// Images go first to the free multimodal PRIMARY_FREE_OMNI, then (paid
+// fallback) to ECONOMY_MODEL — the free text chain can't see them. The
+// client downsizes to ~1568 px JPEG first; this cap keeps the whole JSON body
+// under the platform's ~4.5 MB request ceiling.
 const MAX_IMAGE_BASE64_CHARS = 3_000_000;
 const DATA_URL_IMAGE_PATTERN = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/]+=*$/i;
 const VISION_SYSTEM_ADDENDUM = `L'étudiant joint une IMAGE médicale (schéma, coupe histologique, ECG, radiographie, photo clinique, capture de QCM…). Analyse-la avec méthode :
@@ -20,10 +22,10 @@ Si l'image est illisible ou insuffisante, dis-le clairement plutôt que d'invent
 type VisionPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
-import { reserveAssistantTurn } from "@/lib/subscription";
+import { reserveAssistantAccess, reservePremiumFallback } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { isAssistantMode, isAssistantStyle, type AssistantMode } from "@/lib/assistant-modes";
+import { isAssistantMode, isAssistantStyle } from "@/lib/assistant-modes";
 import { buildAssistantSystemPrompt, DASHBOARD_ASSISTANT_SYSTEM_PROMPT } from "@/lib/ai/assistant-prompts";
 import { isReplyId } from "@/lib/copilot-background";
 import { streamReplyInBackground } from "@/lib/copilot-background-store";
@@ -51,14 +53,15 @@ export const maxDuration = 120;
  * share of the SAME account-wide free-tier request ceiling
  * (lib/platform-spend-guard.ts's reserveFreeTierCapacity).
  *
- * MODEL TIER (product direction) — no longer free-only. The first
- * DAILY_CHAT_LIMIT (20, see lib/subscription.ts) messages/day route to
- * CHEAP_MODEL (DeepSeek, paid but cheap and fast); every message after that
- * silently falls back to FREE_MODEL_CHAIN below — zero alert, zero error
- * shown, same "try the next one" mechanism the free-model loop already used.
- * The daily gate is reserveChatMessageDaily, the SAME atomic, TOCTOU-safe RPC
- * app/api/courses/chat/route.ts already reserves against — this route now
- * shares that one daily pool instead of having none at all.
+ * MODEL ROUTING — Omni-first since 2026-11-09 (product order; see
+ * lib/ai/omni-routing.ts): every message, text or image, goes first to the
+ * free multimodal PRIMARY_FREE_OMNI (8192-token ceiling). Only if it fails
+ * does a paid model answer — CHAT_MODEL for text, ECONOMY_MODEL for an image
+ * — for a student whose plan grants it (reservePremiumFallback, which spends
+ * one of the daily premium messages shared with app/api/courses/chat/route.ts
+ * only then), capped at 500 tokens and asked for a short answer. A text
+ * message then still has the rest of FREE_MODEL_CHAIN as a zero-cost
+ * safety net.
  *
  * FREE_MODEL_CHAIN lives in lib/ai/openrouter.ts (shared with courses/chat
  * and lib/cache-prewarming.ts) — see that constant's own comment for the
@@ -84,24 +87,12 @@ const MAX_DOCUMENT_CHARS = 12000;
 // for a single reply.
 const MAX_OUTPUT_TOKENS = 8192;
 
-// Paid tier (CHAT_MODEL) ceilings — 2026-10-12, explicit product order (cost).
-// Plain questions are concise by prompt now (120-250 words, 400 max), so the
-// default only stops a runaway; each quick action keeps room for the format
-// it asks for (up to 10 QCM with a per-option correction, 12 flashcards, a
-// revision sheet, a differential table) so it is never cut mid-answer. The
-// free chain keeps MAX_OUTPUT_TOKENS above (reasoning headroom, no cost).
-const PAID_MAX_OUTPUT_TOKENS_DEFAULT = 900;
-// Image questions (ECONOMY_MODEL): room for a concise read of an ECG / imaging
-// plus the model's capped thinking.
-const PAID_MAX_OUTPUT_TOKENS_VISION = 2500;
-const PAID_MAX_OUTPUT_TOKENS_BY_MODE: Record<AssistantMode, number> = {
-  clinical_case: 1000,
-  mcq: 3000,
-  differential: 1500,
-  summary: 1800,
-  simplify: 700,
-  flashcards: 1500,
-};
+// Paid fallback ceiling (CHAT_MODEL for text, ECONOMY_MODEL for an image):
+// PAID_FALLBACK_MAX_TOKENS (500) since 2026-11-09 — product order, short and
+// cheap. It replaced the per-quick-action ceilings of 2026-10-12 (700-3000)
+// and the 2500 of image questions; the answer is asked to be short on that
+// path (withPaidFallbackBrevity) so it ends where it should. The free models
+// keep MAX_OUTPUT_TOKENS above (no cost).
 
 // 0.3, aligned on app/api/courses/chat/route.ts (was 0.5 here): same model,
 // but medical answers need precision over variety — a lower temperature
@@ -208,19 +199,15 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
     });
 
-  // Daily paid-tier gate (see this file's header comment) — decides whether
-  // THIS message tries CHEAP_MODEL first. Deliberately checked BEFORE (and
-  // independently of) reserveFreeTierCapacity below: a message served by
-  // DeepSeek touches the free tier's external ceiling not at all, so it must
-  // never be blocked by that unrelated circuit breaker being saturated.
-  // Monetization v2: free trial = 20 messages for life (then paywall);
-  // paid = 20 premium messages a day, then the free model, silently.
-  // Small talk ("salut", "merci", "ça va ?") goes to the free chain and never
-  // spends a premium message — see lib/chat-intent.ts. An image always needs
-  // the vision model, whatever the caption says.
-  const turn = await reserveAssistantTurn(user, { needsPremium: Boolean(imageDataUrl) || !isSmallTalk(message) });
-  if (!turn.allowed) return quotaBlockedResponse(turn);
-  const dailyGate = { allowed: turn.premium };
+  // Access gate (see this file's header comment) — may this message be sent,
+  // and may a paid model stand in if the free Omni model fails? Monetization
+  // v2: free trial = 20 messages for life (then paywall); paid = 20 premium
+  // messages a day — spent only when the paid fallback actually answers
+  // (reservePremiumFallback below). Small talk ("salut", "merci", "ça va ?")
+  // is never worth a paid call — see lib/chat-intent.ts. An image always may,
+  // whatever the caption says.
+  const access = await reserveAssistantAccess(user, { needsPremium: Boolean(imageDataUrl) || !isSmallTalk(message) });
+  if (!access.allowed) return quotaBlockedResponse(access);
 
   const systemPrompt = buildAssistantSystemPrompt(SYSTEM_PROMPT, {
     mode: isAssistantMode(mode) ? mode : undefined,
@@ -242,79 +229,91 @@ export async function POST(request: NextRequest) {
     { role: "user", content: message },
   ];
 
-  // Vision: multimodal model only (the text chain would silently ignore the
-  // image). Draws on the same daily allowance as the advanced text model.
+  // An image travels as an image_url part on the student's last turn, with the
+  // vision method right after the persona — the same request for Omni and for
+  // the paid vision fallback.
+  const requestMessages: ChatMessageInput[] = imageDataUrl
+    ? [
+        messages[0],
+        { role: "system", content: VISION_SYSTEM_ADDENDUM },
+        ...messages.slice(1, -1),
+        {
+          role: "user",
+          content: [
+            { type: "text", text: message },
+            { type: "image_url", image_url: { url: imageDataUrl } },
+          ] as VisionPart[],
+        } as unknown as ChatMessageInput,
+      ]
+    : messages;
+
+  // Omni-first routing (lib/ai/omni-routing.ts) — the first attempt that
+  // succeeds wins:
+  //  1. PRIMARY_FREE_OMNI for every message, text or image (8192 tokens: free).
+  //  2. Only if it failed, for a student whose plan grants it, the paid model —
+  //     CHAT_MODEL for text, ECONOMY_MODEL for an image — at 500 tokens, a
+  //     short answer asked for.
+  //  3. Text only: the rest of FREE_MODEL_CHAIN, the zero-cost safety net (no
+  //     free model there can see an image).
+  // A model erroring (saturation, a provider hiccup, a 429) is the EXPECTED,
+  // routine case on free endpoints, not an exceptional one.
+  let lastError: unknown = null;
+
+  // The shared external free-tier ceiling (see reserveFreeTierCapacity's own
+  // comment), reserved once for this message before its first free call.
+  // When it is spent, the free models are skipped, never the paid fallback.
+  const capacity = await reserveFreeTierCapacity();
+
+  if (capacity.allowed) {
+    try {
+      // Resolves once Omni's first visible word has arrived; throws (429, 5xx,
+      // an empty or broken stream, 25 s of silence) so the next attempt runs.
+      return deliver(await streamFreeOmni(requestMessages, { temperature: ANSWER_TEMPERATURE }));
+    } catch (error) {
+      lastError = error;
+      console.error("[dashboard-assistant] Omni gratuit indisponible, bascule sur le repli:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  const paidFallback = await reservePremiumFallback(user, access);
+  if (paidFallback) {
+    try {
+      const stream = imageDataUrl
+        ? // Gemini's hidden thinking capped (uncapped, it billed 965 reasoning tokens for one question, live 2026-10-12).
+          await streamOpenRouter(withPaidFallbackBrevity(requestMessages), {
+            model: ECONOMY_MODEL,
+            maxTokens: PAID_FALLBACK_MAX_TOKENS,
+            temperature: 0.3,
+            reasoning: { effort: "low" },
+            providerSort: "latency",
+          })
+        : // CHAT_MODEL: qwen3.7-flash, a hybrid thinking model — reasoning switched OFF explicitly.
+          await streamOpenRouter(withPaidFallbackBrevity(requestMessages), {
+            model: CHAT_MODEL,
+            maxTokens: PAID_FALLBACK_MAX_TOKENS,
+            temperature: ANSWER_TEMPERATURE,
+            reasoning: { enabled: false },
+            providerSort: "latency",
+          });
+      return deliver(stream);
+    } catch (error) {
+      lastError = error;
+      console.error("[dashboard-assistant] Modèle payant de repli indisponible:", error instanceof Error ? error.message : error);
+    }
+  }
+
   if (imageDataUrl) {
-    if (!dailyGate.allowed) {
+    // No free text model can stand in for an image.
+    console.error("[dashboard-assistant] Analyse d'image échouée:", lastError instanceof Error ? lastError.message : lastError);
+    if (access.premiumEligible && !paidFallback && access.dailySub) {
       return NextResponse.json(
         { error: "Tu as utilisé toutes tes analyses avancées du jour (images comprises). Elles se rechargent demain — tu peux continuer en texte d'ici là." },
         { status: 429 }
       );
     }
-    const visionMessages: ChatMessageInput[] = [
-      messages[0],
-      { role: "system", content: VISION_SYSTEM_ADDENDUM },
-      ...messages.slice(1, -1),
-      {
-        role: "user",
-        content: [
-          { type: "text", text: message },
-          { type: "image_url", image_url: { url: imageDataUrl } },
-        ] as VisionPart[],
-      } as unknown as ChatMessageInput,
-    ];
-    try {
-      // Reasoning capped like this model's other call sites (lecture-notes):
-      // uncapped, gemini-3.7-flash billed hidden thinking at $3.75/M — live
-      // 2026-10-12, one question: 965 reasoning tokens, $0.0054, 18.8 s vs
-      // 0, $0.0019, 7.6 s with this cap, same answer length.
-      const stream = await streamOpenRouter(visionMessages, {
-        model: ECONOMY_MODEL,
-        maxTokens: PAID_MAX_OUTPUT_TOKENS_VISION,
-        temperature: 0.3,
-        reasoning: { effort: "low" },
-        providerSort: "latency",
-      });
-      return deliver(stream);
-    } catch (error) {
-      console.error("[dashboard-assistant] Analyse d'image échouée:", error instanceof Error ? error.message : error);
-      return NextResponse.json({ error: "L'analyse de l'image n'a pas pu aboutir. Réessaie dans un instant." }, { status: 502 });
-    }
+    return NextResponse.json({ error: "L'analyse de l'image n'a pas pu aboutir. Réessaie dans un instant." }, { status: 502 });
   }
 
-  // Try each candidate model in order — the first one that succeeds wins. A
-  // model erroring (momentary saturation, a provider hiccup, a rate-limit
-  // blip) is the EXPECTED, routine case here, not an exceptional one — this
-  // is also what makes a DeepSeek failure fall through to the free chain
-  // automatically, silently, with no separate handling needed.
-  let lastError: unknown = null;
-
-  if (dailyGate.allowed) {
-    try {
-      // CHAT_MODEL (Qwen3-30B-2507) since 2026-10-07, was CHEAP_MODEL
-      // (qwen-2.5-72b, measured 14-42 tok/s — the copilot's slowness).
-      // qwen3.7-flash since 2026-10-12 — a hybrid thinking model, reasoning
-      // switched OFF explicitly (see CHAT_MODEL in lib/ai/openrouter.ts).
-      const paidMaxTokens = isAssistantMode(mode) ? PAID_MAX_OUTPUT_TOKENS_BY_MODE[mode] : PAID_MAX_OUTPUT_TOKENS_DEFAULT;
-      const stream = await streamOpenRouter(messages, {
-        model: CHAT_MODEL,
-        maxTokens: paidMaxTokens,
-        temperature: ANSWER_TEMPERATURE,
-        reasoning: { enabled: false },
-        providerSort: "latency",
-      });
-      return deliver(stream);
-    } catch (error) {
-      lastError = error;
-      console.error("[dashboard-assistant] CHAT_MODEL indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
-    }
-  }
-
-  // Reached either because the daily paid allowance is already spent, or
-  // DeepSeek just failed above — NOW reserve the shared external free-tier
-  // ceiling (see reserveDashboardAssistantCapacity's own comment), since
-  // we're actually about to spend some of it.
-  const capacity = await reserveFreeTierCapacity();
   if (!capacity.allowed) {
     return NextResponse.json({ error: capacity.reason }, { status: 503 });
   }
@@ -332,10 +331,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Every free model in the chain failed — the ONLY case the student sees
-  // an error. Deliberately NEVER falls back to a paid model: that would
-  // silently defeat the entire point of this feature (genuinely zero
-  // marginal cost) the exact moment free capacity is actually saturated.
+  // Omni, the paid fallback (when granted) and every free model failed — the
+  // ONLY case the student sees an error. A paid model is never called past
+  // the one fallback its plan grants.
   const status = lastError instanceof OpenRouterError ? lastError.status : 503;
   console.error("[dashboard-assistant] Tous les modèles gratuits ont échoué:", lastError instanceof Error ? lastError.message : lastError);
   return NextResponse.json(

@@ -3,6 +3,9 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { transcribeAudioViaOpenRouter, OpenRouterError, type TranscriptionFormat } from "@/lib/ai/openrouter";
+import { transcribeWithFreeOmni } from "@/lib/ai/omni-routing";
+import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
+import { canUsePaidAudioFallback } from "@/lib/subscription";
 
 export const runtime = "nodejs";
 // A single short dictation clip (a spoken chat question, well under a
@@ -101,17 +104,43 @@ export async function POST(request: NextRequest) {
   const format = resolveFormat(file.type || "audio/webm");
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  try {
-    // No forced language: Whisper auto-detects French, Arabic or Algerian
-    // Darja (forcing "fr" bent Darja/Arabic speech into wrong French). The
-    // prompt only biases spelling towards medical vocabulary and the
-    // student's real languages, it never translates.
-    const { text } = await transcribeAudioViaOpenRouter(buffer, format, { prompt: DICTATION_PROMPT });
-    return NextResponse.json({ success: true, text });
-  } catch (error) {
-    const message = error instanceof OpenRouterError ? error.message : errorMessage(error);
-    const status = error instanceof OpenRouterError ? error.status : 502;
-    console.error("[assistant/transcribe] Échec transcription:", message);
-    return NextResponse.json({ success: false, error: message }, { status });
+  // Omni-first routing (product order 2026-11-09, lib/ai/omni-routing.ts):
+  //  1. the free multimodal PRIMARY_FREE_OMNI transcribes the clip — one
+  //     request on the shared free-tier daily ceiling (reserveFreeTierCapacity);
+  //  2. only if it failed, Whisper — for a student whose plan grants a paid
+  //     fallback (canUsePaidAudioFallback; counts nothing: the dictated
+  //     question is counted when it is sent).
+  let lastError: unknown = null;
+
+  const capacity = await reserveFreeTierCapacity();
+  if (capacity.allowed) {
+    try {
+      const text = await transcribeWithFreeOmni(buffer, format);
+      return NextResponse.json({ success: true, text });
+    } catch (error) {
+      lastError = error;
+      console.error("[assistant/transcribe] Omni gratuit indisponible, bascule sur le repli:", error instanceof Error ? error.message : error);
+    }
   }
+
+  if (await canUsePaidAudioFallback(user)) {
+    try {
+      // No forced language: Whisper auto-detects French, Arabic or Algerian
+      // Darja (forcing "fr" bent Darja/Arabic speech into wrong French). The
+      // prompt only biases spelling towards medical vocabulary and the
+      // student's real languages, it never translates.
+      const { text } = await transcribeAudioViaOpenRouter(buffer, format, { prompt: DICTATION_PROMPT });
+      return NextResponse.json({ success: true, text });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  const detail = lastError === null ? capacity.reason ?? "aucune tentative" : lastError instanceof OpenRouterError ? lastError.message : errorMessage(lastError);
+  const status = lastError instanceof OpenRouterError ? lastError.status : lastError === null ? 503 : 502;
+  console.error("[assistant/transcribe] Échec transcription:", detail);
+  return NextResponse.json(
+    { success: false, error: "La dictée vocale est momentanément indisponible — réessaie dans un instant, ou tape ta question." },
+    { status: status >= 400 && status < 600 ? status : 502 }
+  );
 }

@@ -487,6 +487,75 @@ export async function reserveAssistantTurn(user: GateUser, options: { needsPremi
   return { allowed: true, premium: data !== null };
 }
 
+/**
+ * OMNI-FIRST ROUTING (product order 2026-11-09, lib/ai/omni-routing.ts): both
+ * Copilots try the free Omni model first for every message, and call a paid
+ * model only when it has failed — and only for a student whose plan grants
+ * one. So the gate above is split in two:
+ *  - reserveAssistantAccess, up front: may this message be sent at all? A
+ *    trial message is counted here exactly as reserveAssistantTurn counts it
+ *    (the trial is a message allowance, whatever model answers). Nothing
+ *    else is spent.
+ *  - reservePremiumFallback, only once Omni has failed: spends one of a paid
+ *    student's DAILY_PREMIUM_MESSAGES — which therefore now count only the
+ *    replies a paid model actually wrote.
+ */
+export type AssistantAccess =
+  | {
+      allowed: true;
+      /** A paid model may answer if Omni fails (false for small talk, never worth a paid call). */
+      premiumEligible: boolean;
+      /** Paid (and legacy) accounts: a fallback spends a daily premium message; trial and dev: already counted. */
+      dailySub: SubscriptionRow | null;
+    }
+  | GateBlocked;
+
+export async function reserveAssistantAccess(user: GateUser, options: { needsPremium?: boolean } = {}): Promise<AssistantAccess> {
+  const needsPremium = options.needsPremium ?? true;
+  const loaded = await loadForGate(user);
+  if ("fail" in loaded) return loaded.fail;
+  if (devBypass()) return { allowed: true, premiumEligible: needsPremium, dailySub: null };
+  const sub = loaded.sub;
+  if (resolveEffectivePlan(sub) === "freemium" && isV2(sub)) {
+    const r = await reserveCounter(user.id, "free_messages_used", FREE_TRIAL.messages);
+    if (r === "error") return CHECK_FAILED;
+    if (r === false) {
+      return { allowed: false, paywall: "trial_messages", reason: `Tes ${FREE_TRIAL.messages} messages gratuits sont utilisés. Choisis ta formule pour continuer à discuter avec MedArt.` };
+    }
+    return { allowed: true, premiumEligible: needsPremium, dailySub: null };
+  }
+  return { allowed: true, premiumEligible: needsPremium, dailySub: sub };
+}
+
+/** Called only when the free Omni model has failed: true = a paid model may answer this message (its premium unit is now spent). */
+export async function reservePremiumFallback(user: GateUser, access: AssistantAccess): Promise<boolean> {
+  if (!access.allowed || !access.premiumEligible) return false;
+  if (!access.dailySub) return true;
+  await ensureFreshDay(user.id, access.dailySub, "daily_chat_messages_used", "daily_chat_reset_at");
+  const { data, error } = await withDbRetry("reserve_daily_chat_messages_used", () => getSupabaseAdmin().rpc("reserve_daily_chat_messages_used", { p_user_id: user.id, p_cap: DAILY_PREMIUM_MESSAGES }));
+  if (error) {
+    console.error("[subscription] reserve_daily_chat_messages_used failed:", error.message);
+    // Never block over a counter hiccup — the free chain still answers.
+    return false;
+  }
+  return data !== null;
+}
+
+/**
+ * Voice dictation (Omni-first, 2026-11-09): may Whisper stand in when the free
+ * Omni model could not transcribe? Yes for any account that could get a
+ * premium Copilot reply — a paid (or legacy) account, or a trial with
+ * messages left. Counts nothing: the dictated question is counted when it is sent.
+ */
+export async function canUsePaidAudioFallback(user: GateUser): Promise<boolean> {
+  const loaded = await loadForGate(user);
+  if ("fail" in loaded) return false;
+  if (devBypass()) return true;
+  const sub = loaded.sub;
+  if (resolveEffectivePlan(sub) === "freemium" && isV2(sub)) return (sub.free_messages_used ?? 0) < FREE_TRIAL.messages;
+  return true;
+}
+
 /** Back-compat shim for callers that only need "premium model or not". */
 export async function reserveChatMessageDaily(user: GateUser): Promise<GateResult> {
   const turn = await reserveAssistantTurn(user);

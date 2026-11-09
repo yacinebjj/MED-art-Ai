@@ -410,6 +410,19 @@ export type OpenRouterResponseFormat =
 // Anthropic's own confirmed vision support rather than an unverified claim.
 export const FREE_MODEL_CHAIN = ["thinkingmachines/inkling:free", "thinkingmachines/inkling-small:free", "nvidia/nemotron-3.5-lightning:free"];
 
+// PRIMARY FREE OMNI — product order 2026-11-09: the FIRST model tried for
+// every Copilot request (Workspace and Dashboard), whatever it carries: text,
+// an image, or a voice recording (lib/ai/omni-routing.ts). NVIDIA Nemotron 3
+// Nano Omni, free tier. Checked live 2026-11-09 against GET
+// https://openrouter.ai/api/v1/models and its /endpoints: input modalities
+// text + audio + image + video, $0 prompt / $0 completion, 256K context, up
+// to 65,536 completion tokens, one provider (Nvidia, healthy), supported
+// parameters: reasoning, include_reasoning, temperature, max_tokens, seed,
+// top_p, tools, tool_choice. A reasoning model ("-reasoning"): its hidden
+// thinking comes before the first visible word, which is why the routing
+// waits for that word (with a time limit) before committing to it.
+export const PRIMARY_FREE_OMNI = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+
 // Zero-spend Studio-content generation for local development: callOpenRouter
 // below checks this to serve a canned fixture (lib/ai/mock-data.ts) instead
 // of a real, billed call. Deliberately does NOT gate streamOpenRouter (the

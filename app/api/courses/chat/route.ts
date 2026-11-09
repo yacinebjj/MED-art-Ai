@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { PAID_FALLBACK_MAX_TOKENS, streamFreeOmni, withPaidFallbackBrevity } from "@/lib/ai/omni-routing";
 import { isSmallTalk } from "@/lib/chat-intent";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { waitUntil } from "@vercel/functions";
@@ -11,9 +12,11 @@ import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import {
   reserveChatMessage,
   refundChatMessage,
-  reserveAssistantTurn,
+  reserveAssistantAccess,
+  reservePremiumFallback,
   reserveHighlightMessage,
   refundHighlightMessage,
+  type AssistantAccess,
 } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
@@ -36,18 +39,16 @@ export const maxDuration = 120; // streamed chat reply — no explicit cap befor
 // call on every message, working against the very cost this exists to cut.
 const MAX_HISTORY_MESSAGES = 10;
 
-// This route now runs EXCLUSIVELY on lib/ai/openrouter.ts's FREE_MODEL_CHAIN
-// (":free"-suffixed models — see that constant's own comment for which
-// ones, and the live verification behind them) — an explicit product
-// decision to trade the previously-tuned Haiku/economy hybrid routing (and
-// its cost-control reasoning) for genuinely zero marginal cost, ACCEPTING a
-// real, unverified quality risk on this app's core medical-explanation
-// surface (see the git history / conversation around this change for the
-// full trade-off discussion). lib/chat-model-routing.ts is left in place,
-// unused but intact, specifically so reverting to paid hybrid routing later
-// is a small, contained change if this experiment doesn't hold up.
+// MODEL ROUTING — Omni-first since 2026-11-09 (product order; see
+// lib/ai/omni-routing.ts): every message goes first to the free multimodal
+// PRIMARY_FREE_OMNI (FREE_OMNI_MAX_TOKENS, 8192). Only if it fails does a
+// paid model answer — CHAT_MODEL, for a student whose plan grants it
+// (reservePremiumFallback), capped at PAID_FALLBACK_MAX_TOKENS (500) and
+// asked for a short answer. The rest of FREE_MODEL_CHAIN stays the last,
+// zero-cost safety net. lib/chat-model-routing.ts (the old Haiku/economy
+// hybrid) is still unused, kept intact.
 //
-// 8192 (raised from 800/1500 on explicit request) — free-tier models are
+// FREE CHAIN ceilings below: 8192 (raised from 800/1500 on explicit request) — free-tier models are
 // not necessarily prioritized the way a paid call is, and are NOT run
 // through this app's own cost-driven caps; a generous ceiling here is what
 // actually stops a genuinely long explanation from being cut off mid-
@@ -65,16 +66,11 @@ const MAX_OUTPUT_TOKENS_NORMAL = 8192;
 // overhead as MAX_OUTPUT_TOKENS_NORMAL above.
 const MAX_OUTPUT_TOKENS_HIGHLIGHT = 3500;
 
-// Paid tier (CHAT_MODEL) ceilings — 2026-10-12, explicit product order (cost).
-// Answers are concise by prompt now (120-250 words, 400 max), so these only
-// stop a runaway; sized per composer mode so a format the student chose
-// (exam QCM, step-by-step) is never cut mid-answer — live, an "examen"
-// answer with its QCM and correction took 785 tokens. The free chain keeps
-// the generous ceilings above: its models can spend part of the budget on
-// reasoning, and they cost nothing.
-const PAID_MAX_OUTPUT_TOKENS: Record<ChatMode, number> = { express: 500, standard: 900, examen: 1400, detaille: 1600 };
-// "Ask MedArt" (100-220 words) and Translate (≤800-char excerpt, into Arabic AND French).
-const PAID_MAX_OUTPUT_TOKENS_HIGHLIGHT = 900;
+// Paid fallback (CHAT_MODEL) ceiling: PAID_FALLBACK_MAX_TOKENS (500) for every
+// mode since 2026-11-09 (product order: short and cheap) — it replaced the
+// per-mode ceilings of 2026-10-12 (500-1600). Free-form answers are asked to
+// stay short on that path (withPaidFallbackBrevity) so they end where they
+// should instead of mid-sentence.
 
 // Appended ONLY for the "Ask MedArt" text-selection quick action (concise:
 // true from the client) — never for the free-form chat input. Product
@@ -377,17 +373,13 @@ export async function POST(request: NextRequest) {
 
   // Plan quota gate — highlight mode's own pool (chatMessageCap, the
   // free-form pool below, is checked separately further down).
-  // Whether this message gets CHAT_MODEL (paid tier) before the free chain —
-  // set from reserveAssistantTurn, which already counted it against the
-  // student's premium allowance either way.
-  let usePaidTier = false;
+  // `access` decides whether a PAID model may stand in if the free Omni model
+  // fails (reservePremiumFallback, at that moment only — lib/subscription.ts).
+  let access: AssistantAccess | null = null;
   if (isHighlightMode) {
     // A selection question is a message too: it uses the free trial's 20.
-    const turn = await reserveAssistantTurn(user);
-    if (!turn.allowed) return quotaBlockedResponse(turn);
-    // Was always the free chain, even though this turn was already counted
-    // as premium — the slow, flaky "Ask MedArt" answers.
-    usePaidTier = turn.premium;
+    access = await reserveAssistantAccess(user);
+    if (!access.allowed) return quotaBlockedResponse(access);
     const gate = await reserveHighlightMessage(user);
     if (!gate.allowed) {
       return NextResponse.json({ error: gate.reason }, { status: 403 });
@@ -545,25 +537,12 @@ export async function POST(request: NextRequest) {
         })()
       : Promise.resolve(null);
 
-  // Daily chat gate — ATOMICALLY reserves (checks AND increments in one
-  // step, see reserveChatMessageDaily's own comment). Deliberate:
-  // DAILY_CHAT_LIMIT exists to bound request VOLUME (abuse/scraping
-  // prevention), not spend — a script hammering the same question 500 times
-  // a day is exactly what this must still block. reserveChatMessage's
-  // monthly chatMessageCap is reserved separately just below.
-  //
-  // REPURPOSED (product direction) — this gate no longer BLOCKS the
-  // request on `!allowed`. It now decides which model TIER this message
-  // gets: the first DAILY_CHAT_LIMIT (20) messages/day route to CHAT_MODEL
-  // (DeepSeek, paid but cheap and fast); every message after that silently
-  // falls back to FREE_MODEL_CHAIN — same zero-alert, zero-error-message
-  // transition the free-model fallback loop below already does for a
-  // mid-tier outage. The atomic RPC itself is UNCHANGED (still the same
-  // TOCTOU-safe reserve_daily_chat_messages_used — see that function's own
-  // security-fix comment in lib/subscription.ts) — only how this route
-  // reacts to its result changed. Highlight mode ("Ask MedArt" on a
-  // selection) is deliberately excluded, same as before: it has its own,
-  // separate highlightMessageCap pool, untouched by this daily counter.
+  // Access gate (reserveAssistantAccess) — may this message be sent, and may a
+  // paid model stand in if the free Omni model fails? The daily premium
+  // counter (the same atomic, TOCTOU-safe reserve_daily_chat_messages_used RPC)
+  // is only touched by reservePremiumFallback, when that paid call actually
+  // happens. Highlight mode ("Ask MedArt" on a selection) took its access
+  // above, with its own separate highlightMessageCap pool.
   //
   // This gate, reserveChatMessage, and reserveFreeTierCapacity stay strictly
   // SEQUENTIAL relative to EACH OTHER (unlike contextPromise above) — each
@@ -574,13 +553,13 @@ export async function POST(request: NextRequest) {
   // counter — even when an earlier gate had already rejected the request,
   // over-charging a student's quota for a message that never actually sent.
   // Monetization v2: free trial = 20 messages for life (then paywall);
-  // paid = 20 premium-model messages a day, then the free model, silently.
-  // Small talk ("salut", "merci", "ça va ?") goes to the free chain and never
-  // spends a premium message — see lib/chat-intent.ts.
+  // paid = 20 premium-model messages a day, then the free models, silently —
+  // and since 2026-11-09 a premium message is only spent when the paid model
+  // actually answers (the free Omni model failed). Small talk ("salut",
+  // "merci", "ça va ?") is never worth a paid call — see lib/chat-intent.ts.
   if (!isHighlightMode) {
-    const turn = await reserveAssistantTurn(user, { needsPremium: !isSmallTalk(message) });
-    if (!turn.allowed) return quotaBlockedResponse(turn);
-    usePaidTier = turn.premium;
+    access = await reserveAssistantAccess(user, { needsPremium: !isSmallTalk(message) });
+    if (!access.allowed) return quotaBlockedResponse(access);
   }
 
   // Semantic caching REMOVED (product direction) — every chat message now
@@ -627,53 +606,56 @@ export async function POST(request: NextRequest) {
         { role: "user", content: message },
       ];
 
-  // Try each candidate model in order — the first one that succeeds wins.
-  // `usePaidTier` prepends CHAT_MODEL (qwen3.7-flash) when this message is
-  // within the daily 20-message paid allowance (see the dailyGate comment
-  // above, highlight mode included); past the daily cap it uses
-  // FREE_MODEL_CHAIN exactly as before. Mirrors
-  // app/api/dashboard-assistant/route.ts's own fallback loop: a model
-  // erroring (momentary saturation, a provider hiccup, a rate-limit blip) is
-  // the EXPECTED, routine case here, not an exceptional one — this is also
-  // what makes DeepSeek's own transient failures fall through to the free
-  // chain automatically, for free, with no extra handling. `reasoning: {
-  // effort: "low" }` applied to every attempt — see MAX_OUTPUT_TOKENS_NORMAL's
-  // own comment for why this is a defensive default now, not a
-  // model-specific fix like it was for ECONOMY_MODEL; it's a documented
-  // no-op on a model (like DeepSeek here) that doesn't support it.
+  // Omni-first routing (lib/ai/omni-routing.ts) — the first attempt that
+  // succeeds wins:
+  //  1. PRIMARY_FREE_OMNI for every message (8192-token ceiling: free).
+  //  2. Only if it failed, CHAT_MODEL for a student whose plan grants it
+  //     (500-token ceiling, asked for a short answer).
+  //  3. The rest of FREE_MODEL_CHAIN, the last zero-cost safety net.
+  // A model erroring (saturation, a provider hiccup, a 429) is the EXPECTED,
+  // routine case on free endpoints, not an exceptional one.
   let responseStream: ReadableStream<Uint8Array> | null = null;
   let lastError: unknown = null;
   const maxTokensForThisTurn = isHighlightMode ? MAX_OUTPUT_TOKENS_HIGHLIGHT : MAX_OUTPUT_TOKENS_NORMAL;
 
-  if (usePaidTier) {
+  // The free-tier models' own hard, EXTERNAL, account-wide daily request cap
+  // (shared with app/api/dashboard-assistant/route.ts, the voice dictation and
+  // lib/cache-prewarming.ts — see that function's own comment), reserved once
+  // for this message before its first free call. When it is spent, the free
+  // models are skipped, never the paid fallback.
+  const freeTierCapacity = await reserveFreeTierCapacity();
+
+  if (freeTierCapacity.allowed) {
     try {
-      // CHAT_MODEL: qwen3.7-flash since 2026-10-12 (see its own comment in
-      // lib/ai/openrouter.ts) — a hybrid thinking model, so reasoning is
-      // switched OFF explicitly (measured: 0 reasoning tokens).
-      responseStream = await streamOpenRouter(messages, {
+      // Resolves once Omni's first visible word has arrived; throws (429, 5xx,
+      // an empty or broken stream, 25 s of silence) so the next attempt runs.
+      responseStream = await streamFreeOmni(messages, { temperature: 0.3 });
+    } catch (error) {
+      lastError = error;
+      console.error("[courses/chat POST] Omni gratuit indisponible, bascule sur le repli:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (!responseStream && access && (await reservePremiumFallback(user, access))) {
+    try {
+      // CHAT_MODEL: qwen3.7-flash — a hybrid thinking model, so reasoning is
+      // switched OFF explicitly (measured: 0 reasoning tokens). Short by
+      // product order; a free-form answer is asked to be short so it never
+      // stops mid-sentence (a highlight answer is already short by its prompt).
+      responseStream = await streamOpenRouter(isHighlightMode ? messages : withPaidFallbackBrevity(messages), {
         model: CHAT_MODEL,
         temperature: 0.3,
-        maxTokens: isHighlightMode ? PAID_MAX_OUTPUT_TOKENS_HIGHLIGHT : PAID_MAX_OUTPUT_TOKENS[chatMode],
+        maxTokens: PAID_FALLBACK_MAX_TOKENS,
         reasoning: { enabled: false },
         providerSort: "latency",
       });
     } catch (error) {
       lastError = error;
-      console.error("[courses/chat POST] CHAT_MODEL indisponible, bascule silencieuse sur la chaîne gratuite:", error instanceof Error ? error.message : error);
+      console.error("[courses/chat POST] CHAT_MODEL indisponible, bascule sur la chaîne gratuite:", error instanceof Error ? error.message : error);
     }
   }
 
   if (!responseStream) {
-    // Reached either because this message was already over the daily paid
-    // allowance (or is highlight mode, never eligible for it), or DeepSeek
-    // just failed above — NOW reserve the free-tier models' own hard,
-    // EXTERNAL, account-wide daily request cap (shared with
-    // app/api/dashboard-assistant/route.ts and lib/cache-prewarming.ts — see
-    // that function's own comment), since we're actually about to spend some
-    // of it. Checking this BEFORE knowing whether DeepSeek would succeed
-    // would wrongly block a message the paid tier could have served fine,
-    // just because the free tier happens to be saturated.
-    const freeTierCapacity = await reserveFreeTierCapacity();
     if (!freeTierCapacity.allowed) {
       // The student's own unit was already reserved above — a platform-wide
       // saturation they can't do anything about must not cost them it.
@@ -706,8 +688,8 @@ export async function POST(request: NextRequest) {
   }
 
   if (!responseStream) {
-    // Every model tried (DeepSeek if applicable, then the whole free chain)
-    // failed. Refund whatever credit was reserved — a transient outage
+    // Every model tried (Omni, the paid fallback if granted, then the free
+    // chain) failed. Refund whatever credit was reserved — a transient outage
     // across the whole free tier shouldn't cost the student their monthly
     // allowance. refundChatMessage/refundHighlightMessage take the user's
     // id (a string), not the whole authenticated User object.
