@@ -45,13 +45,17 @@ export interface ReplyCopy {
 /** Fired on window when a reply settles with no page watching it (detail: { id }). */
 export const REPLY_READY_EVENT = "copilot:reply-ready";
 
-/** How long a page keeps asking the server for a reply whose connection broke (a reply gets 120 s there). */
-const RECOVER_FOR_MS = 150_000;
+/**
+ * How long a page keeps asking the server for a reply whose connection broke.
+ * A reply gets 300 s there (app/api/dashboard-assistant's maxDuration, raised
+ * from 120 s on 2026-11-09 with the free models' long, detailed answers).
+ */
+const RECOVER_FOR_MS = 330_000;
 /** No trace of the reply on the server after this long: it never started there. */
 const RECOVER_NO_TRACE_MS = 10_000;
 const RECOVER_EVERY_MS = 1500;
 /** Still "generating" this long after it started: the server was cut off (function timeout). */
-const STALE_GENERATING_MS = 180_000;
+const STALE_GENERATING_MS = 360_000;
 
 interface Run {
   userId: string | null;

@@ -26,7 +26,7 @@ import { reserveAssistantAccess, reservePremiumFallback } from "@/lib/subscripti
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { isAssistantMode, isAssistantStyle } from "@/lib/assistant-modes";
-import { buildAssistantSystemPrompt, DASHBOARD_ASSISTANT_SYSTEM_PROMPT } from "@/lib/ai/assistant-prompts";
+import { buildAssistantSystemPrompt, DASHBOARD_ASSISTANT_SYSTEM_PROMPT, DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED } from "@/lib/ai/assistant-prompts";
 import { isReplyId } from "@/lib/copilot-background";
 import { streamReplyInBackground } from "@/lib/copilot-background-store";
 
@@ -38,10 +38,13 @@ export const dynamic = "force-dynamic";
 // Without more wall-clock headroom here, Vercel's own function timeout
 // could still cut a long reply off mid-stream even though MAX_OUTPUT_TOKENS
 // itself would have allowed it to finish — same failure the token-side fix
-// is meant to remove, just from the platform side instead of ours. 120s
-// matches the precedent already used for this app's other long-running
-// stream (app/api/courses/chat/route.ts).
-export const maxDuration = 120;
+// is meant to remove, just from the platform side instead of ours. 300 s
+// (was 120 s) since 2026-11-09: the free models are now asked for exhaustive
+// answers (lib/ai/answer-depth.ts), so a slower free endpoint may need more
+// than two minutes to stream one — same value as
+// app/api/courses/chat/route.ts; lib/copilot-reply-runner.ts's recovery
+// windows follow it.
+export const maxDuration = 300;
 
 /**
  * Dashboard Assistant — a general-purpose chat surface for the dashboard
@@ -102,8 +105,10 @@ const MAX_OUTPUT_TOKENS = 8192;
 // truncate the visible answer.
 const ANSWER_TEMPERATURE = 0.3;
 
-// Base persona — see DASHBOARD_ASSISTANT_SYSTEM_PROMPT's own comment in
-// lib/ai/assistant-prompts.ts (modeled on the course chat's prompt).
+// Base persona, concise version (a paid fallback) — see
+// DASHBOARD_ASSISTANT_SYSTEM_PROMPT's own comment in lib/ai/assistant-prompts.ts
+// (modeled on the course chat's prompt). The free models get
+// DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED (see buildRequest below).
 const SYSTEM_PROMPT = DASHBOARD_ASSISTANT_SYSTEM_PROMPT;
 
 interface HistoryTurn {
@@ -209,43 +214,50 @@ export async function POST(request: NextRequest) {
   const access = await reserveAssistantAccess(user, { needsPremium: Boolean(imageDataUrl) || !isSmallTalk(message) });
   if (!access.allowed) return quotaBlockedResponse(access);
 
-  const systemPrompt = buildAssistantSystemPrompt(SYSTEM_PROMPT, {
+  const promptOptions = {
     mode: isAssistantMode(mode) ? mode : undefined,
     style: isAssistantStyle(style) ? style : undefined,
     stepByStep: stepByStep === true,
-  });
+  };
 
-  const messages: ChatMessageInput[] = [
-    { role: "system", content: systemPrompt },
-    ...(documentAttachment
-      ? [
-          {
-            role: "system" as const,
-            content: `Voici le contenu extrait du document que l'étudiant vient d'importer ("${documentAttachment.fileName}") — utilise-le comme contexte pour répondre à sa question ci-dessous quand c'est pertinent :\n"""\n${documentAttachment.text}\n"""`,
-          },
-        ]
-      : []),
-    ...historyTurns.map((turn): ChatMessageInput => ({ role: turn.role, content: turn.content })),
-    { role: "user", content: message },
-  ];
-
-  // An image travels as an image_url part on the student's last turn, with the
-  // vision method right after the persona — the same request for Omni and for
-  // the paid vision fallback.
-  const requestMessages: ChatMessageInput[] = imageDataUrl
-    ? [
-        messages[0],
-        { role: "system", content: VISION_SYSTEM_ADDENDUM },
-        ...messages.slice(1, -1),
-        {
-          role: "user",
-          content: [
-            { type: "text", text: message },
-            { type: "image_url", image_url: { url: imageDataUrl } },
-          ] as VisionPart[],
-        } as unknown as ChatMessageInput,
-      ]
-    : messages;
+  // Dynamic system prompts (product order 2026-11-09, lib/ai/answer-depth.ts):
+  // the same request in two versions, each sent only to the models it is
+  // meant for — the DETAILED persona (no length limit, the depth directive)
+  // to the free models, the CONCISE one (its length target, plus the
+  // short-answer note added at call time) to a paid fallback. A quick action
+  // or a style the student chose is added to both. An image travels as an
+  // image_url part on the student's last turn, with the vision method right
+  // after the persona.
+  const buildRequest = (basePrompt: string): ChatMessageInput[] => {
+    const messages: ChatMessageInput[] = [
+      { role: "system", content: buildAssistantSystemPrompt(basePrompt, promptOptions) },
+      ...(documentAttachment
+        ? [
+            {
+              role: "system" as const,
+              content: `Voici le contenu extrait du document que l'étudiant vient d'importer ("${documentAttachment.fileName}") — utilise-le comme contexte pour répondre à sa question ci-dessous quand c'est pertinent :\n"""\n${documentAttachment.text}\n"""`,
+            },
+          ]
+        : []),
+      ...historyTurns.map((turn): ChatMessageInput => ({ role: turn.role, content: turn.content })),
+      { role: "user", content: message },
+    ];
+    if (!imageDataUrl) return messages;
+    return [
+      messages[0],
+      { role: "system", content: VISION_SYSTEM_ADDENDUM },
+      ...messages.slice(1, -1),
+      {
+        role: "user",
+        content: [
+          { type: "text", text: message },
+          { type: "image_url", image_url: { url: imageDataUrl } },
+        ] as VisionPart[],
+      } as unknown as ChatMessageInput,
+    ];
+  };
+  const freeModelMessages = buildRequest(DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED);
+  const paidModelMessages = buildRequest(SYSTEM_PROMPT);
 
   // Omni-first routing (lib/ai/omni-routing.ts) — the first attempt that
   // succeeds wins:
@@ -268,7 +280,7 @@ export async function POST(request: NextRequest) {
     try {
       // Resolves once Omni's first visible word has arrived; throws (429, 5xx,
       // an empty or broken stream, 25 s of silence) so the next attempt runs.
-      return deliver(await streamFreeOmni(requestMessages, { temperature: ANSWER_TEMPERATURE }));
+      return deliver(await streamFreeOmni(freeModelMessages, { temperature: ANSWER_TEMPERATURE }));
     } catch (error) {
       lastError = error;
       console.error("[dashboard-assistant] Omni gratuit indisponible, bascule sur le repli:", error instanceof Error ? error.message : error);
@@ -280,7 +292,7 @@ export async function POST(request: NextRequest) {
     try {
       const stream = imageDataUrl
         ? // Gemini's hidden thinking capped (uncapped, it billed 965 reasoning tokens for one question, live 2026-10-12).
-          await streamOpenRouter(withPaidFallbackBrevity(requestMessages), {
+          await streamOpenRouter(withPaidFallbackBrevity(paidModelMessages), {
             model: ECONOMY_MODEL,
             maxTokens: PAID_FALLBACK_MAX_TOKENS,
             temperature: 0.3,
@@ -288,7 +300,7 @@ export async function POST(request: NextRequest) {
             providerSort: "latency",
           })
         : // CHAT_MODEL: qwen3.7-flash, a hybrid thinking model — reasoning switched OFF explicitly.
-          await streamOpenRouter(withPaidFallbackBrevity(requestMessages), {
+          await streamOpenRouter(withPaidFallbackBrevity(paidModelMessages), {
             model: CHAT_MODEL,
             maxTokens: PAID_FALLBACK_MAX_TOKENS,
             temperature: ANSWER_TEMPERATURE,
@@ -320,7 +332,7 @@ export async function POST(request: NextRequest) {
 
   for (const model of FREE_MODEL_CHAIN) {
     try {
-      const stream = await streamOpenRouter(messages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: ANSWER_TEMPERATURE, reasoning: { effort: "low" }, providerSort: "latency" });
+      const stream = await streamOpenRouter(freeModelMessages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: ANSWER_TEMPERATURE, reasoning: { effort: "low" }, providerSort: "latency" });
       return deliver(stream);
     } catch (error) {
       lastError = error;

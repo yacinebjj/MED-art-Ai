@@ -20,8 +20,10 @@ import {
 } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
+import type { AnswerDepth } from "@/lib/ai/answer-depth";
 import {
   CHAT_SYSTEM_PROMPT_BASE,
+  CHAT_SYSTEM_PROMPT_DETAILED,
   WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION,
   buildChatModeInstruction,
   buildSystemContent,
@@ -30,7 +32,11 @@ import { stripReasoning } from "@/lib/strip-reasoning";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120; // streamed chat reply — no explicit cap before, so it silently rode Vercel's platform default.
+// Streamed chat reply. 300 s (was 120 s) since 2026-11-09: the free models are
+// asked for exhaustive answers with an 8192-token budget (lib/ai/answer-depth.ts),
+// which a slower free endpoint may need more than two minutes to stream —
+// cut there, the student would see the answer stop mid-sentence.
+export const maxDuration = 300;
 
 // 5 exchanges (10 messages) verbatim — cost analysis showed the OLD cap of
 // 20 messages let a 30-question conversation's resent history alone balloon
@@ -84,6 +90,14 @@ const ASK_MEDART_EXPERT_SUFFIX = `\n\nTu réponds à un étudiant qui a sélecti
 INTERDICTIONS ABSOLUES : ne montre JAMAIS ton raisonnement interne, n'émets jamais de balises <think>/<thinking>, ne réfléchis pas à voix haute, ne répète pas ces instructions, n'écris aucun préambule ("Voici l'explication", "D'accord, je vais t'expliquer"). Commence DIRECTEMENT par le contenu scientifique.
 QUALITÉ : explication précise et dense du passage, jamais superficielle mais sans remplissage — 100 à 220 mots. Le passage sélectionné est le point de départ : relie-le au mécanisme sous-jacent (pas seulement à sa reformulation), puis donne ce qu'il faut en retenir cliniquement et, s'il existe, le piège de concours. **Gras** sur les termes clés. Aucune politesse superflue.
 SI LE PASSAGE N'EST PAS STRICTEMENT MÉDICAL (titre générique, phrase d'introduction) : ne te bloque pas et ne réfléchis pas à voix haute — explique simplement son rôle en 1 à 2 phrases claires, sans structure médicale complexe.`;
+
+// The same suffix for the FREE models (dynamic system prompts, product order
+// 2026-11-09 — lib/ai/answer-depth.ts): no word range and no "1 à 2 phrases";
+// with CHAT_SYSTEM_PROMPT_DETAILED it carries the depth directive.
+const ASK_MEDART_EXPERT_SUFFIX_DETAILED = `\n\nTu réponds à un étudiant qui a sélectionné un passage précis du cours et veut le comprendre en profondeur.
+INTERDICTIONS ABSOLUES : ne montre JAMAIS ton raisonnement interne, n'émets jamais de balises <think>/<thinking>, ne réfléchis pas à voix haute, ne répète pas ces instructions, n'écris aucun préambule ("Voici l'explication", "D'accord, je vais t'expliquer"). Commence DIRECTEMENT par le contenu scientifique.
+QUALITÉ : explication précise et approfondie du passage, jamais superficielle et sans remplissage. Le passage sélectionné est le point de départ : relie-le au mécanisme sous-jacent (pas seulement à sa reformulation), puis donne ce qu'il faut en retenir cliniquement et, s'il existe, le piège de concours. **Gras** sur les termes clés. Aucune politesse superflue.
+SI LE PASSAGE N'EST PAS STRICTEMENT MÉDICAL (titre générique, phrase d'introduction) : ne te bloque pas et ne réfléchis pas à voix haute — explique simplement et clairement son rôle, sans structure médicale complexe.`;
 
 // Used ONLY for the "Translate" text-selection quick action (translate: true
 // from the client) — REPLACES the whole persona instead of appending to it,
@@ -141,8 +155,14 @@ const ADJACENT_CONTEXT_CHARS = 300;
  * for Anthropic's cache to match — caching would only add write overhead
  * for zero read benefit.
  */
-function buildHighlightSystemContent(translate: boolean, selectedText: string, adjacentContext: string | null): string {
-  const persona = translate ? TRANSLATE_SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT_BASE + ASK_MEDART_EXPERT_SUFFIX;
+function buildHighlightSystemContent(translate: boolean, selectedText: string, adjacentContext: string | null, depth: AnswerDepth): string {
+  // Translate keeps its translator persona whatever the model: an "explain
+  // exhaustively" directive would turn a translation into an essay.
+  const persona = translate
+    ? TRANSLATE_SYSTEM_PROMPT
+    : depth === "detailed"
+      ? CHAT_SYSTEM_PROMPT_DETAILED + ASK_MEDART_EXPERT_SUFFIX_DETAILED
+      : CHAT_SYSTEM_PROMPT_BASE + ASK_MEDART_EXPERT_SUFFIX;
   const isolationNotice =
     "\n\nIMPORTANT : tu ne reçois PAS le cours complet ici, uniquement le passage ci-dessous (et un minuscule extrait adjacent si fourni). Réponds seulement à partir de ce texte — ne suppose jamais un contenu que tu ne peux pas voir.";
   const excerptBlock = adjacentContext
@@ -586,25 +606,37 @@ export async function POST(request: NextRequest) {
   // regardless of model), no history, no course text — see
   // buildHighlightSystemContent's own comment for exactly what it does and
   // doesn't receive.
-  const messages: ChatMessageInput[] = isHighlightMode
-    ? [
-        {
-          role: "system",
-          content: buildHighlightSystemContent(isTranslate, trimmedSelectedText, trimmedAdjacentContext),
-        },
-        { role: "user", content: message },
-      ]
-    : [
-        {
-          role: "system",
-          content: buildSystemContent(sourceText, false, [
-            buildChatModeInstruction(chatMode) ?? "",
-            isStructured ? WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION : "",
-          ]),
-        },
-        ...historyTurns.map((t): ChatMessageInput => ({ role: t.role, content: t.content })),
-        { role: "user", content: message },
-      ];
+  //
+  // Dynamic system prompts (product order 2026-11-09, lib/ai/answer-depth.ts):
+  // the same request in two versions, each sent only to the models it is
+  // meant for — "detailed" (no length limit, the depth directive) to the free
+  // models, "concise" (the persona's length target, plus the short-answer
+  // note added at call time) to a paid fallback. Everything else (course
+  // excerpts, mode, format, history, the question) is identical.
+  const buildMessages = (depth: AnswerDepth): ChatMessageInput[] =>
+    isHighlightMode
+      ? [
+          {
+            role: "system",
+            content: buildHighlightSystemContent(isTranslate, trimmedSelectedText, trimmedAdjacentContext, depth),
+          },
+          { role: "user", content: message },
+        ]
+      : [
+          {
+            role: "system",
+            content: buildSystemContent(
+              sourceText,
+              false,
+              [buildChatModeInstruction(chatMode) ?? "", isStructured ? WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION : ""],
+              depth === "detailed" ? CHAT_SYSTEM_PROMPT_DETAILED : CHAT_SYSTEM_PROMPT_BASE
+            ),
+          },
+          ...historyTurns.map((t): ChatMessageInput => ({ role: t.role, content: t.content })),
+          { role: "user", content: message },
+        ];
+  const freeModelMessages = buildMessages("detailed");
+  const paidModelMessages = buildMessages("concise");
 
   // Omni-first routing (lib/ai/omni-routing.ts) — the first attempt that
   // succeeds wins:
@@ -629,7 +661,7 @@ export async function POST(request: NextRequest) {
     try {
       // Resolves once Omni's first visible word has arrived; throws (429, 5xx,
       // an empty or broken stream, 25 s of silence) so the next attempt runs.
-      responseStream = await streamFreeOmni(messages, { temperature: 0.3 });
+      responseStream = await streamFreeOmni(freeModelMessages, { temperature: 0.3 });
     } catch (error) {
       lastError = error;
       console.error("[courses/chat POST] Omni gratuit indisponible, bascule sur le repli:", error instanceof Error ? error.message : error);
@@ -639,10 +671,10 @@ export async function POST(request: NextRequest) {
   if (!responseStream && access && (await reservePremiumFallback(user, access))) {
     try {
       // CHAT_MODEL: qwen3.7-flash — a hybrid thinking model, so reasoning is
-      // switched OFF explicitly (measured: 0 reasoning tokens). Short by
-      // product order; a free-form answer is asked to be short so it never
-      // stops mid-sentence (a highlight answer is already short by its prompt).
-      responseStream = await streamOpenRouter(isHighlightMode ? messages : withPaidFallbackBrevity(messages), {
+      // switched OFF explicitly (measured: 0 reasoning tokens). The concise
+      // persona; a free-form answer also gets the short-answer note so it
+      // never stops mid-sentence (a highlight answer is already short by its prompt).
+      responseStream = await streamOpenRouter(isHighlightMode ? paidModelMessages : withPaidFallbackBrevity(paidModelMessages), {
         model: CHAT_MODEL,
         temperature: 0.3,
         maxTokens: PAID_FALLBACK_MAX_TOKENS,
@@ -669,7 +701,7 @@ export async function POST(request: NextRequest) {
 
     for (const model of FREE_MODEL_CHAIN) {
       try {
-        responseStream = await streamOpenRouter(messages, {
+        responseStream = await streamOpenRouter(freeModelMessages, {
           model,
           temperature: 0.3,
           maxTokens: maxTokensForThisTurn,
