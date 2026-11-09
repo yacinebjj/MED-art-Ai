@@ -1036,6 +1036,98 @@ export async function generateOpenRouterImage(
   return { imageDataUrl, text: typeof message?.content === "string" ? message.content : null };
 }
 
+/**
+ * OpenRouter's dedicated Images API — `POST /api/v1/images` with
+ * `{ model, prompt }`, answered with `data[].b64_json` (+ `media_type`), not a
+ * chat completion. Some image models are served ONLY there, such as Meta's
+ * Muse Image (Studio "Infographie / Fiche de Synthèse", lib/ai/infographic-sheet.ts):
+ * checked live 2026-11-09, its catalog entry lists `/api/v1/images` as its one
+ * endpoint. Image-only models are also missing from the default
+ * GET /api/v1/models listing — they appear with `?output_modalities=image`
+ * or under GET /api/v1/images/models.
+ */
+const OPENROUTER_IMAGES_URL = "https://openrouter.ai/api/v1/images";
+
+interface OpenRouterImagesResponse {
+  created?: number;
+  data?: { b64_json?: string; media_type?: string }[];
+  usage?: unknown;
+}
+
+/** The image type from the first bytes of its base64, for an answer without `media_type`. */
+function sniffImageMediaType(base64: string): string {
+  if (base64.startsWith("/9j/")) return "image/jpeg";
+  if (base64.startsWith("UklGR")) return "image/webp";
+  if (base64.startsWith("R0lGOD")) return "image/gif";
+  return "image/png";
+}
+
+/**
+ * One image from OpenRouter's Images API (see OPENROUTER_IMAGES_URL above),
+ * returned in the same `data:image/...;base64,...` shape as
+ * generateOpenRouterImage. The timeout stays armed through the body read (see
+ * callOpenRouter's own comment).
+ */
+export async function generateOpenRouterImageViaImagesApi(
+  prompt: string,
+  options: { model: string; timeoutMs?: number }
+): Promise<GeneratedImageResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new OpenRouterError("OPENROUTER_API_KEY n'est pas configurée sur le serveur.", 500);
+  }
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  let data: OpenRouterImagesResponse | undefined;
+  try {
+    const res = await fetchOpenRouterWithRetry(OPENROUTER_IMAGES_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+        "X-Title": "Med Art AI",
+      },
+      body: JSON.stringify({ model: options.model, prompt }),
+      signal: timeoutController.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(`OpenRouter Images API error (${res.status})`, body.slice(0, 500));
+      console.error("OpenRouter Images API error detail:", extractOpenRouterErrorDetail(body));
+      throw new OpenRouterError(brandedUpstreamMessage(res.status, "image"), res.status);
+    }
+
+    data = await res.json();
+  } catch (error) {
+    if (error instanceof OpenRouterError) throw error;
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error(`OpenRouter Images API timed out after ${timeoutMs}ms (headers or body phase)`);
+      throw new OpenRouterError("La génération de l'image met trop de temps. Réessaie dans un instant.", 504);
+    }
+    console.error("OpenRouter Images API fetch failed", error);
+    throw new OpenRouterError("L'appel au modèle d'image a échoué. Réessaie dans un instant.", 502);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  logUsage(`generateOpenRouterImageViaImagesApi model=${options.model}`, data?.usage);
+
+  const first = Array.isArray(data?.data) ? data.data[0] : undefined;
+  const encoded = typeof first?.b64_json === "string" ? first.b64_json.trim() : "";
+  if (encoded.startsWith("data:image/")) return { imageDataUrl: encoded, text: null };
+  if (!encoded) {
+    console.error("OpenRouter Images API returned no usable image", JSON.stringify(data).slice(0, 500));
+    throw new OpenRouterError("Le modèle n'a renvoyé aucune image exploitable.", 502);
+  }
+  const mediaType = typeof first?.media_type === "string" && /^image\/[\w.+-]+$/.test(first.media_type) ? first.media_type : sniffImageMediaType(encoded);
+  return { imageDataUrl: `data:${mediaType};base64,${encoded}`, text: null };
+}
+
 // Studio "Podcast Audio" tab — confirmed live against
 // GET https://openrouter.ai/api/v1/models (2026-09-02): real id, output
 // modality includes "audio". Real minimal calibration test confirmed: (1)

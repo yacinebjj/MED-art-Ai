@@ -1,4 +1,4 @@
-import { callOpenRouter, CHAT_MODEL, generateOpenRouterImage, PRIMARY_FREE_OMNI, type ChatMessageInput, type OpenRouterResponseFormat } from "@/lib/ai/openrouter";
+import { callOpenRouter, CHAT_MODEL, generateOpenRouterImageViaImagesApi, PRIMARY_FREE_OMNI, type ChatMessageInput, type OpenRouterResponseFormat } from "@/lib/ai/openrouter";
 import { FREE_OMNI_MAX_TOKENS } from "@/lib/ai/omni-routing";
 import { runThroughLedger } from "@/lib/ai/generation-ledger";
 import { normalizeText, sha256 } from "@/lib/content-similarity";
@@ -17,8 +17,8 @@ import { FICHE_SYNTHESE_VERSION } from "@/lib/infographic-fiche-key";
  *     (Llama 3.1 8B held to a strict JSON schema, then qwen3.7-flash in JSON
  *     mode — a small fraction of a cent per course); if every model fails, a
  *     plan built from the course's own headings. The step cannot fail.
- *  2. app/api/studio/infographic — that prompt goes to the image model
- *     (FICHE_IMAGE_MODELS); the image is stored and shown in the Studio.
+ *  2. app/api/studio/infographic — that prompt goes to Meta's Muse Image
+ *     (FICHE_IMAGE_MODEL); the image is stored and shown in the Studio.
  * The plan is kept in the generation ledger, so step 2 reuses step 1's plan
  * for 0 tokens. The image route never takes a prompt from the browser.
  */
@@ -27,13 +27,15 @@ import { FICHE_SYNTHESE_VERSION } from "@/lib/infographic-fiche-key";
 export const FICHE_TOPIC_COUNT = 6;
 
 /**
- * Image models, in order. NO "Muse" model on OpenRouter generates images
- * (checked live 2026-11-09: every meta/muse-* model outputs text only), so
- * the sheet uses the app's designated image backend — Nano Banana 2 (Gemini
- * 3.1 Flash Image) — then its preview id, the one the shelved Infographie
- * validated in production (2026-09-02), if the first fails.
+ * The sheet's image model — Meta's Muse Image, by product order (2026-11-09),
+ * with no other model behind it. Checked live 2026-11-09: id
+ * "meta/muse-image" (canonical meta/muse-image-1.0-eval-20260824), text +
+ * image in, image out, provider Meta, billed per image token. Its one
+ * endpoint is OpenRouter's dedicated Images API (POST /api/v1/images), so it
+ * goes through generateOpenRouterImageViaImagesApi, not chat completions. It
+ * reasons before it renders, hence the long time budget below.
  */
-export const FICHE_IMAGE_MODELS = ["google/gemini-3.1-flash-image", "google/gemini-3.1-flash-image-preview"] as const;
+export const FICHE_IMAGE_MODEL = "meta/muse-image";
 
 /** The ultra-cheap extraction fallback ($0.02 / $0.04 per million tokens), held to a strict JSON schema. */
 export const FICHE_OUTLINE_CHEAP_MODEL = "meta-llama/llama-3.1-8b-instruct";
@@ -43,10 +45,8 @@ export const MAX_SOURCE_CHARS_FOR_FICHE = 20_000;
 
 const OMNI_OUTLINE_TIMEOUT_MS = 45_000;
 const CHEAP_OUTLINE_TIMEOUT_MS = 25_000;
-/** One image attempt. A real Nano Banana 2 generation took ~10 s (2026-09-02). */
-const IMAGE_ATTEMPT_TIMEOUT_MS = 110_000;
-/** A second image model is only worth trying with at least this much time left. */
-const MIN_IMAGE_ATTEMPT_MS = 30_000;
+/** Floor of the image call's time budget (it otherwise gets all the time the route has left). */
+const MIN_IMAGE_TIMEOUT_MS = 30_000;
 /**
  * A plan built from the course's headings (every model failed) is kept this
  * long — enough for the image step that follows to reuse it instead of
@@ -399,25 +399,19 @@ export async function extractFicheOutline(input: { courseTitle: string; sourceTe
 }
 
 /**
- * Step 2: the image for a finished prompt — FICHE_IMAGE_MODELS in order, each
- * attempt bounded by `deadline` (epoch ms) so the route always answers within
- * its own duration. Throws the last error when no model produced an image.
+ * Step 2: the image for a finished prompt — Muse Image only (FICHE_IMAGE_MODEL),
+ * given all the time left before `deadline` (epoch ms) so the route always
+ * answers within its own duration. Throws its error when no image came back.
  */
 export async function generateFicheImage(prompt: string, deadline: number): Promise<{ imageDataUrl: string; model: string }> {
-  let lastError: unknown = null;
-  for (const [index, model] of FICHE_IMAGE_MODELS.entries()) {
-    const remaining = deadline - Date.now();
-    if (index > 0 && remaining < MIN_IMAGE_ATTEMPT_MS) break;
-    try {
-      const { imageDataUrl } = await generateOpenRouterImage([{ role: "user", content: prompt }], {
-        model,
-        timeoutMs: Math.max(MIN_IMAGE_ATTEMPT_MS, Math.min(IMAGE_ATTEMPT_TIMEOUT_MS, remaining)),
-      });
-      return { imageDataUrl, model };
-    } catch (error) {
-      lastError = error;
-      console.error(`[infographic-sheet] Modèle d'image "${model}" sans image:`, error instanceof Error ? error.message : error);
-    }
+  try {
+    const { imageDataUrl } = await generateOpenRouterImageViaImagesApi(prompt, {
+      model: FICHE_IMAGE_MODEL,
+      timeoutMs: Math.max(MIN_IMAGE_TIMEOUT_MS, deadline - Date.now()),
+    });
+    return { imageDataUrl, model: FICHE_IMAGE_MODEL };
+  } catch (error) {
+    console.error(`[infographic-sheet] Muse Image ("${FICHE_IMAGE_MODEL}") sans image:`, error instanceof Error ? error.message : error);
+    throw error;
   }
-  throw lastError instanceof Error ? lastError : new Error("Aucun modèle d'image n'a répondu.");
 }
