@@ -13,6 +13,7 @@ import {
   BookOpen,
   ClipboardCheck,
   Columns2,
+  FileImage,
   FileText,
   Focus,
   FolderOpen,
@@ -94,6 +95,8 @@ import { DEMO_SECTIONS, buildQuotedChatMessage, visibleStudioSections, type Demo
 import { getInFlightGeneration, trackGeneration } from "@/lib/studio-generation-tracker";
 import { PodcastGeneratingLabel } from "@/components/course/workspace/PodcastGeneratingLabel";
 import { ExplicationGeneratingLabel, type ExplicationProgressView } from "@/components/course/workspace/ExplicationGeneratingLabel";
+import { InfographicGeneratingView } from "@/components/course/workspace/InfographicGeneratingView";
+import { isFichePlanView, type FichePlanView } from "@/lib/infographic-fiche-key";
 import { createClient } from "@/lib/supabase/client";
 import type { CurriculumModule } from "@/types/academic";
 import type { StudioCourseFull, StudioCourseSummary } from "@/types/studio-course";
@@ -248,6 +251,35 @@ function withSectionValue(course: StudioCourseFull, section: DemoSectionId, valu
 /** Composite key for the generating-by-key Set below — course-scoped so an in-flight section on one course can never bleed into another's identically-named tile. */
 function sectionKey(courseId: number, section: DemoSectionId): string {
   return `${courseId}:${section}`;
+}
+
+/**
+ * Step 1 of the Studio "Infographie / Fiche de Synthèse": the sheet's plan
+ * (title + six key topics, read from the course by a text model), shown as a
+ * preview while step 2 draws the image. Null when the plan route can't be
+ * reached or failed on its side (a 401 included: it can be a passing session
+ * refresh race) — the image route then builds the plan itself. Throws only on
+ * an answer the image route would give too (missing course, too little
+ * content, rate limit).
+ */
+async function requestFichePlan(courseId: number): Promise<FichePlanView | null> {
+  let res: Response;
+  try {
+    res = await fetch("/api/studio/infographic/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ courseId }),
+    });
+  } catch {
+    return null;
+  }
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && data?.success && isFichePlanView(data.outline)) return data.outline;
+  if (res.status === 429) throw new Error(buildRateLimitMessage(res));
+  if (res.status === 400 || res.status === 404) {
+    throw new Error(typeof data?.error === "string" ? data.error : "La génération a échoué.");
+  }
+  return null;
 }
 
 /** Derives the plain `Set<DemoSectionId>` StudioPanel/MobileStudioCards expect, scoped to whichever course is currently active — see generatingByKey's own comment for the bug this exists to fix. */
@@ -890,6 +922,9 @@ export default function ModuleWorkspacePage() {
   // Live per-part progress for the multi-request Explication pipeline — see
   // the onProgress call site below for why surfacing this matters.
   const [explicationProgress, setExplicationProgress] = useState<ExplicationProgressView | null>(null);
+  // Infographie / Fiche de Synthèse: each course's plan (step 1), previewed
+  // while its image is drawn (step 2).
+  const [fichePlans, setFichePlans] = useState<Record<number, FichePlanView>>({});
   // "Afficher le cours" — the self-contained CourseViewer module, decoupled
   // from the isSplitScreen/studioPanel system entirely, showing whichever
   // course's file was requested from the Sources list.
@@ -1180,6 +1215,9 @@ export default function ModuleWorkspacePage() {
     const key = sectionKey(courseId, id);
 
     setGeneratingByKey((prev) => new Set(prev).add(key));
+    // The Fiche de Synthèse opens at once on its live preview (its plan, then
+    // the finished sheet) rather than leaving a spinner on its tile.
+    if (id === "infographic") startNavTransition(() => setOpenedSection(id));
 
     // Wrapped in its own promise, registered with trackGeneration BEFORE
     // being awaited — this is what survives a navigation away from this
@@ -1204,10 +1242,15 @@ export default function ModuleWorkspacePage() {
         let cached: boolean;
 
         if (id === "infographic") {
+          // Fiche de Synthèse, in two steps: the plan (a text model reads the
+          // course — free Omni first, ultra-cheap fallback), previewed while
+          // the image model draws the sheet from it.
+          const plan = await requestFichePlan(courseId);
+          if (plan) setFichePlans((prev) => ({ ...prev, [courseId]: plan }));
           const res = await fetch("/api/studio/infographic", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ courseId, language: options?.language ?? getContentLanguage(), model: options?.model }),
+            body: JSON.stringify({ courseId }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || !data.success) {
@@ -2306,6 +2349,12 @@ export default function ModuleWorkspacePage() {
             </div>
             <ExplicationReader markdown={explicationProgress.previewMarkdown} />
           </div>
+        ) : openedSection === "infographic" ? (
+          // The sheet takes shape: its plan (title + six boxes) as soon as
+          // step 1 has it, while the image is drawn.
+          <div key={`generating-infographic:${activeCourse?.id ?? ""}`} className="animate-fade-in">
+            <InfographicGeneratingView plan={activeCourse ? fichePlans[activeCourse.id] ?? null : null} />
+          </div>
         ) : (
         <div key="generating" className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">
           <BrandLoader className="h-6 w-6" />
@@ -2401,6 +2450,29 @@ export default function ModuleWorkspacePage() {
               <AudioPodcastViewer key={activeCourse.id} audioUrl={activeCourse.audioUrl} courseTitle={activeCourse.title} />
             )}
           </Suspense>
+        </div>
+      ) : openedSection === "infographic" && activeCourse ? (
+        // Opened without a sheet (its generation failed — the toast says why —
+        // or another course was picked meanwhile): one click to generate it,
+        // never a blank pane.
+        <div key={`infographic-idle:${activeCourse.id}`} className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-16 text-center">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-card shadow-soft">
+            <FileImage className="h-5 w-5 text-muted-foreground" />
+          </span>
+          <p className="text-sm font-medium text-foreground">{language === "fr" ? "Ta fiche de synthèse n'est pas encore prête" : "Your summary sheet isn't ready yet"}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            {language === "fr"
+              ? "Une fiche illustrée du cours : son titre, ses six notions clés et des schémas médicaux, en une seule image."
+              : "One illustrated sheet of the course: its title, its six key topics and medical drawings, in a single image."}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            className="bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
+            onClick={() => void handleStudioItemClick("infographic")}
+          >
+            {language === "fr" ? "Générer la fiche" : "Generate the sheet"}
+          </Button>
         </div>
       ) : openedSection && !activeCourse ? (
         <div key="no-source" className="animate-fade-in flex h-full flex-col items-center justify-center gap-2 py-20 text-center">

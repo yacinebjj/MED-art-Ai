@@ -3,31 +3,22 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { normalizeText, sha256 } from "@/lib/content-similarity";
-import { generateOpenRouterImage, OpenRouterError } from "@/lib/ai/openrouter";
-import {
-  DEFAULT_INFOGRAPHIC_LANGUAGE,
-  DEFAULT_INFOGRAPHIC_MODEL_KEY,
-  INFOGRAPHIC_MODEL_OPTIONS,
-  MAX_EXPLICATION_CHARS_FOR_INFOGRAPHIC,
-  buildInfographicSystemPrompt,
-  buildInfographicUserMessage,
-  resolveInfographicLanguage,
-  resolveInfographicModelKey,
-} from "@/lib/ai/infographic-prompts";
+import { OpenRouterError } from "@/lib/ai/openrouter";
+import { buildFicheSynthesePrompt, extractFicheOutline, ficheContentHash, generateFicheImage } from "@/lib/ai/infographic-sheet";
+import { FICHE_STORAGE_FOLDER, FICHE_SYNTHESE_VERSION, ficheSourceText, isFicheSyntheseUrl } from "@/lib/infographic-fiche-key";
 import {
   lookupStudioInfographicCache,
   recordStudioInfographicCacheHit,
   storeStudioInfographicCache,
 } from "@/lib/studio-infographic-cache";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
-import { findStoredObjectUrl } from "@/lib/storage-variant-lookup";
 import { LedgerBusyError, runThroughLedger } from "@/lib/ai/generation-ledger";
 
 export const runtime = "nodejs";
-// Real test generation took ~10.4s — 300s (same class as /api/studio/generate)
-// is generous headroom, never the expected duration.
 export const maxDuration = 300;
+
+/** Every model call of this route ends before this point (ms after the request starts), inside maxDuration. */
+const ROUTE_BUDGET_MS = 280_000;
 
 const INFOGRAPHIC_BUCKET = "studio-infographics";
 
@@ -50,12 +41,10 @@ async function ensureInfographicBucket(supabase: ReturnType<typeof getSupabaseAd
 }
 
 /**
- * Persists the generated infographie URL onto the student's OWN
- * studio_courses row, so it reloads deterministically regardless of which
- * variant was generated or what the cross-student cache holds — the real fix
- * for the "infographie disappears on refresh" bug (see this column's own
- * comment in supabase/schema.sql). Best-effort: a write failure is logged,
- * never thrown, so it can never fail an otherwise-successful generation.
+ * Persists the sheet's URL onto the student's OWN studio_courses row, so it
+ * reloads deterministically (the course loader reads infographic_url first).
+ * Best-effort: a write failure is logged, never thrown, so it can never fail
+ * an otherwise-successful generation.
  */
 async function persistInfographicUrl(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -63,43 +52,49 @@ async function persistInfographicUrl(
   userId: string,
   imageUrl: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from("studio_courses")
-    .update({ infographic_url: imageUrl })
-    .eq("id", courseId)
-    .eq("user_id", userId);
-  if (error) {
-    console.error("[studio/infographic] Persistance infographic_url échouée (non bloquant):", error.message);
+  try {
+    const { error } = await supabase
+      .from("studio_courses")
+      .update({ infographic_url: imageUrl })
+      .eq("id", courseId)
+      .eq("user_id", userId);
+    if (error) console.error("[studio/infographic] Persistance infographic_url échouée (non bloquant):", error.message);
+  } catch (error) {
+    console.error("[studio/infographic] Persistance infographic_url échouée (non bloquant):", error instanceof Error ? error.message : error);
   }
 }
 
 /** `data:image/png;base64,AAAA...` -> { buffer, contentType }. Throws if the shape doesn't match — a malformed data URL here means the model response parsing (lib/ai/openrouter.ts) already found something wrong. */
 function decodeImageDataUrl(dataUrl: string): { buffer: Buffer; contentType: string } {
-  const match = /^data:(image\/\w+);base64,([\s\S]+)$/.exec(dataUrl);
+  const match = /^data:(image\/[\w.+-]+);base64,([\s\S]+)$/.exec(dataUrl);
   if (!match) {
     throw new Error("Format d'image inattendu renvoyé par le modèle.");
   }
   return { buffer: Buffer.from(match[2], "base64"), contentType: match[1] };
 }
 
+function imageExtension(contentType: string): string {
+  const subtype = contentType.split("/")[1]?.toLowerCase() ?? "png";
+  if (subtype === "jpeg") return "jpg";
+  return /^[a-z0-9]+$/.test(subtype) ? subtype : "png";
+}
+
 /**
- * "Infographie / Mindmap" tab — cache-then-generate, mirroring
- * app/api/flashcards/generate/route.ts's own Pass 1/Pass 2 shape:
- *  1. Hash this course's Explication text, check studio_infographic_cache —
- *     a hit is served instantly, $0, regardless of which student asks.
- *  2. A miss reserves quota, calls google/gemini-3.1-flash-image-preview
- *     (lib/ai/openrouter.ts's generateOpenRouterImage), uploads the result to
- *     Supabase Storage, and stores the URL in the cache BEFORE returning —
- *     so the very next student (of up to 4 000) to open this same course
- *     gets it for free.
- *
- * Deliberately its OWN route, not folded into the generic
- * /api/studio/generate pipeline: that pipeline's whole contract (Zod schema
- * validation, a studio_courses JSON/text column to save into) doesn't apply
- * to an image response — see lib/demo-content.ts's JsonSectionId comment for
- * why "infographic" is excluded from every one of those mappings.
+ * STEP 2 of the Studio "Infographie / Fiche de Synthèse" (product order
+ * 2026-11-09, lib/ai/infographic-sheet.ts): the illustrated sheet itself.
+ *  1. The student's unit is reserved first (billing rule below).
+ *  2. The shared cross-student cache, keyed by the sheet version + course
+ *     text: a hit is served at once.
+ *  3. Otherwise the plan — step 1's (app/api/studio/infographic/prompt), from
+ *     the generation ledger for 0 tokens; extracted here if step 1 never ran —
+ *     is poured into the strict prompt, which goes to the image model. The
+ *     image is uploaded to Supabase Storage (fiche-synthese/…), cached for
+ *     every student with the same course, and saved on the student's course.
+ * The prompt is always built here, from the student's own course — never
+ * taken from the request.
  */
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const user = await getAuthenticatedUser();
   if (!user) {
     return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -120,21 +115,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { courseId, language: languageRaw, model: modelKeyRaw } = (body ?? {}) as {
-    courseId?: unknown;
-    language?: unknown;
-    model?: unknown;
-  };
+  // Only the course: the sheet is French-only with fixed models (an older
+  // client's `language` / `model` fields are ignored).
+  const { courseId } = (body ?? {}) as { courseId?: unknown };
   if (typeof courseId !== "number" || !Number.isFinite(courseId)) {
     return NextResponse.json({ success: false, error: "'courseId' est requis." }, { status: 400 });
   }
-  const language = resolveInfographicLanguage(languageRaw);
-  const modelKey = resolveInfographicModelKey(modelKeyRaw);
-  // Only the ORIGINAL default (French, nano-banana-2) is cross-student
-  // cached — studio_infographic_cache is keyed on content_hash alone, with
-  // no language/model dimension. Same bypass-rather-than-migrate pattern as
-  // /api/studio/podcast — see that route's own comment.
-  const isDefaultVariant = language === DEFAULT_INFOGRAPHIC_LANGUAGE && modelKey === DEFAULT_INFOGRAPHIC_MODEL_KEY;
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ success: false, error: "Supabase n'est pas configuré sur le serveur." }, { status: 500 });
@@ -155,123 +141,83 @@ export async function POST(request: NextRequest) {
   if (!course) {
     return NextResponse.json({ success: false, error: "Cours introuvable." }, { status: 404 });
   }
-  // Prefers the polished Explication when it exists, but no longer REQUIRES
-  // it — Studio sections are independently generatable now (product
-  // reversal: a student can generate Infographie, or any other section,
-  // without ever touching Explication first), matching the same
-  // explication ?? raw_text fallback already established elsewhere
-  // (exam/generate, module-synthesis, search, chat).
-  const sourceText = course.explication && course.explication.trim().length >= 50 ? course.explication : course.raw_text;
-  if (!sourceText || sourceText.trim().length < 50) {
-    return NextResponse.json({ success: false, error: "Ce cours n'a pas assez de contenu source pour générer une infographie." }, { status: 400 });
+
+  const sourceText = ficheSourceText(course);
+  if (!sourceText) {
+    return NextResponse.json({ success: false, error: "Ce cours n'a pas assez de contenu source pour générer une fiche de synthèse." }, { status: 400 });
   }
 
-  const contentHash = sha256(normalizeText(sourceText));
+  const contentHash = ficheContentHash(sourceText);
 
-  // BILLING RULE: the student's standard unit is consumed on every
-  // infographic request, including one served from the shared cache / a
-  // stored variant file below — those only cut OUR model bill. Refunded only
-  // when generation fails.
+  // BILLING RULE: the student's standard unit is consumed on every request,
+  // including one served from the shared cache below — caches only cut OUR
+  // model bill. Refunded only when no sheet is delivered.
   const quotaGate = await reserveGeneration(user);
   if (!quotaGate.allowed) {
     return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
   }
 
   try {
-    if (isDefaultVariant) {
-      const cachedUrl = await lookupStudioInfographicCache(contentHash);
-      if (cachedUrl) {
-        await recordStudioInfographicCacheHit(contentHash);
-        // Persist even on a cache hit — this student's row may not yet point
-        // at it (e.g. another student generated it first), and the reload
-        // path now reads infographic_url directly.
-        await persistInfographicUrl(supabase, courseId, user.id, cachedUrl);
-        return NextResponse.json({ success: true, imageUrl: cachedUrl, cached: true });
-      }
-    } else {
-      // Non-default language/model: the deterministic file this variant is
-      // uploaded to (see `path` below; extension unknown until generated, so
-      // matched by prefix) is its own cache — reuse it for 0 tokens.
-      const storedUrl = await findStoredObjectUrl(supabase, INFOGRAPHIC_BUCKET, `${contentHash}-${language}-${modelKey}.`, "prefix");
-      if (storedUrl) {
-        await persistInfographicUrl(supabase, courseId, user.id, storedUrl);
-        return NextResponse.json({ success: true, imageUrl: storedUrl, cached: true });
-      }
+    const cachedUrl = await lookupStudioInfographicCache(contentHash);
+    if (cachedUrl && isFicheSyntheseUrl(cachedUrl)) {
+      await recordStudioInfographicCacheHit(contentHash);
+      // Persisted even on a cache hit — this student's row may not point at it yet.
+      await persistInfographicUrl(supabase, courseId, user.id, cachedUrl);
+      return NextResponse.json({ success: true, imageUrl: cachedUrl, cached: true });
     }
 
-    try {
-      // Single-flight per output variant (generation ledger, our bill only —
-      // the student's unit was reserved above): a second identical request
-      // arriving while the image is still being generated waits for it
-      // instead of paying for a second image; if it isn't ready in time, a
-      // retryable "already in progress" answer (onPeerTimeout: "fail"), never
-      // a duplicate bill.
-      const imageUrl = await runThroughLedger(
-        {
-          namespace: "infographic-image",
-          key: { contentHash, language, modelKey, isDefaultVariant },
-          peerWaitMs: 200_000,
-          leaseMs: 260_000,
-          onPeerTimeout: "fail",
-          isValid: (value) => typeof value === "string" && value.startsWith("http"),
-        },
-        async () => {
-          const excerpt = sourceText.slice(0, MAX_EXPLICATION_CHARS_FOR_INFOGRAPHIC);
-          const { imageDataUrl } = await generateOpenRouterImage(
-            [
-              { role: "system", content: buildInfographicSystemPrompt(language) },
-              { role: "user", content: buildInfographicUserMessage(course.title, excerpt) },
-            ],
-            { model: INFOGRAPHIC_MODEL_OPTIONS[modelKey].id }
-          );
+    const { outline, source } = await extractFicheOutline({ courseTitle: course.title, sourceText, contentHash });
+    const prompt = buildFicheSynthesePrompt(outline);
+    // A plan built from the course's headings (every text model failed) stays
+    // this student's: its sheet is neither the course's shared file nor cached
+    // for other students, who get a model-written plan later.
+    const shared = source !== "course-headings";
 
-          const { buffer, contentType } = decodeImageDataUrl(imageDataUrl);
+    // Single-flight per prompt (generation ledger, our bill only — the
+    // student's unit was reserved above): an identical request arriving while
+    // the image is still being drawn waits for it instead of paying for a
+    // second one; if it isn't ready in time, a retryable "already in
+    // progress" answer (onPeerTimeout: "fail"), never a duplicate bill.
+    const imageUrl = await runThroughLedger(
+      {
+        namespace: "infographic-fiche-image",
+        key: { version: FICHE_SYNTHESE_VERSION, contentHash, prompt },
+        peerWaitMs: Math.max(0, Math.min(150_000, ROUTE_BUDGET_MS - (Date.now() - startedAt) - 20_000)),
+        leaseMs: 260_000,
+        onPeerTimeout: "fail",
+        isValid: (value) => isFicheSyntheseUrl(typeof value === "string" ? value : null),
+      },
+      async () => {
+        const { imageDataUrl, model } = await generateFicheImage(prompt, startedAt + ROUTE_BUDGET_MS);
+        const { buffer, contentType } = decodeImageDataUrl(imageDataUrl);
 
-          await ensureInfographicBucket(supabase);
-          const extension = contentType.split("/")[1] ?? "png";
-          // Non-default variants get their own path (language+model suffix) —
-          // never overwrite the shared default-variant file, never collide with
-          // each other across variants of the same course.
-          const path = isDefaultVariant ? `${contentHash}.${extension}` : `${contentHash}-${language}-${modelKey}.${extension}`;
-          const { error: uploadError } = await supabase.storage
-            .from(INFOGRAPHIC_BUCKET)
-            .upload(path, buffer, { contentType, upsert: true });
-          if (uploadError) throw uploadError;
+        await ensureInfographicBucket(supabase);
+        const path = `${FICHE_STORAGE_FOLDER}/${contentHash}${shared ? "" : `-${user.id}`}.${imageExtension(contentType)}`;
+        const { error: uploadError } = await supabase.storage.from(INFOGRAPHIC_BUCKET).upload(path, buffer, { contentType, upsert: true });
+        if (uploadError) throw uploadError;
 
-          const { data: publicUrlData } = supabase.storage.from(INFOGRAPHIC_BUCKET).getPublicUrl(path);
-          const generatedUrl = publicUrlData.publicUrl;
+        const generatedUrl = supabase.storage.from(INFOGRAPHIC_BUCKET).getPublicUrl(path).data.publicUrl;
+        console.log(`[studio/infographic] Fiche de synthèse générée (${model}, plan : ${source}) → ${path}`);
 
-          // Store BEFORE returning — the next student to hit this content_hash
-          // benefits immediately. Fail-open: storeStudioInfographicCache logs
-          // its own errors and never throws, so a caching hiccup can't block
-          // this student's own successful generation. Only the default variant
-          // is ever written to the shared cross-student cache — see this
-          // route's own comment on `isDefaultVariant` above.
-          if (isDefaultVariant) {
-            await storeStudioInfographicCache(contentHash, generatedUrl);
-          }
-          return generatedUrl;
-        }
-      );
-
-      // Persist onto this student's own course row — the deterministic,
-      // per-course, every-variant source of truth the reload path reads.
-      await persistInfographicUrl(supabase, courseId, user.id, imageUrl);
-
-      return NextResponse.json({ success: true, imageUrl, cached: false });
-    } catch (error) {
-      await refundGeneration(user.id);
-      if (error instanceof OpenRouterError) {
-        return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+        // Stored BEFORE returning — the next student with this course gets it
+        // at once. Fail-open: storeStudioInfographicCache logs its own errors
+        // and never throws.
+        if (shared) await storeStudioInfographicCache(contentHash, generatedUrl);
+        return generatedUrl;
       }
-      if (error instanceof LedgerBusyError) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 409 });
-      }
-      console.error("[studio/infographic] Échec génération/upload:", error);
-      return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
-    }
+    );
+
+    await persistInfographicUrl(supabase, courseId, user.id, imageUrl);
+    return NextResponse.json({ success: true, imageUrl, cached: false });
   } catch (error) {
-    console.error("[studio/infographic] Erreur non gérée:", error);
-    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 });
+    await refundGeneration(user.id);
+    if (error instanceof OpenRouterError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+    }
+    if (error instanceof LedgerBusyError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 409 });
+    }
+    console.error("[studio/infographic] Échec génération/upload:", error);
+    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 502 });
   }
 }

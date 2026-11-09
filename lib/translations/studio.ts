@@ -74,7 +74,7 @@ const SECTION_LABELS: Record<DemoSectionId, Record<Language, string>> = {
   cas_clinique: { fr: "Cas Cliniques", en: "Clinical Cases" },
   qcm: { fr: "Examen QCMs", en: "MCQ Exam" },
   exemples_analogies: { fr: "Exemples & Analogies", en: "Examples & Analogies" },
-  infographic: { fr: "Infographie", en: "Infographic" },
+  infographic: { fr: "Infographie / Fiche de Synthèse", en: "Infographic / Summary Sheet" },
   audio: { fr: "Podcast Audio", en: "Audio Podcast" },
 };
 

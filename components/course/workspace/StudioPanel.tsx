@@ -46,7 +46,6 @@ import { LAB_HEADING_ICON, type LabToolDescriptor, type LabToolId } from "@/lib/
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { STUDIO_TOOL_TOURS } from "@/lib/onboarding/tour-ids";
-import { INFOGRAPHIC_MODEL_OPTIONS, type InfographicModelKey } from "@/lib/ai/infographic-prompts";
 import { type PodcastDialect } from "@/lib/ai/podcast-prompts";
 import { cn } from "@/lib/utils";
 import { useTextSelection } from "@/hooks/useTextSelection";
@@ -73,26 +72,23 @@ export type SectionStatus = "available" | "needs_generation";
  * TileOptionsMenu below) — a superset covering every section type, with only
  * the fields relevant to the clicked section ever populated by the caller
  * (app/dashboard/module/[id]/page.tsx routes each into the right fetch:
- * language/customPrompt into /api/studio/generate's body, model+language into
- * /api/studio/infographic's, dialect into /api/studio/podcast's).
+ * language/customPrompt into /api/studio/generate's body, dialect into
+ * /api/studio/podcast's).
  */
 export interface TileGenerationOptions {
   language?: "fr" | "en";
   /** Explication tile only. */
   customPrompt?: string;
-  /** Infographie tile only. */
-  model?: InfographicModelKey;
   /** Podcast Audio tile only. */
   dialect?: PodcastDialect;
 }
 
-/** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies, which stays a direct, no-menu click by explicit product decision. Exported so MobileStudioCards.tsx (a completely separate component tree for the mobile browse view) gates its own equivalent menu identically instead of drifting out of sync. */
+/** Sections whose grid tile gets the arrow/options menu — every real study mode except Exemples & Analogies and the Infographie / Fiche de Synthèse (French only, one fixed image model: nothing to choose), which stay direct, no-menu clicks by explicit product decision. Exported so MobileStudioCards.tsx (a completely separate component tree for the mobile browse view) gates its own equivalent menu identically instead of drifting out of sync. */
 export const SECTIONS_WITH_OPTIONS_MENU: ReadonlySet<DemoSectionId> = new Set([
   "explication",
   "resume",
   "cas_clinique",
   "qcm",
-  "infographic",
   "audio",
 ]);
 
@@ -324,7 +320,6 @@ export function TileOptionsMenu({
   const contentLanguage = useLanguageStore((state) => state.language);
   const setContentLanguage = useLanguageStore((state) => state.setLanguage);
   const [draftCustomPrompt, setDraftCustomPrompt] = useState("");
-  const [draftModel, setDraftModel] = useState<InfographicModelKey>("nano-banana-2");
   // Podcast keeps its own dialect list; it starts on the global language
   // (plain English, not the mixed Darija variant) when English is selected.
   const [draftDialect, setDraftDialect] = useState<PodcastDialect>(() => (contentLanguage === "en" ? "en" : "fr"));
@@ -375,13 +370,11 @@ export function TileOptionsMenu({
 
   function handleGenerate() {
     const options: TileGenerationOptions =
-      sectionId === "infographic"
-        ? { language: contentLanguage, model: draftModel }
-        : sectionId === "audio"
-          ? { dialect: draftDialect }
-          : sectionId === "explication"
-            ? { language: contentLanguage, customPrompt: draftCustomPrompt.trim() || undefined }
-            : { language: contentLanguage };
+      sectionId === "audio"
+        ? { dialect: draftDialect }
+        : sectionId === "explication"
+          ? { language: contentLanguage, customPrompt: draftCustomPrompt.trim() || undefined }
+          : { language: contentLanguage };
     onGenerate(options);
     onClose();
   }
@@ -423,22 +416,6 @@ export function TileOptionsMenu({
               </div>
             ) : (
               <>
-                {sectionId === "infographic" && (
-                  <div className="space-y-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      {language === "fr" ? "Modèle" : "Model"}
-                    </p>
-                    <Select
-                      value={draftModel}
-                      onValueChange={(value) => setDraftModel(value as InfographicModelKey)}
-                      options={Object.entries(INFOGRAPHIC_MODEL_OPTIONS).map(([key, opt]) => ({
-                        value: key,
-                        label: language === "fr" ? opt.labelFr : opt.labelEn,
-                      }))}
-                      className={TILE_SELECT_TRIGGER_CLASSES}
-                    />
-                  </div>
-                )}
                 <div className="space-y-1">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     {language === "fr" ? "Langue (tout le Studio et le Lab)" : "Language (whole Studio and Lab)"}

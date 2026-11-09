@@ -7,6 +7,8 @@ import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-share
 import { normalizeText, sha256 } from "@/lib/content-similarity";
 import { lookupStudioInfographicCache } from "@/lib/studio-infographic-cache";
 import { lookupStudioPodcastCache } from "@/lib/studio-podcast-cache";
+import { ficheContentHash } from "@/lib/ai/infographic-sheet";
+import { ficheSourceText, isFicheSyntheseUrl } from "@/lib/infographic-fiche-key";
 import type { JsonSectionId } from "@/lib/demo-content";
 import type { StudioCourseFull } from "@/types/studio-course";
 
@@ -132,24 +134,30 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   // find a non-default variant (the read path has no idea which the student
   // picked) and broke whenever the hash basis (explication ?? raw_text)
   // changed after generation.
-  // null when the columns don't exist yet (mediaError above) — the legacy
-  // cache fallback below then behaves exactly as it did before them.
-  let infographicUrl = mediaError ? null : mediaRow?.infographic_url ?? null;
+  // null when the columns don't exist yet (mediaError above) — the cache
+  // fallback below then stands in for them.
+  // The Infographie tile shows only a "Fiche de Synthèse" (2026-11-09): an
+  // image of the shelved Infographie / Mindmap left on a row reads as "not
+  // generated yet", so the tile offers the new sheet instead.
+  const storedInfographicUrl = mediaError ? null : mediaRow?.infographic_url ?? null;
+  let infographicUrl = isFicheSyntheseUrl(storedInfographicUrl) ? storedInfographicUrl : null;
   let audioUrl = mediaError ? null : mediaRow?.audio_url ?? null;
 
-  // LEGACY FALLBACK, only for a column still null — a course whose media was
-  // generated before infographic_url/audio_url existed. Mirrors the exact
-  // explication ?? raw_text hash basis those older cache writes used, and
-  // only runs the lookup for whichever URL isn't already on the row.
-  if (infographicUrl === null || audioUrl === null) {
-    const sourceText = row.explication && row.explication.trim().length >= 50 ? row.explication : row.raw_text;
-    const contentHash = sourceText && sourceText.trim().length >= 50 ? sha256(normalizeText(sourceText)) : null;
-    if (contentHash) {
-      const [cachedInfographic, cachedAudio] = await Promise.all([
-        infographicUrl === null ? lookupStudioInfographicCache(contentHash) : Promise.resolve(null),
-        audioUrl === null ? lookupStudioPodcastCache(contentHash) : Promise.resolve(null),
+  // LEGACY FALLBACK — podcast: a course whose audio was generated before
+  // audio_url existed (same explication ?? raw_text hash basis those older
+  // cache writes used). Sheet: only while the infographic_url column itself
+  // is missing — every sheet is saved on its student's row, so a null column
+  // means "not generated yet" (the student's own click generates it, or gets
+  // the shared copy, for their standard unit).
+  const lookupSheet = Boolean(mediaError) && infographicUrl === null;
+  if (lookupSheet || audioUrl === null) {
+    const sourceText = ficheSourceText(row);
+    if (sourceText) {
+      const [cachedSheet, cachedAudio] = await Promise.all([
+        lookupSheet ? lookupStudioInfographicCache(ficheContentHash(sourceText)) : Promise.resolve(null),
+        audioUrl === null ? lookupStudioPodcastCache(sha256(normalizeText(sourceText))) : Promise.resolve(null),
       ]);
-      infographicUrl = infographicUrl ?? cachedInfographic;
+      if (isFicheSyntheseUrl(cachedSheet)) infographicUrl = cachedSheet;
       audioUrl = audioUrl ?? cachedAudio;
     }
   }

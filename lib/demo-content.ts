@@ -4,7 +4,7 @@ import {
   Stethoscope,
   ListChecks,
   Lightbulb,
-  Network,
+  FileImage,
   Headphones,
   type LucideIcon,
 } from "lucide-react";
@@ -23,8 +23,8 @@ export type DemoSectionId =
  * The 5 original sections: JSON/text content, validated against a Zod
  * schema, generated+saved through the generic /api/studio/generate pipeline
  * (STUDIO_PROMPT_CONFIG, STUDIO_SCHEMAS, SECTION_TO_COLUMN). "infographic"
- * and "audio" are excluded — "infographic" is IMAGE-based
- * (google/gemini-3.1-flash-image-preview via OpenRouter) and "audio" is
+ * and "audio" are excluded — "infographic" is IMAGE-based (the illustrated
+ * Fiche de Synthèse, lib/ai/infographic-sheet.ts) and "audio" is
  * AUDIO-based (openai/gpt-audio-mini via OpenRouter), neither has a JSON
  * schema, neither is saved as a studio_courses column (they live in their
  * own shared cache tables instead — studio_infographic_cache /
@@ -722,8 +722,8 @@ Ce mode réexplique le cours avec des analogies de la vie de tous les jours (bou
   },
   {
     id: "infographic",
-    label: "Infographie",
-    icon: Network,
+    label: "Infographie / Fiche de Synthèse",
+    icon: FileImage,
     accent: {
       active: "border-rose-300 bg-rose-50 text-rose-800",
       chip: "bg-rose-100 text-rose-600",
@@ -733,9 +733,9 @@ Ce mode réexplique le cours avec des analogies de la vie de tous les jours (bou
     // image (activeCourse.infographicUrl), not this string. Kept only for
     // parity with the other DemoSection entries and the legacy hardcoded
     // demo course, which has no image to show here.
-    content: `## Infographie Mindmap
+    content: `## Infographie / Fiche de Synthèse
 
-Une carte visuelle unique du cours — origines, mécanismes, manifestations cliniques, diagnostic et traitement, réunis dans une seule image de synthèse.`,
+Une fiche de synthèse illustrée du cours — son titre, ses six notions clés et leurs points essentiels, entourés de schémas anatomiques et médicaux, réunis dans une seule image.`,
   },
   {
     id: "audio",
