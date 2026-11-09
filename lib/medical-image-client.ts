@@ -4,6 +4,7 @@ import {
   MEDICAL_IMAGE_FILE_API,
   canonicalImageSrc,
   imageFileSlug,
+  isCaptionSearchUrl,
   readMedicalImageResolution,
   type MedicalImageResolution,
   type VerifiedMedicalImage,
@@ -117,7 +118,8 @@ const IMAGE_MARKDOWN = /!\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
 export function withVerifiedImages(markdown: string): string {
   return markdown.replace(IMAGE_MARKDOWN, (whole: string, alt: string, src: string) => {
     const shown = shownByLink.get(canonicalImageSrc(src));
-    if (shown === undefined) return whole;
+    // A caption-only figure not looked up yet: its caption, never the placeholder link.
+    if (shown === undefined) return isCaptionSearchUrl(src) ? (alt.trim() ? `*${alt.trim()}*` : "") : whole;
     return shown ? `![${alt}](${shown.src})` : "";
   });
 }

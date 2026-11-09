@@ -1,6 +1,5 @@
 import { isWikimediaMediaUrl, type VerifiedMedicalImage } from "@/lib/medical-images";
 import { ImageSourceUnavailableError, fetchSourceJson, plainText, type ImageCandidate } from "@/lib/medical-image-candidates";
-import { searchWords } from "@/lib/medical-image-relevance";
 
 /**
  * Wikimedia Commons, for the Copilot's image engine (lib/medical-image-engine.ts):
@@ -119,10 +118,9 @@ export async function lookupCommonsFile(fileName: string): Promise<ImageCandidat
   return null;
 }
 
-/** Commons pictures for `query` (bitmaps and drawings only), in search order, labelled in English or French (or not labelled). */
-export async function searchCommons(query: string, language: "en" | "fr"): Promise<ImageCandidate[]> {
-  const words = searchWords(query);
-  if (!words) return [];
+/** Commons pictures for search `words` (bitmaps and drawings only), in search order, labelled in English or French (or not labelled); descriptions in `language`. */
+export async function searchCommons(words: string, language: "en" | "fr"): Promise<ImageCandidate[]> {
+  if (!words.trim()) return [];
   const pages = await queryCommons({
     generator: "search",
     gsrsearch: `${words} filetype:bitmap|drawing`,

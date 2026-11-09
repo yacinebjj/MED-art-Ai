@@ -354,8 +354,10 @@ export const StreamedMarkdown = forwardRef<HTMLDivElement, StreamedMarkdownProps
   { content, isStreaming = false, components, rehypePlugins, className },
   ref
 ) {
-  // LaTeX, stray HTML and near-miss Markdown made readable before anything is parsed (lib/assistant-markdown.ts).
-  const cleaned = useMemo(() => cleanAssistantMarkdown(content ?? ""), [content]);
+  // LaTeX, stray HTML and near-miss Markdown (images too) made readable before
+  // anything is parsed (lib/assistant-markdown.ts). A finished reply ends with
+  // a line break: its last line is complete, and gets repaired like the rest.
+  const cleaned = useMemo(() => cleanAssistantMarkdown(isStreaming ? (content ?? "") : `${content ?? ""}\n`), [content, isStreaming]);
   const blocks = useMemo(() => splitIntoBlocks(cleaned), [cleaned]);
   const direction = useMemo(() => dominantDirection(cleaned) ?? "auto", [cleaned]);
   const renderers = useMemo(() => (components ? { ...MARKDOWN_COMPONENTS, ...components } : MARKDOWN_COMPONENTS), [components]);

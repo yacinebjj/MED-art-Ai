@@ -12,7 +12,11 @@
  * Display formulas become a ```medart-formula block, which
  * components/assistant/StreamedMarkdown.tsx draws as a centred formula card;
  * copy and read-aloud ask for them as plain lines instead (formulaBlocks: false).
+ * Images the model wrote imperfectly are repaired first
+ * (lib/image-markdown-repair.ts).
  */
+
+import { repairImageMarkdown } from "@/lib/image-markdown-repair";
 
 const SUPERSCRIPTS: Record<string, string> = {
   "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
@@ -324,12 +328,15 @@ export interface CleanOptions {
 const HOLD_OPEN = "";
 const HOLD_CLOSE = "";
 
-function convertProse(text: string, options: Required<CleanOptions>): string {
+function convertProse(text: string, options: Required<CleanOptions>, openEnded: boolean): string {
   const held: string[] = [];
   const hold = (value: string) => `${HOLD_OPEN}${held.push(value) - 1}${HOLD_CLOSE}`;
 
+  // Images written the way the renderer shows them: a caption alone, a link
+  // without "!", a bare image URL… (lib/image-markdown-repair.ts). The last
+  // line of a reply still arriving waits until it is complete.
   // Inline code stays exactly as written.
-  let out = text.replace(/`[^`\n]+`/g, (code) => hold(code));
+  let out = repairImageMarkdown(text, openEnded).replace(/`[^`\n]+`/g, (code) => hold(code));
 
   // So do links and images: "Blausen_0463_HeartAttack.png" must not become
   // "Blausen₀₄₆₃…", nor "Gray's" "Gray’s" — the link would break. A Wikimedia
@@ -420,16 +427,22 @@ function convertProse(text: string, options: Required<CleanOptions>): string {
   return out;
 }
 
-/** The reply's Markdown with LaTeX, stray HTML and near-miss Markdown made readable. Code is left exactly as written. */
+/**
+ * The reply's Markdown with LaTeX, stray HTML and near-miss Markdown (images
+ * included) made readable. Code is left exactly as written. A text that
+ * doesn't end with a line break is taken as still arriving: its last line is
+ * not repaired yet (a finished reply is passed with one — StreamedMarkdown).
+ */
 export function cleanAssistantMarkdown(text: string, { formulaBlocks = true, typography = true }: CleanOptions = {}): string {
   if (!text) return text;
   const options = { formulaBlocks, typography };
   const lines = text.split("\n");
+  const openEnded = !text.endsWith("\n");
   const out: string[] = [];
   let prose: string[] = [];
   let fence: string | null = null;
-  const flush = () => {
-    if (prose.length) out.push(convertProse(prose.join("\n"), options));
+  const flush = (final = false) => {
+    if (prose.length) out.push(convertProse(prose.join("\n"), options, final && openEnded));
     prose = [];
   };
   for (const line of lines) {
@@ -445,7 +458,7 @@ export function cleanAssistantMarkdown(text: string, { formulaBlocks = true, typ
     out.push(line);
     if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = null;
   }
-  flush();
+  flush(true);
   return out.join("\n");
 }
 

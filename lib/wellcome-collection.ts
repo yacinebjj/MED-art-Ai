@@ -1,5 +1,4 @@
 import { fetchSourceJson, plainText, type ImageCandidate } from "@/lib/medical-image-candidates";
-import { searchWords } from "@/lib/medical-image-relevance";
 
 /**
  * Wellcome Collection's open images API (https://api.wellcomecollection.org),
@@ -29,10 +28,9 @@ interface WellcomeImage {
   aspectRatio?: unknown;
 }
 
-/** Wellcome pictures for `query` (English), in search order, CC BY / CC0 / public domain only. */
-export async function searchWellcome(query: string): Promise<ImageCandidate[]> {
-  const words = searchWords(query);
-  if (!words) return [];
+/** Wellcome pictures for search `words` (English), in search order, CC BY / CC0 / public domain only. */
+export async function searchWellcome(words: string): Promise<ImageCandidate[]> {
+  if (!words.trim()) return [];
   const url = new URL(IMAGES_API);
   url.searchParams.set("query", words);
   url.searchParams.set("pageSize", String(RESULTS));

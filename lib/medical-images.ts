@@ -211,15 +211,33 @@ export function fileNameKeywords(fileName: string): string {
 }
 
 /**
+ * The link given to a figure the reply only captioned ("Figure 2 :
+ * Diagramme du…" with no image — lib/image-markdown-repair.ts): there is no
+ * file to look up, the engine searches with the caption. It is never shown
+ * or fetched: only verified pictures are (`.invalid` is a reserved domain).
+ */
+const CAPTION_SEARCH_ORIGIN = "https://figure.medartai.invalid";
+
+export function captionSearchUrl(caption: string): string {
+  return `${CAPTION_SEARCH_ORIGIN}/${encodeURIComponent(imageFileSlug(caption))}.png`;
+}
+
+export function isCaptionSearchUrl(src: string): boolean {
+  return src.trim().startsWith(`${CAPTION_SEARCH_ORIGIN}/`);
+}
+
+/**
  * The resolver's request from an image's link and description, or null when
  * there is nothing to look up. A link outside Wikimedia is never shown: its
- * file name and the description can still find the picture.
+ * file name and the description can still find the picture. A caption-only
+ * figure (captionSearchUrl) is looked for with its description alone.
  */
 export function parseMedicalImageQuery(src: unknown, alt: unknown): MedicalImageQuery | null {
   if (typeof src !== "string") return null;
   const link = src.trim();
   if (!link || link.length > MAX_IMAGE_SRC_CHARS || !/^https?:\/\//i.test(link)) return null;
   const description = typeof alt === "string" ? alt.replace(/\s+/g, " ").trim().slice(0, MAX_IMAGE_ALT_CHARS) : "";
+  if (isCaptionSearchUrl(link)) return description ? { fileName: null, keywords: "", alt: description } : null;
 
   const fileName = wikimediaFileName(link);
   let keywords = fileName ? fileNameKeywords(fileName) : "";
@@ -240,12 +258,14 @@ export function canonicalImageSrc(src: string): string {
   return safeDecode(src.trim());
 }
 
-/** A file-name-safe slug for a downloaded picture ("Tracé ECG normal" → "trace-ecg-normal"). */
+/** A file-name-safe slug for a downloaded picture ("Tracé ECG normal" → "trace-ecg-normal", "cœur" → "coeur"). */
 export function imageFileSlug(text: string): string {
   const slug = text
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
+    .replace(/œ/g, "oe")
+    .replace(/æ/g, "ae")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60)

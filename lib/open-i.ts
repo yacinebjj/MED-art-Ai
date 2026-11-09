@@ -1,5 +1,4 @@
 import { commercialCreativeCommons, fetchSourceJson, plainText, type ImageCandidate } from "@/lib/medical-image-candidates";
-import { searchWords } from "@/lib/medical-image-relevance";
 
 /**
  * PubMed Central Open Access figures, through NLM's Open-i search
@@ -29,10 +28,9 @@ interface OpenIResult {
   licenseURL?: unknown;
 }
 
-/** Open-i figures for `query` (English), in search order, licensed for commercial reuse. */
-export async function searchOpenI(query: string): Promise<ImageCandidate[]> {
-  const words = searchWords(query);
-  if (!words) return [];
+/** Open-i figures for search `words` (English), in search order, licensed for commercial reuse. */
+export async function searchOpenI(words: string): Promise<ImageCandidate[]> {
+  if (!words.trim()) return [];
   const url = new URL(`${OPENI_ORIGIN}/api/search`);
   url.searchParams.set("query", words);
   url.searchParams.set("m", "1");

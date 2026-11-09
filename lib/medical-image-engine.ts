@@ -1,6 +1,6 @@
 import { MAX_IMAGE_ALTERNATIVES, type MedicalImageQuery, type MedicalImageResolution, type MedicalImageSource, type VerifiedMedicalImage } from "@/lib/medical-images";
 import { ImageSourceUnavailableError, type ImageCandidate } from "@/lib/medical-image-candidates";
-import { imageKind, relevance, searchWords, type ImageKind } from "@/lib/medical-image-relevance";
+import { captionAgrees, frenchSearchWords, imageKind, keyWords, relevance, searchWords, type ImageKind } from "@/lib/medical-image-relevance";
 import { lookupCommonsFile, searchCommons } from "@/lib/wikimedia-commons";
 import { searchOpenI } from "@/lib/open-i";
 import { searchWellcome } from "@/lib/wellcome-collection";
@@ -10,20 +10,25 @@ import { searchWellcome } from "@/lib/wellcome-collection";
  * reply wrote into the best REAL picture, with up to three alternatives, or
  * nothing.
  *
- *  1. The Commons file the link names, when it exists and is a medical
- *     picture: the model's own choice, alone.
+ *  1. The Commons file the link names, when it exists, is a medical picture
+ *     and agrees with the reply's caption: the model's own choice, alone. (A
+ *     well-known file under an unrelated caption — an example copied into
+ *     another answer — is ignored, and so is its name.)
  *  2. Otherwise the repositories that are good at that KIND of picture,
- *     searched at once with the link's words:
+ *     searched at once with the link's words, folded to English — then with
+ *     the caption's first words, folded to English (a French file name or a
+ *     caption-only figure still finds an English-titled picture):
  *       diagram (schema, anatomy, mechanism) → Wikimedia Commons
  *       trace (ECG)                          → Commons + PubMed Central
  *       imaging (X-ray, CT, MRI, echo…)      → PubMed Central + Commons
  *       microscopy (histology)               → Commons + PubMed Central + Wellcome
- *     Every result must pass lib/medical-image-relevance.ts; the survivors
- *     are ranked by relevance, the repository's fit for the kind, and their
- *     own search rank. Alternatives favour other repositories first: if the
- *     best picture is already shown higher up in the reply, or fails to load,
- *     the next one is different.
- *  3. Otherwise a Commons search with the reply's own (French) description.
+ *     Every result must pass lib/medical-image-relevance.ts and agree with
+ *     the caption; the survivors are ranked by relevance, the repository's
+ *     fit for the kind, and their own search rank. Alternatives favour other
+ *     repositories first: if the best picture is already shown higher up in
+ *     the reply, or fails to load, the next one is different.
+ *  3. Otherwise a Commons search with the reply's caption as written (French
+ *     descriptions).
  *
  * Commons is the primary repository: its outage is an error (never
  * remembered, asked again later). A secondary repository down only means
@@ -57,10 +62,13 @@ const FOUND_TTL_MS = 12 * 60 * 60 * 1000;
 const NOT_FOUND_TTL_MS = 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 1000;
 
-function searchSource(source: MedicalImageSource, query: string): Promise<ImageCandidate[]> {
-  if (source === "pmc") return searchOpenI(query);
-  if (source === "wellcome") return searchWellcome(query);
-  return searchCommons(query, "en");
+/** A caption's subject is in its first words: the rest describes it. */
+const CAPTION_QUERY_WORDS = 5;
+
+function searchSource(source: MedicalImageSource, words: string): Promise<ImageCandidate[]> {
+  if (source === "pmc") return searchOpenI(words);
+  if (source === "wellcome") return searchWellcome(words);
+  return searchCommons(words, "en");
 }
 
 interface ScoredImage {
@@ -68,12 +76,12 @@ interface ScoredImage {
   score: number;
 }
 
-/** The candidates that pass the relevance check, best first, each picture once. */
-function rank(candidates: ImageCandidate[], query: string, kind: ImageKind): ScoredImage[] {
+/** The candidates that pass the relevance check (and agree with the reply's caption), best first, each picture once. */
+function rank(candidates: ImageCandidate[], query: string, kind: ImageKind, caption: string): ScoredImage[] {
   const scored: ScoredImage[] = [];
   for (const candidate of candidates) {
     const fit = relevance(query, candidate.text);
-    if (fit === null) continue;
+    if (fit === null || (caption && !captionAgrees(caption, candidate.text))) continue;
     scored.push({ image: candidate.image, score: fit + (SOURCE_FIT[kind][candidate.image.source] ?? 0) - RANK_PENALTY * candidate.rank });
   }
   scored.sort((a, b) => b.score - a.score);
@@ -111,29 +119,49 @@ function withVariety(ranked: ScoredImage[]): VerifiedMedicalImage[] {
   return chosen;
 }
 
+/** The repositories good at `kind`, searched at once with `query` folded to English; ranked survivors. */
+async function searchByKind(query: string, kind: ImageKind, caption: string): Promise<ScoredImage[]> {
+  const words = searchWords(query);
+  if (!words) return [];
+  const sources = SOURCES_BY_KIND[kind];
+  const settled = await Promise.allSettled(sources.map((source) => searchSource(source, words)));
+  const candidates: ImageCandidate[] = [];
+  for (let index = 0; index < settled.length; index++) {
+    const outcome = settled[index];
+    if (outcome.status === "fulfilled") candidates.push(...outcome.value);
+    else if (sources[index] === "wikimedia") throw outcome.reason;
+    else console.warn(`[medical-image] ${sources[index]} indisponible, recherche poursuivie sans :`, outcome.reason instanceof Error ? outcome.reason.message : outcome.reason);
+  }
+  return rank(candidates, query, kind, caption);
+}
+
 async function findImages(query: MedicalImageQuery): Promise<VerifiedMedicalImage[]> {
+  const kind = imageKind(`${query.keywords} ${query.alt}`);
+  // The model's file name is worth searching with — unless it named an existing file unrelated to its own caption.
+  let fileNameSaysSomething = Boolean(query.keywords);
+
   if (query.fileName) {
     const exact = await lookupCommonsFile(query.fileName);
-    if (exact) return [exact.image];
+    if (exact && captionAgrees(query.alt, exact.text, 2)) return [exact.image];
+    if (exact) fileNameSaysSomething = false;
   }
 
-  const kind = imageKind(`${query.keywords} ${query.alt}`);
-  if (query.keywords) {
-    const sources = SOURCES_BY_KIND[kind];
-    const settled = await Promise.allSettled(sources.map((source) => searchSource(source, query.keywords)));
-    const candidates: ImageCandidate[] = [];
-    for (let index = 0; index < settled.length; index++) {
-      const outcome = settled[index];
-      if (outcome.status === "fulfilled") candidates.push(...outcome.value);
-      else if (sources[index] === "wikimedia") throw outcome.reason;
-      else console.warn(`[medical-image] ${sources[index]} indisponible, recherche poursuivie sans :`, outcome.reason instanceof Error ? outcome.reason.message : outcome.reason);
-    }
-    const ranked = rank(candidates, query.keywords, kind);
+  if (fileNameSaysSomething) {
+    const ranked = await searchByKind(query.keywords, kind, query.alt);
     if (ranked.length > 0) return withVariety(ranked);
   }
 
-  if (query.alt && searchWords(query.alt) !== searchWords(query.keywords)) {
-    const ranked = rank(await searchCommons(query.alt, "fr"), query.alt, kind);
+  // The reply's own caption (often French, often the only thing a caption-only figure has), folded to English.
+  const captionQuery = keyWords(query.alt).slice(0, CAPTION_QUERY_WORDS).join(" ");
+  if (captionQuery && (!fileNameSaysSomething || searchWords(captionQuery) !== searchWords(query.keywords))) {
+    const ranked = await searchByKind(captionQuery, kind, query.alt);
+    if (ranked.length > 0) return withVariety(ranked);
+  }
+
+  // Last, Commons' own French descriptions.
+  const french = frenchSearchWords(query.alt);
+  if (french) {
+    const ranked = rank(await searchCommons(french, "fr"), query.alt, kind, query.alt);
     if (ranked.length > 0) return withVariety(ranked);
   }
   return [];
