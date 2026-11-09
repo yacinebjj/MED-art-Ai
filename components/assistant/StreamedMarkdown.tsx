@@ -5,6 +5,7 @@ import ReactMarkdown, { type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cleanAssistantMarkdown, tidyLiveBlock } from "@/lib/assistant-markdown";
 import { dominantDirection } from "@/lib/text-direction";
+import { MedicalFigure } from "@/components/assistant/MedicalFigure";
 
 /**
  * Markdown renderer for assistant replies, built for streaming.
@@ -210,10 +211,10 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
       {children}
     </a>
   ),
-  img: ({ src, alt }) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} className="h-auto max-w-full rounded-lg" loading="lazy" />
-  ),
+  // An image the reply embedded is never shown as the model wrote it: only as
+  // the verified Wikimedia Commons file it names, or not at all (components/
+  // assistant/MedicalFigure.tsx, lib/medical-images.ts).
+  img: ({ src, alt }) => <MedicalFigure src={typeof src === "string" ? src : undefined} alt={alt} />,
 };
 
 // --- Error containment -----------------------------------------------------------

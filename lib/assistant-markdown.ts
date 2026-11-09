@@ -331,6 +331,17 @@ function convertProse(text: string, options: Required<CleanOptions>): string {
   // Inline code stays exactly as written.
   let out = text.replace(/`[^`\n]+`/g, (code) => hold(code));
 
+  // So do links and images: "Blausen_0463_HeartAttack.png" must not become
+  // "Blausen₀₄₆₃…", nor "Gray's" "Gray’s" — the link would break. A Wikimedia
+  // image name written with spaces gets them as %20 first: a link can't
+  // contain a space, and the image would otherwise show as raw text.
+  out = out.replace(
+    /(!\[[^\]\n]*\]\()(https?:\/\/(?:upload|thumb|commons)\.wikimedia\.org\/(?:[^()\n]|\([^()\n]*\))*?)(\))/gi,
+    (_, open: string, url: string, close: string) => `${open}${url.trim().replace(/ /g, "%20")}${close}`
+  );
+  out = out.replace(/(\]\()((?:[^()\s]|\([^()\s]*\))+)(\))/g, (_, open: string, url: string, close: string) => `${open}${hold(url)}${close}`);
+  out = out.replace(/\bhttps?:\/\/[^\s<>()]+/g, (url) => hold(url));
+
   // Display math. At the start of a line it becomes a block of its own; inside
   // a sentence or an indented list item it stays inline, so the list holds.
   const display = (inner: string, offset: number, whole: string): string => {
@@ -440,11 +451,13 @@ export function cleanAssistantMarkdown(text: string, { formulaBlocks = true, typ
 
 /**
  * The live (still-arriving) block, tidied for the frame it is shown in: a
- * command or tag cut mid-name ("\righ", "<b") waits for the rest, and a "**"
- * still waiting for its partner is closed (see closeOpenEmphasis).
+ * command or tag cut mid-name ("\righ", "<b") waits for the rest, an image
+ * whose description or link is still arriving ("![Schéma du né", "![…](https://upl")
+ * appears once complete instead of as raw text, and a "**" still waiting for
+ * its partner is closed (see closeOpenEmphasis).
  */
 export function tidyLiveBlock(block: string): string {
-  return closeOpenEmphasis(block.replace(/(?:\\[a-zA-Z]*|<\/?[a-zA-Z]*)$/, ""));
+  return closeOpenEmphasis(block.replace(/(?:\\[a-zA-Z]*|<\/?[a-zA-Z]*)$/, "").replace(/!\[[^\]\n]*(?:\](?:\([^)\n]*)?)?$/, ""));
 }
 
 /**

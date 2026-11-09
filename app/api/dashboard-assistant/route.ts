@@ -25,8 +25,10 @@ import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
 import { reserveAssistantAccess, reservePremiumFallback } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
-import { isAssistantMode, isAssistantStyle } from "@/lib/assistant-modes";
+import { isAssistantMode, isAssistantStyle, type AssistantMode } from "@/lib/assistant-modes";
 import { buildAssistantSystemPrompt, DASHBOARD_ASSISTANT_SYSTEM_PROMPT, DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED } from "@/lib/ai/assistant-prompts";
+import { MEDICAL_IMAGE_DIRECTIVE } from "@/lib/ai/medical-image-directive";
+import { FREE_MODEL_HISTORY_BUDGET, PAID_FALLBACK_HISTORY_BUDGET, normalizeChatHistory, selectHistory, type SelectedHistory } from "@/lib/chat-history";
 import { isReplyId } from "@/lib/copilot-background";
 import { streamReplyInBackground } from "@/lib/copilot-background-store";
 
@@ -71,7 +73,15 @@ export const maxDuration = 300;
  * live verification (2026-08-29) behind these exact ids.
  */
 const MAX_MESSAGE_CHARS = 4000;
-const MAX_HISTORY_MESSAGES = 20;
+// History: the whole conversation since 2026-11-09 (product order, "Master
+// Copilot Surgery") — no longer its last 20 messages. lib/chat-history.ts
+// reads it and gives each model what its budget holds: the recent turns word
+// for word, everything older as a condensed memory in the system prompt.
+
+// Proactive Wikimedia images (lib/ai/medical-image-directive.ts, free models
+// only) — never in these quick actions: QCM and flashcards are formats of
+// their own, and a progressive clinical case must not give its diagnosis away.
+const NO_IMAGE_MODES: ReadonlySet<AssistantMode> = new Set<AssistantMode>(["mcq", "flashcards", "clinical_case"]);
 // "Importer un PDF" is text-only, so it works fine here. Bounded the same
 // way app/api/assistant/route.ts bounds it.
 const MAX_DOCUMENT_CHARS = 12000;
@@ -111,17 +121,6 @@ const ANSWER_TEMPERATURE = 0.3;
 // DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED (see buildRequest below).
 const SYSTEM_PROMPT = DASHBOARD_ASSISTANT_SYSTEM_PROMPT;
 
-interface HistoryTurn {
-  role: "user" | "assistant";
-  content: string;
-}
-
-function isHistoryTurn(value: unknown): value is HistoryTurn {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return (candidate.role === "user" || candidate.role === "assistant") && typeof candidate.content === "string";
-}
-
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user) {
@@ -147,9 +146,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { message, history, image, document, mode, style, stepByStep, replyId, language } = (body ?? {}) as {
+  const { message, history, messages: historyAlias, image, document, mode, style, stepByStep, replyId, language } = (body ?? {}) as {
     message?: unknown;
+    /** The conversation so far, oldest first: [{ role: "user" | "assistant", content }] (lib/chat-history.ts). */
     history?: unknown;
+    /** The same, under the name most chat APIs use — read when `history` is absent. */
+    messages?: unknown;
     /** The page's id for this reply: with it, the reply is carried on to its end if the student leaves, and kept for them to collect (lib/copilot-background.ts). */
     replyId?: unknown;
     language?: unknown;
@@ -193,7 +195,9 @@ export async function POST(request: NextRequest) {
     documentAttachment = { fileName: candidate.fileName.slice(0, 200), text: candidate.text.slice(0, MAX_DOCUMENT_CHARS) };
   }
 
-  const historyTurns: HistoryTurn[] = Array.isArray(history) ? history.filter(isHistoryTurn).slice(-MAX_HISTORY_MESSAGES) : [];
+  // The whole conversation, read once (lib/chat-history.ts): failed replies
+  // and empty bubbles left out, student → Copilot turns alternating.
+  const conversation = normalizeChatHistory(Array.isArray(history) ? history : historyAlias);
 
   // Every successful answer goes out through here. With a reply id from the
   // page, the model's stream outlives the student's connection (an iPhone app
@@ -222,15 +226,19 @@ export async function POST(request: NextRequest) {
 
   // Dynamic system prompts (product order 2026-11-09, lib/ai/answer-depth.ts):
   // the same request in two versions, each sent only to the models it is
-  // meant for — the DETAILED persona (no length limit, the depth directive)
-  // to the free models, the CONCISE one (its length target, plus the
-  // short-answer note added at call time) to a paid fallback. A quick action
-  // or a style the student chose is added to both. An image travels as an
-  // image_url part on the student's last turn, with the vision method right
-  // after the persona.
-  const buildRequest = (basePrompt: string): ChatMessageInput[] => {
-    const messages: ChatMessageInput[] = [
-      { role: "system", content: buildAssistantSystemPrompt(basePrompt, promptOptions) },
+  // meant for — the DETAILED persona (exhaustive, no length limit, the depth
+  // directive, and the proactive Wikimedia images) to the free models, the
+  // CONCISE one (its length target, plus the short-answer note added at call
+  // time) to a paid fallback. A quick action or a style the student chose is
+  // added to both. The conversation travels as messages (the recent turns)
+  // and, past the model's budget, as a condensed memory at the end of the
+  // system prompt (lib/chat-history.ts). An image travels as an image_url
+  // part on the student's last turn, with the vision method right after the
+  // persona.
+  const buildRequest = (basePrompt: string, conversationSlice: SelectedHistory): ChatMessageInput[] => {
+    const systemPrompt = buildAssistantSystemPrompt(basePrompt, promptOptions);
+    const request: ChatMessageInput[] = [
+      { role: "system", content: conversationSlice.memory ? `${systemPrompt}\n\n${conversationSlice.memory}` : systemPrompt },
       ...(documentAttachment
         ? [
             {
@@ -239,14 +247,14 @@ export async function POST(request: NextRequest) {
             },
           ]
         : []),
-      ...historyTurns.map((turn): ChatMessageInput => ({ role: turn.role, content: turn.content })),
+      ...conversationSlice.recent.map((turn): ChatMessageInput => ({ role: turn.role, content: turn.content })),
       { role: "user", content: message },
     ];
-    if (!imageDataUrl) return messages;
+    if (!imageDataUrl) return request;
     return [
-      messages[0],
+      request[0],
       { role: "system", content: VISION_SYSTEM_ADDENDUM },
-      ...messages.slice(1, -1),
+      ...request.slice(1, -1),
       {
         role: "user",
         content: [
@@ -256,8 +264,13 @@ export async function POST(request: NextRequest) {
       } as unknown as ChatMessageInput,
     ];
   };
-  const freeModelMessages = buildRequest(DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED);
-  const paidModelMessages = buildRequest(SYSTEM_PROMPT);
+  // Images: not for a question about the student's own image, nor in the quick actions of NO_IMAGE_MODES.
+  const illustrate = !imageDataUrl && !(promptOptions.mode && NO_IMAGE_MODES.has(promptOptions.mode));
+  const freeModelMessages = buildRequest(
+    illustrate ? `${DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED}\n\n${MEDICAL_IMAGE_DIRECTIVE}` : DASHBOARD_ASSISTANT_SYSTEM_PROMPT_DETAILED,
+    selectHistory(conversation, FREE_MODEL_HISTORY_BUDGET)
+  );
+  const paidModelMessages = buildRequest(SYSTEM_PROMPT, selectHistory(conversation, PAID_FALLBACK_HISTORY_BUDGET));
 
   // Omni-first routing (lib/ai/omni-routing.ts) — the first attempt that
   // succeeds wins:

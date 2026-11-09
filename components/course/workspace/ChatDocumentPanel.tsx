@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
 import { stripReasoning } from "@/lib/strip-reasoning";
 import { cleanAssistantMarkdown } from "@/lib/assistant-markdown";
+import { withVerifiedImages } from "@/lib/medical-image-client";
 import { dominantDirection } from "@/lib/text-direction";
 import { tAssistant } from "@/lib/translations/assistant";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -123,9 +124,9 @@ function isErrorReply(content: string): boolean {
   return text.startsWith("⚠️") && text.length < 400 && !text.includes("\n");
 }
 
-/** A reply as plain, readable Markdown — for the clipboard, Mes notes, read-aloud and the export. */
+/** A reply as plain, readable Markdown — for the clipboard, Mes notes, read-aloud and the export — each image as the verified Wikimedia file shown (lib/medical-image-client.ts). */
 function readableReply(content: string): string {
-  return cleanAssistantMarkdown(stripCitationMarkers(content), { formulaBlocks: false, typography: false });
+  return withVerifiedImages(cleanAssistantMarkdown(stripCitationMarkers(content), { formulaBlocks: false, typography: false }));
 }
 
 function downloadMarkdown(filename: string, content: string) {

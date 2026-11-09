@@ -62,6 +62,7 @@ import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
 import { ASSISTANT_PREFILL_KEY } from "@/lib/dashboard/assistant-prefill";
 import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { dominantDirection } from "@/lib/text-direction";
+import { compactHistoryForUpload } from "@/lib/chat-history";
 import { forgetReply, getReplySnapshot, resumeReply, settledReplyContent, startReply, stopReply, subscribeReply, type ReplyCopy } from "@/lib/copilot-reply-runner";
 
 interface HistoryTurn {
@@ -357,8 +358,9 @@ function summarizeForHistory(content: string): string {
   return `[Document importé : ${envelope.fileName}]${envelope.caption ? ` ${envelope.caption}` : ""}`;
 }
 
+/** The whole thread as the route's `history`: attachments as their short stand-ins, failed replies left out, bounded for the upload (lib/chat-history.ts). */
 function toHistoryTurns(msgs: ChatMessage[]): HistoryTurn[] {
-  return msgs.map((m) => ({ role: m.role, content: summarizeForHistory(m.content) }));
+  return compactHistoryForUpload(msgs.map((m) => ({ role: m.role, content: summarizeForHistory(m.content) })));
 }
 
 // Client-side image resize (Anthropic vision sweet spot, ~1568px long edge)

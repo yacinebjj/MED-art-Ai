@@ -21,6 +21,7 @@ import {
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
 import type { AnswerDepth } from "@/lib/ai/answer-depth";
+import { MEDICAL_IMAGE_DIRECTIVE } from "@/lib/ai/medical-image-directive";
 import {
   CHAT_SYSTEM_PROMPT_BASE,
   CHAT_SYSTEM_PROMPT_DETAILED,
@@ -28,6 +29,7 @@ import {
   buildChatModeInstruction,
   buildSystemContent,
 } from "@/lib/chat-system-prompt";
+import { FREE_MODEL_HISTORY_BUDGET, PAID_FALLBACK_HISTORY_BUDGET, normalizeChatHistory, selectHistory, type ChatHistoryTurn } from "@/lib/chat-history";
 import { stripReasoning } from "@/lib/strip-reasoning";
 
 export const runtime = "nodejs";
@@ -38,12 +40,14 @@ export const dynamic = "force-dynamic";
 // cut there, the student would see the answer stop mid-sentence.
 export const maxDuration = 300;
 
-// 5 exchanges (10 messages) verbatim — cost analysis showed the OLD cap of
-// 20 messages let a 30-question conversation's resent history alone balloon
-// past 1M input tokens in the worst case. Plain truncation (not LLM
-// summarization) is deliberate: summarizing would itself be a paid model
-// call on every message, working against the very cost this exists to cut.
-const MAX_HISTORY_MESSAGES = 10;
+// History: the whole conversation since 2026-11-09 (product order, "Master
+// Copilot Surgery") — it was cut to its last 5 exchanges, each clipped at
+// 6000 characters, so the Copilot forgot anything older. lib/chat-history.ts
+// now gives each model what its budget holds: the recent turns word for word
+// (FREE_MODEL_HISTORY_BUDGET for the free models, a smaller
+// PAID_FALLBACK_HISTORY_BUDGET for a paid fallback — bounded input cost),
+// everything older as a condensed memory in the system prompt. Condensing is
+// plain text handling, never a model call.
 
 // MODEL ROUTING — Omni-first since 2026-11-09 (product order; see
 // lib/ai/omni-routing.ts): every message goes first to the free multimodal
@@ -115,19 +119,13 @@ const MAX_HIGHLIGHT_CHARS = 800;
 
 // The free-form chat `message` field had NO length cap at all — every other
 // user-controlled input into this route (selectedText above, adjacentContext,
-// sourceText via MAX_CONTEXT_CHARS, history via MAX_HISTORY_MESSAGES) was
+// sourceText via MAX_CONTEXT_CHARS, history via lib/chat-history.ts's budgets) was
 // bounded, but a student could paste an arbitrarily large message directly
 // into the prompt, undermining every token-budget assumption this cost
 // model relies on. Found during a security audit. 4000 chars is generous
 // for a real question (well above what a highlight quick-action's
 // "instruction" text ever needs) while still bounding worst-case spend.
 const MAX_MESSAGE_CHARS = 4000;
-
-// Per-turn cap on the client-supplied history — MAX_MESSAGE_CHARS above only
-// bounds the NEW message, so 10 arbitrarily large "history" turns could
-// otherwise still reach the model. Generous enough to keep a long previous
-// answer's substance (assistant replies can run to several thousand chars).
-const MAX_HISTORY_TURN_CHARS = 6000;
 
 // Each history turn's share of the RAG retrieval query. The CURRENT question
 // goes first and history only adds a short topic anchor — a long previous
@@ -157,11 +155,12 @@ const ADJACENT_CONTEXT_CHARS = 300;
  */
 function buildHighlightSystemContent(translate: boolean, selectedText: string, adjacentContext: string | null, depth: AnswerDepth): string {
   // Translate keeps its translator persona whatever the model: an "explain
-  // exhaustively" directive would turn a translation into an essay.
+  // exhaustively" directive would turn a translation into an essay. The free
+  // models' explanation may come illustrated (lib/ai/medical-image-directive.ts).
   const persona = translate
     ? TRANSLATE_SYSTEM_PROMPT
     : depth === "detailed"
-      ? CHAT_SYSTEM_PROMPT_DETAILED + ASK_MEDART_EXPERT_SUFFIX_DETAILED
+      ? `${CHAT_SYSTEM_PROMPT_DETAILED}${ASK_MEDART_EXPERT_SUFFIX_DETAILED}\n\n${MEDICAL_IMAGE_DIRECTIVE}`
       : CHAT_SYSTEM_PROMPT_BASE + ASK_MEDART_EXPERT_SUFFIX;
   const isolationNotice =
     "\n\nIMPORTANT : tu ne reçois PAS le cours complet ici, uniquement le passage ci-dessous (et un minuscule extrait adjacent si fourni). Réponds seulement à partir de ce texte — ne suppose jamais un contenu que tu ne peux pas voir.";
@@ -170,17 +169,6 @@ function buildHighlightSystemContent(translate: boolean, selectedText: string, a
     : "";
 
   return `${persona}${isolationNotice}${excerptBlock}\n\nPassage sélectionné par l'étudiant :\n"""\n${selectedText}\n"""`;
-}
-
-interface HistoryTurn {
-  role: "user" | "assistant";
-  content: string;
-}
-
-function isHistoryTurn(value: unknown): value is HistoryTurn {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return (candidate.role === "user" || candidate.role === "assistant") && typeof candidate.content === "string";
 }
 
 // Backend backstop, layered on top of the client's own history hygiene (see
@@ -322,6 +310,7 @@ export async function POST(request: NextRequest) {
     slug,
     message,
     history,
+    messages: historyAlias,
     concise,
     translate,
     selectedText,
@@ -338,7 +327,10 @@ export async function POST(request: NextRequest) {
     structured?: unknown;
     slug?: unknown;
     message?: unknown;
+    /** The conversation so far, oldest first: [{ role: "user" | "assistant", content }] (lib/chat-history.ts). */
     history?: unknown;
+    /** The same, under the name most chat APIs use — read when `history` is absent. */
+    messages?: unknown;
     concise?: unknown;
     translate?: unknown;
     /** The exact text the student highlighted — presence of this (non-empty) is what triggers isHighlightMode below. Distinct from `message`, which stays the free-form question/instruction wrapping it. */
@@ -416,24 +408,16 @@ export async function POST(request: NextRequest) {
   const courseSlug = typeof slug === "string" && slug.trim() ? slug.trim() : null;
   const supabase = courseSlug && isSupabaseConfigured() ? getSupabaseAdmin() : null;
 
-  // Bound the context sent upstream — the last 5 exchanges is plenty of
-  // continuity for a course-reading chat without letting the request grow
-  // unbounded over a long session (see MAX_HISTORY_MESSAGES above for why
-  // this is a hard truncation, not a summarization call). A bare greeting
-  // forces this to empty regardless of what the client sent. A highlight
-  // quick action ALSO forces this to empty — it's a self-contained,
+  // The whole conversation, read once (lib/chat-history.ts): failed replies
+  // and empty bubbles left out, student → Copilot turns alternating; each
+  // model then gets what its budget holds (buildMessages below). A bare
+  // greeting forces this to empty regardless of what the client sent. A
+  // highlight quick action ALSO forces this to empty — it's a self-contained,
   // stateless lookup on an isolated passage by design, and history is
   // exactly the kind of dynamic content that can't sit behind
   // buildHighlightSystemContent's isolation guarantee.
-  const historyTurns: HistoryTurn[] =
-    isBareGreetingMessage || isHighlightMode
-      ? []
-      : Array.isArray(history)
-        ? history
-            .filter(isHistoryTurn)
-            .slice(-MAX_HISTORY_MESSAGES)
-            .map((turn) => ({ role: turn.role, content: turn.content.slice(0, MAX_HISTORY_TURN_CHARS) }))
-        : [];
+  const conversation: ChatHistoryTurn[] =
+    isBareGreetingMessage || isHighlightMode ? [] : normalizeChatHistory(Array.isArray(history) ? history : historyAlias);
 
   // Save the student's message — its id is only ever read later, inside the
   // background persistence closure below (the "Nouvelle conversation" race
@@ -518,7 +502,7 @@ export async function POST(request: NextRequest) {
               // Active course first — purely cosmetic for the ranking (all
               // chunks compete equally), but keeps the order deterministic.
               owned.sort((a, b) => requestedIds.indexOf(a.id) - requestedIds.indexOf(b.id));
-              const retrievalQuery = [message, ...historyTurns.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
+              const retrievalQuery = [message, ...conversation.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
               return await retrieveRelevantContextForStudioCourses(retrievalQuery, owned, message);
             }
 
@@ -543,10 +527,10 @@ export async function POST(request: NextRequest) {
             // chunks happen to score highest for a generic phrase, not the ones
             // related to what's actually being discussed. Anchor the retrieval
             // query to the last couple of turns (already available here as
-            // historyTurns, computed above for the model call itself) so a
+            // conversation, read above for the model call itself) so a
             // follow-up's embedding carries the real topic forward, not just its
             // own bare wording.
-            const retrievalQuery = [message, ...historyTurns.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
+            const retrievalQuery = [message, ...conversation.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
             return await retrieveRelevantContext(retrievalQuery, chunkSource, message);
           } catch (error) {
             // Fails open to `null` (no course context at all), NEVER to the full
@@ -609,32 +593,43 @@ export async function POST(request: NextRequest) {
   //
   // Dynamic system prompts (product order 2026-11-09, lib/ai/answer-depth.ts):
   // the same request in two versions, each sent only to the models it is
-  // meant for — "detailed" (no length limit, the depth directive) to the free
+  // meant for — "detailed" (no length limit, the depth directive, the
+  // proactive Wikimedia images except in "Synthèse express") to the free
   // models, "concise" (the persona's length target, plus the short-answer
-  // note added at call time) to a paid fallback. Everything else (course
-  // excerpts, mode, format, history, the question) is identical.
-  const buildMessages = (depth: AnswerDepth): ChatMessageInput[] =>
-    isHighlightMode
-      ? [
-          {
-            role: "system",
-            content: buildHighlightSystemContent(isTranslate, trimmedSelectedText, trimmedAdjacentContext, depth),
-          },
-          { role: "user", content: message },
-        ]
-      : [
-          {
-            role: "system",
-            content: buildSystemContent(
-              sourceText,
-              false,
-              [buildChatModeInstruction(chatMode) ?? "", isStructured ? WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION : ""],
-              depth === "detailed" ? CHAT_SYSTEM_PROMPT_DETAILED : CHAT_SYSTEM_PROMPT_BASE
-            ),
-          },
-          ...historyTurns.map((t): ChatMessageInput => ({ role: t.role, content: t.content })),
-          { role: "user", content: message },
-        ];
+  // note added at call time) to a paid fallback. The conversation travels as
+  // messages (the recent turns) and, past each model's budget, as a condensed
+  // memory before the course excerpts (lib/chat-history.ts). Everything else
+  // (course excerpts, mode, format, the question) is identical.
+  const buildMessages = (depth: AnswerDepth): ChatMessageInput[] => {
+    if (isHighlightMode) {
+      return [
+        {
+          role: "system",
+          content: buildHighlightSystemContent(isTranslate, trimmedSelectedText, trimmedAdjacentContext, depth),
+        },
+        { role: "user", content: message },
+      ];
+    }
+    const conversationSlice = selectHistory(conversation, depth === "detailed" ? FREE_MODEL_HISTORY_BUDGET : PAID_FALLBACK_HISTORY_BUDGET);
+    return [
+      {
+        role: "system",
+        content: buildSystemContent(
+          sourceText,
+          false,
+          [
+            buildChatModeInstruction(chatMode) ?? "",
+            isStructured ? WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION : "",
+            depth === "detailed" && chatMode !== "express" ? MEDICAL_IMAGE_DIRECTIVE : "",
+            conversationSlice.memory ?? "",
+          ],
+          depth === "detailed" ? CHAT_SYSTEM_PROMPT_DETAILED : CHAT_SYSTEM_PROMPT_BASE
+        ),
+      },
+      ...conversationSlice.recent.map((turn): ChatMessageInput => ({ role: turn.role, content: turn.content })),
+      { role: "user", content: message },
+    ];
+  };
   const freeModelMessages = buildMessages("detailed");
   const paidModelMessages = buildMessages("concise");
 

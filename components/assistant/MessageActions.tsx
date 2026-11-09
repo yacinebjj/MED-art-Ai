@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
 import { exportReplyToPdf } from "@/lib/assistant-export";
 import { cleanAssistantMarkdown } from "@/lib/assistant-markdown";
+import { withVerifiedImages } from "@/lib/medical-image-client";
 import { speak, stopSpeaking, useSpeakingId } from "@/hooks/useSpeechSynthesis";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -111,9 +112,9 @@ export function MessageActions({
     return html.replace(/\s(?:class|style)="[^"]*"/g, "");
   }
 
-  /** The reply as readable Markdown: LaTeX turned into plain symbols, formulas on lines of their own. */
+  /** The reply as readable Markdown: LaTeX turned into plain symbols, formulas on lines of their own, each image as the verified Wikimedia file shown (lib/medical-image-client.ts). */
   function readableReply(): string {
-    return cleanAssistantMarkdown(content, { formulaBlocks: false, typography: false });
+    return withVerifiedImages(cleanAssistantMarkdown(content, { formulaBlocks: false, typography: false }));
   }
 
   async function handleCopy() {

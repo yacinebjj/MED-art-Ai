@@ -124,6 +124,8 @@ export const RATE_LIMITS = {
   lectureChunk: { limit: 70, windowMs: 10 * 60 * 1000 },
   /** app/api/assistant/transcribe/route.ts — one short Whisper call per voice-dictated question in the MedArt Assistant composer (replaces the old browser SpeechRecognition dictation). A student can plausibly redo a short clip a few times in a row (mis-heard, changed their mind), so this is looser than `ai`'s general cap but still bounded — same guardrail role as `lectureChunk`, just for single-shot clips instead of a chunked lecture upload. */
   assistantDictation: { limit: 30, windowMs: 5 * 60 * 1000 },
+  /** app/api/assistant/medical-image/route.ts — no AI, no cost: one Wikimedia Commons lookup per image of a Copilot reply. Opening a long conversation checks all its images at once, hence the room; the bound keeps one account from hammering Wikimedia through us. */
+  medicalImage: { limit: 120, windowMs: 60 * 1000 },
 } satisfies Record<string, RateLimitConfig>;
 
 /** Seconds until the window resets, for a Retry-After header. */

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { isQuotedChatMessage } from "@/lib/demo-content";
+import { compactHistoryForUpload } from "@/lib/chat-history";
 import { useToast } from "@/components/ui/Toast";
 import type { ChatMessage } from "@/lib/types";
 import type { ChatMode } from "@/lib/chat-constants";
@@ -231,8 +232,9 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
     // Past messages flagged excludeFromHistory (a prior quick action's quote
     // AND its reply) are dropped entirely here — not trimmed, not
     // paraphrased, just absent — so nothing about that exchange can anchor
-    // this or any later message back onto its topic.
-    const historyForRequest = chatMessages.filter((m) => !m.excludeFromHistory).map((m) => ({ role: m.role, content: m.content }));
+    // this or any later message back onto its topic. The rest is the whole
+    // conversation, bounded for the upload (lib/chat-history.ts).
+    const historyForRequest = compactHistoryForUpload(chatMessages.filter((m) => !m.excludeFromHistory).map((m) => ({ role: m.role, content: m.content })));
 
     setChatMessages((prev) => [...prev, userMessage, { id: assistantId, role: "assistant", content: "", excludeFromHistory: exclude }]);
 
@@ -254,10 +256,12 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
     // excludeFromHistory filtering sendChatMessage applies) — the turn being
     // regenerated is re-sent as `message`, never duplicated into its own
     // history.
-    const historyForRequest = chatMessages
-      .slice(0, idx - 1)
-      .filter((m) => !m.excludeFromHistory)
-      .map((m) => ({ role: m.role, content: m.content }));
+    const historyForRequest = compactHistoryForUpload(
+      chatMessages
+        .slice(0, idx - 1)
+        .filter((m) => !m.excludeFromHistory)
+        .map((m) => ({ role: m.role, content: m.content }))
+    );
 
     const newAssistantId = crypto.randomUUID();
     // Drop the old reply and anything after it (ChatGPT-style: regenerating a
