@@ -5,6 +5,7 @@ import { Download, ExternalLink, ImageOff, Loader2, Maximize2, RotateCcw, ZoomIn
 import { Button } from "@/components/ui/Button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/Dialog";
 import { useLanguage } from "@/providers/LanguageProvider";
+import { composeWatermarkedImage, WATERMARK_COLORS, WATERMARK_LOGO_SRC, WATERMARK_TEXT_PARTS, WATERMARK_URL_TEXT } from "@/lib/infographic-watermark";
 import { cn } from "@/lib/utils";
 
 /** The Studio's graphite primary action (no blue in the Studio). */
@@ -19,6 +20,7 @@ const LABELS = {
     expand: "Agrandir",
     expandAria: "Agrandir la fiche de synthèse",
     download: "Télécharger",
+    downloadFailed: "Le téléchargement n'a pas pu être préparé. Réessaie dans un instant.",
     open: "Ouvrir dans un nouvel onglet",
     zoomIn: "Zoom avant",
     zoomOut: "Zoom arrière",
@@ -31,6 +33,7 @@ const LABELS = {
     expand: "Expand",
     expandAria: "Expand the summary sheet",
     download: "Download",
+    downloadFailed: "The download couldn't be prepared. Try again in a moment.",
     open: "Open in a new tab",
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
@@ -53,61 +56,127 @@ function downloadBaseName(courseTitle: string): string {
   return `fiche-de-synthese${slug ? `-${slug}` : ""}`;
 }
 
-function extensionFor(blobType: string, imageUrl: string): string {
-  if (blobType === "image/jpeg") return "jpg";
-  if (blobType.startsWith("image/")) return blobType.slice("image/".length).replace(/[^a-z0-9]/gi, "") || "png";
-  const fromUrl = imageUrl.split("?")[0].split(".").pop() ?? "";
-  return /^[a-z0-9]{2,4}$/i.test(fromUrl) ? fromUrl : "png";
+/**
+ * HTML twin of the signature strip baked into the image
+ * (lib/infographic-watermark.ts) — shown under the plain image only when the
+ * signed image could not be composed in this browser.
+ */
+function WatermarkStrip({ className }: { className?: string }) {
+  return (
+    <div
+      role="img"
+      aria-label={`MedArt AI — ${WATERMARK_URL_TEXT}`}
+      className={cn("relative flex items-center justify-center gap-2.5 px-3 pb-2.5 pt-3", className)}
+      style={{ backgroundImage: `linear-gradient(90deg, ${WATERMARK_COLORS.stripFrom}, ${WATERMARK_COLORS.stripTo})` }}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-[3px]"
+        style={{ backgroundImage: `linear-gradient(90deg, ${WATERMARK_COLORS.accentFrom}, ${WATERMARK_COLORS.accentTo})` }}
+      />
+      <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: WATERMARK_COLORS.badge }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- tiny static brand mark */}
+        <img src={WATERMARK_LOGO_SRC} alt="" className="h-[22px] w-[22px]" />
+      </span>
+      <span aria-hidden className="text-sm tracking-wide">
+        {WATERMARK_TEXT_PARTS.map((part) => (
+          <span key={part.text} style={{ color: part.color, fontWeight: part.weight }}>
+            {part.text}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
 }
 
 /**
- * Studio "Infographie / Fiche de Synthèse" — the generated sheet (app/api/studio/infographic):
- * the image with Agrandir (a full-screen view with a zoom that keeps the
- * clicked spot under the cursor), Télécharger (a real file download) and a
- * plain link to open it in a new tab.
+ * Studio "Infographie / Fiche de Synthèse" — the generated sheet (app/api/studio/infographic),
+ * signed: the MedArt AI strip (logo + www.medartai.com) is drawn under the
+ * sheet in this browser (lib/infographic-watermark.ts), and that signed image
+ * is what is shown, opened, zoomed and downloaded. Agrandir opens a
+ * full-screen view with a zoom that keeps the clicked spot under the cursor.
+ * If the signed image can't be composed here, the plain image is shown with
+ * the same strip in HTML, and a download is only ever a signed file.
  */
 export function InfographicViewer({ imageUrl, courseTitle }: { imageUrl: string; courseTitle: string }) {
   const { language } = useLanguage();
   const t = LABELS[language];
-  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [attempt, setAttempt] = useState(0);
+  const [composed, setComposed] = useState<{ url: string; blob: Blob } | null>(null);
+  const [composeFailed, setComposeFailed] = useState(false);
+  const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
   const [expanded, setExpanded] = useState(false);
   const [zoomWidth, setZoomWidth] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadFailed, setDownloadFailed] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const zoomFocusRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0 });
 
-  const src = attempt === 0 ? imageUrl : `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}retry=${attempt}`;
+  const sourceUrl = attempt === 0 ? imageUrl : `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}retry=${attempt}`;
+  // The signed image; the plain one only when it could not be composed (with the HTML strip under it).
+  const displaySrc = composed?.url ?? (composeFailed ? sourceUrl : null);
   const alt = `${t.alt} — ${courseTitle.replace(/\.[a-z0-9]{2,5}$/i, "")}`;
+  const unavailable = !displaySrc || loadState === "error";
 
-  // An image already in the browser cache can finish before React sees its load event.
+  // Composes the signed image once per source.
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    let objectUrl: string | null = null;
+    setComposed(null);
+    setComposeFailed(false);
+    setLoadState("loading");
+    composeWatermarkedImage(sourceUrl, controller.signal)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setComposed({ url: objectUrl, blob });
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.warn("[InfographicViewer] Signature non intégrée à l'image — bandeau HTML à la place:", error instanceof Error ? error.message : error);
+        setComposeFailed(true);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [sourceUrl]);
+
+  // An image already decoded can finish before React sees its load event.
   useEffect(() => {
     const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) setStatus("loaded");
-  }, [src]);
+    if (image?.complete && image.naturalWidth > 0) setLoadState("loaded");
+  }, [displaySrc]);
 
   const download = useCallback(async () => {
+    setDownloadFailed(false);
     setDownloading(true);
     try {
-      const res = await fetch(imageUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
+      const blob = composed?.blob ?? (await composeWatermarkedImage(sourceUrl));
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = href;
-      link.download = `${downloadBaseName(courseTitle)}.${extensionFor(blob.type, imageUrl)}`;
+      link.download = `${downloadBaseName(courseTitle)}.png`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(href), 30_000);
-    } catch {
-      // Download refused (offline, cross-origin): the image itself, where the browser's own save works.
-      window.open(imageUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      // Never an unsigned file: the student tries again.
+      console.error("[InfographicViewer] Téléchargement signé impossible:", error instanceof Error ? error.message : error);
+      setDownloadFailed(true);
     } finally {
       setDownloading(false);
     }
-  }, [imageUrl, courseTitle]);
+  }, [composed, sourceUrl, courseTitle]);
+
+  function retry() {
+    setDownloadFailed(false);
+    setAttempt((n) => n + 1);
+  }
 
   function zoomIn(focus: { x: number; y: number }) {
     const container = scrollRef.current;
@@ -150,30 +219,28 @@ export function InfographicViewer({ imageUrl, courseTitle }: { imageUrl: string;
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t.heading}</p>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setExpanded(true)} disabled={status === "error"}>
+          <Button type="button" variant="outline" size="sm" onClick={() => setExpanded(true)} disabled={unavailable}>
             <Maximize2 className="h-4 w-4" />
             {t.expand}
           </Button>
-          <Button type="button" size="sm" onClick={download} disabled={downloading} className={GRAPHITE_BUTTON}>
+          <Button type="button" size="sm" onClick={download} disabled={downloading || unavailable} className={GRAPHITE_BUTTON}>
             {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {t.download}
           </Button>
         </div>
       </div>
 
-      {status === "error" ? (
+      {downloadFailed && (
+        <p role="status" className="text-right text-xs font-medium text-rose-600 dark:text-rose-400">
+          {t.downloadFailed}
+        </p>
+      )}
+
+      {loadState === "error" ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border px-4 py-12 text-center">
           <ImageOff className="h-6 w-6 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{t.loadError}</p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setStatus("loading");
-              setAttempt((n) => n + 1);
-            }}
-          >
+          <Button type="button" variant="outline" size="sm" onClick={retry}>
             <RotateCcw className="h-4 w-4" />
             {t.retry}
           </Button>
@@ -182,36 +249,42 @@ export function InfographicViewer({ imageUrl, courseTitle }: { imageUrl: string;
         <button
           type="button"
           onClick={() => setExpanded(true)}
+          disabled={!displaySrc}
           aria-label={t.expandAria}
-          className="group relative block w-full cursor-zoom-in overflow-hidden rounded-2xl border border-border bg-white shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-zinc-900"
+          className="group relative block w-full cursor-zoom-in overflow-hidden rounded-2xl border border-border bg-white shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait dark:bg-zinc-900"
         >
-          {status === "loading" && <div aria-hidden className="aspect-square w-full animate-pulse bg-zinc-100 dark:bg-zinc-800/60" />}
-          {/* eslint-disable-next-line @next/next/no-img-element -- generated image of unknown size from storage; rendered as-is */}
-          <img
-            ref={imageRef}
-            src={src}
-            alt={alt}
-            decoding="async"
-            onLoad={() => setStatus("loaded")}
-            onError={() => setStatus("error")}
-            className={cn("block h-auto w-full", status === "loaded" ? "animate-fade-in" : "absolute inset-0 h-full opacity-0")}
-          />
-          <span className="pointer-events-none absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-zinc-950/70 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors group-hover:bg-zinc-950/85">
+          {loadState !== "loaded" && <div aria-hidden className="aspect-square w-full animate-pulse bg-zinc-100 dark:bg-zinc-800/60" />}
+          {displaySrc && (
+            // eslint-disable-next-line @next/next/no-img-element -- generated image of unknown size (a local signed copy); rendered as-is
+            <img
+              ref={imageRef}
+              src={displaySrc}
+              alt={alt}
+              decoding="async"
+              onLoad={() => setLoadState("loaded")}
+              onError={() => setLoadState("error")}
+              className={cn("block h-auto w-full", loadState === "loaded" ? "animate-fade-in" : "absolute inset-0 h-full opacity-0")}
+            />
+          )}
+          {composeFailed && loadState === "loaded" && <WatermarkStrip />}
+          <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-zinc-950/70 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors group-hover:bg-zinc-950/85">
             <Maximize2 className="h-3.5 w-3.5" />
             {t.expand}
           </span>
         </button>
       )}
 
-      <a
-        href={imageUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 self-center text-xs font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-      >
-        <ExternalLink className="h-3.5 w-3.5" />
-        {t.open}
-      </a>
+      {composed && loadState === "loaded" && (
+        <a
+          href={composed.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 self-center text-xs font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          {t.open}
+        </a>
+      )}
 
       <Dialog open={expanded} onOpenChange={handleOpenChange}>
         <DialogContent
@@ -233,24 +306,32 @@ export function InfographicViewer({ imageUrl, courseTitle }: { imageUrl: string;
             >
               {zoomWidth === null ? <ZoomIn className="h-4 w-4" /> : <ZoomOut className="h-4 w-4" />}
             </button>
-            <button type="button" onClick={download} disabled={downloading} aria-label={t.download} title={t.download} className={LIGHTBOX_ICON_BUTTON}>
+            <button type="button" onClick={download} disabled={downloading || unavailable} aria-label={t.download} title={t.download} className={LIGHTBOX_ICON_BUTTON}>
               {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </button>
           </div>
+          {downloadFailed && (
+            <p role="status" className="shrink-0 px-4 py-1.5 text-xs font-medium text-rose-300">
+              {t.downloadFailed}
+            </p>
+          )}
           <div
             ref={scrollRef}
             className={cn("min-h-0 flex-1 overflow-auto overscroll-contain", zoomWidth === null && "flex items-center justify-center p-2 sm:p-4")}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- same generated image, full size */}
-            <img
-              src={src}
-              alt={alt}
-              draggable={false}
-              onClick={handleLightboxImageClick}
-              style={zoomWidth === null ? undefined : { width: zoomWidth }}
-              className={cn("select-none", zoomWidth === null ? "max-h-full max-w-full cursor-zoom-in object-contain" : "h-auto max-w-none cursor-zoom-out")}
-            />
+            {displaySrc && (
+              // eslint-disable-next-line @next/next/no-img-element -- same signed image, full size
+              <img
+                src={displaySrc}
+                alt={alt}
+                draggable={false}
+                onClick={handleLightboxImageClick}
+                style={zoomWidth === null ? undefined : { width: zoomWidth }}
+                className={cn("select-none", zoomWidth === null ? "max-h-full max-w-full cursor-zoom-in object-contain" : "h-auto max-w-none cursor-zoom-out")}
+              />
+            )}
           </div>
+          {composeFailed && <WatermarkStrip className="shrink-0" />}
         </DialogContent>
       </Dialog>
     </div>
