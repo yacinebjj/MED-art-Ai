@@ -1,8 +1,11 @@
 import {
   MAX_IMAGE_ALT_CHARS,
   MEDICAL_IMAGE_API,
+  MEDICAL_IMAGE_FILE_API,
   canonicalImageSrc,
-  isVerifiedMedicalImage,
+  imageFileSlug,
+  readMedicalImageResolution,
+  type MedicalImageResolution,
   type VerifiedMedicalImage,
 } from "@/lib/medical-images";
 
@@ -13,15 +16,21 @@ import {
  * re-rendering while it streams, or a thread reopened, asks nothing again.
  */
 
-type Resolution = VerifiedMedicalImage | null;
+type Answer = MedicalImageResolution | null;
 
+/**
+ * Sent with every check: the answer's shape changed with the multi-repository
+ * engine, and a browser may still hold day-old answers of the old shape for
+ * the same link — a new parameter is a new address, so they're never read.
+ */
+const ANSWER_VERSION = "2";
 const MAX_REMEMBERED = 500;
-/** Request key → answer (null: no real image fits). */
-const answers = new Map<string, Resolution>();
-const inFlight = new Map<string, Promise<Resolution>>();
-/** Canonical link → its answer, for copies of a reply (withVerifiedImages). */
-const answersByLink = new Map<string, Resolution>();
-/** Verified images already painted once: shown again (a re-mounted block), they don't fade in a second time. */
+/** Request key → answer (null: no real picture fits). */
+const answers = new Map<string, Answer>();
+const inFlight = new Map<string, Promise<Answer>>();
+/** Canonical link → the picture shown for it (copies of a reply: withVerifiedImages). */
+const shownByLink = new Map<string, VerifiedMedicalImage | null>();
+/** Pictures already painted once: shown again (a re-mounted block), they don't fade in a second time. */
 const painted = new Set<string>();
 
 function rememberIn<V>(map: Map<string, V>, key: string, value: V): void {
@@ -40,42 +49,46 @@ function requestKey(src: string, alt: string): string {
   return `${canonicalImageSrc(src)}\u0000${description(alt)}`;
 }
 
-/** What is already known about an image: the verified image, null (none fits), or undefined (not checked yet). */
-export function peekMedicalImage(src: string, alt: string): Resolution | undefined {
+/** What is already known about an image: its resolution, null (no picture fits), or undefined (not checked yet). */
+export function peekMedicalImage(src: string, alt: string): Answer | undefined {
   return answers.get(requestKey(src, alt));
 }
 
 /**
- * The verified image for a link a reply wrote, or null. A definite answer
- * (found, or 404/400: nothing fits) is remembered; a failure that may pass
- * (offline, 429, Wikimedia down) resolves null for now and is asked again by
- * the next figure that shows this link.
+ * The verified picture (and alternatives) for a link a reply wrote, or null.
+ * A definite answer (found, or 404/400: nothing fits) is remembered; a
+ * failure that may pass (offline, 429, a repository down) resolves null for
+ * now and is asked again by the next figure that shows this link.
  */
-export function resolveMedicalImageInBrowser(src: string, alt: string): Promise<Resolution> {
+export function resolveMedicalImageInBrowser(src: string, alt: string): Promise<Answer> {
   const key = requestKey(src, alt);
   if (answers.has(key)) return Promise.resolve(answers.get(key) ?? null);
   const pending = inFlight.get(key);
   if (pending) return pending;
 
-  const params = new URLSearchParams({ src: src.trim(), alt: description(alt) });
+  const params = new URLSearchParams({ src: src.trim(), alt: description(alt), v: ANSWER_VERSION });
   const request = fetch(`${MEDICAL_IMAGE_API}?${params.toString()}`, { credentials: "same-origin" })
-    .then(async (res): Promise<Resolution> => {
+    .then(async (res): Promise<Answer> => {
       if (res.status === 404 || res.status === 400) {
         rememberIn(answers, key, null);
-        rememberIn(answersByLink, canonicalImageSrc(src), null);
+        rememberIn(shownByLink, canonicalImageSrc(src), null);
         return null;
       }
       if (!res.ok) return null;
-      const data = (await res.json().catch(() => null)) as { image?: unknown } | null;
-      if (!isVerifiedMedicalImage(data?.image)) return null;
-      rememberIn(answers, key, data.image);
-      rememberIn(answersByLink, canonicalImageSrc(src), data.image);
-      return data.image;
+      const resolution = readMedicalImageResolution(await res.json().catch(() => null));
+      if (!resolution) return null;
+      rememberIn(answers, key, resolution);
+      return resolution;
     })
-    .catch((): Resolution => null)
+    .catch((): Answer => null)
     .finally(() => inFlight.delete(key));
   inFlight.set(key, request);
   return request;
+}
+
+/** The picture a figure ended up showing for `link` (after any switch to an alternative): what copies of the reply carry. */
+export function rememberShownMedicalImage(link: string, image: VerifiedMedicalImage): void {
+  rememberIn(shownByLink, canonicalImageSrc(link), image);
 }
 
 export function markMedicalImagePainted(src: string): void {
@@ -87,18 +100,24 @@ export function wasMedicalImagePainted(src: string): boolean {
   return painted.has(src);
 }
 
+/** "Télécharger": the picture's best version, saved through MedArt's own address (app/api/assistant/medical-image/file). */
+export function medicalImageDownloadHref(image: VerifiedMedicalImage, caption: string): string {
+  const params = new URLSearchParams({ src: image.zoomSrc ?? image.src, name: imageFileSlug(caption || image.title) });
+  return `${MEDICAL_IMAGE_FILE_API}?${params.toString()}`;
+}
+
 const IMAGE_MARKDOWN = /!\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
 
 /**
  * A reply's Markdown as the student saw it, for what they take away (copy,
  * Mes notes, export): each image link the reply wrote becomes the verified
- * Commons file it was shown as, an image that was not shown (none fits) is
- * left out, one not checked yet stays as written.
+ * picture it was shown as, an image that was not shown (none fits) is left
+ * out, one not checked yet stays as written.
  */
 export function withVerifiedImages(markdown: string): string {
   return markdown.replace(IMAGE_MARKDOWN, (whole: string, alt: string, src: string) => {
-    const known = answersByLink.get(canonicalImageSrc(src));
-    if (known === undefined) return whole;
-    return known ? `![${alt}](${known.src})` : "";
+    const shown = shownByLink.get(canonicalImageSrc(src));
+    if (shown === undefined) return whole;
+    return shown ? `![${alt}](${shown.src})` : "";
   });
 }

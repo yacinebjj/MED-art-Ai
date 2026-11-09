@@ -2,20 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { parseMedicalImageQuery } from "@/lib/medical-images";
-import { resolveMedicalImage } from "@/lib/wikimedia-commons";
+import { resolveMedicalImage } from "@/lib/medical-image-engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Up to three Wikimedia calls (exact file, then two searches), 6 s each at most.
+// The exact file, then the repositories searched at once (7 s at most each), then the description: well within 30 s.
 export const maxDuration = 30;
 
 /**
  * GET ?src=<the image link a Copilot reply wrote>&alt=<its description>
- *   200 { image }        the verified Wikimedia Commons image to show
- *   404 { image: null }  no real image fits: the reply shows none
- * See lib/medical-images.ts. Costs nothing: Wikimedia's public API, no AI.
- * The answer depends only on the query string, never on who asks — browsers
- * and Vercel's edge may keep it; errors are never kept.
+ *   200 { image, alternatives }  the best verified picture and up to 3 others
+ *   404 { image: null }          no real picture fits: the reply shows none
+ * See lib/medical-images.ts and lib/medical-image-engine.ts. Costs nothing:
+ * the repositories' public APIs, no AI. The answer depends only on the query
+ * string, never on who asks — browsers and Vercel's edge may keep it; errors
+ * are never kept.
  */
 const NO_STORE = { "Cache-Control": "no-store" };
 const FOUND_CACHE = { "Cache-Control": "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400" };
@@ -41,12 +42,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const image = await resolveMedicalImage(query);
-    return image
-      ? NextResponse.json({ image }, { status: 200, headers: FOUND_CACHE })
-      : NextResponse.json({ image: null }, { status: 404, headers: NOT_FOUND_CACHE });
+    const resolution = await resolveMedicalImage(query);
+    return resolution
+      ? NextResponse.json(resolution, { status: 200, headers: FOUND_CACHE })
+      : NextResponse.json({ image: null, alternatives: [] }, { status: 404, headers: NOT_FOUND_CACHE });
   } catch (error) {
-    console.error("[medical-image] Wikimedia Commons indisponible:", error instanceof Error ? error.message : error);
-    return NextResponse.json({ image: null, error: "Wikimedia Commons est momentanément injoignable." }, { status: 502, headers: NO_STORE });
+    console.error("[medical-image] Recherche d'image indisponible:", error instanceof Error ? error.message : error);
+    return NextResponse.json({ image: null, error: "Les banques d'images sont momentanément injoignables." }, { status: 502, headers: NO_STORE });
   }
 }

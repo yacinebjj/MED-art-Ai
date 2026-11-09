@@ -5,6 +5,7 @@ import ReactMarkdown, { type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cleanAssistantMarkdown, tidyLiveBlock } from "@/lib/assistant-markdown";
 import { dominantDirection } from "@/lib/text-direction";
+import { FigureBlockContext, FigureRegistryContext, createFigureRegistry } from "@/lib/medical-figure-registry";
 import { MedicalFigure } from "@/components/assistant/MedicalFigure";
 
 /**
@@ -212,9 +213,17 @@ const MARKDOWN_COMPONENTS: Options["components"] = {
     </a>
   ),
   // An image the reply embedded is never shown as the model wrote it: only as
-  // the verified Wikimedia Commons file it names, or not at all (components/
-  // assistant/MedicalFigure.tsx, lib/medical-images.ts).
-  img: ({ src, alt }) => <MedicalFigure src={typeof src === "string" ? src : undefined} alt={alt} />,
+  // the verified picture an open repository has for it, or not at all
+  // (components/assistant/MedicalFigure.tsx, lib/medical-images.ts). Its
+  // offset in the block gives its place in the reply (several images stay
+  // distinct, lib/medical-figure-registry.ts).
+  img: ({ src, alt, node }) => (
+    <MedicalFigure
+      src={typeof src === "string" ? src : undefined}
+      alt={alt}
+      offset={(node as { position?: { start?: { offset?: number } } } | undefined)?.position?.start?.offset ?? 0}
+    />
+  ),
 };
 
 // --- Error containment -----------------------------------------------------------
@@ -252,19 +261,24 @@ class MarkdownErrorBoundary extends Component<{ content: string; children: React
 }
 
 const MarkdownBlock = memo(function MarkdownBlock({
+  index,
   text,
   rehypePlugins,
   components,
 }: {
+  /** The block's place in the reply — its figures' order (lib/medical-figure-registry.ts). */
+  index: number;
   text: string;
   rehypePlugins: Options["rehypePlugins"];
   components: Options["components"];
 }) {
   return (
     <MarkdownErrorBoundary content={text}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehypePlugins} components={components}>
-        {text}
-      </ReactMarkdown>
+      <FigureBlockContext.Provider value={index}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehypePlugins} components={components}>
+          {text}
+        </ReactMarkdown>
+      </FigureBlockContext.Provider>
     </MarkdownErrorBoundary>
   );
 });
@@ -355,14 +369,24 @@ export const StreamedMarkdown = forwardRef<HTMLDivElement, StreamedMarkdownProps
         : [REHYPE_PLUGINS, LIVE_REHYPE_PLUGINS],
     [rehypePlugins]
   );
+  // This reply's pictures, kept distinct (lib/medical-figure-registry.ts).
+  const figures = useMemo(() => createFigureRegistry(), []);
   return (
     <div ref={ref} dir={direction} className={className ? `${PROSE_CLASSES} ${className}` : PROSE_CLASSES}>
-      {blocks.map((block, index) => {
-        const live = isStreaming && index === blocks.length - 1;
-        return (
-          <MarkdownBlock key={index} text={live ? tidyLiveBlock(block) : block} rehypePlugins={live ? livePlugins : settledPlugins} components={renderers} />
-        );
-      })}
+      <FigureRegistryContext.Provider value={figures}>
+        {blocks.map((block, index) => {
+          const live = isStreaming && index === blocks.length - 1;
+          return (
+            <MarkdownBlock
+              key={index}
+              index={index}
+              text={live ? tidyLiveBlock(block) : block}
+              rehypePlugins={live ? livePlugins : settledPlugins}
+              components={renderers}
+            />
+          );
+        })}
+      </FigureRegistryContext.Provider>
     </div>
   );
 });
