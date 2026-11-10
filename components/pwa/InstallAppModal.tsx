@@ -202,7 +202,7 @@ export function InstallAppModal({ open, onOpenChange }: { open: boolean; onOpenC
             id="install-panel"
             role="tabpanel"
             aria-labelledby={`install-tab-${platform}`}
-            className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-1"
+            className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-5 pb-5 pt-1"
           >
             {installed ? (
               <div className="flex items-start gap-3 rounded-2xl bg-emerald-500/10 p-3.5 ring-1 ring-inset ring-emerald-500/25">

@@ -1534,6 +1534,10 @@ details[data-closing="true"] > :not(summary) {
 }
 
 .install-card {
+  /* Centred by transform: translate(-50%, -50%); the standalone `scale` of
+     the pop and the exit pivots on transform-origin before that translate,
+     so 0 0 is the card's visible centre (the default made it drift). */
+  transform-origin: 0 0;
   max-height: calc(100vh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
@@ -1594,6 +1598,22 @@ details[data-closing="true"] > :not(summary) {
   animation: install-halo 1800ms var(--ease-glide) infinite;
 }
 
+@keyframes install-halo-soft {
+  0% {
+    opacity: 0.8;
+    scale: 1;
+  }
+  75%,
+  100% {
+    opacity: 0;
+    scale: 1.04 1.25;
+  }
+}
+
+.install-halo-soft {
+  animation: install-halo-soft 1800ms var(--ease-glide) infinite;
+}
+
 @keyframes install-nudge-up {
   50% {
     translate: 0 -3px;
@@ -1646,6 +1666,7 @@ details[data-closing="true"] > :not(summary) {
 
 @media (prefers-reduced-motion: reduce) {
   .install-halo,
+  .install-halo-soft,
   .install-breathe,
   .install-sheen,
   .install-nudge-up,
@@ -1654,6 +1675,7 @@ details[data-closing="true"] > :not(summary) {
   }
 
   .install-halo,
+  .install-halo-soft,
   .install-sheen {
     opacity: 0;
   }

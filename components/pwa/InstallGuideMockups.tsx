@@ -60,12 +60,12 @@ function Frame({ children, className }: { children: ReactNode; className?: strin
 /** A miniature panel of the browser (bar, sheet, menu, dialog). */
 const PANEL = "bg-white/95 ring-1 ring-black/[0.06] shadow-[0_6px_18px_-8px_rgba(15,23,42,0.28)] dark:bg-neutral-800/95 dark:ring-white/10";
 
-/** The control to touch: a glowing ring and a halo pulsing outward. */
+/** The control to touch: a glowing ring and a halo pulsing outward (a full-width row: a softer one, kept inside its miniature). */
 function Target({ children, shape = "pill", className }: { children: ReactNode; shape?: "circle" | "pill" | "row"; className?: string }) {
   const radius = shape === "circle" ? "rounded-full" : shape === "row" ? "rounded-[0.625rem]" : "rounded-lg";
   return (
     <span className={cn("relative z-10 inline-flex items-center justify-center", className)}>
-      <span className={cn("install-halo pointer-events-none absolute -inset-1.5 ring-2 ring-sky-400/60", radius)} />
+      <span className={cn(shape === "row" ? "install-halo-soft" : "install-halo", "pointer-events-none absolute -inset-1.5 ring-2 ring-sky-400/60", radius)} />
       <span className={cn("pointer-events-none absolute -inset-[3px] bg-sky-400/10 shadow-[0_0_14px_2px_rgba(56,189,248,0.55)] ring-2 ring-sky-400", radius)} />
       <span className="relative flex w-full items-center justify-center">{children}</span>
     </span>
