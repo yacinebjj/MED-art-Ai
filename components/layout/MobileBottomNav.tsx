@@ -27,6 +27,7 @@ import { tCockpit } from "@/lib/translations/cockpit";
 import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/Dialog";
+import { InstallAppSheetEntry } from "@/components/pwa/InstallAppEntry";
 import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
 import { THEME_MODE_ICONS, THEME_MODE_LABELS, useThemeMode, type ThemeMode } from "./cockpit/ThemeModeSwitcher";
 
@@ -124,6 +125,8 @@ function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
         </div>
 
         <nav className="px-2" aria-label={TAB_LABELS.more[language]}>
+          {/* « Installer l'application » first: the sheet closes, the guide opens (components/pwa/InstallAppEntry.tsx). */}
+          <InstallAppSheetEntry onOpen={() => onOpenChange(false)} />
           {MENU_ITEMS.map((item) => {
             const Icon = item.icon;
             return (

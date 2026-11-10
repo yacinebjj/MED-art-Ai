@@ -10,6 +10,7 @@ import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
 import { NotificationCenter } from "./cockpit/NotificationCenter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
+import { InstallAppHeaderButton, InstallAppMenuItem } from "@/components/pwa/InstallAppEntry";
 import { useCockpitStore } from "@/store/useCockpitStore";
 import { tCockpit } from "@/lib/translations/cockpit";
 import { FLASHCARD_ENGINE_LABEL } from "@/lib/dashboard/engine";
@@ -222,6 +223,7 @@ function AccountMenu({ className }: { className?: string }) {
           );
         })}
         <DropdownMenuSeparator className="mx-1 my-1 bg-black/[0.06] dark:bg-white/[0.08] sm:hidden" />
+        <InstallAppMenuItem className={ACCOUNT_ITEM_CLASSES} iconClassName={ACCOUNT_ITEM_ICON_CLASSES} />
         <DropdownMenuItem asChild className={ACCOUNT_ITEM_CLASSES}>
           <Link href="/dashboard/billing">
             <span className={ACCOUNT_ITEM_ICON_CLASSES}>
@@ -295,9 +297,11 @@ export function TopbarCluster({ standalone = false }: { standalone?: boolean }) 
         Voir la Démo
       </Link> */}
       {/* Below lg the bottom nav's Menu sheet carries language, appearance and
-          the account — the bar keeps only notifications. */}
+          the account — the bar keeps only notifications, and the install
+          button (the sidebar carries it from lg). */}
       <UnifiedLanguageSwitch className={standalone ? "hidden sm:flex" : "hidden lg:flex"} />
       <ThemeModeSwitcher className={standalone ? "hidden sm:flex" : "hidden lg:flex"} />
+      <InstallAppHeaderButton className="lg:hidden" />
       <NotificationCenter />
       <AccountMenu className={standalone ? undefined : "hidden lg:block"} />
     </div>

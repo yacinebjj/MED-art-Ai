@@ -966,6 +966,11 @@ textarea,
     backdrop-filter: blur(24px) !important;
     -webkit-backdrop-filter: blur(24px) !important;
   }
+
+  .install-overlay {
+    backdrop-filter: blur(40px) !important;
+    -webkit-backdrop-filter: blur(40px) !important;
+  }
 }
 
 /* iOS Safari zooms on focus below 16px — and fields often carry `.text-xs` or
@@ -1504,6 +1509,165 @@ details[data-closing="true"] > :not(summary) {
 .lightbox-stage[data-gesture],
 .lightbox-image[data-gesture] {
   transition: none;
+}
+
+/* INSTALL GUIDE (components/pwa/InstallAppModal.tsx, InstallGuideMockups.tsx,
+   InstallAppEntry.tsx): the deep blur fades in while the card pops from 95 %
+   on the lively spring (a hint of bounce); the platform pill glides to the
+   chosen guide; each step rises in after the one before; the trace between
+   the steps glows. The lit-up controls pulse a halo and nudge their arrow,
+   the entry points' glyph breathes until the guide has been opened once, and
+   « Installer en 1 clic » catches a passing sheen — decorative loops, all
+   still under calm motion (the lit ring itself stays). */
+@keyframes install-pop {
+  from {
+    scale: 0.95;
+  }
+}
+
+.install-overlay[data-state="open"] {
+  animation: motion-fade-in 320ms var(--ease-glide);
+}
+
+.install-overlay[data-state="closed"] {
+  animation: motion-fade-out 260ms var(--ease-exit) forwards;
+}
+
+.install-card {
+  max-height: calc(100vh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+.install-card[data-state="open"] {
+  animation:
+    motion-fade-in 220ms var(--ease-glide),
+    install-pop 640ms var(--ease-bloom);
+}
+
+.install-card[data-state="closed"] {
+  animation: dialog-out 220ms var(--ease-exit) forwards;
+}
+
+.install-tab-indicator {
+  transition: translate 520ms var(--ease-bloom);
+}
+
+.install-step {
+  animation: section-rise 520ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--step, 0) * 80ms + 80ms);
+}
+
+.install-trace {
+  background-image: linear-gradient(to bottom, rgb(56 189 248 / 0.95), rgb(129 140 248 / 0.25));
+  box-shadow: 0 0 12px rgb(56 189 248 / 0.55);
+}
+
+.install-node {
+  background-image: linear-gradient(135deg, #0ea5e9, #6366f1);
+  box-shadow:
+    0 0 0 4px rgb(14 165 233 / 0.14),
+    0 8px 22px -6px rgb(14 165 233 / 0.75);
+}
+
+.install-grid {
+  background-image:
+    linear-gradient(rgb(14 165 233 / 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(14 165 233 / 0.07) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(70% 100% at 50% 0%, #000, transparent);
+  mask-image: radial-gradient(70% 100% at 50% 0%, #000, transparent);
+}
+
+@keyframes install-halo {
+  0% {
+    opacity: 0.8;
+    scale: 1;
+  }
+  75%,
+  100% {
+    opacity: 0;
+    scale: 1.45;
+  }
+}
+
+.install-halo {
+  animation: install-halo 1800ms var(--ease-glide) infinite;
+}
+
+@keyframes install-nudge-up {
+  50% {
+    translate: 0 -3px;
+  }
+}
+
+@keyframes install-nudge-down {
+  50% {
+    translate: 0 3px;
+  }
+}
+
+.install-nudge-up {
+  animation: install-nudge-up 1200ms ease-in-out infinite;
+}
+
+.install-nudge-down {
+  animation: install-nudge-down 1200ms ease-in-out infinite;
+}
+
+@keyframes install-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+    scale: 0.9;
+  }
+  50% {
+    opacity: 1;
+    scale: 1.12;
+  }
+}
+
+.install-breathe {
+  animation: install-breathe 2800ms ease-in-out infinite;
+}
+
+@keyframes install-sheen {
+  0%,
+  55% {
+    translate: 0 0;
+  }
+  100% {
+    translate: 450% 0;
+  }
+}
+
+.install-sheen {
+  animation: install-sheen 3600ms var(--ease-glide) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .install-halo,
+  .install-breathe,
+  .install-sheen,
+  .install-nudge-up,
+  .install-nudge-down {
+    animation: none;
+  }
+
+  .install-halo,
+  .install-sheen {
+    opacity: 0;
+  }
+
+  .install-breathe {
+    opacity: 0.6;
+  }
+}
+
+/* Already running as the installed app: no entry point, from the first paint. */
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+  .install-entry {
+    display: none !important;
+  }
 }
 
 /* The dock (components/layout/MobileBottomNav.tsx): one highlight pill for

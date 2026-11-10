@@ -24,6 +24,7 @@ import {
 import { motion } from "framer-motion";
 import { Logo } from "./Logo";
 import { AnimatedBrandMark } from "./AnimatedBrandMark";
+import { InstallAppSidebarEntry } from "@/components/pwa/InstallAppEntry";
 import { cn } from "@/lib/utils";
 import { useRouteIntent } from "@/lib/motion";
 import { useSidebarState } from "@/providers/SidebarProvider";
@@ -491,6 +492,8 @@ export function Sidebar() {
           </nav>
 
           <div className="shrink-0 space-y-1.5 border-t border-white/20 p-[clamp(0.5rem,1.4vh,0.75rem)] dark:border-white/5">
+            {/* « Installer l'application » (components/pwa/InstallAppEntry.tsx); gone once MedArt runs as the app. */}
+            <InstallAppSidebarEntry collapsed={collapsed} />
             <QuotaGauge collapsed={collapsed} language={language} />
 
             {/* The sync state and the rail toggle share one row — no near-empty row left at
