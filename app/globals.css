@@ -944,6 +944,28 @@ textarea,
     backdrop-filter: blur(24px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
   }
+
+  /* The floating layers of 2026-11-10 keep theirs too, for the same reason:
+     a notification pill, a message's menu, the picture viewer's backdrop and
+     its two controls all sit over layers that no longer animate on touch
+     (the aurora is frozen, the WebGL DNA never mounts), so the stutter this
+     block cured can't come back through them. Their Tailwind blur, written
+     out: backdrop-blur-lg / -md / -md / -xl. */
+  .toast-pill {
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+  }
+
+  .message-menu,
+  [data-lightbox-control] {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+  }
+
+  .lightbox-overlay {
+    backdrop-filter: blur(24px) !important;
+    -webkit-backdrop-filter: blur(24px) !important;
+  }
 }
 
 /* iOS Safari zooms on focus below 16px — and fields often carry `.text-xs` or

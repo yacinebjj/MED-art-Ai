@@ -212,8 +212,9 @@ function ToastPill({ item, onDismiss, onRemove }: { item: ToastItem; onDismiss: 
   }
 
   return (
-    <div className="toast-slot grid w-full" data-leaving={item.leaving ? "" : undefined}>
-      <div className="flex min-h-0 justify-center pb-2">
+    // grid-cols-1 (minmax(0, 1fr)): an implicit auto column would grow to the text on one line and push the pill past a phone screen.
+    <div className="toast-slot grid w-full grid-cols-1" data-leaving={item.leaving ? "" : undefined}>
+      <div className="flex min-h-0 min-w-0 justify-center pb-2">
         <div
           ref={pillRef}
           data-variant={item.variant}
@@ -230,7 +231,7 @@ function ToastPill({ item, onDismiss, onRemove }: { item: ToastItem; onDismiss: 
             if (item.leaving && event.target === event.currentTarget && event.animationName === "toast-lift") onRemove(item.id);
           }}
           className={cn(
-            "toast-pill pointer-events-auto flex w-max min-w-0 max-w-[min(28rem,100%)] touch-none gap-2.5 border bg-white/95 shadow-xl backdrop-blur-lg dark:bg-neutral-900/95",
+            "toast-pill pointer-events-auto flex w-max min-w-0 max-w-[min(32rem,100%)] touch-none gap-2.5 border bg-white/95 shadow-xl backdrop-blur-lg dark:bg-neutral-900/95",
             multiline ? "items-start rounded-[1.375rem] py-2.5 pl-3.5 pr-2" : "items-center rounded-full py-2 pl-3.5 pr-2",
             border
           )}

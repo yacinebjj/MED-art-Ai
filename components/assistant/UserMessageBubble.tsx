@@ -127,6 +127,8 @@ export function UserMessageBubble({ text, dir, onEdit }: { text: string; dir?: s
           collisionPadding={12}
           hideWhenDetached
           loop
+          // Named by its own label: Radix's default aria-labelledby points at the inert anchor, which has no text.
+          aria-labelledby={undefined}
           aria-label={tAssistant("messageOptions", language)}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
