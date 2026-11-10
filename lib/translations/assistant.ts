@@ -79,6 +79,14 @@ export const ASSISTANT_TRANSLATIONS = {
   stepByStep: { fr: "Raisonnement pas à pas", en: "Step-by-step reasoning" },
   stepByStepHint: { fr: "Déroule la démarche en étapes avant de conclure.", en: "Walks through the reasoning in steps before concluding." },
 
+  // A sent message's menu (components/assistant/UserMessageBubble.tsx)
+  messageOptions: { fr: "Options du message", en: "Message options" },
+  copyMessage: { fr: "Copier le texte", en: "Copy text" },
+  messageCopied: { fr: "Copié", en: "Copied" },
+  editMessage: { fr: "Modifier", en: "Edit" },
+  copyFailed: { fr: "Copie impossible", en: "Couldn't copy" },
+  copyFailedHint: { fr: "Ton navigateur a refusé l'accès au presse-papiers.", en: "Your browser blocked access to the clipboard." },
+
   // Per-message actions
   speak: { fr: "Écouter la réponse", en: "Read aloud" },
   stopSpeaking: { fr: "Arrêter la lecture", en: "Stop reading" },

@@ -64,11 +64,11 @@ import {
   COPILOT_ACTION_BUTTON_CLASSES,
   COPILOT_HUB_CLASSES,
   COPILOT_SUGGESTION_CLASSES,
-  COPILOT_USER_BUBBLE_CLASSES,
   NovaOrb,
   TypingIndicator,
 } from "@/components/assistant/CopilotParts";
 import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
+import { UserMessageBubble } from "@/components/assistant/UserMessageBubble";
 import { VoiceMeter } from "@/components/assistant/VoiceMeter";
 import { TextSelectionToolbar } from "@/components/course/workspace/TextSelectionToolbar";
 import { ChatRichMarkdown } from "@/components/course/workspace/ChatRichMarkdown";
@@ -84,14 +84,13 @@ export interface ChatDocumentPanelHandle {
 const MAX_MESSAGE_CHARS = 4000;
 
 /**
- * Phones read the workspace chat larger than the MedArt Copilot's: replies at
- * 18 px (the Copilot's are 17 px there; from sm both are 18 px) and the
- * student's bubbles at 16 px (15 px there). `max-sm:` classes, appended after
- * the base size so they win there; rem, so app/globals.css's phone type scale
- * leaves them alone.
+ * Phones read the workspace chat's replies larger than the MedArt Copilot's:
+ * 18 px (the Copilot's are 17 px there; from sm both are 18 px). A `max-sm:`
+ * class, appended after the base size so it wins there; rem, so
+ * app/globals.css's phone type scale leaves it alone. The student's bubbles
+ * are the same 17 px in both Copilots (COPILOT_USER_BUBBLE_CLASSES).
  */
 const PHONE_REPLY_TEXT = "max-sm:text-[1.125rem]";
-const PHONE_BUBBLE_TEXT = "max-sm:text-[1rem]";
 
 /** How far a reading scroll must travel in one direction before the page's chrome reacts. */
 const READING_SCROLL_TRAVEL = 24;
@@ -563,6 +562,21 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     },
   }));
 
+  // « Modifier » in a sent message's menu: the text back in the composer, the
+  // caret at its end. The focus is taken right away, inside the tap, so a
+  // phone opens its keyboard (iOS ignores a focus that comes later).
+  const editMessage = useCallback(
+    (text: string) => {
+      onInputChange(text.slice(0, MAX_MESSAGE_CHARS));
+      inputRef.current?.focus({ preventScroll: true });
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (el) el.setSelectionRange(el.value.length, el.value.length);
+      });
+    },
+    [onInputChange]
+  );
+
   const hasConversation = messages.length > 0;
   const hasOptions = showSplitScreenToggle || hasConversation;
   const hasSourcePicker = Boolean(sources && sources.length > 0 && (onToggleSource || onSelectSource));
@@ -959,9 +973,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                           className="flex w-full min-w-0 justify-end"
                         >
                           <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
-                            <div dir={dominantDirection(message.content) ?? "auto"} className={`${COPILOT_USER_BUBBLE_CLASSES} ${PHONE_BUBBLE_TEXT}`}>
-                              {message.content}
-                            </div>
+                            {/* A tap opens its menu — copy, edit (components/assistant/UserMessageBubble.tsx). */}
+                            <UserMessageBubble text={message.content} dir={dominantDirection(message.content) ?? "auto"} onEdit={editMessage} />
                           </div>
                         </motion.div>
                       );

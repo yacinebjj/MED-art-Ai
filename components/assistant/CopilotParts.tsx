@@ -20,9 +20,14 @@ export const COPILOT_HUB_CLASSES =
 export const COPILOT_SUGGESTION_CLASSES =
   "flex min-h-[52px] min-w-0 items-center gap-2.5 rounded-2xl border border-black/[0.06] bg-white/70 px-3.5 py-2 text-left text-[13px] font-medium leading-snug text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-white hover:text-slate-900 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/75 dark:shadow-none dark:hover:bg-white/[0.08] dark:hover:text-white sm:min-h-11 sm:gap-2 sm:rounded-full sm:px-4 sm:py-0";
 
-/** The student's own message: a sky bubble on the right (white glass in dark). */
+/**
+ * The student's own message: a sky bubble on the right (white glass in dark).
+ * 17 px on every screen (product order 2026-11-10: was 15 px on phones, 16 px
+ * from sm) — a step under the replies' 18 px from sm, so the answer still
+ * leads. rem, so app/globals.css's phone type scale leaves it alone.
+ */
 export const COPILOT_USER_BUBBLE_CLASSES =
-  "max-w-full whitespace-pre-wrap break-words rounded-3xl rounded-br-lg border border-sky-100 bg-sky-50 px-4 py-2.5 text-[0.9375rem] leading-[1.5] text-slate-800 sm:text-[16px] dark:border-white/[0.06] dark:bg-white/[0.07] dark:text-white/90";
+  "max-w-full whitespace-pre-wrap break-words rounded-3xl rounded-br-lg border border-sky-100 bg-sky-50 px-4 py-2.5 text-[1.0625rem] leading-[1.5] text-slate-800 dark:border-white/[0.06] dark:bg-white/[0.07] dark:text-white/90";
 
 /**
  * A reply's action button: clear at a glance, 40 px discs with 20 px glyphs on

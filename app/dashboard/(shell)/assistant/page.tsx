@@ -50,8 +50,9 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { stopSpeaking } from "@/hooks/useSpeechSynthesis";
 import { useVisualViewportBox } from "@/hooks/useVisualViewportBox";
 import { ConversationSidebar, ConversationSidebarCollapsedToggle } from "@/components/assistant/ConversationSidebar";
-import { AssistantAvatar, COPILOT_HUB_CLASSES, COPILOT_SUGGESTION_CLASSES, COPILOT_USER_BUBBLE_CLASSES, NovaOrb, TypingIndicator } from "@/components/assistant/CopilotParts";
+import { AssistantAvatar, COPILOT_HUB_CLASSES, COPILOT_SUGGESTION_CLASSES, NovaOrb, TypingIndicator } from "@/components/assistant/CopilotParts";
 import { MessageActions } from "@/components/assistant/MessageActions";
+import { UserMessageBubble } from "@/components/assistant/UserMessageBubble";
 import { QUICK_ACTIONS } from "@/components/assistant/QuickActionBar";
 import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
 import { VoiceMeter } from "@/components/assistant/VoiceMeter";
@@ -141,6 +142,7 @@ const ChatBubble = memo(function ChatBubble({
   questionText,
   onRefresh,
   onDelete,
+  onEdit,
 }: {
   message: ChatMessage;
   /** True only for the reply currently arriving — its newest words fade in, and its action bar waits until it is complete. */
@@ -149,6 +151,8 @@ const ChatBubble = memo(function ChatBubble({
   questionText: string | null;
   onRefresh: (id: string) => void;
   onDelete: (id: string) => void;
+  /** « Modifier » in a sent message's menu: its text back in the composer. */
+  onEdit: (text: string) => void;
 }) {
   const { language } = useLanguage();
   const proseRef = useRef<HTMLDivElement>(null);
@@ -190,16 +194,13 @@ const ChatBubble = memo(function ChatBubble({
             </div>
           )}
           {(!attachment || attachment.caption) && (
-            // bg-card/text-card-foreground/border-border: theme tokens, so it
-            // follows light/dark like every other surface here. dir="auto" — a
-            // message in Arabic/Darija must read right-to-left. break-words:
-            // a pasted long token wraps instead of widening the thread.
-            <div
-              dir={dominantDirection(attachment ? attachment.caption ?? "" : message.content) ?? "auto"}
-              className={COPILOT_USER_BUBBLE_CLASSES}
-            >
-              {attachment ? attachment.caption : message.content}
-            </div>
+            // A message in Arabic/Darija reads right-to-left (dominantDirection);
+            // a tap opens its menu — copy, edit (components/assistant/UserMessageBubble.tsx).
+            <UserMessageBubble
+              text={attachment ? (attachment.caption ?? "") : message.content}
+              dir={dominantDirection(attachment ? (attachment.caption ?? "") : message.content) ?? "auto"}
+              onEdit={onEdit}
+            />
           )}
         </div>
       </motion.div>
@@ -485,6 +486,18 @@ export default function AssistantPage() {
       setInput(prefill.slice(0, 4000));
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
+  }, []);
+
+  // « Modifier » in a sent message's menu: the text back in the composer, the
+  // caret at its end. The focus is taken right away, inside the tap, so a
+  // phone opens its keyboard (iOS ignores a focus that comes later).
+  const editMessage = useCallback((text: string) => {
+    setInput(text.slice(0, 4000));
+    textareaRef.current?.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) el.setSelectionRange(el.value.length, el.value.length);
+    });
   }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -1270,6 +1283,7 @@ export default function AssistantPage() {
                       questionText={message.role === "assistant" && messages[index - 1]?.role === "user" ? summarizeForHistory(messages[index - 1].content) : null}
                       onRefresh={regenerateResponse}
                       onDelete={deleteMessage}
+                      onEdit={editMessage}
                     />
                   ))}
                 </AnimatePresence>

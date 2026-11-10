@@ -235,9 +235,20 @@ function ResolvedFigure({ link, caption, offset }: { link: string; caption: stri
           {medicalImageCredit(shown)}
         </span>
       )}
-      {/* The full-screen view is portaled, but React still bubbles its events through here: they stop at this figure. */}
+      {/* The full-screen view is portaled, but React still bubbles its events through here: they stop at this figure
+          (its drags and wheel never reach the thread's scroll tracking either). */}
       {loaded && (
-        <span onClick={stopPropagation} onKeyDown={stopPropagation} className="contents">
+        <span
+          onClick={stopPropagation}
+          onKeyDown={stopPropagation}
+          onPointerDown={stopPropagation}
+          onPointerMove={stopPropagation}
+          onPointerUp={stopPropagation}
+          onTouchStart={stopPropagation}
+          onTouchMove={stopPropagation}
+          onWheel={stopPropagation}
+          className="contents"
+        >
           <MedicalImageLightbox key={shown.src} image={shown} caption={caption} open={open} onOpenChange={setOpen} />
         </span>
       )}

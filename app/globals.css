@@ -1356,6 +1356,134 @@ details[data-closing="true"] > :not(summary) {
   animation-delay: 100ms;
 }
 
+/* A sent message's menu (components/assistant/UserMessageBubble.tsx): a
+   quieter pop than the other menus — from 95 % on the soft spring, fading in.
+   It folds away like every popper (popper-out above). One class more specific
+   than the shared popper rule. */
+@keyframes message-menu-pop {
+  from {
+    scale: 0.95;
+  }
+}
+
+[data-radix-popper-content-wrapper] > .message-menu[data-side][data-state="open"] {
+  animation:
+    motion-fade-in 180ms var(--ease-glide),
+    message-menu-pop 420ms var(--ease-spring);
+}
+
+/* NOTIFICATIONS (components/ui/Toast.tsx): every alert, error, warning and
+   success is a pill floating at the top centre. It drops in on the soft
+   spring; on its way out it lifts and fades while its slot folds shut, so
+   the pills below close the gap without a jump. A pill swiped up but not far
+   enough springs back (its inline translate is cleared; data-gesture turns
+   the transition off while the finger drives it). */
+@keyframes toast-drop {
+  from {
+    translate: 0 -28px;
+    scale: 0.94;
+  }
+}
+
+@keyframes toast-lift {
+  to {
+    opacity: 0;
+    translate: 0 -100%;
+    scale: 0.96;
+  }
+}
+
+.toast-pill {
+  transition: translate 380ms var(--ease-spring);
+  animation:
+    motion-fade-in 220ms var(--ease-glide),
+    toast-drop 620ms var(--ease-spring);
+}
+
+.toast-pill[data-gesture] {
+  transition: none;
+}
+
+.toast-pill[data-leaving] {
+  pointer-events: none;
+  animation: toast-lift 240ms var(--ease-exit) forwards;
+}
+
+.toast-slot {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 240ms var(--ease-exit);
+}
+
+.toast-slot[data-leaving] {
+  grid-template-rows: 0fr;
+}
+
+/* The Copilot's picture viewer (components/assistant/MedicalImageLightbox.tsx):
+   the frosted backdrop fades in while the picture springs up from 92 %, and
+   the floating controls follow a beat later. On close Radix waits for the
+   Content's own fade while the picture sinks back a little. A tap zooms on
+   the spring (the image's scale/translate transition); a drag pans it or
+   swipes the whole picture away — inline values, transitions off
+   (data-gesture) while a finger or the mouse drives them. */
+@keyframes lightbox-pop {
+  from {
+    scale: 0.92;
+  }
+}
+
+@keyframes lightbox-sink {
+  to {
+    scale: 0.95;
+  }
+}
+
+.lightbox-overlay {
+  transition: opacity 260ms var(--ease-glide);
+}
+
+.lightbox-overlay[data-state="open"] {
+  animation: motion-fade-in 320ms var(--ease-glide);
+}
+
+.lightbox-overlay[data-state="closed"] {
+  animation: motion-fade-out 260ms var(--ease-exit) forwards;
+}
+
+.lightbox-content[data-state="closed"] {
+  pointer-events: none;
+  animation: motion-fade-out 220ms var(--ease-exit) forwards;
+}
+
+.lightbox-content[data-state="open"] .lightbox-stage {
+  animation:
+    motion-fade-in 200ms var(--ease-glide),
+    lightbox-pop 600ms var(--ease-spring);
+}
+
+.lightbox-content[data-state="closed"] .lightbox-stage {
+  animation: lightbox-sink 220ms var(--ease-exit) forwards;
+}
+
+.lightbox-content[data-state="open"] .lightbox-chrome {
+  animation: motion-fade-in 300ms var(--ease-glide) 120ms backwards;
+}
+
+.lightbox-stage {
+  transition: translate 420ms var(--ease-sheet);
+}
+
+.lightbox-image {
+  transition:
+    scale 480ms var(--ease-spring),
+    translate 480ms var(--ease-spring);
+}
+
+.lightbox-overlay[data-gesture],
+.lightbox-stage[data-gesture],
+.lightbox-image[data-gesture] {
+  transition: none;
+}
+
 /* The dock (components/layout/MobileBottomNav.tsx): one highlight pill for
    the whole bar glides to the tapped tab on the lively spring, and the
    tapped icon lifts a hair. Calm motion: the same glide without the bounce, half the lift. */
