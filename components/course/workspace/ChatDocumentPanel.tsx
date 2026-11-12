@@ -652,16 +652,24 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     };
   }, [menuOpen, isCompactMenu]);
 
-  function setMessagesRef(node: HTMLDivElement | null) {
-    if (node !== scrollRef.current) {
-      // A new thread (or none): reading-scroll tracking starts over with it.
-      lastScrollTopRef.current = node?.scrollTop ?? 0;
-      scrollTravelRef.current = 0;
-      lastReadingDirectionRef.current = null;
-    }
-    scrollRef.current = node;
-    containerRef(node);
-  }
+  // Stable (refs + a stable setter only): a callback ref that is a new function
+  // on every render is detached and re-attached on EVERY commit — a second
+  // render of this whole panel each time (containerRef sets state twice), a
+  // forced layout (scrollTop), and the reading-scroll tracking reset — up to
+  // 60 times a second while a reply streams.
+  const setMessagesRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node !== scrollRef.current) {
+        // A new thread (or none): reading-scroll tracking starts over with it.
+        lastScrollTopRef.current = node?.scrollTop ?? 0;
+        scrollTravelRef.current = 0;
+        lastReadingDirectionRef.current = null;
+      }
+      scrollRef.current = node;
+      containerRef(node);
+    },
+    [containerRef]
+  );
 
   function markScrollIntent() {
     scrollIntentAtRef.current = Date.now();

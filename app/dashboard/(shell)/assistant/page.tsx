@@ -72,6 +72,7 @@ import { useTourBlocker } from "@/lib/onboarding/onboarding-context";
 import { dominantDirection } from "@/lib/text-direction";
 import { compactHistoryForUpload } from "@/lib/chat-history";
 import { forgetReply, getReplySnapshot, resumeReply, settledReplyContent, startReply, stopReply, subscribeReply, type ReplyCopy } from "@/lib/copilot-reply-runner";
+import { createStreamFlusher } from "@/lib/stream-flush";
 
 interface HistoryTurn {
   role: "user" | "assistant";
@@ -314,6 +315,24 @@ function summarizeForHistory(content: string): string {
     return `[Image envoyée${envelope.fileName ? ` : ${envelope.fileName}` : ""}]${envelope.caption ? ` ${envelope.caption}` : ""}`;
   }
   return `[Document importé : ${envelope.fileName}]${envelope.caption ? ` ${envelope.caption}` : ""}`;
+}
+
+/**
+ * summarizeForHistory, once per message. The thread names each reply's question
+ * on EVERY render of this page (each keystroke, each painted chunk of a streaming
+ * reply), and an attachment message is a JSON envelope — an old photo's base64 or
+ * a whole PDF's extracted text — that it would otherwise parse every time. A
+ * message object never changes in place (an edit makes a new one), so the
+ * summary is keyed by the object itself.
+ */
+const questionTextCache = new WeakMap<ChatMessage, string>();
+function questionTextFor(message: ChatMessage): string {
+  let text = questionTextCache.get(message);
+  if (text === undefined) {
+    text = summarizeForHistory(message.content);
+    questionTextCache.set(message, text);
+  }
+  return text;
 }
 
 /** The whole thread as the route's `history`: attachments as their short stand-ins, failed replies left out, bounded for the upload (lib/chat-history.ts). */
@@ -740,20 +759,22 @@ export default function AssistantPage() {
   );
 
   /**
-   * Shows a reply as it arrives (one paint per frame) and settles it in the
-   * thread. Resolves when it settles — or when the page stops watching (the
-   * thread left on purpose, or the page left while the reply carries on).
+   * Shows a reply as it arrives (one paint per frame, ~20 a second at most —
+   * lib/stream-flush.ts) and settles it in the thread. Resolves when it
+   * settles — or when the page stops watching (the thread left on purpose, or
+   * the page left while the reply carries on).
    */
   const watchReply = useCallback((replyId: string) => {
     activeReplyIdRef.current = replyId;
     setIsTyping(true);
     return new Promise<void>((resolve) => {
-      let frame: number | null = null;
       let latest = "";
       let unsubscribe: () => void = () => undefined;
+      const flusher = createStreamFlusher(() => {
+        setMessages((prev) => prev.map((m) => (m.id === replyId ? { ...m, content: latest } : m)));
+      });
       const stopWatching = () => {
-        if (frame !== null) cancelAnimationFrame(frame);
-        frame = null;
+        flusher.cancel();
         unsubscribe();
         replyWatchersRef.current.delete(replyId);
         resolve();
@@ -762,12 +783,7 @@ export default function AssistantPage() {
       unsubscribe = subscribeReply(replyId, (snapshot) => {
         if (snapshot.status === "streaming") {
           latest = snapshot.text;
-          if (frame === null) {
-            frame = requestAnimationFrame(() => {
-              frame = null;
-              setMessages((prev) => prev.map((m) => (m.id === replyId ? { ...m, content: latest } : m)));
-            });
-          }
+          flusher.schedule();
           return;
         }
         // Settled: the text, the "⚠️ …" error line, or nothing (stopped before its first word).
@@ -1250,7 +1266,7 @@ export default function AssistantPage() {
                       key={message.id}
                       message={message}
                       isStreaming={isTyping && index === messages.length - 1}
-                      questionText={message.role === "assistant" && messages[index - 1]?.role === "user" ? summarizeForHistory(messages[index - 1].content) : null}
+                      questionText={message.role === "assistant" && messages[index - 1]?.role === "user" ? questionTextFor(messages[index - 1]) : null}
                       onRefresh={regenerateResponse}
                       onDelete={deleteMessage}
                       onEdit={editMessage}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IBM_Plex_Sans_Arabic } from "next/font/google";
 import ReactMarkdown, { type Components, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -172,16 +172,24 @@ function useMarkdownKit(rtl: boolean) {
     []
   );
   const inlineComponents = useMemo<Components>(() => ({ ...components, p: ({ children }) => <>{children}</> }), [components]);
-  return { rehypePlugins, components, inlineComponents };
+  // One stable kit, so every <Md> below can skip its parse when its text hasn't changed.
+  return useMemo(() => ({ rehypePlugins, components, inlineComponents }), [rehypePlugins, components, inlineComponents]);
 }
 
-function Md({ markdown, kit, inline = false }: { markdown: string; kit: ReturnType<typeof useMarkdownKit>; inline?: boolean }) {
+const REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm];
+
+/**
+ * Memoized: react-markdown parses on every render, and this canvas re-renders
+ * with the whole workspace page — on every keystroke in the Co-pilot and every
+ * frame of a streamed reply. Same text, same kit → no parse.
+ */
+const Md = memo(function Md({ markdown, kit, inline = false }: { markdown: string; kit: ReturnType<typeof useMarkdownKit>; inline?: boolean }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={kit.rehypePlugins} components={inline ? kit.inlineComponents : kit.components}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={kit.rehypePlugins} components={inline ? kit.inlineComponents : kit.components}>
       {markdown}
     </ReactMarkdown>
   );
-}
+});
 
 // ─── Block grouping: story ↔ clinical split cards ──────────────────────────
 

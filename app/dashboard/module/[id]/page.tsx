@@ -1857,6 +1857,14 @@ export default function ModuleWorkspacePage() {
     [activeCourse, cacheVersion, courses]
   );
 
+  // The Exemples tile's plain-article fallback, normalized once per text — not
+  // on every render of this page (each keystroke in the Co-pilot and each frame
+  // of a streamed reply re-renders it).
+  const exemplesFallbackMarkdown = useMemo(
+    () => (activeCourse?.exemplesAnalogies ? normalizeCallouts(activeCourse.exemplesAnalogies) : ""),
+    [activeCourse?.exemplesAnalogies]
+  );
+
   /** Files dropped on (or attached in) the co-pilot become new sources — same direct-to-storage pipeline as the Add-source modal. */
   const handleImportFiles = useCallback(
     async (files: File[]) => {
@@ -2393,7 +2401,7 @@ export default function ModuleWorkspacePage() {
               fallback={
                 <article dir="auto" className={cn(isDark ? DARK_PROSE_CLASSES : PROSE_CLASSES, "max-w-none")}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={isDark ? DARK_MARKDOWN_COMPONENTS : MARKDOWN_COMPONENTS}>
-                    {normalizeCallouts(activeCourse.exemplesAnalogies!)}
+                    {exemplesFallbackMarkdown}
                   </ReactMarkdown>
                 </article>
               }

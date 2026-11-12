@@ -83,20 +83,23 @@ export function NovaOrb() {
  * conversation swap instead of remounting.
  *
  * MedArt's own "neural aurora" (app/globals.css, "Copilot ambience"):
- * - the stage: a MedArt sky-blue heart that breathes, with three currents
- *   melting into it — bioluminescent cyan, deep ocean, a whisper of violet —
- *   that drift and cross-fade out of phase, so the tint itself morphs;
+ * - "welcome": a MedArt sky-blue heart that breathes, two currents melting
+ *   into it — bioluminescent cyan; deep ocean with a whisper of violet —
+ *   that drift and cross-fade in counter-phase, so the tint itself morphs,
+ *   and a halftone dot-matrix that pulses;
+ * - "thread": a reading screen — the currents and dots fade out, the heart
+ *   rests lower and dimmer, and breathes only while `active` (a reply is on
+ *   its way);
  * - awake: while the composer hub (`copilot-hub`) holds the focus, the stage
- *   rises, swells and brightens, and a brighter heart beats softly; it
- *   exhales back on blur. Pure CSS (`:has(.copilot-hub:focus-within)`), so a
- *   keystroke never re-renders this tree;
- * - "welcome" adds a halftone dot-matrix that flows slowly under a still
- *   crest. "thread": the same aurora, lower and calmer, hugging the composer;
- *   the dot-matrix fades out and pauses. `active` (a reply is on its way)
- *   brightens it.
+ *   rises and swells and a brighter heart beats softly; it exhales back on
+ *   blur. Pure CSS (`:has(.copilot-hub:focus-within)`), so a keystroke never
+ *   re-renders this tree. On desktop the loops hold still while the pointer
+ *   is elsewhere.
  *
- * Every loop is compositor-only (opacity + the standalone translate / scale
- * properties), so a main thread busy streaming a reply never costs it a frame.
+ * Cheap by construction (Code Red 2026-11-12): every moving layer is a plain
+ * gradient the compositor only moves or fades; nothing that moves is masked
+ * or sits under a group opacity, and the dot-matrix (masked) is painted once
+ * inside a wrapper that only fades.
  */
 export function CopilotAmbience({ variant, active = false }: { variant: "welcome" | "thread"; active?: boolean }) {
   return (
@@ -105,12 +108,13 @@ export function CopilotAmbience({ variant, active = false }: { variant: "welcome
         <span className="copilot-aurora-core" />
         <span className="copilot-aurora-cyan" />
         <span className="copilot-aurora-ocean" />
-        <span className="copilot-aurora-violet" />
         <span className="copilot-aurora-awake" />
       </span>
       <span className="copilot-ambience-welcome">
-        <span className="copilot-halftone" />
-        <span className="copilot-halftone copilot-halftone-fine" />
+        <span className="copilot-halftone-pulse">
+          <span className="copilot-halftone" />
+          <span className="copilot-halftone copilot-halftone-fine" />
+        </span>
       </span>
     </div>
   );

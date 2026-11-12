@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import { useReducedMotion } from "framer-motion";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { GlassArt, type GlassArtName } from "@/components/ui/GlassArt";
 
@@ -23,7 +23,8 @@ interface FloaterSpec {
   /** Stagger + slightly different float rhythm per icon so they never all bob in unison, which would read as one mechanical group instead of ambient scenery. */
   delay: number;
   duration: number;
-  rotateRange: number;
+  /** Degrees of sway either side — one of the @keyframes medical-float-sway-N in app/globals.css. */
+  rotateRange: 5 | 6 | 7;
 }
 
 // Deliberately sparse (six objects) and scattered toward the edges —
@@ -66,17 +67,22 @@ export function FloatingMedicalIcons() {
     // auto) — no negative z-index needed, or wanted.
     <div aria-hidden className="pointer-events-none absolute inset-0 hidden overflow-hidden md:block">
       {FLOATERS.map((floater, i) => (
-        <motion.div
+        <div
           key={i}
           // Glass is already translucent (the old stickers were opaque), so a
           // slightly higher layer opacity keeps the same faint presence.
           className="absolute opacity-[0.36] dark:opacity-[0.3]"
-          style={{ top: floater.top, bottom: floater.bottom, left: floater.left, right: floater.right }}
-          animate={{ y: [0, -14, 0], rotate: [0, floater.rotateRange, 0, -floater.rotateRange, 0] }}
-          transition={{ duration: floater.duration, delay: floater.delay, repeat: Infinity, ease: "easeInOut" }}
+          style={{
+            top: floater.top,
+            bottom: floater.bottom,
+            left: floater.left,
+            right: floater.right,
+            // A slow bob and sway on the compositor (app/globals.css): no main-thread work per frame.
+            animation: `medical-float-bob ${floater.duration}s ease-in-out ${floater.delay}s infinite, medical-float-sway-${floater.rotateRange} ${floater.duration}s ease-in-out ${floater.delay}s infinite`,
+          }}
         >
           <GlassArt name={floater.art} size={floater.size} />
-        </motion.div>
+        </div>
       ))}
     </div>
   );

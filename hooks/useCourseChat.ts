@@ -6,6 +6,7 @@ import { compactHistoryForUpload } from "@/lib/chat-history";
 import { useToast } from "@/components/ui/Toast";
 import type { ChatMessage } from "@/lib/types";
 import type { ChatMode } from "@/lib/chat-constants";
+import { createStreamFlusher, type StreamFlusher } from "@/lib/stream-flush";
 
 /**
  * Per-request extras the module workspace sends with EVERY turn (including
@@ -152,6 +153,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
     setIsTyping(true);
     setIsStreaming(true);
 
+    let flusher: StreamFlusher | null = null;
     try {
       const res = await fetch("/api/courses/chat", {
         method: "POST",
@@ -177,16 +179,17 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullText = "";
-      // At most ONE state update per animation frame: a fast stream delivers
-      // dozens of chunks per frame, and each update re-renders the whole
-      // course workspace — the text still appears as fast as the eye sees it.
-      let frame: number | null = null;
+      // At most ONE state update per animation frame, and no more than ~20 a
+      // second (lib/stream-flush.ts): a fast stream delivers dozens of chunks
+      // per frame, and each update re-renders the whole course workspace — the
+      // text still reads as live, flowing text.
       const flush = () => {
-        frame = null;
         if (!isMountedRef.current) return;
         const text = fullText;
         setChatMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m)));
       };
+      const streamFlusher = createStreamFlusher(flush);
+      flusher = streamFlusher;
       let typingCleared = false;
 
       while (true) {
@@ -194,7 +197,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
         if (done) break;
         fullText += decoder.decode(value, { stream: true });
         if (!isMountedRef.current) continue; // keep draining the stream, just stop touching state
-        if (frame === null) frame = requestAnimationFrame(flush);
+        streamFlusher.schedule();
         // The growing bubble itself is the "in progress" signal from here on —
         // clear the separate "MedArt écrit…" indicator the moment real text
         // starts arriving, so the two don't show redundantly at once.
@@ -203,7 +206,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
           setIsTyping(false);
         }
       }
-      if (frame !== null) cancelAnimationFrame(frame);
+      streamFlusher.cancel();
       flush();
 
       if (!isMountedRef.current) return;
@@ -214,6 +217,8 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
         );
       }
     } catch (err) {
+      // A paint still pending must never cover the error line with the partial text.
+      flusher?.cancel();
       if (!isMountedRef.current) return;
       const message = err instanceof Error ? err.message : "L'assistant n'a pas pu répondre. Réessaie.";
       setChatMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: `⚠️ ${message}` } : m)));
