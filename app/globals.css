@@ -1832,11 +1832,20 @@ html.theme-reveal::view-transition-new(root) {
 
 /* ---------------------------------------------------------------------------
    Copilot ambience (CopilotAmbience, NovaOrb and CopilotWelcome in
-   components/assistant/CopilotParts.tsx): the living light of both Copilots.
-   A blue aurora breathes up from the composer. On the welcome, two coloured
-   currents and a halftone dot-matrix wave drift through it, the emblem's
-   glow breathes with two thin rings pulsing out of it, and the screen rises
-   in one step after another.
+   components/assistant/CopilotParts.tsx): the living light of both Copilots —
+   MedArt's own "neural aurora" (product order 2026-11-12: alive, premium,
+   unmistakably ours — never a Gemini clone).
+   - Palette: the MedArt sky blue at its heart, melting into bioluminescent
+     cyan, a deep oceanic blue and a whisper of violet. No green, no pink.
+   - Breathing: the heart swells and brightens on a slow 9 s breath; three
+     currents drift, and their opacities cross-fade out of phase, so the tint
+     itself morphs — cyan-led, ocean-led, violet-touched — without a repaint.
+   - The halftone dot-matrix flows: each dot grid pans a whole number of
+     tiles per loop under a still crest (no seam), and pulses.
+   - Awake: while the composer holds the focus (`:has(.copilot-hub:focus-within)`
+     — pure CSS, no React state), the light inhales on a fast, springy curve:
+     it rises, swells, brightens, and a brighter heart beats softly (lub-dub,
+     MedArt's own signature). It exhales back on a slower curve.
    Gradients only — no filter blur, which iOS boxes on moving layers — and
    every loop animates opacity and the standalone translate / scale
    properties: the compositor runs them, so a main thread busy streaming a
@@ -1846,19 +1855,21 @@ html.theme-reveal::view-transition-new(root) {
   position: absolute;
   inset: auto 0 0;
   z-index: 0;
-  height: 74%;
+  height: 80%;
   overflow: hidden;
   pointer-events: none;
-  transition: opacity 700ms var(--ease-glide);
+  /* A feathered top: however high the light rises (awake), it dissolves into the canvas instead of being cut by the box's edge. */
+  mask-image: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.5) 13%, #000 30%);
+  transition: opacity 800ms var(--ease-glide);
 }
 
 /* In a conversation: lower and calmer, hugging the composer; brighter while a reply is on its way. */
 .copilot-ambience[data-variant="thread"] {
-  opacity: 0.6;
+  opacity: 0.62;
 }
 
 .copilot-ambience[data-variant="thread"][data-active] {
-  opacity: 0.92;
+  opacity: 0.95;
 }
 
 .copilot-ambience span {
@@ -1866,84 +1877,169 @@ html.theme-reveal::view-transition-new(root) {
   display: block;
 }
 
-/* The aurora's heart: a wide swell of the logo's blues, rooted under the composer. */
-.copilot-aurora-core {
-  inset: 16% -32% -46%;
-  background: radial-gradient(closest-side, rgb(56 189 248 / 0.34), rgb(14 165 233 / 0.18) 42%, rgb(59 130 246 / 0.07) 70%, transparent);
+/* The stage carries the awake reaction (transitions); the layers inside keep breathing (animations). Exhale: slow, settling. */
+.copilot-aurora-stage {
+  inset: 0;
+  opacity: 0.86;
   transform-origin: 50% 100%;
-  transition: translate 900ms var(--ease-glide);
-  animation: copilot-aurora-breathe 7.5s ease-in-out infinite alternate;
+  transition:
+    translate 1500ms cubic-bezier(0.33, 0, 0.15, 1),
+    scale 1500ms cubic-bezier(0.33, 0, 0.15, 1),
+    opacity 1300ms cubic-bezier(0.33, 0, 0.15, 1);
 }
 
-.dark .copilot-aurora-core {
-  background: radial-gradient(closest-side, rgb(56 189 248 / 0.46), rgb(14 165 233 / 0.27) 40%, rgb(29 78 216 / 0.12) 68%, transparent);
-}
-
-.copilot-ambience[data-variant="thread"] .copilot-aurora-core {
+.copilot-ambience[data-variant="thread"] .copilot-aurora-stage {
   translate: 0 24%;
 }
 
-/* The welcome's own layers fade out, and pause, once a conversation starts. */
+/* Inhale: the student is writing — the light rises, swells and brightens on a fast, springy curve. */
+:has(.copilot-hub:focus-within) > .copilot-ambience .copilot-aurora-stage {
+  translate: 0 -12%;
+  scale: 1.08;
+  opacity: 1;
+  transition:
+    translate 950ms cubic-bezier(0.16, 1, 0.3, 1),
+    scale 950ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 650ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:has(.copilot-hub:focus-within) > .copilot-ambience[data-variant="thread"] .copilot-aurora-stage {
+  translate: 0 8%;
+}
+
+/* The heart: the MedArt sky blue, rooted under the composer — it breathes. */
+.copilot-aurora-core {
+  inset: 14% -30% -46%;
+  background: radial-gradient(closest-side, rgb(56 189 248 / 0.42), rgb(14 165 233 / 0.22) 40%, rgb(37 99 235 / 0.08) 68%, transparent);
+  transform-origin: 50% 100%;
+  animation: copilot-aurora-breathe 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+
+.dark .copilot-aurora-core {
+  background: radial-gradient(closest-side, rgb(56 189 248 / 0.55), rgb(14 165 233 / 0.32) 38%, rgb(29 78 216 / 0.14) 66%, transparent);
+}
+
+/* Three currents melt into it: they drift, and cross-fade out of phase, so the tint morphs. */
+.copilot-aurora-cyan {
+  inset: 30% 42% -28% -28%;
+  background: radial-gradient(closest-side, rgb(34 211 238 / 0.32), rgb(103 232 249 / 0.1) 55%, transparent);
+  animation:
+    copilot-current-drift 16s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate,
+    copilot-current-morph 11s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+
+.copilot-aurora-ocean {
+  inset: 22% -30% -34% 36%;
+  background: radial-gradient(closest-side, rgb(8 145 178 / 0.22), rgb(37 99 235 / 0.12) 55%, transparent);
+  animation:
+    copilot-current-drift-alt 19s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate,
+    copilot-current-morph 11s cubic-bezier(0.45, 0, 0.55, 1) -11s infinite alternate;
+}
+
+.copilot-aurora-violet {
+  inset: 10% 6% 18% 34%;
+  background: radial-gradient(closest-side, rgb(139 92 246 / 0.13), rgb(99 102 241 / 0.05) 60%, transparent);
+  animation:
+    copilot-current-drift 23s cubic-bezier(0.45, 0, 0.55, 1) -9s infinite alternate-reverse,
+    copilot-current-morph 13s cubic-bezier(0.45, 0, 0.55, 1) -3s infinite alternate-reverse;
+}
+
+.dark .copilot-aurora-cyan {
+  background: radial-gradient(closest-side, rgb(34 211 238 / 0.3), rgb(103 232 249 / 0.08) 55%, transparent);
+}
+
+.dark .copilot-aurora-ocean {
+  background: radial-gradient(closest-side, rgb(14 116 144 / 0.5), rgb(29 78 216 / 0.2) 55%, transparent);
+}
+
+.dark .copilot-aurora-violet {
+  background: radial-gradient(closest-side, rgb(139 92 246 / 0.22), rgb(99 102 241 / 0.07) 60%, transparent);
+}
+
+/* Awake only: a brighter heart that beats softly — lub-dub, about 63 a minute — while the composer listens.
+   The beat (scale) only pauses when the heart fades out (opacity), so it never snaps back mid-beat. */
+.copilot-aurora-awake {
+  inset: 38% -6% -34%;
+  background: radial-gradient(closest-side, rgb(56 189 248 / 0.36), rgb(14 165 233 / 0.17) 45%, transparent 76%);
+  opacity: 0;
+  transform-origin: 50% 100%;
+  transition: opacity 1300ms cubic-bezier(0.33, 0, 0.15, 1);
+  animation: copilot-heartbeat 1.9s cubic-bezier(0.37, 0, 0.63, 1) infinite paused;
+}
+
+.dark .copilot-aurora-awake {
+  background: radial-gradient(closest-side, rgb(125 211 252 / 0.5), rgb(14 165 233 / 0.28) 45%, transparent 76%);
+}
+
+:has(.copilot-hub:focus-within) > .copilot-ambience .copilot-aurora-awake {
+  opacity: 1;
+  transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation-play-state: running;
+}
+
+/* The welcome's own layers (the dot-matrix): they rise with the light when awake, and fade out — paused — once a conversation starts. */
 .copilot-ambience-welcome {
   inset: 0;
-  transition: opacity 600ms var(--ease-glide);
+  transition:
+    opacity 600ms var(--ease-glide),
+    translate 1500ms cubic-bezier(0.33, 0, 0.15, 1);
+}
+
+:has(.copilot-hub:focus-within) > .copilot-ambience .copilot-ambience-welcome {
+  translate: 0 -7%;
+  transition:
+    opacity 600ms var(--ease-glide),
+    translate 950ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .copilot-ambience[data-variant="thread"] .copilot-ambience-welcome {
   opacity: 0;
 }
 
-.copilot-ambience[data-variant="thread"] .copilot-ambience-welcome > span {
+.copilot-ambience[data-variant="thread"] .copilot-ambience-welcome *,
+.copilot-ambience[data-variant="thread"] .copilot-ambience-welcome *::before {
   animation-play-state: paused;
 }
 
-/* Two currents keep the swell from reading as a symmetric spotlight. */
-.copilot-aurora-cyan {
-  inset: 34% 46% -30% -26%;
-  background: radial-gradient(closest-side, rgb(34 211 238 / 0.24), transparent);
-  animation: copilot-aurora-drift 19s ease-in-out infinite alternate;
-}
-
-.copilot-aurora-indigo {
-  inset: 28% -26% -34% 44%;
-  background: radial-gradient(closest-side, rgb(59 130 246 / 0.24), transparent);
-  animation: copilot-aurora-drift-alt 23s ease-in-out infinite alternate;
-}
-
-.dark .copilot-aurora-cyan {
-  background: radial-gradient(closest-side, rgb(34 211 238 / 0.2), transparent);
-}
-
-.dark .copilot-aurora-indigo {
-  background: radial-gradient(closest-side, rgb(37 99 235 / 0.34), transparent);
-}
-
-/* The halftone wave: two dot grids, each masked to a crest rising from the
-   composer, drifting against each other — where they overlap the dots
-   thicken, as in a printed halftone. */
+/* The halftone dot-matrix: two grids under still crests, each flowing a whole
+   number of tiles per loop (seamless), pulsing out of phase — where they
+   overlap the dots thicken, as in a printed halftone. */
 .copilot-halftone {
-  inset: 6% -20% -8%;
-  opacity: 0.7;
-  background-image: radial-gradient(circle, rgb(14 165 233 / 0.42) 1px, transparent 1.6px);
+  inset: 4% -12% -8%;
+  overflow: hidden;
+  opacity: 0.72;
+  mask-image: radial-gradient(62% 58% at 50% 100%, #000, rgb(0 0 0 / 0.55) 40%, transparent 75%);
+  animation: copilot-halftone-pulse 7s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+
+.copilot-halftone::before {
+  content: "";
+  position: absolute;
+  inset: -24px;
+  background-image: radial-gradient(circle, rgb(14 165 233 / 0.45) 1px, transparent 1.6px);
   background-size: 12px 12px;
-  mask-image: radial-gradient(60% 56% at 50% 100%, #000, rgb(0 0 0 / 0.55) 40%, transparent 74%);
-  animation: copilot-halftone-drift 16s ease-in-out infinite alternate;
+  animation: copilot-halftone-pan 10s linear infinite;
 }
 
 .copilot-halftone-fine {
-  background-image: radial-gradient(circle, rgb(56 189 248 / 0.36) 0.8px, transparent 1.3px);
+  mask-image: radial-gradient(46% 44% at 38% 100%, #000, transparent 72%);
+  animation-duration: 9s;
+  animation-delay: -4.5s;
+}
+
+.copilot-halftone-fine::before {
+  background-image: radial-gradient(circle, rgb(56 189 248 / 0.4) 0.8px, transparent 1.3px);
   background-size: 8px 8px;
   background-position: 4px 4px;
-  mask-image: radial-gradient(46% 44% at 40% 100%, #000, transparent 72%);
-  animation: copilot-halftone-drift-alt 21s ease-in-out infinite alternate;
+  animation: copilot-halftone-pan-fine 13s linear infinite;
 }
 
-.dark .copilot-halftone {
-  background-image: radial-gradient(circle, rgb(125 211 252 / 0.38) 1px, transparent 1.6px);
+.dark .copilot-halftone::before {
+  background-image: radial-gradient(circle, rgb(125 211 252 / 0.42) 1px, transparent 1.6px);
 }
 
-.dark .copilot-halftone-fine {
-  background-image: radial-gradient(circle, rgb(186 230 253 / 0.28) 0.8px, transparent 1.3px);
+.dark .copilot-halftone-fine::before {
+  background-image: radial-gradient(circle, rgb(165 243 252 / 0.3) 0.8px, transparent 1.3px);
 }
 
 /* The emblem (NovaOrb): its glow breathes, and two thin rings pulse out of it half a beat apart. */
@@ -1993,58 +2089,92 @@ html.theme-reveal::view-transition-new(root) {
   }
 }
 
+/* The heart's breath: it swells up from the composer and brightens, then settles. */
 @keyframes copilot-aurora-breathe {
   from {
-    opacity: 0.74;
-    scale: 0.94 0.9;
+    opacity: 0.62;
+    scale: 0.9 0.86;
   }
   to {
     opacity: 1;
-    scale: 1.05 1.08;
+    scale: 1.06 1.12;
   }
 }
 
-@keyframes copilot-aurora-drift {
+/* A current wanders… */
+@keyframes copilot-current-drift {
   from {
-    opacity: 0.7;
-    translate: -8% 4%;
+    translate: -12% 6%;
+  }
+  to {
+    translate: 12% -8%;
+  }
+}
+
+@keyframes copilot-current-drift-alt {
+  from {
+    translate: 10% 4%;
+  }
+  to {
+    translate: -12% -9%;
+  }
+}
+
+/* …and its strength swells and fades out of phase with the others: the aurora's tint morphs. */
+@keyframes copilot-current-morph {
+  from {
+    opacity: 0.28;
   }
   to {
     opacity: 1;
-    translate: 10% -6%;
   }
 }
 
-@keyframes copilot-aurora-drift-alt {
+/* The dot-matrix pulses… */
+@keyframes copilot-halftone-pulse {
   from {
-    opacity: 1;
-    translate: 8% 2%;
+    opacity: 0.42;
   }
   to {
-    opacity: 0.66;
-    translate: -10% -7%;
+    opacity: 0.92;
   }
 }
 
-@keyframes copilot-halftone-drift {
+/* …and flows: exactly two tiles across and one up per loop (12 px tile), so the loop has no seam. */
+@keyframes copilot-halftone-pan {
   from {
-    opacity: 0.5;
-    translate: -5% 3%;
+    translate: 0 0;
   }
   to {
-    opacity: 0.85;
-    translate: 5% -2%;
+    translate: 24px -12px;
   }
 }
 
-@keyframes copilot-halftone-drift-alt {
+/* The fine grid flows the other way: two tiles back, one up (8 px tile). */
+@keyframes copilot-halftone-pan-fine {
   from {
-    opacity: 0.8;
-    translate: 6% -1%;
+    translate: 0 0;
   }
   to {
-    opacity: 0.4;
-    translate: -6% 3%;
+    translate: -16px -8px;
+  }
+}
+
+/* Awake: lub-dub, then rest. */
+@keyframes copilot-heartbeat {
+  0%,
+  58%,
+  100% {
+    scale: 1;
+  }
+  12% {
+    scale: 1.07;
+  }
+  22% {
+    scale: 1.015;
+  }
+  33% {
+    scale: 1.05;
   }
 }
 
@@ -2073,19 +2203,66 @@ html.theme-reveal::view-transition-new(root) {
   }
 }
 
-/* Calm motion: the light still breathes — opacity only, slower — while
-   nothing drifts, swells or pings, and the welcome rises half as far. */
+/* Calm motion (iOS Reduce Motion, Android "Remove animations", Windows with
+   animation effects off — browsers report all of them as reduce): gentler,
+   never frozen (an opacity-only ambience read as "completely static"). The
+   light still breathes and its tint still morphs, the currents wander half as
+   far, the dots flow at half speed, the awake light rises half as high and
+   its heart glows instead of beating, the emblem's rings shimmer in place,
+   and the welcome rises half as far. */
 @media (prefers-reduced-motion: reduce) {
-  .copilot-aurora-core,
+  .copilot-aurora-core {
+    animation-name: copilot-glow-calm;
+    animation-duration: 11s;
+  }
+
   .copilot-emblem-glow {
-    animation: copilot-glow-calm 8s ease-in-out infinite alternate;
+    animation-name: copilot-glow-calm;
+    animation-duration: 6s;
   }
 
   .copilot-aurora-cyan,
-  .copilot-aurora-indigo,
-  .copilot-halftone,
+  .copilot-aurora-violet {
+    animation-name: copilot-current-drift-calm, copilot-current-morph;
+  }
+
+  .copilot-aurora-ocean {
+    animation-name: copilot-current-drift-alt-calm, copilot-current-morph;
+  }
+
+  .copilot-halftone::before {
+    animation-duration: 20s;
+  }
+
+  .copilot-halftone-fine::before {
+    animation-duration: 26s;
+  }
+
+  .copilot-aurora-awake {
+    animation-name: copilot-heartbeat-calm;
+    animation-duration: 3.8s;
+  }
+
+  :has(.copilot-hub:focus-within) > .copilot-ambience .copilot-aurora-stage {
+    translate: 0 -6%;
+    scale: 1.04;
+  }
+
+  :has(.copilot-hub:focus-within) > .copilot-ambience[data-variant="thread"] .copilot-aurora-stage {
+    translate: 0 16%;
+  }
+
+  :has(.copilot-hub:focus-within) > .copilot-ambience .copilot-ambience-welcome {
+    translate: 0 -3.5%;
+  }
+
   .copilot-emblem-ring {
-    animation: none;
+    animation-name: copilot-emblem-ping-calm;
+    animation-duration: 4.8s;
+  }
+
+  .copilot-emblem-ring + .copilot-emblem-ring {
+    animation-delay: 2.4s;
   }
 
   .copilot-rise {
@@ -2096,10 +2273,54 @@ html.theme-reveal::view-transition-new(root) {
 
 @keyframes copilot-glow-calm {
   from {
-    opacity: 0.72;
+    opacity: 0.7;
+    scale: 0.96;
   }
   to {
     opacity: 1;
+    scale: 1.04;
+  }
+}
+
+@keyframes copilot-current-drift-calm {
+  from {
+    translate: -6% 3%;
+  }
+  to {
+    translate: 6% -4%;
+  }
+}
+
+@keyframes copilot-current-drift-alt-calm {
+  from {
+    translate: 5% 2%;
+  }
+  to {
+    translate: -6% -4.5%;
+  }
+}
+
+@keyframes copilot-heartbeat-calm {
+  0%,
+  100% {
+    scale: 1;
+  }
+  50% {
+    scale: 1.03;
+  }
+}
+
+@keyframes copilot-emblem-ping-calm {
+  0% {
+    opacity: 0;
+    scale: 1.1;
+  }
+  35% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+    scale: 1.18;
   }
 }
 

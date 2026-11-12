@@ -18,9 +18,11 @@ import { useLanguage } from "@/providers/LanguageProvider";
  * The floating composer hub: frosted, 36 px corners, deep in dark and clean
  * white in light, with a faint blue glow rising off its top edge (the
  * ambience's aurora seems to come from the bar itself); brighter while focused.
+ * `copilot-hub` is the marker CopilotAmbience listens to: while the hub holds
+ * the focus, the light behind the column wakes (app/globals.css, pure CSS).
  */
 export const COPILOT_HUB_CLASSES =
-  "relative flex w-full flex-col rounded-[36px] border border-black/[0.06] bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_44px_-18px_rgba(15,23,42,0.24),0_-10px_40px_-26px_rgba(14,165,233,0.45)] backdrop-blur-2xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_16px_48px_-16px_rgba(14,165,233,0.38),0_-12px_44px_-24px_rgba(14,165,233,0.5)] dark:border-white/[0.09] dark:bg-[#0a0c10]/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_24px_64px_-20px_rgba(0,0,0,0.9),0_-12px_48px_-26px_rgba(56,189,248,0.5)] dark:focus-within:border-sky-400/25 dark:focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(56,189,248,0.16),0_24px_64px_-20px_rgba(14,165,233,0.32),0_-14px_52px_-24px_rgba(56,189,248,0.6)]";
+  "copilot-hub relative flex w-full flex-col rounded-[36px] border border-black/[0.06] bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_44px_-18px_rgba(15,23,42,0.24),0_-10px_40px_-26px_rgba(14,165,233,0.45)] backdrop-blur-2xl transition-[box-shadow,border-color] duration-300 focus-within:border-sky-500/30 focus-within:shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_16px_48px_-16px_rgba(14,165,233,0.38),0_-12px_44px_-24px_rgba(14,165,233,0.5)] dark:border-white/[0.09] dark:bg-[#0a0c10]/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_24px_64px_-20px_rgba(0,0,0,0.9),0_-12px_48px_-26px_rgba(56,189,248,0.5)] dark:focus-within:border-sky-400/25 dark:focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(56,189,248,0.16),0_24px_64px_-20px_rgba(14,165,233,0.32),0_-14px_52px_-24px_rgba(56,189,248,0.6)]";
 
 /**
  * A welcome-screen suggestion: a slim floating pill (no box, no hard border —
@@ -80,11 +82,18 @@ export function NovaOrb() {
  * its thread, welcome and composer) so it carries across the welcome ⇄
  * conversation swap instead of remounting.
  *
- * - "welcome": a tall blue aurora breathing up from the composer, two
- *   coloured currents drifting through it and a halftone dot-matrix wave.
- * - "thread": the same aurora, lower and calmer, hugging the composer; the
- *   welcome's extra layers fade out and pause. `active` (a reply is on its
- *   way) brightens it.
+ * MedArt's own "neural aurora" (app/globals.css, "Copilot ambience"):
+ * - the stage: a MedArt sky-blue heart that breathes, with three currents
+ *   melting into it — bioluminescent cyan, deep ocean, a whisper of violet —
+ *   that drift and cross-fade out of phase, so the tint itself morphs;
+ * - awake: while the composer hub (`copilot-hub`) holds the focus, the stage
+ *   rises, swells and brightens, and a brighter heart beats softly; it
+ *   exhales back on blur. Pure CSS (`:has(.copilot-hub:focus-within)`), so a
+ *   keystroke never re-renders this tree;
+ * - "welcome" adds a halftone dot-matrix that flows slowly under a still
+ *   crest. "thread": the same aurora, lower and calmer, hugging the composer;
+ *   the dot-matrix fades out and pauses. `active` (a reply is on its way)
+ *   brightens it.
  *
  * Every loop is compositor-only (opacity + the standalone translate / scale
  * properties), so a main thread busy streaming a reply never costs it a frame.
@@ -92,10 +101,14 @@ export function NovaOrb() {
 export function CopilotAmbience({ variant, active = false }: { variant: "welcome" | "thread"; active?: boolean }) {
   return (
     <div aria-hidden className="copilot-ambience" data-variant={variant} data-active={active ? "" : undefined}>
-      <span className="copilot-aurora-core" />
-      <span className="copilot-ambience-welcome">
+      <span className="copilot-aurora-stage">
+        <span className="copilot-aurora-core" />
         <span className="copilot-aurora-cyan" />
-        <span className="copilot-aurora-indigo" />
+        <span className="copilot-aurora-ocean" />
+        <span className="copilot-aurora-violet" />
+        <span className="copilot-aurora-awake" />
+      </span>
+      <span className="copilot-ambience-welcome">
         <span className="copilot-halftone" />
         <span className="copilot-halftone copilot-halftone-fine" />
       </span>
