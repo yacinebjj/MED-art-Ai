@@ -94,6 +94,7 @@ import { type ChatMessageInput } from "@/lib/ai/openrouter";
 import { callDeepSeek, EXPLICATION_MODEL } from "@/lib/ai/deepseek";
 import { modelCallKey, runThroughLedger } from "@/lib/ai/generation-ledger";
 import { stripReasoning } from "@/lib/strip-reasoning";
+import { repairStudioVisualJson } from "@/lib/studio-visuals";
 import { parseJsonResponse, MAX_SOURCE_CHARS, VALID_JSON_ESCAPE_TARGETS, CONTROL_CHAR_ESCAPES } from "@/lib/course-generation-shared";
 import { buildSourceChunks } from "@/lib/search/source-chunking";
 import { splitExplicationByChapter } from "@/lib/explication-sections";
@@ -1238,7 +1239,10 @@ export async function generateExplicationPart(
       isValid: (value) => typeof value === "string" && value.trim().length >= 50 && removeLeakedReasoning(value).removedRatio < 0.02,
     },
     async () => {
-      const raw = await callDeepSeek(messages, callOptions);
+      // A bare quote around a <FreeMedImage query> or inside a ```mermaid block is
+      // always content, never JSON structure: escaped before parsing
+      // (lib/studio-visuals.ts — a no-op for any other answer).
+      const raw = repairStudioVisualJson(await callDeepSeek(messages, callOptions));
 
       let parsed: Record<string, unknown>;
       try {

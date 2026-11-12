@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 import { findBestMatchingSection } from "@/lib/weakness-matching";
+import { stripStudioVisuals } from "@/lib/studio-visuals";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { PROSE_CLASSES, DARK_PROSE_CLASSES, MARKDOWN_COMPONENTS, DARK_MARKDOWN_COMPONENTS, normalizeCallouts } from "@/lib/markdown";
 import { createClient } from "@/lib/supabase/client";
@@ -665,7 +666,8 @@ export function InteractiveQuiz({
       : null;
     setConceptModal(
       matchedSection
-        ? { title: matchedSection.headingText, content: matchedSection.content }
+        ? // This excerpt renders as plain Markdown: no diagram code or picture tag (lib/studio-visuals.ts).
+          { title: matchedSection.headingText, content: stripStudioVisuals(matchedSection.content) }
         : { title: "Explication de cette question", content: qcm.explication.globale }
     );
   }

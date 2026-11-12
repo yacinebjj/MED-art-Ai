@@ -2099,6 +2099,105 @@ html.theme-reveal::view-transition-new(root) {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Studio visuals (lib/studio-visuals.ts): the Explication's Mermaid diagrams
+   (components/reader/MermaidDiagram.tsx) and pictures
+   (components/studio/FreeMedImage.tsx). In em, so the reader's A-/A+ scales
+   them with the text. The skeleton's light sweep is compositor-only
+   (translate), slower under calm motion.
+   --------------------------------------------------------------------------- */
+/* No `position` here: each user sets its own (relative or absolute) — unlayered, this rule would beat Tailwind's. */
+.studio-visual-skeleton {
+  display: block;
+  overflow: hidden;
+  border-radius: 0.9em;
+  background-image: linear-gradient(135deg, rgb(224 242 254 / 0.75), rgb(255 255 255 / 0.5) 45%, rgb(219 234 254 / 0.6));
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.05);
+}
+
+.dark .studio-visual-skeleton {
+  background-image: linear-gradient(135deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.025) 45%, rgb(56 189 248 / 0.07));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+.studio-visual-shimmer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+}
+
+.studio-visual-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.6) 50%, transparent 80%);
+  animation: studio-visual-sweep 1.6s ease-in-out infinite;
+}
+
+.dark .studio-visual-shimmer::after {
+  background-image: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.08) 50%, transparent 80%);
+}
+
+/* The picture's glass frame: rounded, a hairline and a soft lift — the picture alone, nothing written. */
+.free-med-image-frame {
+  display: block;
+  margin-inline: auto;
+  max-width: 32em;
+  padding: 0.4em;
+  border-radius: 1.25em;
+  background-color: rgb(255 255 255 / 0.7);
+  box-shadow:
+    0 0 0 1px rgb(15 23 42 / 0.06),
+    0 18px 40px -26px rgb(15 23 42 / 0.45);
+}
+
+.dark .free-med-image-frame {
+  background-color: rgb(255 255 255 / 0.04);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 18px 44px -24px rgb(0 0 0 / 0.8);
+}
+
+/* A diagram's glass card; a wide flowchart scrolls inside it, never the page. */
+.studio-mermaid {
+  overflow-x: auto;
+  padding: 1em;
+  border-radius: 1.25em;
+  background-color: rgb(255 255 255 / 0.7);
+  box-shadow:
+    0 0 0 1px rgb(14 165 233 / 0.14),
+    0 14px 36px -26px rgb(14 165 233 / 0.55);
+}
+
+.dark .studio-mermaid {
+  background-color: rgb(255 255 255 / 0.03);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 14px 40px -26px rgb(0 0 0 / 0.8);
+}
+
+.studio-mermaid-svg svg {
+  display: block;
+  margin-inline: auto;
+  height: auto;
+}
+
+@keyframes studio-visual-sweep {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-visual-shimmer::after {
+    animation-duration: 3.2s;
+  }
+}
+
 @keyframes copilot-shimmer {
   from {
     background-position: 110% 0;

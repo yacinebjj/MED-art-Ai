@@ -6,6 +6,9 @@ import remarkGfm from "remark-gfm";
 import { AlertTriangle, Activity, Info, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { splitMarkdownChunks } from "@/lib/markdown-chunks";
+import { isMermaidClassName, isolateFreeMedImageTags, remarkFreeMedImage } from "@/lib/studio-visuals";
+import { MermaidDiagram } from "@/components/reader/MermaidDiagram";
+import { FreeMedImage } from "@/components/studio/FreeMedImage";
 
 /**
  * Long-form medical renderer shared by the Studio Reader (Explication
@@ -112,7 +115,24 @@ export const PathophysiologyCard = ({ children, label }: { children: ReactNode; 
 
 const CHAPTER_RE = /^((?:chapitre|partie|section)\s+[IVXLCDM\d]+)\s*[:.–—-]\s*(.+)$/i;
 
-const COMPONENTS: Components = {
+/** The source of a ```mermaid fenced block (`pre` > `code.language-mermaid`), or null for any other block. */
+function mermaidSource(node: unknown): string | null {
+  const code = (node as { children?: unknown[] } | undefined)?.children?.[0] as { type?: string; tagName?: string; properties?: { className?: unknown } } | undefined;
+  if (code?.type !== "element" || code.tagName !== "code" || !isMermaidClassName(code.properties?.className)) return null;
+  return nodeText(code);
+}
+
+// Cast: `freemedimage` is our own element (lib/studio-visuals.ts's remark
+// plugin), not an intrinsic HTML tag, so it isn't in react-markdown's
+// Components type.
+const COMPONENTS = {
+  // Studio visuals (lib/studio-visuals.ts): a ```mermaid block becomes its
+  // diagram; every other code block renders exactly as before (a bare <pre>).
+  pre: ({ node, children }: { node?: unknown; children?: ReactNode }) => {
+    const source = mermaidSource(node);
+    return source !== null ? <MermaidDiagram code={source} /> : <pre>{children}</pre>;
+  },
+  freemedimage: ({ query }: { query?: unknown }) => <FreeMedImage query={typeof query === "string" ? query : undefined} />,
   h1: ({ children }) => (
     <header className="mb-[1.6em] mt-[0.4em]">
       <h1 className="[font-family:var(--reader-heading,inherit)] text-[1.85em] font-extrabold leading-[1.15] tracking-tight text-slate-900 dark:text-white">{children}</h1>
@@ -174,7 +194,7 @@ const COMPONENTS: Components = {
   th: ({ children }) => <th className="whitespace-nowrap px-[0.9em] py-[0.7em] text-left text-[0.82em] font-bold uppercase tracking-wide">{children}</th>,
   tr: ({ children }) => <tr className="border-t border-slate-200 transition-colors even:bg-slate-50/70 hover:bg-emerald-50/80 dark:border-white/[0.07] dark:even:bg-white/[0.025] dark:hover:bg-emerald-400/[0.07]">{children}</tr>,
   td: ({ children }) => <td className="px-[0.9em] py-[0.65em] align-top">{children}</td>,
-};
+} as Components;
 
 type Decorate = (text: string) => ReactNode;
 
@@ -211,7 +231,7 @@ function withDecoration(decorate: Decorate): Components {
 // a whole render puts between blocks, so the DOM ends up identical
 // (unit-tested), and so do highlight offsets (lib/reading/text-index.ts).
 
-const REMARK_PLUGINS = [remarkGfm];
+const REMARK_PLUGINS = [remarkGfm, remarkFreeMedImage];
 /** Shorter documents render in one go, exactly as before. */
 const PROGRESSIVE_MIN_CHARS = 12_000;
 /** One rendering step: a few milliseconds of parsing and DOM work on a slow phone. */
@@ -265,8 +285,10 @@ function useProgressiveCount(markdown: string, total: number): number {
  * and table cells — used by the synthesis explorer for search and medical
  * term highlighting. Without it, rendering is exactly the default.
  */
-export const MedicalMarkdown = memo(function MedicalMarkdown({ markdown, className, decorate }: { markdown: string; className?: string; decorate?: Decorate }) {
+export const MedicalMarkdown = memo(function MedicalMarkdown({ markdown: source, className, decorate }: { markdown: string; className?: string; decorate?: Decorate }) {
   const components = useMemo(() => (decorate ? withDecoration(decorate) : COMPONENTS), [decorate]);
+  // A FreeMedImage tag on its own line gets blank lines around it (lib/studio-visuals.ts) — a no-op for text without one.
+  const markdown = useMemo(() => isolateFreeMedImageTags(source), [source]);
   const chunks = useMemo(() => (markdown.length >= PROGRESSIVE_MIN_CHARS ? splitMarkdownChunks(markdown, CHUNK_TARGET_CHARS) : [markdown]), [markdown]);
   const visible = useProgressiveCount(markdown, chunks.length);
   return (

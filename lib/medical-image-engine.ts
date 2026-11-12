@@ -1,4 +1,11 @@
-import { MAX_IMAGE_ALTERNATIVES, type MedicalImageQuery, type MedicalImageResolution, type MedicalImageSource, type VerifiedMedicalImage } from "@/lib/medical-images";
+import {
+  MAX_IMAGE_ALTERNATIVES,
+  isAttributionFreeLicense,
+  type MedicalImageQuery,
+  type MedicalImageResolution,
+  type MedicalImageSource,
+  type VerifiedMedicalImage,
+} from "@/lib/medical-images";
 import { ImageSourceUnavailableError, type ImageCandidate } from "@/lib/medical-image-candidates";
 import { captionAgrees, frenchSearchWords, imageKind, keyWords, relevance, searchWords, type ImageKind } from "@/lib/medical-image-relevance";
 import { lookupCommonsFile, searchCommons } from "@/lib/wikimedia-commons";
@@ -76,10 +83,14 @@ interface ScoredImage {
   score: number;
 }
 
+/** Which pictures a search may return (all of them when absent). */
+type Accept = ((image: VerifiedMedicalImage) => boolean) | undefined;
+
 /** The candidates that pass the relevance check (and agree with the reply's caption), best first, each picture once. */
-function rank(candidates: ImageCandidate[], query: string, kind: ImageKind, caption: string): ScoredImage[] {
+function rank(candidates: ImageCandidate[], query: string, kind: ImageKind, caption: string, accept?: Accept): ScoredImage[] {
   const scored: ScoredImage[] = [];
   for (const candidate of candidates) {
+    if (accept && !accept(candidate.image)) continue;
     const fit = relevance(query, candidate.text);
     if (fit === null || (caption && !captionAgrees(caption, candidate.text))) continue;
     scored.push({ image: candidate.image, score: fit + (SOURCE_FIT[kind][candidate.image.source] ?? 0) - RANK_PENALTY * candidate.rank });
@@ -120,7 +131,7 @@ function withVariety(ranked: ScoredImage[]): VerifiedMedicalImage[] {
 }
 
 /** The repositories good at `kind`, searched at once with `query` folded to English; ranked survivors. */
-async function searchByKind(query: string, kind: ImageKind, caption: string): Promise<ScoredImage[]> {
+async function searchByKind(query: string, kind: ImageKind, caption: string, accept?: Accept): Promise<ScoredImage[]> {
   const words = searchWords(query);
   if (!words) return [];
   const sources = SOURCES_BY_KIND[kind];
@@ -132,39 +143,49 @@ async function searchByKind(query: string, kind: ImageKind, caption: string): Pr
     else if (sources[index] === "wikimedia") throw outcome.reason;
     else console.warn(`[medical-image] ${sources[index]} indisponible, recherche poursuivie sans :`, outcome.reason instanceof Error ? outcome.reason.message : outcome.reason);
   }
-  return rank(candidates, query, kind, caption);
+  return rank(candidates, query, kind, caption, accept);
 }
 
-async function findImages(query: MedicalImageQuery): Promise<VerifiedMedicalImage[]> {
+async function findImages(query: MedicalImageQuery, accept?: Accept): Promise<VerifiedMedicalImage[]> {
   const kind = imageKind(`${query.keywords} ${query.alt}`);
   // The model's file name is worth searching with — unless it named an existing file unrelated to its own caption.
   let fileNameSaysSomething = Boolean(query.keywords);
 
   if (query.fileName) {
     const exact = await lookupCommonsFile(query.fileName);
-    if (exact && captionAgrees(query.alt, exact.text, 2)) return [exact.image];
+    if (exact && (!accept || accept(exact.image)) && captionAgrees(query.alt, exact.text, 2)) return [exact.image];
     if (exact) fileNameSaysSomething = false;
   }
 
   if (fileNameSaysSomething) {
-    const ranked = await searchByKind(query.keywords, kind, query.alt);
+    const ranked = await searchByKind(query.keywords, kind, query.alt, accept);
     if (ranked.length > 0) return withVariety(ranked);
   }
 
   // The reply's own caption (often French, often the only thing a caption-only figure has), folded to English.
   const captionQuery = keyWords(query.alt).slice(0, CAPTION_QUERY_WORDS).join(" ");
   if (captionQuery && (!fileNameSaysSomething || searchWords(captionQuery) !== searchWords(query.keywords))) {
-    const ranked = await searchByKind(captionQuery, kind, query.alt);
+    const ranked = await searchByKind(captionQuery, kind, query.alt, accept);
     if (ranked.length > 0) return withVariety(ranked);
   }
 
   // Last, Commons' own French descriptions.
   const french = frenchSearchWords(query.alt);
   if (french) {
-    const ranked = rank(await searchCommons(french, "fr"), query.alt, kind, query.alt);
+    const ranked = rank(await searchCommons(french, "fr"), query.alt, kind, query.alt, accept);
     if (ranked.length > 0) return withVariety(ranked);
   }
   return [];
+}
+
+/** Options of one lookup. */
+export interface MedicalImageSearchOptions {
+  /**
+   * Only pictures whose license asks for no credit (CC0, public domain —
+   * isAttributionFreeLicense): for a surface that shows the picture alone,
+   * with no caption or credit (the Studio's FreeMedImage).
+   */
+  attributionFree?: boolean;
 }
 
 // --- Memory of answers -----------------------------------------------------------------
@@ -185,13 +206,14 @@ function remember(key: string, resolution: MedicalImageResolution | null): void 
  * when no real picture fits. Throws ImageSourceUnavailableError when
  * Wikimedia Commons, the primary repository, is unreachable.
  */
-export async function resolveMedicalImage(query: MedicalImageQuery): Promise<MedicalImageResolution | null> {
-  const key = `${query.fileName ?? ""}\u0000${query.keywords}\u0000${query.alt}`;
+export async function resolveMedicalImage(query: MedicalImageQuery, options: MedicalImageSearchOptions = {}): Promise<MedicalImageResolution | null> {
+  const accept: Accept = options.attributionFree ? (image) => isAttributionFreeLicense(image.license) : undefined;
+  const key = `${query.fileName ?? ""}\u0000${query.keywords}\u0000${query.alt}${accept ? "\u0000attribution-free" : ""}`;
   const known = answers.get(key);
   if (known && known.expires > Date.now()) return known.resolution;
   const pending = inFlight.get(key);
   if (pending) return pending;
-  const lookup = findImages(query)
+  const lookup = findImages(query, accept)
     .then((images) => {
       const resolution = images.length > 0 ? { image: images[0], alternatives: images.slice(1, 1 + MAX_IMAGE_ALTERNATIVES) } : null;
       remember(key, resolution);

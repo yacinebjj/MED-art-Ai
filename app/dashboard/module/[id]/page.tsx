@@ -43,6 +43,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { tModulePage } from "@/lib/translations/modulePage";
 import { getSectionLabel } from "@/lib/translations/studio";
 import { cn } from "@/lib/utils";
+import { stripStudioVisuals } from "@/lib/studio-visuals";
 import { buildRateLimitMessage, buildRateLimitMessageFromSeconds } from "@/lib/rate-limit-message";
 import { uploadDocumentDirect, retryUploadWithOcr } from "@/lib/upload-client";
 import { generateExplicationInParts } from "@/lib/studio-explication-client";
@@ -1844,7 +1845,8 @@ export default function ModuleWorkspacePage() {
     return Array.from(ids)
       .map((id) => courseCacheRef.current.get(id))
       .filter((c): c is StudioCourseFull => Boolean(c))
-      .map((c) => ({ id: c.id, title: c.title, rawText: c.rawText, explication: c.explication }));
+      // A citation's context is shown as text: never with diagram code or a picture tag (lib/studio-visuals.ts).
+      .map((c) => ({ id: c.id, title: c.title, rawText: c.rawText, explication: c.explication ? stripStudioVisuals(c.explication) : c.explication }));
     // cacheVersion: the cache is a ref — this is what makes a background-loaded source count.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSourceIds, activeCourse, cacheVersion]);

@@ -62,6 +62,17 @@ export interface MedicalImageQuery {
   alt: string;
 }
 
+/**
+ * True for a license that asks for no credit at all — CC0 and the public
+ * domain. The Studio's FreeMedImage shows a picture alone, with no caption,
+ * credit or link (product order 2026-11-12), which CC BY / CC BY-SA would not
+ * allow: it only ever receives such pictures (app/api/studio/free-med-image).
+ */
+export function isAttributionFreeLicense(license: string | null | undefined): boolean {
+  if (typeof license !== "string") return false;
+  return /^(?:cc0\b|cc[\s-]?zero\b|public[\s-]*domain\b|domaine\s+public\b|pd(?:[\s-]|$)|pdm\b|no\s+restrictions\b)/i.test(license.trim());
+}
+
 export const MEDICAL_IMAGE_API = "/api/assistant/medical-image";
 /** The same-origin download of a verified picture (app/api/assistant/medical-image/file). */
 export const MEDICAL_IMAGE_FILE_API = "/api/assistant/medical-image/file";

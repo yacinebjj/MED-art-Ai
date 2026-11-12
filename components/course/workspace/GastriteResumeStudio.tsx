@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -99,6 +99,27 @@ const PIEGE_CATEGORY_TONES = [
   { pill: "bg-purple-600", rule: "bg-purple-200 dark:bg-purple-900/40", card: "bg-purple-50 dark:bg-purple-950/40 border-2 border-purple-300 dark:border-purple-500/40 shadow-[0_0_25px_-8px_rgba(168,85,247,0.4)]", title: "text-purple-700 dark:text-purple-400", body: "text-purple-800 dark:text-purple-300" },
   { pill: "bg-amber-500", rule: "bg-amber-200 dark:bg-amber-900/40", card: "bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-300 dark:border-amber-500/40 shadow-[0_0_25px_-8px_rgba(245,158,11,0.4)]", title: "text-amber-700 dark:text-amber-400", body: "text-amber-800 dark:text-amber-300" },
 ];
+
+/**
+ * One "Pièges QCM & Perles cliniques" line in the exam format the Résumé
+ * prompt asks for since 2026-11-12 (lib/ai/studio-prompts.ts):
+ * `🚨 **Piège:** … ➡️ **Pourquoi ?** …` or `💎 **Perle:** … ➡️ **Pourquoi ?** …`.
+ * Null for any other text (older résumés), which renders as before.
+ */
+const EXAM_POINT_RE = /^\s*(?:🚨|💎)?\s*\*\*\s*(Piège|Perle)\s*:?\s*\*\*\s*:?\s*([\s\S]+?)\s*(?:➡️|➡|→)\s*\*\*\s*Pourquoi\s*\??\s*\*\*\s*:?\s*([\s\S]+?)\s*$/i;
+
+function parseExamPoint(text: string): { kind: "piege" | "perle"; statement: string; why: string } | null {
+  const match = typeof text === "string" ? text.match(EXAM_POINT_RE) : null;
+  if (!match) return null;
+  return { kind: match[1].toLowerCase() === "perle" ? "perle" : "piege", statement: match[2], why: match[3] };
+}
+
+/** `**bold**` runs as <strong>, everything else as plain text; unbalanced markers (or none) leave the text exactly as it is. */
+function renderInlineBold(text: string): ReactNode {
+  const parts = text.split("**");
+  if (parts.length < 3 || parts.length % 2 === 0) return text;
+  return parts.map((part, index) => (index % 2 === 1 ? <strong key={index}>{part}</strong> : part));
+}
 
 /** Guideline timeline steps escalate teal → cyan → blue → emerald — position-based, matches the original 4-step sequence. */
 const GUIDELINE_STEP_STYLES = [
@@ -517,14 +538,27 @@ function ExamSummaryContent({ mode }: { mode: GastriteResumeMode }) {
                 <span className={cn("h-px flex-1", tone.rule)} />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {category.items.map((item) => (
-                  <div key={item.numero} className={cn("relative overflow-hidden p-5 rounded-2xl", tone.card)}>
-                    <h3 className={cn("font-black mb-1 flex items-center gap-2", tone.title)}>
-                      <XCircle className="w-4 h-4" /> Piège n°{item.numero}
-                    </h3>
-                    <p className={cn("text-sm", tone.body)}>{item.text}</p>
-                  </div>
-                ))}
+                {category.items.map((item) => {
+                  const point = parseExamPoint(item.text);
+                  const isPerle = point?.kind === "perle";
+                  return (
+                    <div key={item.numero} className={cn("relative overflow-hidden p-5 rounded-2xl", tone.card)}>
+                      <h3 className={cn("font-black mb-1 flex items-center gap-2", tone.title)}>
+                        {isPerle ? <Lightbulb className="w-4 h-4" /> : <XCircle className="w-4 h-4" />} {isPerle ? "Perle" : "Piège"} n°{item.numero}
+                      </h3>
+                      {point ? (
+                        <>
+                          <p className={cn("text-sm", tone.body)}>{point.statement}</p>
+                          <p className={cn("mt-2 text-sm", tone.body)}>
+                            ➡️ <strong className="font-bold">Pourquoi ?</strong> {point.why}
+                          </p>
+                        </>
+                      ) : (
+                        <p className={cn("text-sm", tone.body)}>{renderInlineBold(item.text)}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );

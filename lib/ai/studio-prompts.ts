@@ -204,12 +204,41 @@ export function resolveCasCliniqueSystemPrompt(studyYear: number | null | undefi
  * tab is opened — no per-mode click-to-generate, no separate cache. The
  * cost lever here is exclusively prompt density (fewer words per bullet),
  * not deferred/partial generation.
+ *
+ * 2026-11-12 (explicit product order, "strict token economy applies ONLY to
+ * the Résumé"): exam-only content, the "why" in the same short sentence, and
+ * 7-10 "Pièges QCM" / "Perles cliniques" in the exam mode's `pieges`, each
+ * `🚨 **Piège:** … ➡️ **Pourquoi ?** …` or `💎 **Perle:** … ➡️ **Pourquoi ?** …`
+ * (GastriteResumeStudio renders that format as a card). Same JSON schema,
+ * same token ceiling. Bump STUDIO_RESUME_PROMPT_VERSION (right after this
+ * prompt) with every change to it.
  */
 const STUDIO_RESUME_SYSTEM_PROMPT = `${RESUME_SYSTEM_PROMPT}
 
 SURCHARGE OBLIGATOIRE — DENSITÉ MAXIMALE (remplace toute consigne de longueur/verbosité ci-dessus ; la structure des 6 modes reste strictement inchangée) : chaque puce ou point clé (cards.items, cheatsheet cards.items, astuces.details, guideline steps.content, etc.) doit être UNE SEULE phrase courte, dense et autonome — jamais un mot-clé isolé sans aucun contexte, mais jamais non plus une phrase longue ou un mini-paragraphe explicatif. Élimine systématiquement : toute répétition d'une idée déjà énoncée ailleurs dans le même mode, les phrases de transition ou d'introduction sans contenu médical ("il est important de noter que...", "on peut également souligner que..."), et tout mot ou adjectif de remplissage. Le résultat doit être nettement plus compact qu'une rédaction non filtrée, sans jamais donner l'impression d'un résumé tronqué ou incomplet — chaque puce doit rester immédiatement compréhensible seule, juste débarrassée de tout superflu.
 
-INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE de chaque puce, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète du mode généré (toutes ses clés de premier niveau et imbriquées telles que définies dans le schéma — hero, sections, ddx_table, pieges, cards, steps, quotes, perles, items — même quand une clé n'est pas utilisée par CE mode précis, auquel cas renvoie-la comme tableau vide [] ou objet aux champs vides, jamais comme clé absente). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.`;
+INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE de chaque puce, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète du mode généré (toutes ses clés de premier niveau et imbriquées telles que définies dans le schéma — hero, sections, ddx_table, pieges, cards, steps, quotes, perles, items — même quand une clé n'est pas utilisée par CE mode précis, auquel cas renvoie-la comme tableau vide [] ou objet aux champs vides, jamais comme clé absente). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.
+
+SURCHARGE OBLIGATOIRE — RÉSUMÉ ORIENTÉ EXAMEN, ÉCONOMIE STRICTE DE MOTS (s'ajoute à la densité ci-dessus ; la structure des 6 modes reste strictement inchangée) :
+- 100 % EXAMEN : ne retiens que ce qui tombe aux examens et aux QCM — seuils chiffrés avec leurs unités, signes cardinaux et de gravité, examen de 1ère intention vs examen de référence, traitement de 1ère intention, contre-indications, complications, terrains particuliers, notions que les étudiants confondent. Supprime tout le reste : historique, généralités, détails à faible rendement.
+- LE POURQUOI EN UNE PHRASE : chaque notion porte sa raison (mécanisme ou justification) dans la même phrase courte — jamais plus d'une phrase courte par notion.
+- PIÈGES QCM ET PERLES CLINIQUES, dans l'objet "pieges" du mode "exam" :
+  - "titre" : « Pièges QCM & Perles cliniques » ; "intro" : une seule phrase courte ;
+  - "categories" : exactement deux catégories, dans cet ordre — { "nom": "Pièges QCM", "items": [...] } puis { "nom": "Perles cliniques", "items": [...] } ;
+  - ENTRE 7 ET 10 éléments au total (au moins 5 pièges et au moins 2 perles), "numero" à partir de 1 dans chaque catégorie ;
+  - chaque "text" suit EXACTEMENT l'un de ces deux formats, sur une seule ligne, avec un « Pourquoi » de 10 à 15 mots au maximum :
+    🚨 **Piège:** [la proposition trompeuse ou la confusion classique] ➡️ **Pourquoi ?** [l'explication]
+    💎 **Perle:** [la perle clinique à retenir] ➡️ **Pourquoi ?** [l'explication]`;
+
+/**
+ * Version of STUDIO_RESUME_SYSTEM_PROMPT — bump it with every change to that
+ * prompt. It keys the cross-student cache (lib/studio-content-cache.ts files
+ * Résumés under "resume:v<version>"), so a résumé written under an older
+ * prompt is never served to a new student. 1 = the original rows (filed as
+ * plain "resume"); 2 = exam-only, one-sentence "why", 7-10 Pièges QCM &
+ * Perles cliniques in the 🚨/💎 format (2026-11-12).
+ */
+export const STUDIO_RESUME_PROMPT_VERSION = 2;
 
 /**
  * Studio Examen QCM — its OWN prompt, no longer an append on the shared
@@ -349,6 +378,18 @@ export const STUDIO_QCM_PROMPT_VERSION = 2;
  * ensemble" and repeated invitations to "take your time" — that entire
  * register is now banned, on the theory that a student opens this tab for
  * medical content, not for a welcome speech.
+ *
+ * 2026-11-12 (explicit product order, "the Explication must remain an
+ * uncompromised medical masterpiece"): the same content, better organised.
+ * The base prompt's Avant-propos and general introduction are dropped —
+ * every part of a multi-part generation used to rewrite them, because the
+ * part instruction (lib/studio-explication-delta.ts) sits BEFORE the base
+ * structure and lost to it; the override below comes last and names the
+ * multi-part case. The volume and depth of information are explicitly kept.
+ * Two zero-cost visual aids are added (lib/studio-visuals.ts): ```mermaid
+ * flowcharts and <FreeMedImage query="…" /> pictures. Bump
+ * STUDIO_EXPLICATION_PROMPT_VERSION (right after this prompt) with every
+ * change to it.
  */
 const STUDIO_EXPLICATION_SYSTEM_PROMPT = `${EXPLICATION_SYSTEM_PROMPT}
 
@@ -376,7 +417,50 @@ SURCHARGE OBLIGATOIRE — CHAÎNE DE "POURQUOI" CIBLÉE (le niveau ultime d'exha
 
 IMPORTANT : cette chaîne de "pourquoi" est un OUTIL à utiliser sur les points qui le méritent, pas un rituel à appliquer sur CHAQUE phrase, y compris les évidences cliniques de base. Décortiquer "le patient a de la fièvre parce que l'inflammation produit des pyrogènes" en cinq niveaux de "pourquoi" est du bruit, pas de la pédagogie. Concentre l'effort sur les mécanismes qui gagnent vraiment à être dépliés.
 
-N'utilise jamais une explication vague ou circulaire ("ça arrive parce que c'est la maladie", "c'est le signe typique") comme fin de chaîne — chaque "pourquoi" doit recevoir une vraie réponse mécanistique, réelle et vérifiable à partir du contenu médical du cours, jamais inventée. Si le texte source ne donne pas explicitement le mécanisme profond, appuie-toi sur les connaissances médicales de base généralement enseignées à ce niveau pour compléter la chaîne de façon médicalement exacte — sans jamais inventer un fait qui contredirait le cours source.`;
+N'utilise jamais une explication vague ou circulaire ("ça arrive parce que c'est la maladie", "c'est le signe typique") comme fin de chaîne — chaque "pourquoi" doit recevoir une vraie réponse mécanistique, réelle et vérifiable à partir du contenu médical du cours, jamais inventée. Si le texte source ne donne pas explicitement le mécanisme profond, appuie-toi sur les connaissances médicales de base généralement enseignées à ce niveau pour compléter la chaîne de façon médicalement exacte — sans jamais inventer un fait qui contredirait le cours source.
+
+SURCHARGE OBLIGATOIRE — ZÉRO RÉPÉTITION, ENTRÉE DIRECTE DANS LA SCIENCE (remplace les points 2 et 4 de la STRUCTURE EXACTE plus haut, ainsi que l'« Avant-propos » et l'« introduction directe » du schéma JSON) :
+- SUPPRIME l'« Avant-propos » : aucun bloc « ## Avant-propos », sous aucun titre, dans aucune partie du cours.
+- Aucune introduction générale, aucun mot d'accueil, aucune présentation du cours ou d'un chapitre (« Dans ce chapitre, nous allons voir… », « Commençons par… », « Ce cours traite de… », « Entrons dans le vif du sujet ») : chaque chapitre commence DIRECTEMENT par sa première information médicale — une définition, un mécanisme, une donnée clinique.
+- N'explique jamais deux fois la même notion : si elle a déjà été expliquée plus haut, rappelle-la en une demi-phrase et avance.
+- Squelette d'un cours rédigé d'un seul tenant : le titre H1 et son sous-titre en italique, puis directement le « ## Sommaire », puis les chapitres, puis le « ## Récapitulatif » final.
+- Squelette d'un cours découpé en PARTIES (consigne « PARTIE N/M » en tête de ce message) : UNIQUEMENT le corps des chapitres de cette partie — aucun titre H1, aucun sous-titre, aucun Sommaire, aucun Avant-propos, aucune introduction, aucun Récapitulatif.
+- Rien n'est perdu : toute information médicale réelle que tu aurais placée dans une introduction ou un Avant-propos (fréquence, gravité, piège principal, enjeu clinique) est intégrée au chapitre qu'elle concerne.
+
+SURCHARGE OBLIGATOIRE — VOLUME D'INFORMATION INTACT : supprimer ces passages creux ne retire RIEN au fond. La profondeur, le détail, la richesse médicale, les tableaux, les encarts et les chaînes de « pourquoi » exigés plus haut restent intégralement dus, avec exactement le même niveau de détail. Les schémas et les images ci-dessous S'AJOUTENT au texte : ils ne remplacent jamais une explication écrite et ne comptent pas dans le repère de longueur.
+
+SCHÉMAS MERMAID OBLIGATOIRES (organisation visuelle, coût nul) : pour chaque mécanisme physiologique ou physiopathologique en plusieurs étapes, chaque cascade et chaque arbre décisionnel diagnostique ou thérapeutique, insère un organigramme Mermaid juste APRÈS le paragraphe qui l'explique — au maximum un par chapitre, uniquement là où il clarifie vraiment. C'est un bloc de code Markdown standard :
+\`\`\`mermaid
+graph TD
+    A[Agression de la muqueuse] --> B[Libération d'histamine]
+    B -->|stimule| C[Sécrétion acide]
+    C --> D{Défenses suffisantes ?}
+    D -->|non| E[Ulcère]
+\`\`\`
+Règles de syntaxe impératives (un schéma mal écrit ne s'affiche pas) :
+- première ligne exactement « graph TD » ;
+- identifiants de nœuds courts : A, B, C… ou A1, B2 — jamais le mot « end » ;
+- texte d'un nœud entre crochets [ ], ou entre accolades { } pour une question ou une décision ; de 4 à 12 nœuds ; de 2 à 8 mots par nœud ;
+- dans le texte des nœuds et des flèches : AUCUN guillemet, AUCUNE parenthèse, aucun crochet, aucune accolade, aucune barre verticale, aucun point-virgule, aucun chevron (écris « IL-1 et TNF alpha », jamais « (IL-1, TNF-α) ») ;
+- flèches : « --> », ou « -->|mot| » pour étiqueter une flèche ; aucune ligne style, classDef, click ou subgraph ;
+- dans le JSON, les retours à la ligne du schéma s'écrivent \\n comme ceux de tout le texte. La règle qui interdit les blocs de code ne concerne que l'enveloppe de ta réponse, et celle qui interdit les schémas sur plusieurs lignes ne s'applique pas à ces blocs mermaid.
+
+IMAGES MÉDICALES (coût nul) : là où un vrai visuel aide à comprendre — anatomie, histologie, imagerie (radiographie, scanner, IRM, échographie), endoscopie, lésion ou signe clinique visible, tracé ECG — insère, SEULE sur sa ligne, juste après le paragraphe concerné, la balise :
+<FreeMedImage query="terme médical exact" />
+- query : le terme médical exact et court (2 à 6 mots), de préférence en anglais médical international (« gastric ulcer endoscopy », « mitral valve anatomy »), sinon en français ;
+- au maximum une image par chapitre ; jamais dans un tableau, une liste ou une citation ;
+- ce sont les seuls guillemets droits permis : dans le JSON, échappe-les comme tout guillemet de chaîne — <FreeMedImage query=\\"mitral valve anatomy\\" />.`;
+
+/**
+ * Version of STUDIO_EXPLICATION_SYSTEM_PROMPT — bump it with every change to
+ * that prompt. It keys the cross-student cache (lib/studio-content-cache.ts
+ * files Explications under "explication:v<version>"), so a lesson written
+ * under an older prompt is never served to a new student. 1 = the original
+ * rows (filed as plain "explication"); 2 = no Avant-propos / intros, Mermaid
+ * flowcharts and FreeMedImage pictures (2026-11-12). The per-part generation
+ * ledger needs no bump: its key already includes the full prompt.
+ */
+export const STUDIO_EXPLICATION_PROMPT_VERSION = 2;
 
 /**
  * Same reasoning as STUDIO_EXPLICATION_SYSTEM_PROMPT above, lighter touch —

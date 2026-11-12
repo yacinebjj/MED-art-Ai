@@ -32,7 +32,7 @@
 
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { computeMinHashSignature, estimateSimilarity, normalizeText, sha256 } from "@/lib/content-similarity";
-import { STUDIO_QCM_PROMPT_VERSION } from "@/lib/ai/studio-prompts";
+import { STUDIO_EXPLICATION_PROMPT_VERSION, STUDIO_QCM_PROMPT_VERSION, STUDIO_RESUME_PROMPT_VERSION } from "@/lib/ai/studio-prompts";
 import type { JsonSectionId } from "@/lib/demo-content";
 
 /**
@@ -47,14 +47,18 @@ import type { JsonSectionId } from "@/lib/demo-content";
 const SIMILARITY_THRESHOLD = 0.85;
 
 /**
- * The `section` value a section's rows are filed under. QCM sets carry the
- * version of the prompt that wrote them ("qcm:v2" — STUDIO_QCM_PROMPT_VERSION
- * in lib/ai/studio-prompts.ts): once the Examen QCM prompt changes, sets
- * written under the old one simply stop matching, exact and fuzzy alike,
- * instead of being served to new students. Every other section keeps its id.
+ * The `section` value a section's rows are filed under. QCM sets, Explications
+ * and Résumés carry the version of the prompt that wrote them ("qcm:v2",
+ * "explication:v2", "resume:v2" — the *_PROMPT_VERSION constants in
+ * lib/ai/studio-prompts.ts): once a prompt changes, content written under the
+ * old one simply stops matching, exact and fuzzy alike, instead of being
+ * served to new students. Every other section keeps its id.
  */
 function cacheSection(section: JsonSectionId): string {
-  return section === "qcm" ? `qcm:v${STUDIO_QCM_PROMPT_VERSION}` : section;
+  if (section === "qcm") return `qcm:v${STUDIO_QCM_PROMPT_VERSION}`;
+  if (section === "explication") return `explication:v${STUDIO_EXPLICATION_PROMPT_VERSION}`;
+  if (section === "resume") return `resume:v${STUDIO_RESUME_PROMPT_VERSION}`;
+  return section;
 }
 
 interface StudioCacheRow {
