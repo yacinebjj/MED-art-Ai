@@ -19,7 +19,10 @@ export function HeroSection() {
 
   return (
     <section ref={ref} className="relative overflow-hidden px-4 pb-20 pt-28 sm:px-6 sm:pt-36 lg:px-8 lg:pb-28">
-      <div className="mx-auto grid max-w-7xl items-center gap-14 lg:grid-cols-[1.05fr_1fr] lg:gap-10">
+      {/* grid-cols-1 below lg: an implicit `auto` column grew to the mockup's
+          min-content (364px on a 375px phone), pushing the hero 21px past the
+          right edge — off-centre text and a clipped badge. */}
+      <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-14 lg:grid-cols-[1.05fr_1fr] lg:gap-10">
         <motion.div style={{ y: textY, opacity: fade }} className="text-center lg:text-left">
           {/* Hero text is server-rendered and visible on first paint: CSS-only
               entrance (.hero-rise, app/globals.css), no JS-gated opacity. */}
