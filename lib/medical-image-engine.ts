@@ -1,11 +1,4 @@
-import {
-  MAX_IMAGE_ALTERNATIVES,
-  isAttributionFreeLicense,
-  type MedicalImageQuery,
-  type MedicalImageResolution,
-  type MedicalImageSource,
-  type VerifiedMedicalImage,
-} from "@/lib/medical-images";
+import { MAX_IMAGE_ALTERNATIVES, type MedicalImageQuery, type MedicalImageResolution, type MedicalImageSource, type VerifiedMedicalImage } from "@/lib/medical-images";
 import { ImageSourceUnavailableError, type ImageCandidate } from "@/lib/medical-image-candidates";
 import { captionAgrees, frenchSearchWords, imageKind, keyWords, relevance, searchWords, type ImageKind } from "@/lib/medical-image-relevance";
 import { lookupCommonsFile, searchCommons } from "@/lib/wikimedia-commons";
@@ -83,14 +76,10 @@ interface ScoredImage {
   score: number;
 }
 
-/** Which pictures a search may return (all of them when absent). */
-type Accept = ((image: VerifiedMedicalImage) => boolean) | undefined;
-
 /** The candidates that pass the relevance check (and agree with the reply's caption), best first, each picture once. */
-function rank(candidates: ImageCandidate[], query: string, kind: ImageKind, caption: string, accept?: Accept): ScoredImage[] {
+function rank(candidates: ImageCandidate[], query: string, kind: ImageKind, caption: string): ScoredImage[] {
   const scored: ScoredImage[] = [];
   for (const candidate of candidates) {
-    if (accept && !accept(candidate.image)) continue;
     const fit = relevance(query, candidate.text);
     if (fit === null || (caption && !captionAgrees(caption, candidate.text))) continue;
     scored.push({ image: candidate.image, score: fit + (SOURCE_FIT[kind][candidate.image.source] ?? 0) - RANK_PENALTY * candidate.rank });
@@ -130,11 +119,14 @@ function withVariety(ranked: ScoredImage[]): VerifiedMedicalImage[] {
   return chosen;
 }
 
-/** The repositories good at `kind`, searched at once with `query` folded to English; ranked survivors. */
-async function searchByKind(query: string, kind: ImageKind, caption: string, accept?: Accept): Promise<ScoredImage[]> {
+/** Every repository, for a broad lookup (MedicalImageSearchOptions.broad). */
+const ALL_SOURCES: readonly MedicalImageSource[] = ["wikimedia", "pmc", "wellcome"];
+
+/** The repositories good at `kind` (all of them when `broad`), searched at once with `query` folded to English; ranked survivors. */
+async function searchByKind(query: string, kind: ImageKind, caption: string, broad = false): Promise<ScoredImage[]> {
   const words = searchWords(query);
   if (!words) return [];
-  const sources = SOURCES_BY_KIND[kind];
+  const sources = broad ? ALL_SOURCES : SOURCES_BY_KIND[kind];
   const settled = await Promise.allSettled(sources.map((source) => searchSource(source, words)));
   const candidates: ImageCandidate[] = [];
   for (let index = 0; index < settled.length; index++) {
@@ -143,36 +135,36 @@ async function searchByKind(query: string, kind: ImageKind, caption: string, acc
     else if (sources[index] === "wikimedia") throw outcome.reason;
     else console.warn(`[medical-image] ${sources[index]} indisponible, recherche poursuivie sans :`, outcome.reason instanceof Error ? outcome.reason.message : outcome.reason);
   }
-  return rank(candidates, query, kind, caption, accept);
+  return rank(candidates, query, kind, caption);
 }
 
-async function findImages(query: MedicalImageQuery, accept?: Accept): Promise<VerifiedMedicalImage[]> {
+async function findImages(query: MedicalImageQuery, broad: boolean): Promise<VerifiedMedicalImage[]> {
   const kind = imageKind(`${query.keywords} ${query.alt}`);
   // The model's file name is worth searching with — unless it named an existing file unrelated to its own caption.
   let fileNameSaysSomething = Boolean(query.keywords);
 
   if (query.fileName) {
     const exact = await lookupCommonsFile(query.fileName);
-    if (exact && (!accept || accept(exact.image)) && captionAgrees(query.alt, exact.text, 2)) return [exact.image];
+    if (exact && captionAgrees(query.alt, exact.text, 2)) return [exact.image];
     if (exact) fileNameSaysSomething = false;
   }
 
   if (fileNameSaysSomething) {
-    const ranked = await searchByKind(query.keywords, kind, query.alt, accept);
+    const ranked = await searchByKind(query.keywords, kind, query.alt, broad);
     if (ranked.length > 0) return withVariety(ranked);
   }
 
   // The reply's own caption (often French, often the only thing a caption-only figure has), folded to English.
   const captionQuery = keyWords(query.alt).slice(0, CAPTION_QUERY_WORDS).join(" ");
   if (captionQuery && (!fileNameSaysSomething || searchWords(captionQuery) !== searchWords(query.keywords))) {
-    const ranked = await searchByKind(captionQuery, kind, query.alt, accept);
+    const ranked = await searchByKind(captionQuery, kind, query.alt, broad);
     if (ranked.length > 0) return withVariety(ranked);
   }
 
   // Last, Commons' own French descriptions.
   const french = frenchSearchWords(query.alt);
   if (french) {
-    const ranked = rank(await searchCommons(french, "fr"), query.alt, kind, query.alt, accept);
+    const ranked = rank(await searchCommons(french, "fr"), query.alt, kind, query.alt);
     if (ranked.length > 0) return withVariety(ranked);
   }
   return [];
@@ -181,11 +173,13 @@ async function findImages(query: MedicalImageQuery, accept?: Accept): Promise<Ve
 /** Options of one lookup. */
 export interface MedicalImageSearchOptions {
   /**
-   * Only pictures whose license asks for no credit (CC0, public domain —
-   * isAttributionFreeLicense): for a surface that shows the picture alone,
-   * with no caption or credit (the Studio's FreeMedImage).
+   * Search every repository, not only those good at the picture's kind: a
+   * Studio lesson's FreeMedImage would rather show a fitting picture from any
+   * repository than none (a Wellcome anatomical plate for a diagram request,
+   * a PubMed Central figure for a histology one). The relevance and caption
+   * checks are the same, so a picture still has to fit.
    */
-  attributionFree?: boolean;
+  broad?: boolean;
 }
 
 // --- Memory of answers -----------------------------------------------------------------
@@ -207,13 +201,13 @@ function remember(key: string, resolution: MedicalImageResolution | null): void 
  * Wikimedia Commons, the primary repository, is unreachable.
  */
 export async function resolveMedicalImage(query: MedicalImageQuery, options: MedicalImageSearchOptions = {}): Promise<MedicalImageResolution | null> {
-  const accept: Accept = options.attributionFree ? (image) => isAttributionFreeLicense(image.license) : undefined;
-  const key = `${query.fileName ?? ""}\u0000${query.keywords}\u0000${query.alt}${accept ? "\u0000attribution-free" : ""}`;
+  const broad = options.broad === true;
+  const key = `${query.fileName ?? ""}\u0000${query.keywords}\u0000${query.alt}${broad ? "\u0000broad" : ""}`;
   const known = answers.get(key);
   if (known && known.expires > Date.now()) return known.resolution;
   const pending = inFlight.get(key);
   if (pending) return pending;
-  const lookup = findImages(query, accept)
+  const lookup = findImages(query, broad)
     .then((images) => {
       const resolution = images.length > 0 ? { image: images[0], alternatives: images.slice(1, 1 + MAX_IMAGE_ALTERNATIVES) } : null;
       remember(key, resolution);

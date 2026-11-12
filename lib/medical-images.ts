@@ -64,13 +64,25 @@ export interface MedicalImageQuery {
 
 /**
  * True for a license that asks for no credit at all — CC0 and the public
- * domain. The Studio's FreeMedImage shows a picture alone, with no caption,
- * credit or link (product order 2026-11-12), which CC BY / CC BY-SA would not
- * allow: it only ever receives such pictures (app/api/studio/free-med-image).
+ * domain. The Studio's FreeMedImage shows its discreet credit pill only for
+ * the others (CC BY, CC BY-SA…), which require one.
  */
 export function isAttributionFreeLicense(license: string | null | undefined): boolean {
   if (typeof license !== "string") return false;
   return /^(?:cc0\b|cc[\s-]?zero\b|public[\s-]*domain\b|domaine\s+public\b|pd(?:[\s-]|$)|pdm\b|no\s+restrictions\b)/i.test(license.trim());
+}
+
+/** The deed of a versioned Creative Commons license ("CC BY-SA 4.0" → https://creativecommons.org/licenses/by-sa/4.0/); null for anything else (no version, a ported license, another license). */
+export function licenseDeedUrl(license: string | null | undefined): string | null {
+  const match = typeof license === "string" ? license.trim().match(/^CC[\s-]+(BY(?:[\s-]+(?:SA|ND|NC))*)[\s-]+(\d\.\d)$/i) : null;
+  if (!match) return null;
+  return `https://creativecommons.org/licenses/${match[1].toLowerCase().replace(/[\s-]+/g, "-")}/${match[2]}/`;
+}
+
+/** A Wikimedia picture's own page on Commons (its credit and license history); null for other repositories. */
+export function commonsFilePageUrl(src: string): string | null {
+  const name = wikimediaFileName(src);
+  return name ? `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(name.replace(/ /g, "_"))}` : null;
 }
 
 export const MEDICAL_IMAGE_API = "/api/assistant/medical-image";

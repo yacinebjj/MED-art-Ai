@@ -994,6 +994,17 @@ textarea,
     backdrop-filter: blur(40px) !important;
     -webkit-backdrop-filter: blur(40px) !important;
   }
+
+  /* A Studio picture's credit pill and its unfolded detail (2026-11-12): tiny, over a still picture. */
+  .free-med-image-credit-pill {
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+  }
+
+  .free-med-image-credit-detail {
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+  }
 }
 
 /* iOS Safari zooms on focus below 16px — and fields often carry `.text-xs` or
@@ -2157,6 +2168,70 @@ html.theme-reveal::view-transition-new(root) {
   box-shadow:
     0 0 0 1px rgb(255 255 255 / 0.08),
     0 18px 44px -24px rgb(0 0 0 / 0.8);
+}
+
+/* The picture's credit, for the licenses that ask for one (CC BY, CC BY-SA…):
+   a microscopic glass pill in the picture's bottom-right corner that unfolds,
+   on a tap, into author · license · source just above it. Dark glass, so it
+   reads on any picture in both themes; barely there until hovered, focused
+   or opened. */
+.free-med-image-credit {
+  position: absolute;
+  right: 0.45em;
+  bottom: 0.45em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3em;
+  max-width: calc(100% - 0.9em);
+  font-size: 0.62em;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.free-med-image-credit-pill {
+  border-radius: 9999px;
+  padding: 0.28em 0.62em;
+  color: rgb(255 255 255 / 0.92);
+  background-color: rgb(15 23 42 / 0.42);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.16);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0.72;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition:
+    opacity 200ms ease,
+    background-color 200ms ease;
+}
+
+.free-med-image-credit-pill:hover,
+.free-med-image-credit-pill:focus-visible,
+.free-med-image-credit-pill[aria-expanded="true"] {
+  opacity: 1;
+  background-color: rgb(15 23 42 / 0.62);
+}
+
+.free-med-image-credit-detail {
+  display: block;
+  max-width: 22em;
+  border-radius: 0.7em;
+  padding: 0.45em 0.65em;
+  color: rgb(255 255 255 / 0.95);
+  background-color: rgb(15 23 42 / 0.74);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.14),
+    0 8px 20px -10px rgb(0 0 0 / 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  overflow-wrap: anywhere;
+  animation: motion-fade-in 180ms var(--ease-glide);
+}
+
+.free-med-image-credit-detail a {
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 0.45);
+  text-underline-offset: 2px;
 }
 
 /* A diagram's glass card; a wide flowchart scrolls inside it, never the page. */
