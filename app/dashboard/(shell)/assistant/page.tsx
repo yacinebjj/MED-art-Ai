@@ -28,7 +28,6 @@ import {
   SquarePen,
   Stethoscope,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { resizeImageToDataUrl } from "@/lib/assistant/image-resize";
@@ -50,7 +49,15 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { stopSpeaking } from "@/hooks/useSpeechSynthesis";
 import { useVisualViewportBox } from "@/hooks/useVisualViewportBox";
 import { ConversationSidebar, ConversationSidebarCollapsedToggle } from "@/components/assistant/ConversationSidebar";
-import { AssistantAvatar, COPILOT_HUB_CLASSES, COPILOT_SUGGESTION_CLASSES, NovaOrb, TypingIndicator } from "@/components/assistant/CopilotParts";
+import {
+  AssistantAvatar,
+  COPILOT_HUB_CLASSES,
+  CopilotAmbience,
+  CopilotWelcome,
+  TypingIndicator,
+  type CopilotSuggestion,
+} from "@/components/assistant/CopilotParts";
+import { displayFirstName } from "@/lib/display-name";
 import { MessageActions } from "@/components/assistant/MessageActions";
 import { UserMessageBubble } from "@/components/assistant/UserMessageBubble";
 import { QUICK_ACTIONS } from "@/components/assistant/QuickActionBar";
@@ -76,65 +83,15 @@ interface HistoryTurn {
 // task) tailored to Algerian médecine/pharmacie/dentaire students, reviewed
 // before shipping. Purely a UI convenience (clicking one just calls the
 // EXISTING sendMessage with this text) — no backend/streaming change.
-/** `label`: the short chip on the welcome screen; `text`: the full request it sends. */
-const QUICK_PROMPTS: { icon: LucideIcon; label: string; text: string }[] = [
-  { icon: Stethoscope, label: "Cas clinique progressif", text: "Génère un cas clinique progressif pour tester mon raisonnement diagnostique." },
-  { icon: Brain, label: "Mécanisme en analogie", text: "Explique-moi ce mécanisme physiologique avec une analogie simple et visuelle." },
-  { icon: Calendar, label: "Planning de révision", text: "Crée-moi un planning de révision réaliste pour mes prochains examens." },
-  { icon: ListChecks, label: "Moyens mnémotechniques", text: "Donne-moi des moyens mnémotechniques percutants pour retenir cette classification." },
-  { icon: HeartPulse, label: "Gérer le stress", text: "Je stresse avant mes épreuves, comment prioriser sans paniquer ?" },
-  { icon: BookOpenCheck, label: "5 QCM pièges", text: "Pose-moi cinq QCM pièges pour évaluer mon niveau aujourd'hui." },
+/** `label`: the pill on the welcome screen from sm (`short` on phones); `text`: the full request it sends. */
+const QUICK_PROMPTS: readonly CopilotSuggestion[] = [
+  { icon: Stethoscope, label: "Cas clinique progressif", short: "Cas clinique", text: "Génère un cas clinique progressif pour tester mon raisonnement diagnostique." },
+  { icon: Brain, label: "Mécanisme en analogie", short: "Analogie", text: "Explique-moi ce mécanisme physiologique avec une analogie simple et visuelle." },
+  { icon: Calendar, label: "Planning de révision", short: "Planning", text: "Crée-moi un planning de révision réaliste pour mes prochains examens." },
+  { icon: ListChecks, label: "Moyens mnémotechniques", short: "Mnémotechniques", text: "Donne-moi des moyens mnémotechniques percutants pour retenir cette classification." },
+  { icon: HeartPulse, label: "Gérer le stress", short: "Anti-stress", text: "Je stresse avant mes épreuves, comment prioriser sans paniquer ?" },
+  { icon: BookOpenCheck, label: "5 QCM pièges", short: "5 QCM pièges", text: "Pose-moi cinq QCM pièges pour évaluer mon niveau aujourd'hui." },
 ];
-
-function EmptyState({ firstName, onSelectPrompt }: { firstName: string; onSelectPrompt: (text: string) => void }) {
-  const { language } = useLanguage();
-  return (
-    // Clears the floating header and composer (their measured heights, see the chat column) and dissolves before reaching them.
-    // motion-swap: rises in when it replaces a conversation ("Nouvelle conversation").
-    <div className="copilot-thread-fade motion-swap relative isolate flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center overflow-y-auto overflow-x-hidden overscroll-none px-4 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
-      {/* Desktop only: a slow, blurred light drifting behind the welcome (transform-only; still under reduced motion, absent on phones). */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden lg:block">
-        <div className="absolute left-1/2 top-[38%] -ml-[340px] -mt-[220px] h-[440px] w-[680px] rounded-full bg-[radial-gradient(closest-side,rgba(14,165,233,0.14),rgba(37,99,235,0.07)_55%,transparent)] blur-3xl [animation:copilot-aurora_26s_ease-in-out_infinite] motion-reduce:[animation:none] dark:bg-[radial-gradient(closest-side,rgba(56,189,248,0.2),rgba(37,99,235,0.1)_55%,transparent)]" />
-      </div>
-      <NovaOrb />
-      <div className="mt-5 w-full max-w-2xl sm:mt-6">
-        {/* Two deliberate lines at one size, two tones: the greeting (the name in the logo's gradient) over the question. */}
-        <h1 className="text-balance text-[30px] font-medium leading-[1.15] tracking-[-0.022em] sm:text-[38px] lg:text-[44px] lg:tracking-[-0.026em]">
-          <span className="block text-slate-900 dark:text-white">
-            {language === "fr" ? "Bonjour" : "Hi"}{" "}
-            <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 bg-clip-text text-transparent dark:from-cyan-300 dark:via-sky-400 dark:to-blue-500">{firstName}</span>
-          </span>{" "}
-          <span className="block text-slate-400 dark:text-white/40">{language === "fr" ? "On révise quoi aujourd'hui ?" : "What's on your mind?"}</span>
-        </h1>
-        <p className="mx-auto mt-4 max-w-md text-balance text-[15px] leading-relaxed text-slate-500 dark:text-white/50">
-          {language === "fr"
-            ? "Un module compliqué, un planning à caler, ou juste besoin de souffler ? Je suis là."
-            : "A tough module, a study plan to build, or just need a breather? I'm here."}
-        </p>
-      </div>
-
-      {/* Phones: a tidy 2×3 grid of compact tiles (pills wrapped into five ragged rows there); from sm, centred pills. */}
-      <div data-tour="asst-suggestions" className="mt-8 grid w-full max-w-2xl grid-cols-2 gap-2 sm:mt-10 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5">
-        {QUICK_PROMPTS.map((prompt, index) => (
-          <motion.button
-            key={prompt.text}
-            type="button"
-            onClick={() => onSelectPrompt(prompt.text)}
-            title={prompt.text}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 + index * 0.04, duration: 0.3, ease: "easeOut" }}
-            whileTap={{ scale: 0.97 }}
-            className={COPILOT_SUGGESTION_CLASSES}
-          >
-            <prompt.icon className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300" strokeWidth={1.75} />
-            {prompt.label}
-          </motion.button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 const ChatBubble = memo(function ChatBubble({
   message,
@@ -408,7 +365,7 @@ export default function AssistantPage() {
   const { isDesktopSidebarOpen, toggleDesktopSidebar } = useSidebarState();
   const { language } = useLanguage();
   const auth = useAuth() ?? {};
-  const firstName = auth.profile?.fullName?.split(" ")[0] || "Étudiant(e)";
+  const firstName = displayFirstName(auth.profile?.fullName) ?? "Étudiant(e)";
   const { conversations, activeId, hydrated, saveMessages, startNewConversation, selectConversation, deleteConversation, restoreConversation } =
     useAssistantConversations(auth.user?.id ?? null);
   const activeConversationTitle = conversations.find((conversation) => conversation.id === activeId)?.title;
@@ -1203,6 +1160,9 @@ export default function AssistantPage() {
           --copilot-header-h / --copilot-composer-h (see the layout effect
           above), and the thread and empty state pad by exactly that much. */}
       <div ref={chatColumnRef} className="relative flex w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden">
+        {/* The living light rising from the composer — behind the welcome, the thread and the dock (CopilotParts). */}
+        <CopilotAmbience variant={isEmpty ? "welcome" : "thread"} active={isTyping} />
+
         {/* Phone header — the shell hides its Topbar and bottom nav on this
             route below lg (see CHROMELESS_MOBILE_ROUTES), so this page owns
             the full screen and needs its own way back out. */}
@@ -1259,7 +1219,17 @@ export default function AssistantPage() {
         </div>
 
         {isEmpty ? (
-          <EmptyState firstName={firstName} onSelectPrompt={(text) => void sendMessage(text)} />
+          <CopilotWelcome
+            firstName={firstName}
+            subtitle={
+              language === "fr"
+                ? "Un module compliqué, un planning à caler, ou juste besoin de souffler ? Je suis là."
+                : "A tough module, a study plan to build, or just need a breather? I'm here."
+            }
+            suggestions={QUICK_PROMPTS}
+            onSuggestion={(text) => void sendMessage(text)}
+            suggestionsTourId="asst-suggestions"
+          />
         ) : (
           // motion-swap: the thread rises in where the welcome screen was (its
           // AnimatePresence mounts with it, so the bubbles' own entrance is skipped).

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { displayFirstName } from "@/lib/display-name";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { GlassArt } from "@/components/ui/GlassArt";
@@ -59,7 +60,7 @@ export function CockpitHeader() {
   const [quoteIndex, setQuoteIndex] = useState(0);
   useEffect(() => setQuoteIndex(Math.floor(Math.random() * QUOTES.fr.length)), []);
 
-  const firstName = profile?.fullName?.trim().split(" ")[0] || tCockpit("fallbackName", language);
+  const firstName = displayFirstName(profile?.fullName) ?? tCockpit("fallbackName", language);
   const greeting = now ? tCockpit(greetingKey(now.getHours()), language) : tCockpit("greetDefault", language);
   const dateLabel = now
     ? now.toLocaleDateString(language === "fr" ? "fr-FR" : "en-GB", { weekday: "long", day: "numeric", month: "long" })

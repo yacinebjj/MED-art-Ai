@@ -27,8 +27,10 @@ const DnaBackground = dynamic(
  * page is a product fact (see MetricsStrip / ProofSection comments).
  */
 export default function LandingPage() {
+  // landing-root (app/globals.css): clips sideways overflow without becoming a
+  // scroll container, so the app's zoom lock (pinch, double-tap) holds here too.
   return (
-    <div className="dark relative isolate flex min-h-dvh flex-col overflow-x-hidden bg-slate-950 text-slate-100 antialiased selection:bg-cyan-400/30">
+    <div className="landing-root dark relative isolate flex min-h-dvh flex-col bg-slate-950 text-slate-100 antialiased selection:bg-cyan-400/30">
       {/* Dark page canvas while the landing is mounted (overscroll / iOS bounce never flashes white). */}
       <style>{"html,body{background:#020617}"}</style>
       {/* Fixed backdrop layers: deep gradient, aurora orbs, neural particles, 3D DNA, cursor light. */}

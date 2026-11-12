@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -63,10 +63,12 @@ import {
   AssistantAvatar,
   COPILOT_ACTION_BUTTON_CLASSES,
   COPILOT_HUB_CLASSES,
-  COPILOT_SUGGESTION_CLASSES,
-  NovaOrb,
+  CopilotAmbience,
+  CopilotWelcome,
   TypingIndicator,
+  type CopilotSuggestion,
 } from "@/components/assistant/CopilotParts";
+import { displayFirstName } from "@/lib/display-name";
 import { StreamedMarkdown } from "@/components/assistant/StreamedMarkdown";
 import { UserMessageBubble } from "@/components/assistant/UserMessageBubble";
 import { VoiceMeter } from "@/components/assistant/VoiceMeter";
@@ -102,12 +104,12 @@ export const CHAT_MODE_OPTIONS: { id: ChatMode; label: string; description: stri
   { id: "express", label: "Synthèse express", description: "5 à 8 puces, l'essentiel à haut rendement", icon: Zap, placeholder: "Que veux-tu réviser en express ?" },
 ];
 
-/** Welcome suggestions — `label` on the pill, `text` the request it sends. */
-const STARTER_PROMPTS: { icon: LucideIcon; label: string; text: string }[] = [
-  { icon: ListChecks, label: "10 points clés", text: "Résume ce cours en 10 points clés à haut rendement." },
-  { icon: ShieldAlert, label: "Pièges d'examen", text: "Quels sont les pièges d'examen classiques de ce cours ?" },
-  { icon: Table2, label: "Diagnostic différentiel", text: "Fais-moi un tableau de diagnostic différentiel des pathologies du cours." },
-  { icon: BookOpenCheck, label: "Teste-moi en 3 questions", text: "Pose-moi 3 questions pour vérifier que j'ai compris l'essentiel." },
+/** Welcome suggestions — `label` on the pill from sm (`short` on phones), `text` the request it sends. */
+const STARTER_PROMPTS: readonly CopilotSuggestion[] = [
+  { icon: ListChecks, label: "10 points clés", short: "10 points clés", text: "Résume ce cours en 10 points clés à haut rendement." },
+  { icon: ShieldAlert, label: "Pièges d'examen", short: "Pièges d'examen", text: "Quels sont les pièges d'examen classiques de ce cours ?" },
+  { icon: Table2, label: "Diagnostic différentiel", short: "Différentiel", text: "Fais-moi un tableau de diagnostic différentiel des pathologies du cours." },
+  { icon: BookOpenCheck, label: "Teste-moi en 3 questions", short: "Teste-moi", text: "Pose-moi 3 questions pour vérifier que j'ai compris l'essentiel." },
 ];
 
 /** The "+" menu's rows: an icon tile, a label and a hint (the MedArt Copilot's attachment menu). */
@@ -484,7 +486,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
   useReadingSurface(container, { key: readingKey("chat", courseSlug ?? (moduleId !== undefined ? `module-${moduleId}` : null)), scroll: false });
   const { language } = useLanguage();
   const { profile } = useAuth();
-  const firstName = profile?.fullName?.split(" ")[0] || "Étudiant(e)";
+  const firstName = displayFirstName(profile?.fullName) ?? "Étudiant(e)";
   const { toast } = useToast();
   const speakingId = useSpeakingId();
   // Phones get the "+" menu as a bottom sheet (the module page's own mobile layout starts below md).
@@ -846,6 +848,9 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
       onDrop={handleDrop}
     >
       <div ref={columnRef} className="relative flex min-h-0 w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden">
+        {/* The living light rising from the composer — behind the welcome, the thread and the dock (CopilotParts). */}
+        <CopilotAmbience variant={!hasConversation && !isHistoryLoading ? "welcome" : "thread"} active={isBusy} />
+
         {/* No title bar: one quiet "…" holds the conversation's options. */}
         {hasOptions && (
           <div ref={headerRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-end px-2 pt-2 sm:px-3">
@@ -893,55 +898,25 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
           isHistoryLoading ? (
             <div className="flex-1" aria-busy="true" />
           ) : (
-            // The welcome: clears the floating header and composer (their measured heights) and dissolves before reaching them.
-            <div className="copilot-thread-fade motion-swap relative isolate flex w-full min-w-0 max-w-full flex-1 flex-col items-center justify-center overflow-y-auto overflow-x-hidden overscroll-none px-4 pb-[calc(var(--copilot-composer-h,0px)+2rem)] pt-[calc(var(--copilot-header-h,0px)+2rem)] text-center sm:pb-[calc(var(--copilot-composer-h,0px)+2.5rem)] sm:pt-[calc(var(--copilot-header-h,0px)+2.5rem)]">
-              {/* Desktop only: a slow, blurred light drifting behind the welcome (transform-only; still under reduced motion). */}
-              <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden lg:block">
-                <div className="absolute left-1/2 top-[38%] -ml-[340px] -mt-[220px] h-[440px] w-[680px] rounded-full bg-[radial-gradient(closest-side,rgba(14,165,233,0.14),rgba(37,99,235,0.07)_55%,transparent)] blur-3xl [animation:copilot-aurora_26s_ease-in-out_infinite] motion-reduce:[animation:none] dark:bg-[radial-gradient(closest-side,rgba(56,189,248,0.2),rgba(37,99,235,0.1)_55%,transparent)]" />
-              </div>
-              <NovaOrb />
-              <div className="mt-5 w-full max-w-2xl sm:mt-6">
-                <h1 className="text-balance text-[30px] font-medium leading-[1.15] tracking-[-0.022em] sm:text-[38px] 2xl:text-[44px] 2xl:tracking-[-0.026em]">
-                  <span className="block text-slate-900 dark:text-white">
-                    {language === "fr" ? "Bonjour" : "Hi"}{" "}
-                    <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 bg-clip-text text-transparent dark:from-cyan-300 dark:via-sky-400 dark:to-blue-500">{firstName}</span>
-                  </span>{" "}
-                  <span className="block text-slate-400 dark:text-white/40">{language === "fr" ? "On révise quoi aujourd'hui ?" : "What's on your mind?"}</span>
-                </h1>
-                <p className="mx-auto mt-4 max-w-md text-balance text-[15px] leading-relaxed text-slate-500 dark:text-white/50">{welcomeLine}</p>
-                {isLongCourse && (
-                  <p className="mx-auto mt-3 flex max-w-md items-start justify-center gap-1.5 text-balance text-[13px] leading-snug text-amber-700/90 dark:text-amber-300/80">
+            // The welcome — the same screen as the MedArt Copilot's, in the pane's narrower headline size.
+            <CopilotWelcome
+              size="pane"
+              firstName={firstName}
+              subtitle={welcomeLine}
+              notice={
+                isLongCourse && (
+                  <p className="copilot-rise mx-auto mt-3 flex max-w-md items-start justify-center gap-1.5 text-balance text-[13px] leading-snug text-amber-700/90 dark:text-amber-300/80" style={{ "--rise": 3 } as CSSProperties}>
                     <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     {language === "fr"
                       ? "Ce cours est très long : je me concentre sur ses passages les plus pertinents."
                       : "This course is very long: I focus on its most relevant passages."}
                   </p>
-                )}
-              </div>
-
-              {/* Phones: a 2×2 grid of compact tiles; from sm, centred pills. */}
-              {contextCount > 0 && (
-                <div className="mt-8 grid w-full max-w-2xl grid-cols-2 gap-2 sm:mt-10 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5">
-                  {STARTER_PROMPTS.map((prompt, index) => (
-                    <motion.button
-                      key={prompt.text}
-                      type="button"
-                      onClick={() => sendPrompt(prompt.text)}
-                      disabled={isBusy}
-                      title={prompt.text}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.2 + index * 0.04, duration: 0.3, ease: "easeOut" }}
-                      whileTap={{ scale: 0.97 }}
-                      className={cn(COPILOT_SUGGESTION_CLASSES, "disabled:opacity-50")}
-                    >
-                      <prompt.icon className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300" strokeWidth={1.75} />
-                      {prompt.label}
-                    </motion.button>
-                  ))}
-                </div>
-              )}
-            </div>
+                )
+              }
+              suggestions={contextCount > 0 ? STARTER_PROMPTS : []}
+              onSuggestion={sendPrompt}
+              disabled={isBusy}
+            />
           )
         ) : (
           // motion-swap: the thread rises in where the welcome was (its

@@ -136,7 +136,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
               >
                 <span
                   className={cn(
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background/70 shadow-soft dark:bg-background/30",
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/[0.08] ring-1 ring-inset ring-sky-500/[0.12] dark:bg-sky-400/[0.1] dark:ring-sky-400/[0.14]",
                     tint.icon
                   )}
                 >
@@ -179,7 +179,7 @@ export const MobileStudioCards = memo(function MobileStudioCards({
             >
               <span
                 className={cn(
-                  "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background/70 shadow-soft dark:bg-background/30",
+                  "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/[0.08] ring-1 ring-inset ring-sky-500/[0.12] dark:bg-sky-400/[0.1] dark:ring-sky-400/[0.14]",
                   tint.icon
                 )}
               >

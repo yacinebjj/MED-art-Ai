@@ -524,8 +524,8 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                   className={cn(
                     "flex aspect-square w-full items-center justify-center rounded-xl border transition-[background-color,border-color,box-shadow,color] duration-200 disabled:cursor-wait",
                     isActive
-                      ? "border-primary-500/30 bg-white text-primary-600 shadow-[0_8px_20px_-14px_rgba(2,132,199,0.6)] dark:border-primary-400/25 dark:bg-white/[0.06] dark:text-primary-300"
-                      : "border-black/[0.06] bg-white/55 text-zinc-500 hover:border-black/[0.1] hover:bg-white/90 hover:text-zinc-800 dark:border-white/[0.07] dark:bg-white/[0.025] dark:text-zinc-400 dark:hover:border-white/[0.12] dark:hover:bg-white/[0.05] dark:hover:text-zinc-200"
+                      ? "border-primary-500/30 bg-white text-primary-600 shadow-[0_8px_20px_-14px_rgba(2,132,199,0.6)] dark:border-primary-400/25 dark:bg-white/[0.07] dark:text-primary-300 dark:shadow-[0_8px_22px_-14px_rgba(14,165,233,0.45)]"
+                      : "border-black/[0.06] bg-white/60 text-slate-500 hover:border-sky-500/25 hover:bg-white hover:text-slate-900 dark:border-white/[0.07] dark:bg-white/[0.03] dark:text-white/55 dark:hover:border-sky-400/25 dark:hover:bg-white/[0.06] dark:hover:text-white"
                   )}
                 >
                   <FileText className="h-5 w-5" />
@@ -566,8 +566,8 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
                   className={cn(
                     "group relative flex items-start gap-2 rounded-2xl border p-3 transition-[background-color,border-color,box-shadow] duration-200",
                     isActive
-                      ? "border-primary-500/30 bg-white shadow-[0_10px_28px_-18px_rgba(2,132,199,0.6)] dark:border-primary-400/25 dark:bg-white/[0.06] dark:shadow-[0_10px_28px_-16px_rgba(0,0,0,0.9)]"
-                      : "border-black/[0.06] bg-white/55 hover:border-black/[0.1] hover:bg-white/90 hover:shadow-[0_8px_22px_-16px_rgba(15,23,42,0.45)] dark:border-white/[0.07] dark:bg-white/[0.025] dark:hover:border-white/[0.12] dark:hover:bg-white/[0.05]"
+                      ? "border-primary-500/30 bg-white shadow-[0_10px_28px_-18px_rgba(2,132,199,0.6)] dark:border-primary-400/25 dark:bg-white/[0.07] dark:shadow-[0_10px_30px_-16px_rgba(14,165,233,0.4)]"
+                      : "border-black/[0.06] bg-white/60 hover:border-sky-500/25 hover:bg-white hover:shadow-[0_8px_22px_-16px_rgba(14,165,233,0.45)] dark:border-white/[0.07] dark:bg-white/[0.03] dark:hover:border-sky-400/25 dark:hover:bg-white/[0.06]"
                   )}
                 >
                   {isActive && <span aria-hidden className="pointer-events-none absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-primary-500" />}

@@ -240,24 +240,30 @@
      Liquid light, in the logo's blues: one tall swell rising from below the
      fold almost to the top (eased stops, so no ring or band
      shows), two off-centre currents that keep it from reading as a
-     symmetric spotlight, and in dark a faint veil behind the welcome. */
+     symmetric spotlight, and in dark a faint veil behind the welcome.
+     Balance (2026-11-12): the swell is a little shorter and a little richer
+     at its root, so the top reads as deeper black (cleaner white in light)
+     and the blue rises from the composer, saturated rather than washed over
+     the whole screen. The Copilots' living aurora (CopilotAmbience) breathes
+     on top of it. Also the module workspace's one canvas (Sources, Co-pilot,
+     Studio). */
   .copilot-canvas {
-    /* Light: a cool off-white (never stark #fff) under a soft sky haze. */
-    background-color: #f6f8fb;
+    /* Light: a clean cool white (slate-50, never stark #fff) under a sky haze. */
+    background-color: #f8fafc;
     background-image:
-      radial-gradient(135% 130% at 50% 115%, rgb(56 189 248 / 0.26) 0%, rgb(56 189 248 / 0.19) 20%, rgb(96 165 250 / 0.12) 40%, rgb(147 197 253 / 0.07) 60%, rgb(191 219 254 / 0.03) 80%, transparent 100%),
-      radial-gradient(60% 80% at 2% 100%, rgb(34 211 238 / 0.12), transparent 70%),
-      radial-gradient(65% 85% at 98% 95%, rgb(59 130 246 / 0.12), transparent 70%);
+      radial-gradient(125% 108% at 50% 112%, rgb(56 189 248 / 0.3) 0%, rgb(56 189 248 / 0.21) 18%, rgb(96 165 250 / 0.12) 38%, rgb(147 197 253 / 0.055) 58%, rgb(191 219 254 / 0.02) 78%, transparent 94%),
+      radial-gradient(55% 72% at 2% 100%, rgb(34 211 238 / 0.12), transparent 70%),
+      radial-gradient(60% 78% at 98% 96%, rgb(59 130 246 / 0.13), transparent 70%);
   }
 
   .dark .copilot-canvas {
     /* Dark: OLED black at the top, deepening into the logo's medical blue. */
     background-color: #000;
     background-image:
-      radial-gradient(135% 130% at 50% 115%, rgb(14 165 233 / 0.36) 0%, rgb(14 140 222 / 0.27) 20%, rgb(29 100 210 / 0.18) 40%, rgb(30 64 175 / 0.1) 60%, rgb(23 37 84 / 0.04) 80%, transparent 100%),
-      radial-gradient(60% 80% at 2% 100%, rgb(34 211 238 / 0.14), transparent 70%),
-      radial-gradient(65% 85% at 98% 95%, rgb(37 99 235 / 0.22), transparent 70%),
-      radial-gradient(100% 60% at 50% 45%, rgb(14 165 233 / 0.05), transparent 75%);
+      radial-gradient(125% 108% at 50% 112%, rgb(14 165 233 / 0.42) 0%, rgb(14 140 222 / 0.31) 18%, rgb(29 100 210 / 0.2) 38%, rgb(30 64 175 / 0.1) 58%, rgb(23 37 84 / 0.035) 78%, transparent 94%),
+      radial-gradient(55% 72% at 2% 100%, rgb(34 211 238 / 0.14), transparent 70%),
+      radial-gradient(60% 78% at 98% 96%, rgb(37 99 235 / 0.24), transparent 70%),
+      radial-gradient(100% 55% at 50% 42%, rgb(14 165 233 / 0.035), transparent 75%);
   }
 
   /* The Copilot thread and welcome dissolve before they reach the floating
@@ -785,6 +791,23 @@ html {
      screen and exposed the fixed aurora grid behind body's background. Also
      blocks pull-to-refresh, which would kill an in-flight generation. */
   overscroll-behavior-y: none;
+}
+
+/* The public landing (app/page.tsx) gets the same lock. Its root clips
+   sideways overflow with `clip`, not `hidden`: `hidden` made it a scroll
+   container (its overflow-y computed to auto), and WebKit starts touch-action
+   afresh at every scroll container — inside it html's pan-x pan-y no longer
+   applied, so iOS Safari let the page pinch-zoom in and out (below 1x it
+   shrank to the left over a black gap). Every element under it also restates
+   pan-x pan-y at zero specificity: a component's own value (touch-none,
+   manipulation) still wins, and no nested scroller can reopen zoom. */
+.landing-root {
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
+:where(.landing-root, .landing-root *) {
+  touch-action: pan-x pan-y;
 }
 
 body {
@@ -1796,14 +1819,283 @@ html.theme-reveal::view-transition-new(root) {
   initial-value: 0px;
 }
 
-/* Copilot welcome (desktop): the ambient light behind the orb drifts — transform only. */
-@keyframes copilot-aurora {
-  0%,
-  100% {
-    transform: translate3d(-5%, -3%, 0) rotate(0deg) scale(1);
+/* ---------------------------------------------------------------------------
+   Copilot ambience (CopilotAmbience, NovaOrb and CopilotWelcome in
+   components/assistant/CopilotParts.tsx): the living light of both Copilots.
+   A blue aurora breathes up from the composer. On the welcome, two coloured
+   currents and a halftone dot-matrix wave drift through it, the emblem's
+   glow breathes with two thin rings pulsing out of it, and the screen rises
+   in one step after another.
+   Gradients only — no filter blur, which iOS boxes on moving layers — and
+   every loop animates opacity and the standalone translate / scale
+   properties: the compositor runs them, so a main thread busy streaming a
+   reply never costs them a frame. Keyframes hold literal values.
+   --------------------------------------------------------------------------- */
+.copilot-ambience {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 0;
+  height: 74%;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 700ms var(--ease-glide);
+}
+
+/* In a conversation: lower and calmer, hugging the composer; brighter while a reply is on its way. */
+.copilot-ambience[data-variant="thread"] {
+  opacity: 0.6;
+}
+
+.copilot-ambience[data-variant="thread"][data-active] {
+  opacity: 0.92;
+}
+
+.copilot-ambience span {
+  position: absolute;
+  display: block;
+}
+
+/* The aurora's heart: a wide swell of the logo's blues, rooted under the composer. */
+.copilot-aurora-core {
+  inset: 16% -32% -46%;
+  background: radial-gradient(closest-side, rgb(56 189 248 / 0.34), rgb(14 165 233 / 0.18) 42%, rgb(59 130 246 / 0.07) 70%, transparent);
+  transform-origin: 50% 100%;
+  transition: translate 900ms var(--ease-glide);
+  animation: copilot-aurora-breathe 7.5s ease-in-out infinite alternate;
+}
+
+.dark .copilot-aurora-core {
+  background: radial-gradient(closest-side, rgb(56 189 248 / 0.46), rgb(14 165 233 / 0.27) 40%, rgb(29 78 216 / 0.12) 68%, transparent);
+}
+
+.copilot-ambience[data-variant="thread"] .copilot-aurora-core {
+  translate: 0 24%;
+}
+
+/* The welcome's own layers fade out, and pause, once a conversation starts. */
+.copilot-ambience-welcome {
+  inset: 0;
+  transition: opacity 600ms var(--ease-glide);
+}
+
+.copilot-ambience[data-variant="thread"] .copilot-ambience-welcome {
+  opacity: 0;
+}
+
+.copilot-ambience[data-variant="thread"] .copilot-ambience-welcome > span {
+  animation-play-state: paused;
+}
+
+/* Two currents keep the swell from reading as a symmetric spotlight. */
+.copilot-aurora-cyan {
+  inset: 34% 46% -30% -26%;
+  background: radial-gradient(closest-side, rgb(34 211 238 / 0.24), transparent);
+  animation: copilot-aurora-drift 19s ease-in-out infinite alternate;
+}
+
+.copilot-aurora-indigo {
+  inset: 28% -26% -34% 44%;
+  background: radial-gradient(closest-side, rgb(59 130 246 / 0.24), transparent);
+  animation: copilot-aurora-drift-alt 23s ease-in-out infinite alternate;
+}
+
+.dark .copilot-aurora-cyan {
+  background: radial-gradient(closest-side, rgb(34 211 238 / 0.2), transparent);
+}
+
+.dark .copilot-aurora-indigo {
+  background: radial-gradient(closest-side, rgb(37 99 235 / 0.34), transparent);
+}
+
+/* The halftone wave: two dot grids, each masked to a crest rising from the
+   composer, drifting against each other — where they overlap the dots
+   thicken, as in a printed halftone. */
+.copilot-halftone {
+  inset: 6% -20% -8%;
+  opacity: 0.7;
+  background-image: radial-gradient(circle, rgb(14 165 233 / 0.42) 1px, transparent 1.6px);
+  background-size: 12px 12px;
+  mask-image: radial-gradient(60% 56% at 50% 100%, #000, rgb(0 0 0 / 0.55) 40%, transparent 74%);
+  animation: copilot-halftone-drift 16s ease-in-out infinite alternate;
+}
+
+.copilot-halftone-fine {
+  background-image: radial-gradient(circle, rgb(56 189 248 / 0.36) 0.8px, transparent 1.3px);
+  background-size: 8px 8px;
+  background-position: 4px 4px;
+  mask-image: radial-gradient(46% 44% at 40% 100%, #000, transparent 72%);
+  animation: copilot-halftone-drift-alt 21s ease-in-out infinite alternate;
+}
+
+.dark .copilot-halftone {
+  background-image: radial-gradient(circle, rgb(125 211 252 / 0.38) 1px, transparent 1.6px);
+}
+
+.dark .copilot-halftone-fine {
+  background-image: radial-gradient(circle, rgb(186 230 253 / 0.28) 0.8px, transparent 1.3px);
+}
+
+/* The emblem (NovaOrb): its glow breathes, and two thin rings pulse out of it half a beat apart. */
+.copilot-emblem-glow,
+.copilot-emblem-ring {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.copilot-emblem-glow {
+  inset: -22%;
+  background: radial-gradient(closest-side, rgb(56 189 248 / 0.36), rgb(37 99 235 / 0.14) 55%, transparent);
+  animation: copilot-emblem-breathe 4.2s ease-in-out infinite alternate;
+}
+
+.dark .copilot-emblem-glow {
+  background: radial-gradient(closest-side, rgb(56 189 248 / 0.46), rgb(37 99 235 / 0.2) 55%, transparent);
+}
+
+.copilot-emblem-ring {
+  inset: 4%;
+  border: 1px solid rgb(14 165 233 / 0.4);
+  opacity: 0;
+  animation: copilot-emblem-ping 3.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.copilot-emblem-ring + .copilot-emblem-ring {
+  animation-delay: 1.8s;
+}
+
+.dark .copilot-emblem-ring {
+  border-color: rgb(125 211 252 / 0.45);
+}
+
+/* The welcome rises in one step after another (--rise: the step, 75 ms apart). */
+.copilot-rise {
+  animation: copilot-rise 820ms var(--ease-glide) backwards;
+  animation-delay: calc(var(--rise, 0) * 75ms + 40ms);
+}
+
+@keyframes copilot-rise {
+  from {
+    opacity: 0;
+    translate: 0 18px;
+    scale: 0.985;
   }
-  50% {
-    transform: translate3d(5%, 4%, 0) rotate(10deg) scale(1.08);
+}
+
+@keyframes copilot-aurora-breathe {
+  from {
+    opacity: 0.74;
+    scale: 0.94 0.9;
+  }
+  to {
+    opacity: 1;
+    scale: 1.05 1.08;
+  }
+}
+
+@keyframes copilot-aurora-drift {
+  from {
+    opacity: 0.7;
+    translate: -8% 4%;
+  }
+  to {
+    opacity: 1;
+    translate: 10% -6%;
+  }
+}
+
+@keyframes copilot-aurora-drift-alt {
+  from {
+    opacity: 1;
+    translate: 8% 2%;
+  }
+  to {
+    opacity: 0.66;
+    translate: -10% -7%;
+  }
+}
+
+@keyframes copilot-halftone-drift {
+  from {
+    opacity: 0.5;
+    translate: -5% 3%;
+  }
+  to {
+    opacity: 0.85;
+    translate: 5% -2%;
+  }
+}
+
+@keyframes copilot-halftone-drift-alt {
+  from {
+    opacity: 0.8;
+    translate: 6% -1%;
+  }
+  to {
+    opacity: 0.4;
+    translate: -6% 3%;
+  }
+}
+
+@keyframes copilot-emblem-breathe {
+  from {
+    opacity: 0.72;
+    scale: 0.92;
+  }
+  to {
+    opacity: 1;
+    scale: 1.06;
+  }
+}
+
+@keyframes copilot-emblem-ping {
+  0% {
+    opacity: 0;
+    scale: 0.84;
+  }
+  20% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    scale: 1.6;
+  }
+}
+
+/* Calm motion: the light still breathes — opacity only, slower — while
+   nothing drifts, swells or pings, and the welcome rises half as far. */
+@media (prefers-reduced-motion: reduce) {
+  .copilot-aurora-core,
+  .copilot-emblem-glow {
+    animation: copilot-glow-calm 8s ease-in-out infinite alternate;
+  }
+
+  .copilot-aurora-cyan,
+  .copilot-aurora-indigo,
+  .copilot-halftone,
+  .copilot-emblem-ring {
+    animation: none;
+  }
+
+  .copilot-rise {
+    animation-name: copilot-rise-calm;
+    animation-duration: 600ms;
+  }
+}
+
+@keyframes copilot-glow-calm {
+  from {
+    opacity: 0.72;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes copilot-rise-calm {
+  from {
+    opacity: 0;
+    translate: 0 8px;
   }
 }
 

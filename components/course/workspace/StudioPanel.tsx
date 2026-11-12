@@ -208,10 +208,12 @@ const GLASS_ICON_BUTTON_CLASSES =
  * suffixes — on the fixed, full-viewport expanded overlay below, a
  * translucent background lets the Chat/Sources text underneath show through
  * and overlap with this view's own text, making both unreadable.
- * One neutral zinc for every section (product order, 2026-11-06): the Studio
- * no longer gives each mode its own pastel, and never blue.
+ * One surface for every section: the workspace canvas's own clean white and
+ * deep blue-black (.copilot-canvas, app/globals.css), so an opened section
+ * reads as part of the Co-pilot and Sources space (product order 2026-11-12,
+ * replacing the 2026-11-06 zinc).
  */
-const SECTION_DETAIL_SURFACE = "bg-zinc-50 dark:bg-zinc-950";
+const SECTION_DETAIL_SURFACE = "bg-[#f8fafc] dark:bg-[#04060a]";
 const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
   explication: SECTION_DETAIL_SURFACE,
   resume: SECTION_DETAIL_SURFACE,
@@ -223,17 +225,20 @@ const SECTION_DETAIL_BG: Record<DemoSectionId, string> = {
 };
 
 /**
- * One graphite identity for every Studio tile (product order, 2026-11-06:
- * "mature, professional, never blue"): the same quiet zinc surface and
- * zinc icon for all seven modes — the label and the icon tell them apart.
- * Colour is kept for state only: `dot`, the "already generated" mark, is a
- * muted emerald. Exported for MobileStudioCards' large-card grid, so both
- * surfaces stay identical. Spelled out as literal classes: Tailwind's JIT
- * scanner only generates CSS for class names it can see verbatim in source.
+ * One identity for every Studio tile, the Co-pilot's own (product order
+ * 2026-11-12: "one cohesive palette across Copilot, Studio and Sources" —
+ * it replaces the 2026-11-06 graphite): the same deep translucent surface on
+ * the shared canvas and the MedArt blue on every icon, like the Copilot's
+ * suggestion pills, for all seven modes — the label and the icon tell them
+ * apart. `dot`, the "already generated" mark, stays a muted emerald (a
+ * state, not decoration). Exported for MobileStudioCards' large-card grid,
+ * so both surfaces stay identical. Spelled out as literal classes:
+ * Tailwind's JIT scanner only generates CSS for class names it can see
+ * verbatim in source.
  */
 const STUDIO_TILE_TINT = {
-  bg: "border-zinc-200/80 bg-white/70 dark:border-white/[0.08] dark:bg-white/[0.035]",
-  icon: "text-zinc-600 dark:text-zinc-300",
+  bg: "border-black/[0.06] bg-white/75 dark:border-white/[0.08] dark:bg-white/[0.04]",
+  icon: "text-sky-600 dark:text-sky-300",
   dot: "bg-emerald-500/90 dark:bg-emerald-400/90",
 };
 export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: string }> = {
@@ -246,9 +251,9 @@ export const TILE_TINTS: Record<DemoSectionId, { bg: string; icon: string; dot: 
   audio: STUDIO_TILE_TINT,
 };
 
-/** Hover for a Studio or Lab tile: the surface firms up and lifts on a soft neutral shadow — no blue glow, no motion of the tile itself (its icon carries the micro-interaction). */
+/** Hover for a Studio or Lab tile: the surface firms up and lifts on a soft MedArt-blue glow — no motion of the tile itself (its icon carries the micro-interaction). */
 const STUDIO_TILE_HOVER_CLASSES =
-  "hover:border-zinc-300 hover:bg-white hover:shadow-[0_10px_24px_-14px_rgba(24,24,27,0.4)] dark:hover:border-white/[0.16] dark:hover:bg-white/[0.06] dark:hover:shadow-[0_10px_28px_-14px_rgba(0,0,0,0.9)]";
+  "hover:border-sky-500/25 hover:bg-white hover:shadow-[0_10px_26px_-14px_rgba(14,165,233,0.5)] dark:hover:border-sky-400/25 dark:hover:bg-white/[0.07] dark:hover:shadow-[0_10px_30px_-14px_rgba(14,165,233,0.4)]";
 
 /** The icon inside a Studio or Lab tile rises and grows a touch while its tile is hovered. */
 const STUDIO_TILE_ICON_MOTION_CLASSES =
@@ -920,7 +925,7 @@ export function StudioPanel({
                           // instead, STUDIO_TILE_ICON_MOTION_CLASSES): a
                           // hovered box that shifts can slide out from under
                           // the cursor and flicker.
-                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-[color-mix(in_oklab,var(--foreground)_80%,transparent)] transition-[background-color,border-color,box-shadow,opacity] duration-200 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:shadow-none md:text-sm",
+                          "group relative flex w-full items-center gap-2 rounded-xl border text-xs font-medium text-slate-800 transition-[background-color,border-color,box-shadow,opacity] duration-200 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:shadow-none dark:text-white/90 md:text-sm",
                           STUDIO_TILE_HOVER_CLASSES,
                           isGenerating && "disabled:cursor-wait",
                           isLocked && "opacity-50 saturate-[0.4] hover:shadow-none",
@@ -1129,7 +1134,7 @@ export function StudioPanel({
                               whileTap={{ scale: 0.97 }}
                               onClick={() => onOpenLabTool(tool.id)}
                               aria-label={tool.label}
-                              // Same graphite surface and hover as the Studio
+                              // Same surface, blue icon and hover as the Studio
                               // tiles above (the tool's own hue stays for the
                               // dashboard's Lab launcher).
                               className={cn(
@@ -1141,7 +1146,7 @@ export function StudioPanel({
                             >
                               <span
                                 className={cn(
-                                  "flex shrink-0 items-center justify-center rounded-lg bg-zinc-900/[0.04] ring-1 ring-inset ring-zinc-900/[0.05] dark:bg-white/[0.06] dark:ring-white/[0.06]",
+                                  "flex shrink-0 items-center justify-center rounded-lg bg-sky-500/[0.08] ring-1 ring-inset ring-sky-500/[0.12] dark:bg-sky-400/[0.1] dark:ring-sky-400/[0.14]",
                                   STUDIO_TILE_ICON_MOTION_CLASSES,
                                   isCollapsed ? "h-9 w-9" : "h-8 w-8",
                                   STUDIO_TILE_TINT.icon
