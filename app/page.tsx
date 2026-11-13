@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { LandingNav } from "@/components/landing/LandingNav";
 import { HeroSection } from "@/components/landing/HeroSection";
 import { MetricsStrip } from "@/components/landing/MetricsStrip";
@@ -12,13 +11,6 @@ import { ComparisonSection, ProofSection } from "@/components/landing/ProofSecti
 import { FaqSection, FinalCta, PricingSection } from "@/components/landing/PricingFaqCta";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { CursorGlow, ParticleField } from "@/components/landing/primitives";
-
-// R3F/WebGL needs a real DOM canvas — dynamically imported with ssr:false so
-// Next.js never tries to render it on the server.
-const DnaBackground = dynamic(
-  () => import("@/components/three/DnaBackground").then((mod) => mod.DnaBackground),
-  { ssr: false },
-);
 
 /**
  * Public landing page — "Cyber-Medical" dark surface, always (the `dark`
@@ -33,18 +25,25 @@ export default function LandingPage() {
     <div className="landing-root dark relative isolate flex min-h-dvh flex-col bg-slate-950 text-slate-100 antialiased selection:bg-cyan-400/30">
       {/* Dark page canvas while the landing is mounted (overscroll / iOS bounce never flashes white). */}
       <style>{"html,body{background:#020617}"}</style>
-      {/* Fixed backdrop layers: deep gradient, aurora orbs, neural particles, 3D DNA, cursor light. */}
+      {/* Fixed backdrop layers: deep gradient, aurora orbs, neural particles, cursor light. No WebGL (the 3D DNA is gone,
+          2026-11-13) and no filter: each orb is a radial gradient the size of the blurred disc it replaces (the disc's box,
+          widened by twice the old blur radius) — painted once, nothing for a phone to re-blur. */}
       <div aria-hidden className="fixed inset-0 -z-30 bg-[radial-gradient(ellipse_at_top,#0b1b33_0%,#020617_55%,#01030a_100%)]" />
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-20 overflow-hidden">
-        <div className="absolute -left-40 -top-40 h-[42rem] w-[42rem] rounded-full bg-cyan-500/10 blur-[140px]" />
-        <div className="absolute -right-40 top-1/3 h-[36rem] w-[36rem] rounded-full bg-violet-600/10 blur-[140px]" />
-        <div className="absolute bottom-0 left-1/3 h-[30rem] w-[30rem] rounded-full bg-emerald-500/[0.07] blur-[140px]" />
+        <div className="absolute -left-40 -top-40 h-[42rem] w-[42rem]">
+          <div className="absolute -inset-[17.5rem] bg-[radial-gradient(closest-side,rgba(6,182,212,0.094),rgba(6,182,212,0.05)_55%,transparent)]" />
+        </div>
+        <div className="absolute -right-40 top-1/3 h-[36rem] w-[36rem]">
+          <div className="absolute -inset-[17.5rem] bg-[radial-gradient(closest-side,rgba(124,58,237,0.088),rgba(124,58,237,0.05)_51%,transparent)]" />
+        </div>
+        <div className="absolute bottom-0 left-1/3 h-[30rem] w-[30rem]">
+          <div className="absolute -inset-[17.5rem] bg-[radial-gradient(closest-side,rgba(16,185,129,0.054),rgba(16,185,129,0.035)_46%,transparent)]" />
+        </div>
         <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.04)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
       </div>
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 opacity-60">
         <ParticleField />
       </div>
-      <DnaBackground />
       <CursorGlow />
 
       <LandingNav />

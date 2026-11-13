@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useInView, useReducedMotion } from "framer-motion";
 import {
   BookOpenText,
   Check,
@@ -292,11 +292,14 @@ export function AudioDemo({ language }: { language: Language }) {
           {playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="ml-0.5 h-4 w-4 fill-current" />}
         </button>
         <div className="flex h-8 flex-1 items-center gap-[3px]">
+          {/* The bars scale (no layout pass per frame) at a fixed height — centred in the row as before. */}
           {bars.map((h, i) => (
             <motion.span
               key={i}
               className="w-1 rounded-full bg-orange-300/80"
-              animate={playing && !reduce ? { height: [h * 0.4, h, h * 0.6, h] } : { height: h * 0.5 }}
+              style={{ height: h }}
+              initial={{ scaleY: 0.5 }}
+              animate={playing && !reduce ? { scaleY: [0.4, 1, 0.6, 1] } : { scaleY: 0.5 }}
               transition={playing && !reduce ? { duration: 0.9, repeat: Infinity, delay: i * 0.05 } : { duration: 0.3 }}
             />
           ))}
@@ -325,14 +328,17 @@ export function AudioDemo({ language }: { language: Language }) {
 export function CockpitDemo({ language }: { language: Language }) {
   const reduce = useReducedMotion();
   const [seconds, setSeconds] = useState(25 * 60);
+  // Ticks only while on screen — off screen it re-rendered every second for nobody.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inView = useInView(rootRef);
   useEffect(() => {
-    if (reduce) return;
+    if (reduce || !inView) return;
     const id = window.setInterval(() => setSeconds((s) => (s <= 0 ? 25 * 60 : s - 1)), 1000);
     return () => window.clearInterval(id);
-  }, [reduce]);
+  }, [reduce, inView]);
   const fr = language === "fr";
   return (
-    <div className="grid grid-cols-2 gap-2 text-xs">
+    <div ref={rootRef} className="grid grid-cols-2 gap-2 text-xs">
       <div className="col-span-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-slate-400">
         <Search className="h-3.5 w-3.5 text-cyan-300" />
         {fr ? "Demander à l'assistant…" : "Ask the assistant…"}

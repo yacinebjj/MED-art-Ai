@@ -3,6 +3,9 @@ import { updateSession } from "@/lib/supabase/middleware";
 import { AUDIO_SMART_NOTES_API, AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE, INFOGRAPHIC_API, INFOGRAPHIC_ENABLED } from "@/lib/feature-flags";
 import { DEVICE_COOKIE, DEVICE_COOKIE_OPTIONS, DEVICE_ID_RE } from "@/lib/device-cookie";
 
+/** A Supabase Auth PKCE code. */
+const AUTH_CODE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -20,6 +23,15 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  // Supabase Auth falls back to the Site URL (/?code=…) when a sign-in's redirect isn't on its allow list:
+  // finish the Google/Apple/e-mail sign-in at /auth/callback instead of leaving the student logged out on
+  // the landing page. Only a Supabase auth code (a UUID) is taken — no other `code` parameter.
+  if (pathname === "/" && AUTH_CODE_RE.test(request.nextUrl.searchParams.get("code") ?? "")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/callback";
     return NextResponse.redirect(url);
   }
 

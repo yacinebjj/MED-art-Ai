@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useInView, useReducedMotion } from "framer-motion";
 import { BarChart3, Brain, Check, CheckCheck, FileText, Flame, LayoutDashboard, MessagesSquare, Search, Sparkles, Stethoscope, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -53,7 +53,14 @@ function DashboardScreen({ fr }: { fr: boolean }) {
               <span className="font-bold text-white">{m.pct}%</span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-              <motion.div className={cn("h-full rounded-full bg-gradient-to-r", m.tint)} initial={{ width: 0 }} animate={{ width: `${m.pct}%` }} transition={{ duration: 1, delay: 0.15 * i, ease: "easeOut" }} />
+              {/* Grows by scaling (compositor), not by width (a layout pass every frame). */}
+              <motion.div
+                className={cn("h-full rounded-full bg-gradient-to-r", m.tint)}
+                style={{ width: `${m.pct}%`, originX: 0 }}
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: 1 }}
+                transition={{ duration: 1, delay: 0.15 * i, ease: "easeOut" }}
+              />
             </div>
           </div>
         ))}
@@ -69,11 +76,13 @@ function StudioScreen({ fr }: { fr: boolean }) {
   const reduce = useReducedMotion();
   const full = fr ? EXPLANATION_FR : EXPLANATION_EN;
   const [typed, setTyped] = useState(reduce ? full.length : 0);
+  const done = typed >= full.length;
+  // Types, then stops ticking (it used to keep waking the page 35 times a second once done).
   useEffect(() => {
-    if (reduce) return;
-    const id = window.setInterval(() => setTyped((n) => (n >= full.length ? n : n + 3)), 28);
+    if (reduce || done) return;
+    const id = window.setInterval(() => setTyped((n) => Math.min(full.length, n + 3)), 28);
     return () => window.clearInterval(id);
-  }, [full, reduce]);
+  }, [full, reduce, done]);
   return (
     <div className="flex h-full flex-col gap-2.5 p-3">
       <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] p-2">
@@ -181,17 +190,21 @@ export function HeroMockup() {
   const fr = language === "fr";
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [paused, setPaused] = useState(false);
+  // Cycles only while on screen: scrolled past the hero, the demo rests instead of re-rendering for nobody.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inView = useInView(rootRef);
+  const cycling = !paused && inView;
 
   useEffect(() => {
-    if (paused) return;
+    if (!cycling) return;
     const id = window.setInterval(() => {
       setScreen((current) => SCREENS[(SCREENS.findIndex((s) => s.id === current) + 1) % SCREENS.length].id);
     }, CYCLE_MS);
     return () => window.clearInterval(id);
-  }, [paused]);
+  }, [cycling]);
 
   return (
-    <div className="relative" onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)}>
+    <div ref={rootRef} className="relative" onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)}>
       <div aria-hidden className="absolute -inset-10 -z-10 rounded-[3rem] bg-[conic-gradient(from_180deg_at_50%_50%,rgba(34,211,238,0.35),rgba(139,92,246,0.3),rgba(16,185,129,0.25),rgba(34,211,238,0.35))] opacity-60 blur-3xl" />
       <TiltCard max={7} className="rounded-[1.75rem]">
         <div className="overflow-hidden rounded-[1.75rem] border border-white/15 bg-slate-950/80 shadow-[0_40px_120px_-30px_rgba(34,211,238,0.45)] backdrop-blur-xl">
@@ -229,9 +242,9 @@ export function HeroMockup() {
             <AnimatePresence mode="wait">
               <motion.div
                 key={screen}
-                initial={{ opacity: 0, y: 12, filter: "blur(6px)" }}
-                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                exit={{ opacity: 0, y: -8, filter: "blur(6px)" }}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.35 }}
                 className="absolute inset-0"
               >
@@ -242,33 +255,36 @@ export function HeroMockup() {
             </AnimatePresence>
           </div>
           {/* Cycle progress */}
-          <div className="h-0.5 bg-white/5">
-            <motion.div key={`${screen}-${paused}`} className="h-full bg-gradient-to-r from-cyan-400 to-violet-400" initial={{ width: "0%" }} animate={{ width: paused ? "0%" : "100%" }} transition={{ duration: CYCLE_MS / 1000, ease: "linear" }} />
+          {/* The time left on this screen: a scale on the compositor, not a width animated every frame. */}
+          <div className="h-0.5 overflow-hidden bg-white/5">
+            {cycling && (
+              <div
+                key={screen}
+                className="h-full origin-left bg-gradient-to-r from-cyan-400 to-violet-400"
+                style={{ animation: `hero-progress ${CYCLE_MS}ms linear forwards` }}
+              />
+            )}
           </div>
         </div>
       </TiltCard>
 
-      {/* Floating depth cards */}
-      <motion.div
+      {/* Floating depth cards — a CSS bob on the compositor (they were endless JavaScript loops). */}
+      <div
         aria-hidden
-        animate={{ y: [0, -10, 0] }}
-        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute -left-4 top-16 hidden rounded-2xl border border-white/15 bg-slate-900/80 px-3 py-2 text-xs text-white shadow-2xl backdrop-blur-xl sm:block lg:-left-10"
+        className="absolute -left-4 top-16 hidden rounded-2xl border border-white/15 bg-slate-900/80 px-3 py-2 text-xs text-white shadow-2xl backdrop-blur-xl [animation:hero-bob-up_5s_ease-in-out_infinite] motion-reduce:[animation:none] sm:block lg:-left-10"
       >
         <span className="flex items-center gap-1.5 font-bold">
           <Flame className="h-4 w-4 text-orange-400" /> {fr ? "Série : 12 jours" : "Streak: 12 days"}
         </span>
-      </motion.div>
-      <motion.div
+      </div>
+      <div
         aria-hidden
-        animate={{ y: [0, 12, 0] }}
-        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
-        className="absolute -right-3 bottom-20 hidden rounded-2xl border border-emerald-400/30 bg-emerald-950/70 px-3 py-2 text-xs text-emerald-100 shadow-2xl backdrop-blur-xl sm:block lg:-right-8"
+        className="absolute -right-3 bottom-20 hidden rounded-2xl border border-emerald-400/30 bg-emerald-950/70 px-3 py-2 text-xs text-emerald-100 shadow-2xl backdrop-blur-xl [animation:hero-bob-down_6s_ease-in-out_0.6s_infinite] motion-reduce:[animation:none] sm:block lg:-right-8"
       >
         <span className="flex items-center gap-1.5 font-bold">
           <Check className="h-4 w-4 text-emerald-300" /> {fr ? "40 QCM prêts" : "40 MCQs ready"}
         </span>
-      </motion.div>
+      </div>
     </div>
   );
 }

@@ -7,13 +7,20 @@ import { motion, useReducedMotion } from "framer-motion";
 import { Logo } from "@/components/layout/Logo";
 import { CursorGlow, ParticleField, TiltCard } from "@/components/landing/primitives";
 import { cn } from "@/lib/utils";
+import type { OAuthProviderId } from "@/lib/oauth-providers";
 import { useLanguage } from "@/providers/LanguageProvider";
 
 const AuthShellContext = createContext(false);
+const OAuthProvidersContext = createContext<readonly OAuthProviderId[] | null>(null);
 
 /** True inside the persistent auth shell (app/(auth)/layout.tsx) — AuthLayout then renders only its header + form. */
 export function useInAuthShell(): boolean {
   return useContext(AuthShellContext);
+}
+
+/** The Google/Apple providers enabled in Supabase, as the server read them for this page (null outside the shell). */
+export function useShellOAuthProviders(): readonly OAuthProviderId[] | null {
+  return useContext(OAuthProvidersContext);
 }
 
 /** Keeps only a ring the width of the element's padding (content-box XOR border-box). */
@@ -35,17 +42,19 @@ const TABS = [
  * Inscription is a client transition: the background, logo and card frame
  * stay put; only the form inside changes and the card resizes smoothly).
  *
- * Performance budget, mobile first:
- *  - no WebGL here (the 3D DNA scene is gone from the auth pages);
- *  - background = static CSS glows + one small canvas particle field
- *    (34 points on phones, paused off-screen / in background tabs);
+ * Performance budget, mobile first (2026-11-13: nothing moves on a phone
+ * unless the student moves it):
+ *  - no WebGL anywhere (the 3D DNA scene is gone from the app);
+ *  - background = static gradient glows (no filter blur) + one small canvas
+ *    particle field: a still frame on phones and tablets, a 30 fps drift on
+ *    desktop pointers (components/landing/primitives.tsx);
  *  - backdrop-blur ONLY from md: up — blurring over an animated canvas
  *    re-composites the whole card every frame, the classic mobile-GPU killer;
- *  - the laser border is a CSS transform rotation (compositor only),
- *    disabled under prefers-reduced-motion; tilt and cursor light are
+ *  - the laser border turns (a CSS transform) on desktop pointers only, and
+ *    never under prefers-reduced-motion; tilt and cursor light are
  *    desktop-pointer only.
  */
-export function AuthShell({ children }: { children: ReactNode }) {
+export function AuthShell({ children, oauthProviders = null }: { children: ReactNode; oauthProviders?: readonly OAuthProviderId[] | null }) {
   const pathname = usePathname();
   const { language } = useLanguage();
   const reduce = useReducedMotion();
@@ -71,13 +80,20 @@ export function AuthShell({ children }: { children: ReactNode }) {
 
   return (
     <AuthShellContext.Provider value>
+      <OAuthProvidersContext.Provider value={oauthProviders}>
       <div className="relative isolate flex min-h-dvh w-full flex-col items-center overflow-x-hidden bg-slate-950 px-4 pb-10 pt-6 text-slate-100 sm:justify-center sm:px-6 sm:py-10">
         <style>{"html,body{background:#020617}"}</style>
         {/* Background — static layers + one light particle canvas. */}
         <div aria-hidden className="fixed inset-0 -z-20 bg-[radial-gradient(ellipse_at_top,#0b1b33_0%,#020617_60%,#01030a_100%)]" />
         <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-          <div className="absolute -left-40 -top-40 h-[34rem] w-[34rem] rounded-full bg-cyan-500/[0.12] blur-[120px]" />
-          <div className="absolute -bottom-40 -right-32 h-[30rem] w-[30rem] rounded-full bg-violet-600/[0.12] blur-[120px]" />
+          {/* Each glow: a radial gradient the size of the blurred disc it replaces (its box widened by twice the
+              old 120px blur) — painted once; a 120px filter blur was a heavy first paint on iPhones. */}
+          <div className="absolute -left-40 -top-40 h-[34rem] w-[34rem]">
+            <div className="absolute -inset-[15rem] bg-[radial-gradient(closest-side,rgba(6,182,212,0.11),rgba(6,182,212,0.06)_53%,transparent)]" />
+          </div>
+          <div className="absolute -bottom-40 -right-32 h-[30rem] w-[30rem]">
+            <div className="absolute -inset-[15rem] bg-[radial-gradient(closest-side,rgba(124,58,237,0.105),rgba(124,58,237,0.06)_50%,transparent)]" />
+          </div>
           <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.045)_1px,transparent_1px)] bg-[size:64px_64px] [mask-image:radial-gradient(ellipse_at_center,black_25%,transparent_70%)]" />
           <div className="absolute inset-0 opacity-70">
             <ParticleField />
@@ -126,7 +142,9 @@ export function AuthShell({ children }: { children: ReactNode }) {
                   {children}
                 </motion.div>
               </div>
-              {/* Laser border: a rotating conic gradient clipped to a 1.5px ring (mask), drawn above the card. */}
+              {/* Laser border: a conic gradient clipped to a 1.5px ring (mask), drawn above the card. It turns on
+                  desktop pointers only: under a mask, a moving layer is an offscreen pass on every frame — on an
+                  iPhone, while the student types. Phones get the same ring, still. */}
               <span
                 aria-hidden
                 className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.75rem] p-[1.5px]"
@@ -134,7 +152,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
                 style={RING_MASK_STYLE}
               >
                 <span className="absolute left-1/2 top-1/2 aspect-square w-[220%] -translate-x-1/2 -translate-y-1/2">
-                  <span className="block h-full w-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(34,211,238,0.95)_40deg,transparent_95deg,transparent_180deg,rgba(139,92,246,0.9)_220deg,transparent_275deg)] motion-safe:animate-[spin_5s_linear_infinite]" />
+                  <span className="block h-full w-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(34,211,238,0.95)_40deg,transparent_95deg,transparent_180deg,rgba(139,92,246,0.9)_220deg,transparent_275deg)] [@media(hover:hover)_and_(pointer:fine)]:motion-safe:animate-[spin_5s_linear_infinite]" />
                 </span>
               </span>
             </motion.div>
@@ -143,6 +161,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
           <p className="mt-8 text-center text-xs text-slate-500">© {new Date().getFullYear()} Med Art AI — Médecine · Pharmacie · Chirurgie Dentaire</p>
         </div>
       </div>
+      </OAuthProvidersContext.Provider>
     </AuthShellContext.Provider>
   );
 }

@@ -149,11 +149,15 @@ export function SimulatorSection() {
                 transition={stage === "absorbing" || stage === "generating" ? { duration: 1.4, repeat: Infinity, delay: ring * 0.45 } : { duration: 0.4 }}
               />
             ))}
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: stage === "generating" ? 2 : 12, repeat: Infinity, ease: "linear" }}
-              className="absolute inset-3 rounded-full bg-[conic-gradient(from_0deg,rgba(34,211,238,0.9),rgba(139,92,246,0.9),rgba(16,185,129,0.9),rgba(34,211,238,0.9))] opacity-80 blur-[2px]"
-            />
+            {/* CSS turns on the compositor (it was an endless JavaScript loop): a slow idle turn on desktop
+                pointers, a fast spin on every device while "generating" — paused in between, never removed
+                or retimed, so the ring never jumps. Phones keep it still the rest of the time. */}
+            <div aria-hidden className="absolute inset-3 [@media(hover:hover)_and_(pointer:fine)]:motion-safe:animate-[spin_12s_linear_infinite]">
+              <div
+                className="h-full w-full rounded-full bg-[conic-gradient(from_0deg,rgba(34,211,238,0.9),rgba(139,92,246,0.9),rgba(16,185,129,0.9),rgba(34,211,238,0.9))] opacity-80 blur-[2px] animate-[spin_2s_linear_infinite] motion-reduce:animate-none"
+                style={{ animationPlayState: stage === "generating" ? "running" : "paused" }}
+              />
+            </div>
             <div className="relative flex h-24 w-24 flex-col items-center justify-center rounded-full bg-slate-950 shadow-[0_0_50px_rgba(34,211,238,0.6)]">
               <Sparkles className="h-7 w-7 text-cyan-300" />
               <span className="mt-1 text-[10px] font-bold uppercase tracking-widest text-cyan-200">

@@ -914,6 +914,38 @@ textarea,
   animation: hero-rise 0.5s var(--ease-glide) both;
 }
 
+/* The hero demo (components/landing/HeroMockup.tsx), on the compositor — no
+   JavaScript loop, no layout or paint per frame (2026-11-13, iPhone fluidity):
+   the time left on a screen, and the two floating cards' bob. */
+@keyframes hero-progress {
+  from {
+    scale: 0 1;
+  }
+  to {
+    scale: 1 1;
+  }
+}
+
+@keyframes hero-bob-up {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -10px;
+  }
+}
+
+@keyframes hero-bob-down {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 12px;
+  }
+}
+
 /* The touch half of the tap-flash rule above. `:not(:focus-visible)` raises
    it above Tailwind's `focus:ring-*` utilities, which the build emits AFTER
    this file's rules at the same specificity — without it a tapped button
@@ -927,8 +959,8 @@ textarea,
 }
 
 /* Touch devices: every backdrop-filter re-blurs the always-animating aurora
-   and WebGL DNA canvas beneath it on every frame, which is what made taps
-   stutter. Flat, more opaque tints instead — same colors, no blur. */
+   (and the WebGL DNA canvas, removed 2026-11-13) beneath it on every frame,
+   which is what made taps stutter. Flat, more opaque tints instead — same colors, no blur. */
 @media (hover: none) {
   *,
   *::before,
@@ -960,9 +992,8 @@ textarea,
 
   /* The exception: glass chrome keeps its real blur. Each bar is one small
      surface over layers that no longer move on touch (the aurora is frozen
-     below and the WebGL DNA never mounts there — components/three/
-     DnaBackground.tsx), so the stutter that motivated this block can't come
-     back through it. A class beats `*` between two !important rules. */
+     below; the WebGL DNA is gone), so the stutter that motivated this block
+     can't come back through it. A class beats `*` between two !important rules. */
   .glass-chrome {
     backdrop-filter: blur(24px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
@@ -971,7 +1002,7 @@ textarea,
   /* The floating layers of 2026-11-10 keep theirs too, for the same reason:
      a notification pill, a message's menu, the picture viewer's backdrop and
      its two controls all sit over layers that no longer animate on touch
-     (the aurora is frozen, the WebGL DNA never mounts), so the stutter this
+     (the aurora is frozen, the WebGL DNA is gone), so the stutter this
      block cured can't come back through them. Their Tailwind blur, written
      out: backdrop-blur-lg / -md / -md / -xl. */
   .toast-pill {
@@ -2521,8 +2552,7 @@ html.theme-reveal::view-transition-new(root) {
 /* Desktop: the background grid holds still at its mid-pulse opacity. Its 20 s
    pulse (0.06 ↔ 0.1 — invisible to the eye) kept every dashboard page
    compositing, and every glass bar above it re-blurring, on every frame —
-   even on the weakest laptops, where the WebGL DNA never runs. Code Red
-   2026-11-12. */
+   even on the weakest laptops. Code Red 2026-11-12. */
 @media (hover: hover) {
   .aurora-mesh-bg.animate-mesh-pulse {
     animation: none;

@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { motion, useAnimationControls } from "framer-motion";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -13,10 +13,17 @@ import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
 import { AuthField } from "./AuthField";
 import { AuthSubmitButton } from "./AuthSubmitButton";
+import { SocialAuthButtons } from "./SocialAuthButtons";
 
+/**
+ * The query is read from window.location, never useSearchParams(): that hook
+ * made Next render this whole form on the client only (the page's HTML had
+ * an empty card until the JavaScript ran — a blank second on a slow phone).
+ * The form is now in the HTML; `next` is only needed on submit and for the
+ * sign-up link, which picks it up right after mount.
+ */
 export function LoginForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { language } = useLanguage();
   const { toast } = useToast();
   const shake = useAnimationControls();
@@ -25,6 +32,28 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [registerHref, setRegisterHref] = useState("/register");
+  const checkedQuery = useRef(false);
+
+  useEffect(() => {
+    if (checkedQuery.current) return;
+    checkedQuery.current = true;
+    const params = new URLSearchParams(window.location.search);
+    // An invite link (?next=/dashboard/billing/pool/<code>) survives the switch to sign-up.
+    if (params.get("next")) setRegisterHref(`/register?next=${encodeURIComponent(sanitizeRedirectPath(params.get("next")))}`);
+    // /auth/callback sends a failed or cancelled Google/Apple sign-in (or an expired e-mail link) back here.
+    if (params.get("error") === "auth") {
+      toast({
+        variant: "error",
+        title: language === "fr" ? "Connexion non aboutie" : "Sign-in didn't go through",
+        description: language === "fr" ? "Réessaie, ou connecte-toi avec ton e-mail et ton mot de passe." : "Try again, or sign in with your e-mail and password.",
+      });
+      // Off the address bar, so a refresh doesn't say it again.
+      params.delete("error");
+      const query = params.toString();
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    }
+  }, [language, toast]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -46,7 +75,7 @@ export function LoginForm() {
     // (router.push on a cross-origin URL performs a genuine hard
     // location.assign in Next's App Router, no trick required beyond a
     // crafted `?next=https://evil.com` link).
-    const next = sanitizeRedirectPath(searchParams.get("next"));
+    const next = sanitizeRedirectPath(new URLSearchParams(window.location.search).get("next"));
     router.push(next);
     router.refresh();
   }
@@ -56,6 +85,8 @@ export function LoginForm() {
 
   return (
     <motion.form onSubmit={handleSubmit} animate={shake} className="space-y-4">
+      <SocialAuthButtons mode="login" />
+
       <AuthField
         label="Adresse e-mail"
         name="email"
@@ -114,7 +145,7 @@ export function LoginForm() {
 
       <p className="pt-2 text-center text-sm text-slate-400">
         Pas encore de compte ?{" "}
-        <Link href={searchParams.get("next") ? `/register?next=${encodeURIComponent(sanitizeRedirectPath(searchParams.get("next")))}` : "/register"} className="font-semibold text-cyan-300 hover:underline">
+        <Link href={registerHref} className="font-semibold text-cyan-300 hover:underline">
           Inscris-toi
         </Link>
       </p>

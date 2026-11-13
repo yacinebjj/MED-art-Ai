@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 import { AuthField } from "./AuthField";
 import { AuthSubmitButton } from "./AuthSubmitButton";
+import { SocialAuthButtons } from "./SocialAuthButtons";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
@@ -267,6 +268,8 @@ export function RegisterForm() {
         animate="visible"
         variants={{ visible: { transition: { staggerChildren: 0.08 } } }}
       >
+      {/* One tap with Google/Apple (shown only once enabled in Supabase): the cursus is then picked on the dashboard. */}
+      <SocialAuthButtons mode="register" />
 
       <motion.div variants={sectionVariants} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="space-y-4">
         <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-300/80">

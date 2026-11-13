@@ -13,14 +13,18 @@ import { cn } from "@/lib/utils";
 
 export const EASE = [0.22, 1, 0.36, 1] as const;
 
-/** Fade + rise when scrolled into view (once). */
+/**
+ * Fade + rise when scrolled into view (once). Opacity and position only: the
+ * blur it also animated repainted every revealing section on every frame —
+ * a stutter while scrolling, worst on iPhones.
+ */
 export function Reveal({ children, delay = 0, className, y = 24 }: { children: ReactNode; delay?: number; className?: string; y?: number }) {
   const reduce = useReducedMotion();
   return (
     <motion.div
       className={className}
-      initial={reduce ? false : { opacity: 0, y, filter: "blur(6px)" }}
-      whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+      initial={reduce ? false : { opacity: 0, y }}
+      whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-80px" }}
       transition={{ duration: 0.7, delay, ease: EASE }}
     >
@@ -148,18 +152,25 @@ export function CursorGlow() {
 }
 
 /**
- * Lightweight canvas particle field ("neurons"): dots drifting with links
- * between close neighbours. ~70 particles, paused when the tab is hidden,
- * disabled for reduced motion.
+ * Lightweight canvas particle field ("neurons"): dots with links between
+ * close neighbours.
+ *
+ * PERFORMANCE (2026-11-13, "micro-stutters on iPhone"): a canvas redrawn on
+ * every frame is main-thread work that competes with the page's own
+ * scrolling. Phones, tablets and calm motion get ONE still frame (redrawn
+ * only on resize). Desktop pointers get the slow drift at ~30 fps (a drift
+ * this slow reads the same at half the frames), paused off screen and in a
+ * hidden tab.
  */
 export function ParticleField({ className }: { className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reduce = useReducedMotion();
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || reduce) return;
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const animated = !reduce && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
     let raf = 0;
     let width = 0;
     let height = 0;
@@ -172,21 +183,8 @@ export function ParticleField({ className }: { className?: string }) {
       vy: (Math.random() - 0.5) * 0.00035,
       r: Math.random() * 1.4 + 0.4,
     }));
-    const resize = () => {
-      width = canvas.clientWidth;
-      height = canvas.clientHeight;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    resize();
-    window.addEventListener("resize", resize);
-    const tick = () => {
+    const draw = () => {
       ctx.clearRect(0, 0, width, height);
-      for (const p of particles) {
-        p.x = (p.x + p.vx + 1) % 1;
-        p.y = (p.y + p.vy + 1) % 1;
-      }
       for (let i = 0; i < particles.length; i++) {
         const a = particles[i];
         const ax = a.x * width;
@@ -210,12 +208,47 @@ export function ParticleField({ className }: { className?: string }) {
         ctx.arc(ax, ay, a.r, 0, Math.PI * 2);
         ctx.fill();
       }
+    };
+    const resize = () => {
+      const nextWidth = canvas.clientWidth;
+      const nextHeight = canvas.clientHeight;
+      // iOS fires resize as its toolbars collapse while scrolling: a height-only nudge keeps
+      // the bitmap (a few % of stretch on tiny dots) instead of reallocating it mid-scroll.
+      if (width > 0 && nextWidth === width && Math.abs(nextHeight - height) < 160) return;
+      width = nextWidth;
+      height = nextHeight;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw();
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    if (!animated) {
+      return () => window.removeEventListener("resize", resize);
+    }
+
+    const FRAME_MS = 1000 / 30;
+    let last = 0;
+    const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
+      // A few ms of slack: on a 60 Hz screen every other frame lands ~33.3 ms on, a hair either side of
+      // FRAME_MS — a strict test skips half of them and the drift falls to 20 fps.
+      if (now - last < FRAME_MS - 4) return;
+      // Frames skipped in between still move the dots by the time that really passed.
+      const steps = last === 0 ? 1 : Math.min(4, Math.round((now - last) / (1000 / 60)));
+      last = now;
+      for (const p of particles) {
+        p.x = (p.x + p.vx * steps + 1) % 1;
+        p.y = (p.y + p.vy * steps + 1) % 1;
+      }
+      draw();
     };
     // Only animate while the canvas is on screen AND the tab is visible.
     let onScreen = true;
     const sync = () => {
       cancelAnimationFrame(raf);
+      last = 0;
       if (onScreen && document.visibilityState === "visible") raf = requestAnimationFrame(tick);
     };
     const observer = new IntersectionObserver(([entry]) => {

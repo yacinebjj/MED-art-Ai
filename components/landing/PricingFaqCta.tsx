@@ -46,13 +46,17 @@ export function PricingSection() {
         {plans.map((plan, index) => (
           <Reveal key={plan.tier} delay={index * 0.1} className={cn("relative h-full", plan.featured && "lg:-translate-y-4")}>
             {plan.featured && (
-              <motion.div
-                aria-hidden
-                className="pointer-events-none absolute -inset-[2px] rounded-[1.6rem] bg-[conic-gradient(from_var(--angle),#22d3ee,#8b5cf6,#10b981,#22d3ee)] opacity-80 blur-[3px]"
-                animate={{ ["--angle" as string]: ["0deg", "360deg"] }}
-                transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-                style={{ ["--angle" as string]: "0deg" }}
-              />
+              // The featured plan's light rim: a conic gradient TURNED on the compositor inside a
+              // rounded clip, the card covering its centre. It used to animate the gradient's angle
+              // from JavaScript and repaint it, blurred, on every frame — forever, even off screen,
+              // which kept the whole landing busy (2026-11-13). Still on phones and in calm motion. The 80%
+              // opacity sits on the turning layer itself: a group opacity around a moving layer costs an
+              // offscreen pass on every frame.
+              <div aria-hidden className="pointer-events-none absolute -inset-[2px] overflow-hidden rounded-[1.6rem] shadow-[0_0_22px_-6px_rgba(34,211,238,0.48)]">
+                <span className="absolute left-1/2 top-1/2 aspect-square w-[260%] -translate-x-1/2 -translate-y-1/2">
+                  <span className="block h-full w-full bg-[conic-gradient(#22d3ee,#8b5cf6,#10b981,#22d3ee)] opacity-80 [@media(hover:hover)_and_(pointer:fine)]:motion-safe:animate-[spin_6s_linear_infinite]" />
+                </span>
+              </div>
             )}
             <div className="relative h-full">
               <PricingTierCard
