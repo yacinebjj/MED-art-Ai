@@ -40,6 +40,23 @@ where s.plan = 'freemium' and s.free_courses_used = 0
 
 -- Atomic check-and-increment on a whitelisted counter. Returns the new value,
 -- or NULL when the cap is reached (same contract as reserve_generations_used).
+--
+-- FUNCTION  reserve_usage_counter(p_user_id text, p_column text,
+--             p_cap integer) → integer
+--   Purpose     Atomic check-and-increment on one of five subscriptions
+--               counters, chosen by name with p_column: courses_created_used,
+--               exams_used, syntheses_used, free_courses_used or
+--               free_messages_used. The counter goes up by 1 only while it is
+--               below p_cap.
+--   Returns     The counter's new value. NULL when nothing was updated: the
+--               cap is reached, or p_user_id has no subscriptions row.
+--   Notes       Any other p_column raises an exception. The name only reaches
+--               the query after that whitelist check, quoted as an identifier
+--               (format %I).
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/subscription.ts
 create or replace function reserve_usage_counter(p_user_id text, p_column text, p_cap integer)
 returns integer
 language plpgsql
@@ -59,6 +76,16 @@ end;
 $$;
 
 -- Only for a generation that FAILED (never for a deletion).
+--
+-- FUNCTION  refund_usage_counter(p_user_id text, p_column text) → void
+--   Purpose     Gives one unit back on one of the same five counters
+--               (p_column): subtracts 1, never going below 0.
+--   Returns     Nothing.
+--   Notes       Any other p_column raises an exception.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/subscription.ts
 create or replace function refund_usage_counter(p_user_id text, p_column text)
 returns void
 language plpgsql
@@ -73,6 +100,20 @@ end;
 $$;
 
 -- Audio → Smart Notes: 1 per day AND 30 per month, both checked in one statement.
+--
+-- FUNCTION  reserve_audio_session(p_user_id text, p_daily_cap integer,
+--             p_monthly_cap integer) → integer
+--   Purpose     Consumes one Audio → Smart Notes session, atomically: a
+--               single UPDATE that adds 1 to both audio_daily_used and
+--               audio_used, only while the first is below p_daily_cap AND the
+--               second is below p_monthly_cap.
+--   Returns     The new value of audio_used (the monthly counter). No value
+--               (NULL) when nothing was updated: one of the two caps is
+--               reached, or p_user_id has no subscriptions row.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/subscription.ts
 create or replace function reserve_audio_session(p_user_id text, p_daily_cap integer, p_monthly_cap integer)
 returns integer
 language sql
@@ -83,6 +124,14 @@ as $$
   returning audio_used;
 $$;
 
+-- FUNCTION  refund_audio_session(p_user_id text) → void
+--   Purpose     Gives one Audio → Smart Notes session back: subtracts 1 from
+--               both audio_daily_used and audio_used, neither going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/subscription.ts
 create or replace function refund_audio_session(p_user_id text)
 returns void
 language sql
@@ -174,6 +223,25 @@ create policy "Deny all client access" on billing_refund_requests for all using 
 -- Holds one seat for a member about to pay (30 min), so a pool can never
 -- take more payments than it has seats. Returns 'held' | 'already_paid' |
 -- 'full' | 'closed'.
+--
+-- FUNCTION  billing_pool_hold_seat(p_pool_id uuid, p_user_id uuid,
+--             p_hold_minutes integer) → text
+--   Purpose     Reserves one seat in a pooled purchase for a member who is
+--               about to pay, for p_hold_minutes. The pool row is locked
+--               first, so two members can never take the last seat at the
+--               same moment. A seat counts as taken when it is paid,
+--               activated, or held by another member with the hold still
+--               running.
+--   Returns     'closed': the pool does not exist, is not in 'pooled' mode,
+--               is not open, or is past its deadline.
+--               'already_paid': this member is already paid or activated.
+--               'full': every seat is taken by other members.
+--               'held': the seat is reserved (a new hold, or this member's
+--               hold renewed).
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/billing-pools.ts
 create or replace function billing_pool_hold_seat(p_pool_id uuid, p_user_id uuid, p_hold_minutes integer)
 returns text
 language plpgsql
@@ -205,6 +273,14 @@ begin
 end;
 $$;
 
+-- FUNCTION  billing_pool_attach_checkout(p_pool_id uuid, p_user_id uuid,
+--             p_checkout_id text) → void
+--   Purpose     Stores the Chargily checkout id on a member's seat, as long
+--               as that seat is still on hold.
+--   Returns     Nothing. No seat on hold for that member: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
 create or replace function billing_pool_attach_checkout(p_pool_id uuid, p_user_id uuid, p_checkout_id text)
 returns void
 language sql
@@ -218,6 +294,32 @@ $$;
 -- 'complete' = this payment filled the last seat: the caller activates
 -- every paid member. 'refund' = the pool was closed / full when the money
 -- arrived: a refund request is recorded, nothing is activated.
+--
+-- FUNCTION  billing_pool_mark_paid(p_pool_id uuid, p_user_id uuid,
+--             p_checkout_id text, p_amount integer) → text
+--   Purpose     Records a confirmed payment for a seat of a pooled purchase,
+--               with the pool row and the member row locked. The payment is
+--               accepted while the pool is open, before its deadline, and
+--               with a seat still unpaid; otherwise it is turned into a
+--               refund request. A member who paid without a seat row gets one
+--               created first.
+--   Returns     'unknown': the pool does not exist.
+--               'duplicate': this member is already paid, activated,
+--               refund_pending or refunded, and nothing changes.
+--               'refund': the payment cannot be accepted (see Purpose); the
+--               member becomes refund_pending and a refund request is
+--               recorded, with reason pool_overflow when every seat was
+--               already paid, pool_expired otherwise.
+--               'complete': the payment is recorded and filled the last seat,
+--               so the pool becomes complete (the caller then activates every
+--               paid member).
+--               'paid': the payment is recorded and seats remain.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/billing-pools.ts
+--   Redefined   in supabase/migrations/20261021_group_pool_hardening.sql (a
+--               later migration).
 create or replace function billing_pool_mark_paid(p_pool_id uuid, p_user_id uuid, p_checkout_id text, p_amount integer)
 returns text
 language plpgsql
@@ -268,6 +370,20 @@ $$;
 
 -- Closes every pooled purchase that missed its 7-day deadline: paid members
 -- get an automatic refund request, holds are released. Returns pools closed.
+--
+-- FUNCTION  billing_pools_expire() → integer
+--   Purpose     Closes every open pooled purchase that is past its deadline:
+--               the pool becomes 'expired', each paid member becomes
+--               refund_pending and gets a refund request (reason
+--               pool_expired), and each seat still on hold is released. Pools
+--               locked by another transaction are skipped, not waited for.
+--   Returns     How many pools were closed.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/billing-pools.ts
+--   Redefined   in supabase/migrations/20261021_group_pool_hardening.sql (a
+--               later migration).
 create or replace function billing_pools_expire()
 returns integer
 language plpgsql
@@ -294,6 +410,21 @@ $$;
 
 -- Leader mode: a seat taken with the invite code (no payment). Returns
 -- 'joined' | 'already' | 'full' | 'closed'.
+--
+-- FUNCTION  billing_pool_join_leader(p_pool_id uuid, p_user_id uuid) → text
+--   Purpose     Leader mode (one student paid for every seat): gives another
+--               student a seat without payment. The pool row is locked first,
+--               so the seats cannot be over-filled.
+--   Returns     'closed': the pool does not exist, is not in 'leader' mode,
+--               is not complete, or its period has ended (or has no end
+--               date).
+--               'already': this student already has a row in the pool.
+--               'full': the activated members already fill every seat.
+--               'joined': the student is added as an activated member.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/billing-pools.ts
 create or replace function billing_pool_join_leader(p_pool_id uuid, p_user_id uuid)
 returns text
 language plpgsql

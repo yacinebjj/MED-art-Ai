@@ -12,6 +12,21 @@ alter table public.profiles
 
 -- Atomically reserves one regeneration. Returns the post-increment count, or
 -- NULL (no row) when the student already reached p_cap.
+--
+-- FUNCTION  reserve_module_exam_regenerate(p_user_id uuid, p_cap integer)
+--             → integer
+--   Purpose     Consumes one « Examen de Module » regeneration from the
+--               student's allowance, atomically: a single UPDATE that adds 1
+--               to profiles.module_exam_regenerations_used only while it is
+--               below p_cap.
+--   Returns     The new count. No value (NULL) when nothing was updated: the
+--               cap is reached, or p_user_id has no profiles row.
+--   Runs as     the caller (SECURITY INVOKER); language sql;
+--               search_path = public.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/exam-generation.ts
+--   Also in     supabase/schema.sql
 create or replace function public.reserve_module_exam_regenerate(p_user_id uuid, p_cap integer)
 returns integer
 language sql
@@ -26,6 +41,18 @@ as $$
 $$;
 
 -- Gives a reservation back when the generation failed downstream.
+--
+-- FUNCTION  refund_module_exam_regenerate(p_user_id uuid) → void
+--   Purpose     Gives one « Examen de Module » regeneration back (for a
+--               reservation whose generation then failed): subtracts 1 from
+--               profiles.module_exam_regenerations_used, never going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER); language sql;
+--               search_path = public.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   app/api/exam/generate/route.ts, app/api/exam/run/route.ts
+--   Also in     supabase/schema.sql
 create or replace function public.refund_module_exam_regenerate(p_user_id uuid)
 returns void
 language sql

@@ -83,6 +83,21 @@ on conflict (user_id) do nothing;
 -- billing_pool_mark_paid gives a confirmation that lands just after the
 -- hold): paid members get an automatic refund request, holds are released.
 -- Returns pools closed.
+--
+-- FUNCTION  billing_pools_expire() → integer
+--   Purpose     Closes every open pooled purchase that is past its deadline
+--               AND has no seat hold still running or ended less than 10
+--               minutes ago: the pool becomes 'expired', each paid member
+--               becomes refund_pending and gets a refund request (reason
+--               pool_expired), and each seat still on hold is released. Pools
+--               locked by another transaction are skipped, not waited for.
+--   Returns     How many pools were closed.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/billing-pools.ts
+--   Replaces    the definition in
+--               supabase/migrations/20261007_monetization.sql.
 create or replace function billing_pools_expire()
 returns integer
 language plpgsql
@@ -124,6 +139,33 @@ $$;
 -- New: past the deadline, a member who still held a seat (reserved before the
 -- deadline, hold running or ended less than 10 minutes ago) is accepted while
 -- the pool is open, instead of being refunded.
+--
+-- FUNCTION  billing_pool_mark_paid(p_pool_id uuid, p_user_id uuid,
+--             p_checkout_id text, p_amount integer) → text
+--   Purpose     Records a confirmed payment for a seat of a pooled purchase,
+--               with the pool row and the member row locked. The payment is
+--               accepted while the pool is open and a seat is still unpaid,
+--               either before the deadline or, past it, for a member whose
+--               seat hold is still running or ended less than 10 minutes ago;
+--               otherwise it is turned into a refund request. A member who
+--               paid without a seat row gets one created first.
+--   Returns     'unknown': the pool does not exist.
+--               'duplicate': this member is already paid, activated,
+--               refund_pending or refunded, and nothing changes.
+--               'refund': the payment cannot be accepted (see Purpose); the
+--               member becomes refund_pending and a refund request is
+--               recorded, with reason pool_overflow when every seat was
+--               already paid, pool_expired otherwise.
+--               'complete': the payment is recorded and filled the last seat,
+--               so the pool becomes complete (the caller then activates every
+--               paid member).
+--               'paid': the payment is recorded and seats remain.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/billing-pools.ts
+--   Replaces    the definition in
+--               supabase/migrations/20261007_monetization.sql.
 create or replace function billing_pool_mark_paid(p_pool_id uuid, p_user_id uuid, p_checkout_id text, p_amount integer)
 returns text
 language plpgsql

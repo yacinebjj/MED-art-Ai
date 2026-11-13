@@ -3,6 +3,109 @@
 -- All access happens server-side through the service-role key (see
 -- lib/supabase/server.ts), so RLS is enabled with no public policies:
 -- only the service role (which bypasses RLS) can read/write these tables.
+--
+-- ---------------------------------------------------------------------------
+-- HOW THIS FILE IS ORGANIZED
+-- ---------------------------------------------------------------------------
+-- This file is meant to be applied from top to bottom. A table's later
+-- changes are appended further down as separate blocks ("Migration: …",
+-- "Idempotent upgrades …") instead of being edited into its original
+-- CREATE TABLE. The ORDER of the statements is therefore part of their
+-- meaning: statements in this file must never be reordered.
+--
+-- To find something, search this file for:
+--   create table if not exists <name>    a table (47 in this file)
+--   FUNCTION  <name>                     a function's summary (46)
+--
+-- The other SQL files of this folder. Some repeat a block of this file,
+-- others define objects that exist only there:
+--   migrations/20261003_groups_last_read_at.sql
+--       chat_members.last_read_at and its index; chat_groups published to
+--       Realtime
+--   migrations/20261004_flashcard_push_cadence.sql
+--       profiles: flashcard reminder interval and last-sent time
+--   migrations/20261004_module_exam_regenerations.sql
+--       profiles.module_exam_regenerations_used and its reserve / refund
+--       functions
+--   migrations/20261005_profiles_avatar_url.sql
+--       profiles.avatar_url
+--   migrations/20261006_user_sync_documents.sql
+--       user_sync_documents (cross-device sync)
+--   migrations/20261007_monetization.sql
+--       usage counters and their functions, audio sessions, billing pools
+--       (tables and functions)
+--   migrations/20261008_ai_generation_ledger.sql
+--       ai_generation_ledger, its hit counter and its stats view
+--   migrations/20261009_exam_harvest_content_hash.sql
+--       exam_harvested_qcms.content_hash and its index
+--   migrations/20261010_pricing_v3_cohorte_40.sql
+--       billing_pools: sizes 5, 15, 40
+--   migrations/20261011_device_limit.sql
+--       user_devices, user_device_replacements and their two functions
+--   migrations/20261011_pricing_v4_group_10.sql
+--       billing_pools: sizes 5, 10, 15, 40
+--   migrations/20261021_group_pool_hardening.sql
+--       pool sizes, refund reasons, missing subscriptions rows, deadline
+--       grace (two functions redefined)
+--   maintenance/2026-10-13_end_of_testing_preview.sql
+--       read-only: counts what the reset below would delete
+--   maintenance/2026-10-13_end_of_testing_reset.sql
+--       IRREVERSIBLE: deletes the testing period's data
+--
+-- TABLES, in the order this file creates them
+--   courses_cache, subscriptions, payments, profiles, user_courses,
+--   course_content_cache, modules, courses, course_chat_history,
+--   qcm_attempts, course_source_chunks, course_explication_chapters,
+--   course_chunks, curriculum_specialties, curriculum_academic_years,
+--   curriculum_teaching_units, curriculum_modules, user_module_flashcards,
+--   studio_courses, flashcards_content_cache, studio_infographic_cache,
+--   studio_slides_cache, studio_podcast_cache, lecture_notes_jobs,
+--   course_workspace_cache, studio_content_variations,
+--   module_generated_exams, user_notes, studio_content_cache,
+--   course_highlights, study_plans, study_plan_tasks, chat_groups,
+--   chat_members, chat_messages, exam_content_cache, exam_content_variations,
+--   exam_harvested_qcms, user_exam_attempts, studio_course_chunks,
+--   studio_course_explication_chapters, studio_cross_university_reuse_log,
+--   platform_daily_generation_usage, dashboard_assistant_daily_usage,
+--   lab_course_cache, user_lab_history, ai_generation_ledger
+--
+-- FUNCTIONS, by role
+--   Student allowances on `subscriptions`: atomic reserve / refund
+--     reserve_generations_used, refund_generations_used,
+--     reserve_highlight_messages_used, refund_highlight_messages_used,
+--     reserve_chat_messages_used, refund_chat_messages_used,
+--     reserve_daily_chat_messages_used, reserve_remediation_used,
+--     refund_remediation_used, reserve_flashcards_used,
+--     refund_flashcards_used
+--   Student allowances on `subscriptions`: legacy unconditional increments
+--     increment_generations_used, increment_highlight_messages_used,
+--     increment_chat_messages_used, increment_daily_chat_messages_used,
+--     increment_remediation_used, increment_flashcards_used
+--   Other per-student allowances: reserve / refund
+--     reserve_qcm_regenerate, refund_qcm_regenerate,
+--     reserve_module_exam_regenerate, refund_module_exam_regenerate
+--   Platform-wide daily caps
+--     reserve_platform_generation, reserve_dashboard_assistant_request
+--   Cache hit counters
+--     increment_cache_hit_count, increment_studio_cache_hit_count,
+--     increment_variation_hit_count,
+--     increment_course_workspace_cache_hit_count,
+--     increment_flashcards_content_cache_hit_count,
+--     increment_studio_infographic_cache_hit_count,
+--     increment_studio_slides_cache_hit_count,
+--     increment_studio_podcast_cache_hit_count,
+--     increment_exam_content_cache_hit_count,
+--     increment_exam_variation_hit_count,
+--     increment_lab_course_cache_hit_count, ai_ledger_record_hit
+--   Similarity search on embeddings
+--     match_similar_courses_by_slug, match_similar_source_chunks,
+--     match_chunks_against_course, match_course_chunks,
+--     match_similar_studio_chunks, match_studio_chunks_against_course
+--   Student statistics
+--     weakness_radar, course_mastery, course_weak_qcms
+--   Trigger functions
+--     handle_new_user, enforce_curriculum_module_year_matches_unit
+-- ---------------------------------------------------------------------------
 
 create extension if not exists pgcrypto;
 
@@ -44,6 +147,13 @@ drop policy if exists "Deny all client access" on courses_cache;
 create policy "Deny all client access" on courses_cache for all using (false);
 
 -- Atomic hit-counter bump, called on every cache hit (see lib/course-cache.ts).
+--
+-- FUNCTION  increment_cache_hit_count(p_file_hash text) → void
+--   Purpose     Records a cache hit: adds 1 to courses_cache.hit_count for
+--               the row whose file_hash is p_file_hash.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_cache_hit_count(p_file_hash text)
 returns void
 language sql
@@ -85,6 +195,15 @@ create policy "Deny all client access" on subscriptions for all using (false);
 
 -- Atomic quota-usage bump, called after every billable AI generation
 -- (see lib/subscription.ts recordGeneration).
+--
+-- FUNCTION  increment_generations_used(p_user_id text) → void
+--   Purpose     Adds 1 to subscriptions.generations_used for p_user_id and
+--               stamps updated_at. Unconditional: it checks no cap.
+--   Returns     Nothing. No subscriptions row for p_user_id: nothing happens.
+--   Notes       One of the six legacy increment_* functions: see the DEFENSE
+--               IN DEPTH note further down.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_generations_used(p_user_id text)
 returns void
 language sql
@@ -154,6 +273,14 @@ alter table subscriptions add constraint subscriptions_plan_check
 -- together, so one shared anchor is simpler and can't drift out of sync.
 alter table subscriptions add column if not exists highlight_messages_used integer not null default 0;
 
+-- FUNCTION  increment_highlight_messages_used(p_user_id text) → void
+--   Purpose     Adds 1 to subscriptions.highlight_messages_used for p_user_id
+--               and stamps updated_at. Unconditional: it checks no cap.
+--   Returns     Nothing. No subscriptions row for p_user_id: nothing happens.
+--   Notes       One of the six legacy increment_* functions: see the DEFENSE
+--               IN DEPTH note further down.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_highlight_messages_used(p_user_id text)
 returns void
 language sql
@@ -185,6 +312,14 @@ alter table subscriptions add column if not exists remediation_used integer not 
 alter table subscriptions add column if not exists daily_chat_messages_used integer not null default 0;
 alter table subscriptions add column if not exists daily_chat_reset_at timestamptz;
 
+-- FUNCTION  increment_flashcards_used(p_user_id text, p_count integer) → void
+--   Purpose     Adds p_count to subscriptions.flashcards_used for p_user_id
+--               and stamps updated_at. Unconditional: it checks no cap.
+--   Returns     Nothing. No subscriptions row for p_user_id: nothing happens.
+--   Notes       One of the six legacy increment_* functions: see the DEFENSE
+--               IN DEPTH note further down.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_flashcards_used(p_user_id text, p_count integer)
 returns void
 language sql
@@ -193,6 +328,14 @@ as $$
   where user_id = p_user_id;
 $$;
 
+-- FUNCTION  increment_remediation_used(p_user_id text) → void
+--   Purpose     Adds 1 to subscriptions.remediation_used for p_user_id and
+--               stamps updated_at. Unconditional: it checks no cap.
+--   Returns     Nothing. No subscriptions row for p_user_id: nothing happens.
+--   Notes       One of the six legacy increment_* functions: see the DEFENSE
+--               IN DEPTH note further down.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_remediation_used(p_user_id text)
 returns void
 language sql
@@ -201,6 +344,15 @@ as $$
   where user_id = p_user_id;
 $$;
 
+-- FUNCTION  increment_daily_chat_messages_used(p_user_id text) → void
+--   Purpose     Adds 1 to subscriptions.daily_chat_messages_used for
+--               p_user_id and stamps updated_at. Unconditional: it checks no
+--               cap.
+--   Returns     Nothing. No subscriptions row for p_user_id: nothing happens.
+--   Notes       One of the six legacy increment_* functions: see the DEFENSE
+--               IN DEPTH note further down.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_daily_chat_messages_used(p_user_id text)
 returns void
 language sql
@@ -209,6 +361,14 @@ as $$
   where user_id = p_user_id;
 $$;
 
+-- FUNCTION  increment_chat_messages_used(p_user_id text) → void
+--   Purpose     Adds 1 to subscriptions.chat_messages_used for p_user_id and
+--               stamps updated_at. Unconditional: it checks no cap.
+--   Returns     Nothing. No subscriptions row for p_user_id: nothing happens.
+--   Notes       One of the six legacy increment_* functions: see the DEFENSE
+--               IN DEPTH note further down.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_chat_messages_used(p_user_id text)
 returns void
 language sql
@@ -239,6 +399,15 @@ $$;
 -- without reopening the race.
 -- ---------------------------------------------------------------------------
 
+-- FUNCTION  reserve_generations_used(p_user_id text, p_cap integer) → integer
+--   Purpose     Consumes one AI generation from the student's allowance,
+--               atomically: a single UPDATE that adds 1 to
+--               subscriptions.generations_used only while it is below p_cap.
+--   Returns     The new value of generations_used. No value (NULL) when
+--               nothing was updated: the cap is reached, or p_user_id has no
+--               subscriptions row.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function reserve_generations_used(p_user_id text, p_cap integer)
 returns integer
 language sql
@@ -248,6 +417,13 @@ as $$
   returning generations_used;
 $$;
 
+-- FUNCTION  refund_generations_used(p_user_id text) → void
+--   Purpose     Gives one AI generation back (for a reservation whose
+--               generation then failed): subtracts 1 from
+--               subscriptions.generations_used, never going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function refund_generations_used(p_user_id text)
 returns void
 language sql
@@ -261,6 +437,17 @@ $$;
 -- exact same race exists here too — canSendHighlightMessage used the same
 -- read-then-write checkQuota() helper. Fixed for real completeness rather
 -- than leaving one of the five gated resources exploitable.
+--
+-- FUNCTION  reserve_highlight_messages_used(p_user_id text, p_cap integer)
+--             → integer
+--   Purpose     Consumes one highlight-chat message, atomically: a single
+--               UPDATE that adds 1 to subscriptions.highlight_messages_used
+--               only while it is below p_cap.
+--   Returns     The new value of highlight_messages_used. No value (NULL)
+--               when nothing was updated: the cap is reached, or p_user_id
+--               has no subscriptions row.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function reserve_highlight_messages_used(p_user_id text, p_cap integer)
 returns integer
 language sql
@@ -270,6 +457,13 @@ as $$
   returning highlight_messages_used;
 $$;
 
+-- FUNCTION  refund_highlight_messages_used(p_user_id text) → void
+--   Purpose     Gives one highlight-chat message back (for a reservation
+--               whose generation then failed): subtracts 1 from
+--               subscriptions.highlight_messages_used, never going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function refund_highlight_messages_used(p_user_id text)
 returns void
 language sql
@@ -278,6 +472,17 @@ as $$
   where user_id = p_user_id;
 $$;
 
+-- FUNCTION  reserve_chat_messages_used(p_user_id text, p_cap integer)
+--             → integer
+--   Purpose     Consumes one free-form chat message from the monthly
+--               allowance, atomically: a single UPDATE that adds 1 to
+--               subscriptions.chat_messages_used only while it is below
+--               p_cap.
+--   Returns     The new value of chat_messages_used. No value (NULL) when
+--               nothing was updated: the cap is reached, or p_user_id has no
+--               subscriptions row.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function reserve_chat_messages_used(p_user_id text, p_cap integer)
 returns integer
 language sql
@@ -287,6 +492,13 @@ as $$
   returning chat_messages_used;
 $$;
 
+-- FUNCTION  refund_chat_messages_used(p_user_id text) → void
+--   Purpose     Gives one free-form chat message back (for a reservation
+--               whose generation then failed): subtracts 1 from
+--               subscriptions.chat_messages_used, never going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function refund_chat_messages_used(p_user_id text)
 returns void
 language sql
@@ -299,6 +511,21 @@ $$;
 -- app/api/courses/chat/route.ts), which never fail after being counted, and
 -- the one real-generation path that DOES fail also fails BEFORE this ever
 -- gets reserved in that flow — see the route's own ordering.
+--
+-- FUNCTION  reserve_daily_chat_messages_used(p_user_id text, p_cap integer)
+--             → integer
+--   Purpose     Consumes one free-form chat message from the daily allowance,
+--               atomically: a single UPDATE that adds 1 to
+--               subscriptions.daily_chat_messages_used only while it is below
+--               p_cap.
+--   Returns     The new value of daily_chat_messages_used. No value (NULL)
+--               when nothing was updated: the cap is reached, or p_user_id
+--               has no subscriptions row.
+--   Notes       The only reserve_* function without a refund_* counterpart:
+--               the comment just above says why.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/subscription.ts
 create or replace function reserve_daily_chat_messages_used(p_user_id text, p_cap integer)
 returns integer
 language sql
@@ -308,6 +535,15 @@ as $$
   returning daily_chat_messages_used;
 $$;
 
+-- FUNCTION  reserve_remediation_used(p_user_id text, p_cap integer) → integer
+--   Purpose     Consumes one weak-point remediation plan, atomically: a
+--               single UPDATE that adds 1 to subscriptions.remediation_used
+--               only while it is below p_cap.
+--   Returns     The new value of remediation_used. No value (NULL) when
+--               nothing was updated: the cap is reached, or p_user_id has no
+--               subscriptions row.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function reserve_remediation_used(p_user_id text, p_cap integer)
 returns integer
 language sql
@@ -317,6 +553,13 @@ as $$
   returning remediation_used;
 $$;
 
+-- FUNCTION  refund_remediation_used(p_user_id text) → void
+--   Purpose     Gives one remediation plan back (for a reservation whose
+--               generation then failed): subtracts 1 from
+--               subscriptions.remediation_used, never going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function refund_remediation_used(p_user_id text)
 returns void
 language sql
@@ -333,6 +576,18 @@ $$;
 -- on SELECT ... FOR UPDATE until the first transaction commits, then reads
 -- the already-updated value. Returns how many of p_requested were actually
 -- granted (0..p_requested) — the caller must clamp its batch to this.
+--
+-- FUNCTION  reserve_flashcards_used(p_user_id text, p_requested integer,
+--             p_cap integer) → integer
+--   Purpose     Reserves a batch of flashcards against the allowance. Locks
+--               the student's subscriptions row (SELECT … FOR UPDATE), grants
+--               as many of p_requested as still fit under p_cap (never fewer
+--               than 0), and adds that number to flashcards_used.
+--   Returns     How many were granted, from 0 to p_requested. When p_user_id
+--               has no subscriptions row: p_requested itself, and nothing is
+--               counted.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function reserve_flashcards_used(p_user_id text, p_requested integer, p_cap integer)
 returns integer
 language plpgsql
@@ -356,6 +611,13 @@ begin
 end;
 $$;
 
+-- FUNCTION  refund_flashcards_used(p_user_id text, p_count integer) → void
+--   Purpose     Gives p_count flashcards back (for a reservation whose
+--               generation then failed): subtracts p_count from
+--               subscriptions.flashcards_used, never going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function refund_flashcards_used(p_user_id text, p_count integer)
 returns void
 language sql
@@ -459,6 +721,18 @@ create policy "Users can view their own profile"
 -- Creates a profiles row (and starts the trial) the moment a new auth user
 -- is created — fires regardless of whether email confirmation is enabled,
 -- so it can't be skipped by a client that never calls back.
+--
+-- FUNCTION  handle_new_user() → trigger
+--   Purpose     Runs for every new auth.users row. Creates the account's
+--               profiles row (trial_ends_at = now + 7 days) and its Freemium
+--               subscriptions row (status 'active', every counter at 0). Both
+--               inserts are ON CONFLICT DO NOTHING, so an existing row is
+--               left as it is.
+--   Returns     NEW (the inserted auth.users row), unchanged.
+--   Runs as     its owner (SECURITY DEFINER); language plpgsql;
+--               search_path = public.
+--   Trigger     on_auth_user_created: after insert on auth.users for each
+--               row.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -777,6 +1051,17 @@ create policy "Users can view their own QCM attempts"
 -- via the dashboard's "Déplacer" action, so deriving the module from the
 -- course at query time, rather than freezing it on the attempt row, keeps
 -- past attempts correctly attributed after a course is reorganized).
+--
+-- FUNCTION  weakness_radar(p_user_id uuid) → table
+--   Purpose     Mastery per module for one student. Joins the student's
+--               qcm_attempts to courses (by slug) and to modules, and counts
+--               attempts and correct attempts per module.
+--   Returns     One row per module the student has attempted: module_id,
+--               module_name, total_attempts, correct_attempts, mastery_pct
+--               (correct ÷ total × 100, 1 decimal). Weakest module first.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function weakness_radar(p_user_id uuid)
 returns table (
   module_id bigint,
@@ -851,6 +1136,21 @@ create index if not exists courses_content_embedding_idx
 -- parseJsonColumn() in app/api/courses/slug/[slug]/route.ts) — casting
 -- normalizes both to a string the caller JSON.parse()s itself, exactly like
 -- every other read path in this app already does.
+--
+-- FUNCTION  match_similar_courses_by_slug(p_slug text, match_threshold float,
+--             match_count int) → table
+--   Purpose     Finds the courses whose content_embedding is closest to that
+--               of the course p_slug (cosine similarity), the course itself
+--               excluded. Courses without an embedding are ignored, and
+--               nothing is returned when p_slug itself has none.
+--   Returns     At most match_count rows whose similarity is at least
+--               match_threshold, closest first: slug, similarity, and that
+--               course's generated sections cast to text (explication,
+--               mode_visuel, resume, cas_clinique, qcms, mind_map,
+--               exemples_analogies).
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function match_similar_courses_by_slug(
   p_slug text,
   match_threshold float,
@@ -941,6 +1241,20 @@ create policy "Deny all client access" on course_source_chunks for all using (fa
 -- globally-closest match per chunk means a strong runner-up candidate can be
 -- under-credited for that chunk — a deliberate simplicity/cost trade-off,
 -- not a correctness bug.
+--
+-- FUNCTION  match_similar_source_chunks(p_slug text, match_threshold float)
+--             → table
+--   Purpose     Chunk-level similarity between the course p_slug and every
+--               other course. For each chunk of p_slug it takes the single
+--               closest chunk among all other courses, then counts, per
+--               candidate course, how many of those best matches reach
+--               match_threshold.
+--   Returns     At most 10 rows, most matched chunks first: candidate_slug,
+--               matched_chunks, and total_chunks (how many chunks p_slug
+--               has). Candidates with no match at the threshold are left out.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function match_similar_source_chunks(
   p_slug text,
   match_threshold float
@@ -1027,6 +1341,18 @@ create policy "Deny all client access" on course_explication_chapters for all us
 -- which of its own chunk_index values matched, so it can look up which
 -- course_explication_chapters rows (keyed by source_chunk_indices) remain
 -- reusable and which don't.
+--
+-- FUNCTION  match_chunks_against_course(p_slug text, p_candidate_slug text,
+--             match_threshold float) → table
+--   Purpose     Chunk-to-chunk comparison between two given courses. For each
+--               chunk of p_slug it takes the closest chunk of
+--               p_candidate_slug.
+--   Returns     One row per chunk of p_slug whose best match reaches
+--               match_threshold: target_chunk_index, candidate_chunk_index,
+--               similarity.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function match_chunks_against_course(
   p_slug text,
   p_candidate_slug text,
@@ -1114,6 +1440,16 @@ create policy "Deny all client access" on course_chunks for all using (false);
 -- knows its name/arity — would still return unfiltered noise.
 drop function if exists match_course_chunks(vector(1536), int);
 
+-- FUNCTION  match_course_chunks(query_embedding vector(1536),
+--             match_count int, match_threshold float) → table
+--   Purpose     Semantic search over course_chunks: the chunks closest to
+--               query_embedding (cosine similarity).
+--   Returns     At most match_count rows whose similarity is at least
+--               match_threshold, closest first: course_slug, section_label,
+--               content, similarity.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function match_course_chunks(query_embedding vector(1536), match_count int, match_threshold float)
 returns table (
   course_slug text,
@@ -1150,6 +1486,19 @@ $$;
 -- box across a course's attempts is a real, already-computed proxy for how
 -- durably memorized that course's material is, not a fabricated number.
 -- ---------------------------------------------------------------------------
+-- FUNCTION  course_mastery(p_user_id uuid) → table
+--   Purpose     Mastery per course for one student, from that student's
+--               qcm_attempts.
+--   Returns     One row per course the student has attempted: course_slug,
+--               total_attempts, correct_attempts, mastery_pct (correct ÷
+--               total × 100, 1 decimal) and avg_leitner_box (average Leitner
+--               box, 2 decimals).
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   app/api/dashboard/overview/route.ts,
+--               app/api/srs/course-mastery/route.ts,
+--               app/api/studio/courses/stats/route.ts
 create or replace function course_mastery(p_user_id uuid)
 returns table (
   course_slug text,
@@ -1183,6 +1532,16 @@ $$;
 -- so this single filter naturally covers "wrong" and "barely holding on".
 -- Ordered weakest-and-oldest-stuck first.
 -- ---------------------------------------------------------------------------
+-- FUNCTION  course_weak_qcms(p_user_id uuid, p_course_slug text,
+--             p_limit int default 8) → table
+--   Purpose     One student's weakest question attempts in one course: those
+--               answered wrong, or whose leitner_box is 2 or less.
+--   Returns     At most p_limit rows (8 by default), lowest Leitner box
+--               first, then oldest attempt first: qcm_id, is_correct,
+--               leitner_box, attempted_at.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function course_weak_qcms(p_user_id uuid, p_course_slug text, p_limit int default 8)
 returns table (
   qcm_id text,
@@ -1298,6 +1657,16 @@ create policy "Public read access" on curriculum_modules for select using (true)
 -- de cette unité DOIT correspondre à l'année du module — sinon un module
 -- pourrait se retrouver rattaché à une UE d'une toute autre année. Un CHECK
 -- ne peut pas faire cette vérification inter-tables, d'où le trigger.
+--
+-- FUNCTION  enforce_curriculum_module_year_matches_unit() → trigger
+--   Purpose     Integrity guard on curriculum_modules. When the row has a
+--               teaching_unit_id, that unit must belong to the same year
+--               (year_id) as the module; otherwise the write is rejected with
+--               an exception. A row without teaching_unit_id always passes.
+--   Returns     NEW (the row being written), unchanged.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Trigger     curriculum_modules_year_consistency: before insert or update
+--               on curriculum_modules for each row.
 create or replace function enforce_curriculum_module_year_matches_unit()
 returns trigger
 language plpgsql
@@ -1518,6 +1887,15 @@ alter table flashcards_content_cache enable row level security;
 drop policy if exists "Deny all client access" on flashcards_content_cache;
 create policy "Deny all client access" on flashcards_content_cache for all using (false);
 
+-- FUNCTION  increment_flashcards_content_cache_hit_count(p_content_hash text)
+--             → void
+--   Purpose     Records a cache hit: adds 1 to
+--               flashcards_content_cache.hit_count and sets last_hit_at to
+--               now, for the row whose content_hash is p_content_hash.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/flashcards-content-cache.ts
 create or replace function increment_flashcards_content_cache_hit_count(p_content_hash text)
 returns void
 language sql
@@ -1551,6 +1929,15 @@ alter table studio_infographic_cache enable row level security;
 drop policy if exists "Deny all client access" on studio_infographic_cache;
 create policy "Deny all client access" on studio_infographic_cache for all using (false);
 
+-- FUNCTION  increment_studio_infographic_cache_hit_count(p_content_hash text)
+--             → void
+--   Purpose     Records a cache hit: adds 1 to
+--               studio_infographic_cache.hit_count and sets last_hit_at to
+--               now, for the row whose content_hash is p_content_hash.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/studio-infographic-cache.ts
 create or replace function increment_studio_infographic_cache_hit_count(p_content_hash text)
 returns void
 language sql
@@ -1586,6 +1973,14 @@ alter table studio_slides_cache enable row level security;
 drop policy if exists "Deny all client access" on studio_slides_cache;
 create policy "Deny all client access" on studio_slides_cache for all using (false);
 
+-- FUNCTION  increment_studio_slides_cache_hit_count(p_content_hash text)
+--             → void
+--   Purpose     Records a cache hit: adds 1 to studio_slides_cache.hit_count
+--               and sets last_hit_at to now, for the row whose content_hash
+--               is p_content_hash.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_studio_slides_cache_hit_count(p_content_hash text)
 returns void
 language sql
@@ -1619,6 +2014,15 @@ alter table studio_podcast_cache enable row level security;
 drop policy if exists "Deny all client access" on studio_podcast_cache;
 create policy "Deny all client access" on studio_podcast_cache for all using (false);
 
+-- FUNCTION  increment_studio_podcast_cache_hit_count(p_content_hash text)
+--             → void
+--   Purpose     Records a cache hit: adds 1 to studio_podcast_cache.hit_count
+--               and sets last_hit_at to now, for the row whose content_hash
+--               is p_content_hash.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/studio-podcast-cache.ts
 create or replace function increment_studio_podcast_cache_hit_count(p_content_hash text)
 returns void
 language sql
@@ -1746,6 +2150,16 @@ alter table course_workspace_cache enable row level security;
 drop policy if exists "Deny all client access" on course_workspace_cache;
 create policy "Deny all client access" on course_workspace_cache for all using (false);
 
+-- FUNCTION  increment_course_workspace_cache_hit_count(p_course_content_hash text,
+--             p_generation_type text) → void
+--   Purpose     Records a cache hit: adds 1 to
+--               course_workspace_cache.hit_count and sets last_hit_at to now,
+--               for the row matching both p_course_content_hash and
+--               p_generation_type.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/course-workspace-cache.ts
 create or replace function increment_course_workspace_cache_hit_count(p_course_content_hash text, p_generation_type text)
 returns void
 language sql
@@ -1799,6 +2213,13 @@ alter table studio_content_variations enable row level security;
 drop policy if exists "Deny all client access" on studio_content_variations;
 create policy "Deny all client access" on studio_content_variations for all using (false);
 
+-- FUNCTION  increment_variation_hit_count(p_variation_id uuid) → void
+--   Purpose     Records a cache hit: adds 1 to
+--               studio_content_variations.hit_count and sets last_hit_at to
+--               now, for the row whose id is p_variation_id.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function increment_variation_hit_count(p_variation_id uuid)
 returns void
 language sql
@@ -1905,6 +2326,18 @@ alter table studio_courses add column if not exists source_file_url text;
 -- race this avoids).
 alter table studio_courses add column if not exists qcm_regenerate_count integer not null default 0;
 
+-- FUNCTION  reserve_qcm_regenerate(p_course_id bigint, p_user_id uuid,
+--             p_cap integer) → integer
+--   Purpose     Consumes one QCM regeneration on one student's course,
+--               atomically: a single UPDATE that adds 1 to
+--               studio_courses.qcm_regenerate_count for the row (id =
+--               p_course_id, user_id = p_user_id), only while it is below
+--               p_cap.
+--   Returns     The new count. No value (NULL) when nothing was updated: the
+--               cap is reached, or no course with that id belongs to
+--               p_user_id.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function reserve_qcm_regenerate(p_course_id bigint, p_user_id uuid, p_cap integer)
 returns integer
 language sql
@@ -1915,6 +2348,14 @@ as $$
   returning qcm_regenerate_count;
 $$;
 
+-- FUNCTION  refund_qcm_regenerate(p_course_id bigint, p_user_id uuid) → void
+--   Purpose     Gives one QCM regeneration back (for a reservation whose
+--               generation then failed): subtracts 1 from
+--               qcm_regenerate_count on that student's course, never going
+--               below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
 create or replace function refund_qcm_regenerate(p_course_id bigint, p_user_id uuid)
 returns void
 language sql
@@ -2037,6 +2478,19 @@ alter table profiles add column if not exists module_global_summaries jsonb not 
 -- Same atomic reserve/refund pattern as every other quota in this file.
 alter table profiles add column if not exists module_exam_regenerations_used integer not null default 0;
 
+-- FUNCTION  reserve_module_exam_regenerate(p_user_id uuid, p_cap integer)
+--             → integer
+--   Purpose     Consumes one « Examen de Module » regeneration from the
+--               student's allowance, atomically: a single UPDATE that adds 1
+--               to profiles.module_exam_regenerations_used only while it is
+--               below p_cap.
+--   Returns     The new count. No value (NULL) when nothing was updated: the
+--               cap is reached, or p_user_id has no profiles row.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated.
+--   Called by   lib/exam-generation.ts
+--   Also in     supabase/migrations/20261004_module_exam_regenerations.sql
 create or replace function reserve_module_exam_regenerate(p_user_id uuid, p_cap integer)
 returns integer
 language sql
@@ -2047,6 +2501,16 @@ as $$
   returning module_exam_regenerations_used;
 $$;
 
+-- FUNCTION  refund_module_exam_regenerate(p_user_id uuid) → void
+--   Purpose     Gives one « Examen de Module » regeneration back (for a
+--               reservation whose generation then failed): subtracts 1 from
+--               profiles.module_exam_regenerations_used, never going below 0.
+--   Returns     Nothing.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated.
+--   Called by   app/api/exam/generate/route.ts, app/api/exam/run/route.ts
+--   Also in     supabase/migrations/20261004_module_exam_regenerations.sql
 create or replace function refund_module_exam_regenerate(p_user_id uuid)
 returns void
 language sql
@@ -2536,6 +3000,15 @@ create policy "Deny all client access" on studio_content_cache for all using (fa
 
 -- Atomic hit-counter bump on every cache hit, mirroring the retired
 -- courses_cache table's own increment_cache_hit_count above.
+--
+-- FUNCTION  increment_studio_cache_hit_count(p_cache_id uuid) → void
+--   Purpose     Records a cache hit: adds 1 to studio_content_cache.hit_count
+--               and sets last_hit_at to now, for the row whose id is
+--               p_cache_id.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/studio-content-cache.ts
 create or replace function increment_studio_cache_hit_count(p_cache_id uuid)
 returns void
 language sql
@@ -2970,6 +3443,15 @@ alter table exam_content_cache enable row level security;
 drop policy if exists "Deny all client access" on exam_content_cache;
 create policy "Deny all client access" on exam_content_cache for all using (false);
 
+-- FUNCTION  increment_exam_content_cache_hit_count(p_content_hash text)
+--             → void
+--   Purpose     Records a cache hit: adds 1 to exam_content_cache.hit_count
+--               and sets last_hit_at to now, for the row whose content_hash
+--               is p_content_hash.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/exam-content-cache.ts
 create or replace function increment_exam_content_cache_hit_count(p_content_hash text)
 returns void
 language sql
@@ -3013,6 +3495,14 @@ alter table exam_content_variations enable row level security;
 drop policy if exists "Deny all client access" on exam_content_variations;
 create policy "Deny all client access" on exam_content_variations for all using (false);
 
+-- FUNCTION  increment_exam_variation_hit_count(p_variation_id uuid) → void
+--   Purpose     Records a cache hit: adds 1 to
+--               exam_content_variations.hit_count and sets last_hit_at to
+--               now, for the row whose id is p_variation_id.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/exam-content-variations.ts
 create or replace function increment_exam_variation_hit_count(p_variation_id uuid)
 returns void
 language sql
@@ -3201,6 +3691,22 @@ create policy "Deny all client access" on studio_course_chunks for all using (fa
 -- matching), university_tag is surfaced downstream (via a separate lookup
 -- against the matched chunks, in lib/studio-explication-delta.ts) purely for
 -- logging/audit, never as a matching filter.
+--
+-- FUNCTION  match_similar_studio_chunks(p_course_id bigint,
+--             match_threshold float) → table
+--   Purpose     Chunk-level similarity between the Studio course p_course_id
+--               and every other Studio course. For each chunk of that course
+--               it takes the single closest chunk among all other courses,
+--               then counts, per candidate course, how many of those best
+--               matches reach match_threshold.
+--   Returns     At most 10 rows, most matched chunks first:
+--               candidate_course_id, matched_chunks, and total_chunks (how
+--               many chunks p_course_id has). Candidates with no match at the
+--               threshold are left out.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/studio-explication-delta.ts
 create or replace function match_similar_studio_chunks(
   p_course_id bigint,
   match_threshold float
@@ -3243,6 +3749,19 @@ $$;
 -- Same shape/semantics as match_chunks_against_course above — detailed
 -- chunk-index-to-chunk-index matching between exactly two specific courses,
 -- used once a candidate has been chosen from match_similar_studio_chunks.
+--
+-- FUNCTION  match_studio_chunks_against_course(p_course_id bigint,
+--             p_candidate_course_id bigint, match_threshold float) → table
+--   Purpose     Chunk-to-chunk comparison between two given Studio courses.
+--               For each chunk of p_course_id it takes the closest chunk of
+--               p_candidate_course_id.
+--   Returns     One row per chunk of p_course_id whose best match reaches
+--               match_threshold: target_chunk_index, candidate_chunk_index,
+--               similarity.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql,
+--               stable.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/studio-explication-delta.ts
 create or replace function match_studio_chunks_against_course(
   p_course_id bigint,
   p_candidate_course_id bigint,
@@ -3360,6 +3879,17 @@ create policy "Deny all client access" on platform_daily_generation_usage for al
 -- guards the update itself, so a day already at its cap silently does NOT
 -- increment and RETURNING yields no row, exactly like the per-user
 -- reserve_* functions returning NULL when a user's own cap is hit.
+--
+-- FUNCTION  reserve_platform_generation(p_date date, p_cap integer) → integer
+--   Purpose     Counts one real AI generation against the platform-wide cap
+--               of the day p_date, atomically. The day's first call inserts
+--               its row with a count of 1; later calls add 1 to
+--               real_generation_count only while it is below p_cap.
+--   Returns     The day's new count. No value (NULL) when the day is already
+--               at p_cap: nothing was counted.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/platform-spend-guard.ts
 create or replace function reserve_platform_generation(p_date date, p_cap integer)
 returns integer
 language sql
@@ -3396,6 +3926,17 @@ alter table dashboard_assistant_daily_usage enable row level security;
 drop policy if exists "Deny all client access" on dashboard_assistant_daily_usage;
 create policy "Deny all client access" on dashboard_assistant_daily_usage for all using (false);
 
+-- FUNCTION  reserve_dashboard_assistant_request(p_date date, p_cap integer)
+--             → integer
+--   Purpose     Counts one dashboard-assistant request against the
+--               platform-wide cap of the day p_date, atomically. The day's
+--               first call inserts its row with a count of 1; later calls add
+--               1 to request_count only while it is below p_cap.
+--   Returns     The day's new count. No value (NULL) when the day is already
+--               at p_cap: nothing was counted.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Privileges  In this file: EXECUTE revoked from anon, authenticated.
+--   Called by   lib/platform-spend-guard.ts
 create or replace function reserve_dashboard_assistant_request(p_date date, p_cap integer)
 returns integer
 language sql
@@ -3508,6 +4049,14 @@ alter table lab_course_cache enable row level security;
 drop policy if exists "Deny all client access" on lab_course_cache;
 create policy "Deny all client access" on lab_course_cache for all using (false);
 
+-- FUNCTION  increment_lab_course_cache_hit_count(p_content_hash text,
+--             p_tool_type text) → void
+--   Purpose     Records a cache hit: adds 1 to lab_course_cache.hit_count and
+--               sets last_hit_at to now, for the row matching both
+--               p_content_hash and p_tool_type.
+--   Returns     Nothing. No matching row: nothing happens.
+--   Runs as     the caller (SECURITY INVOKER, the default); language sql.
+--   Called by   lib/lab-course-cache.ts
 create or replace function increment_lab_course_cache_hit_count(p_content_hash text, p_tool_type text)
 returns void
 language sql
@@ -3545,10 +4094,10 @@ alter table user_lab_history enable row level security;
 drop policy if exists "Users read own lab history" on user_lab_history;
 create policy "Users read own lab history" on user_lab_history for select using (auth.uid() = user_id);
 
--- ============================================================================
+-- ===========================================================================
 -- AI generation ledger — see supabase/migrations/20261008_ai_generation_ledger.sql
 -- (the runnable source of truth; copied here so this file stays the full map).
--- ============================================================================
+-- ===========================================================================
 create table if not exists public.ai_generation_ledger (
   key text primary key check (char_length(key) = 64),
   namespace text not null check (char_length(namespace) between 1 and 80),
@@ -3569,6 +4118,17 @@ create index if not exists ai_generation_ledger_namespace_idx on public.ai_gener
 alter table public.ai_generation_ledger enable row level security;
 
 -- Hit counter (observability: which namespaces actually save money).
+--
+-- FUNCTION  ai_ledger_record_hit(p_key text) → void
+--   Purpose     Records that a stored AI output was served again instead of
+--               being regenerated: adds 1 to ai_generation_ledger.hits and
+--               sets last_hit_at to now, for the row whose key is p_key.
+--   Returns     Nothing. No row with that key: nothing happens.
+--   Runs as     its owner (SECURITY DEFINER); language sql;
+--               search_path = public.
+--   Privileges  In this file: ALL revoked from public, anon, authenticated.
+--   Called by   lib/ai/generation-ledger.ts
+--   Also in     supabase/migrations/20261008_ai_generation_ledger.sql
 create or replace function public.ai_ledger_record_hit(p_key text)
 returns void
 language sql
@@ -3599,9 +4159,9 @@ revoke all on public.ai_generation_ledger_stats from public, anon, authenticated
 
 notify pgrst, 'reload schema';
 
--- ============================================================================
+-- ===========================================================================
 -- exam_harvested_qcms.content_hash — see supabase/migrations/20261009_exam_harvest_content_hash.sql
--- ============================================================================
+-- ===========================================================================
 alter table public.exam_harvested_qcms add column if not exists content_hash text;
 
 create index if not exists exam_harvested_qcms_content_hash_idx

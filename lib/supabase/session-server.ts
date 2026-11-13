@@ -1,15 +1,48 @@
+/**
+ * Supabase — the signed-in user, for server code.
+ *
+ * Where it runs   On the server, inside a request: API route handlers (and
+ *                 Server Components, which can read cookies but not write them).
+ * Credentials     The public anon key plus the request's own session cookie:
+ *                 Supabase Auth is asked whom that cookie belongs to.
+ * Exports         getAuthenticatedUser()  the user, device limit enforced —
+ *                                         what API routes call
+ *                 getSessionUser()        the user, without the device limit
+ *
+ * Why this is more than one getUser() call (each point is explained where it
+ * lives below):
+ *   - concurrent requests carrying the same session cookie share ONE Supabase
+ *     round trip;
+ *   - a successful check is remembered for 30 seconds;
+ *   - a session Supabase declares dead gets its cookie deleted;
+ *   - any other failure is retried once.
+ */
+
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import type { User } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
+
 import { checkDevice } from "@/lib/devices";
 import { EXPIRED_COOKIE, isDeadSessionError, isSessionCookieName } from "@/lib/supabase/dead-session";
 
+// ---------------------------------------------------------------------------
+// Session client: the anon key + this request's cookies
+
+/** A cookie as @supabase/ssr hands it to the cookie adapter's setAll(). */
 interface CookieToSet {
   name: string;
   value: string;
   options: CookieOptions;
 }
 
+/**
+ * A Supabase client bound to THIS request: it reads the session from the
+ * request's cookies and, when Supabase refreshes that session, writes the new
+ * cookies back — where the context allows writing (route handlers). Anywhere
+ * else the write throws and is ignored: the middleware keeps the cookie fresh.
+ *
+ * @returns A new anon-key client for the current request.
+ */
 function createSessionClient() {
   const cookieStore = cookies();
   return createServerClient(
@@ -34,6 +67,9 @@ function createSessionClient() {
     }
   );
 }
+
+// ---------------------------------------------------------------------------
+// One check per session at a time, remembered briefly
 
 /**
  * Confirmed from real server logs: `/api/upload` and `/api/studio/generate`
@@ -72,9 +108,19 @@ const inFlightByCookieFingerprint = new Map<string, Promise<User | null>>();
  * cached, and the TTL is far below the access token's own lifetime.
  */
 const VERIFIED_TTL_MS = 30_000;
+/** Size limit of that memory — rememberVerified() says what happens when it is reached. */
 const VERIFIED_MAX_ENTRIES = 500;
+/** Verified sessions by cookie fingerprint, each with the moment its entry expires. */
 const verifiedByCookieFingerprint = new Map<string, { user: User; expiresAt: number }>();
 
+/**
+ * Remembers a successful check for VERIFIED_TTL_MS. When the memory is full
+ * (VERIFIED_MAX_ENTRIES), expired entries are dropped first; if it is still
+ * full after that, it is emptied — every session is simply checked again.
+ *
+ * @param fingerprint - The request's session-cookie fingerprint.
+ * @param user - The user Supabase Auth just confirmed for it.
+ */
 function rememberVerified(fingerprint: string, user: User): void {
   if (verifiedByCookieFingerprint.size >= VERIFIED_MAX_ENTRIES) {
     const now = Date.now();
@@ -86,11 +132,16 @@ function rememberVerified(fingerprint: string, user: User): void {
   verifiedByCookieFingerprint.set(fingerprint, { user, expiresAt: Date.now() + VERIFIED_TTL_MS });
 }
 
+// ---------------------------------------------------------------------------
+// Cookie helpers
+
 /**
  * Deletes this request's session cookie (never the PKCE code verifier — see
  * lib/supabase/dead-session.ts) so the browser stops presenting a dead
  * session. Takes effect from route handlers; a Server Component can't set
  * cookies, so there it's a no-op. Returns how many cookies were deleted.
+ *
+ * @returns The number of session cookies deleted (0 where cookies are read-only).
  */
 function deleteSessionCookies(): number {
   const cookieStore = cookies();
@@ -107,6 +158,14 @@ function deleteSessionCookies(): number {
   return deleted;
 }
 
+/**
+ * A request's session, as one string: every Supabase cookie (name starting
+ * with `sb-`) written `name=value`, sorted, joined with "&". Two requests get
+ * the same fingerprint only when they carry exactly the same Supabase cookies.
+ *
+ * @param cookieStore - The request's cookies (next/headers).
+ * @returns The fingerprint, or null when the request has no Supabase cookie.
+ */
 function authCookieFingerprint(cookieStore: ReturnType<typeof cookies>): string | null {
   const authCookies = cookieStore.getAll().filter((c) => c.name.startsWith("sb-"));
   if (authCookies.length === 0) return null;
@@ -116,12 +175,17 @@ function authCookieFingerprint(cookieStore: ReturnType<typeof cookies>): string 
     .join("&");
 }
 
+// ---------------------------------------------------------------------------
+// Public API
+
 /**
  * The signed-in user, or null — what every /api/** route calls. Also
  * enforces the 2-device limit (lib/devices.ts): a device beyond it is
  * treated as signed out (401) by every route, and DeviceGuard shows it the
  * device-limit screen. Use getSessionUser() only for the routes that must
  * work from such a device (listing / replacing devices, signing out).
+ *
+ * @returns The verified user; null when signed out or on a device past the limit.
  */
 export async function getAuthenticatedUser(): Promise<User | null> {
   const user = await getSessionUser();
@@ -133,7 +197,20 @@ export async function getAuthenticatedUser(): Promise<User | null> {
   return user;
 }
 
-/** Session check only, WITHOUT the device limit — see getAuthenticatedUser. */
+/**
+ * Session check only, WITHOUT the device limit — see getAuthenticatedUser.
+ *
+ * In order:
+ *  1. no Supabase cookie on the request → null, nothing is asked;
+ *  2. this exact cookie was verified less than VERIFIED_TTL_MS ago → that user;
+ *  3. a check of this exact cookie is already running → its result is shared;
+ *  4. otherwise Supabase Auth is asked (getUser). A dead session has its
+ *     cookie deleted and is not retried; any other failure is retried once,
+ *     300 ms later, with a fresh client.
+ * Only a success is remembered (for step 2).
+ *
+ * @returns The verified user, or null when the request has no valid session.
+ */
 export async function getSessionUser(): Promise<User | null> {
   const fingerprint = authCookieFingerprint(cookies());
   if (!fingerprint) {

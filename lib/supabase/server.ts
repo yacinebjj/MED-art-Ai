@@ -1,4 +1,25 @@
+/**
+ * Supabase — service-role ("admin") client.
+ *
+ * Where it runs   On the server only: API routes and the server-side modules
+ *                 they call.
+ * Credentials     SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY. This key bypasses
+ *                 Row Level Security entirely: the code calling it is the
+ *                 only access control, so it must never reach the browser.
+ * Exports         isSupabaseConfigured()  are both variables set?
+ *                 getSupabaseAdmin()      the process-wide client
+ *
+ * This file has two parts:
+ *   1. The admin client: a lazily created singleton.
+ *   2. Its fetch: never cached by Next.js, and retried only when sending the
+ *      request again cannot apply anything twice (dead socket, gateway
+ *      502/503, 504 on reads).
+ */
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+// ---------------------------------------------------------------------------
+// 1. Admin client
 
 /**
  * Server-only Supabase client using the service-role key. Never import this
@@ -11,10 +32,26 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  */
 let client: SupabaseClient<any, any, any> | null = null;
 
+/**
+ * Whether the server has both variables the admin client needs
+ * (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY). Routes check this first and
+ * answer cleanly, instead of letting getSupabaseAdmin() throw.
+ *
+ * @returns true when both variables are set and non-empty.
+ */
 export function isSupabaseConfigured(): boolean {
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
+/**
+ * The service-role client, built on the first call and reused for the life
+ * of the server instance. It keeps no session and refreshes no token (a
+ * service-role key needs neither), and sends every request through
+ * fetchWithStaleSocketRetry (part 2 below).
+ *
+ * @returns The shared admin client. It bypasses Row Level Security.
+ * @throws Error when SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing.
+ */
 export function getSupabaseAdmin(): SupabaseClient<any, any, any> {
   if (client) return client;
 
@@ -40,12 +77,17 @@ export function getSupabaseAdmin(): SupabaseClient<any, any, any> {
   return client;
 }
 
-// Socket-level failures where the request never reached Postgres: a
-// kept-alive connection the far end dropped while this serverless instance
-// was frozen (the same failure class documented on lib/ai/openrouter.ts's
-// createOpenRouterDispatcher), or a connect that never completed.
-// DNS / connect failures (EAI_AGAIN, ENOTFOUND, ETIMEDOUT) belong to the same
-// class: the request never left this instance.
+// ---------------------------------------------------------------------------
+// 2. Resilient fetch: retries only what is safe to send again
+
+/**
+ * Socket-level failures where the request never reached Postgres: a
+ * kept-alive connection the far end dropped while this serverless instance
+ * was frozen (the same failure class documented on lib/ai/openrouter.ts's
+ * createOpenRouterDispatcher), or a connect that never completed.
+ * DNS / connect failures (EAI_AGAIN, ENOTFOUND, ETIMEDOUT) belong to the same
+ * class: the request never left this instance.
+ */
 const STALE_SOCKET_CODES = new Set([
   "UND_ERR_SOCKET",
   "UND_ERR_CLOSED",
@@ -58,6 +100,15 @@ const STALE_SOCKET_CODES = new Set([
   "ENOTFOUND",
 ]);
 
+/**
+ * Whether a rejected fetch() is one of those socket-level failures: an Error
+ * whose `code` — or whose `cause.code`, where Node's fetch reports the
+ * underlying socket error — is in STALE_SOCKET_CODES. An AbortError never
+ * is: the caller cancelled.
+ *
+ * @param error - What fetch() rejected with.
+ * @returns true when the request never reached Postgres and can be re-sent.
+ */
 function isStaleSocketError(error: unknown): boolean {
   if (!(error instanceof Error) || error.name === "AbortError") return false;
   const code = (error as NodeJS.ErrnoException).code ?? (error.cause as NodeJS.ErrnoException | undefined)?.code;
@@ -70,12 +121,21 @@ function isStaleSocketError(error: unknown): boolean {
  * project answers 503 "PGRST002 — could not query the schema cache" for a
  * few seconds). 504 only for reads — a write may have run before the
  * gateway gave up waiting.
+ *
+ * @param status - The HTTP status Supabase answered with.
+ * @param method - The request's HTTP method, upper-cased.
+ * @returns true when re-sending the request cannot apply anything twice.
  */
 function isRetryableGatewayStatus(status: number, method: string): boolean {
   if (status === 502 || status === 503) return true;
   return status === 504 && (method === "GET" || method === "HEAD");
 }
 
+/**
+ * The wait before each attempt, by attempt index: none before the first,
+ * 400 ms before the second, 1200 ms before the third and last. Its length is
+ * therefore also the maximum number of attempts.
+ */
 const RETRY_DELAYS_MS = [0, 400, 1200];
 
 /**
@@ -86,6 +146,16 @@ const RETRY_DELAYS_MS = [0, 400, 1200];
  * student's manual retry a second later always worked. These retries do
  * what that manual retry did. Limited to failures where the request was
  * never processed, so a write is never applied twice.
+ *
+ * Every attempt is sent with `cache: "no-store"` (see the note in
+ * getSupabaseAdmin). A caller that aborted its signal is never retried.
+ *
+ * @param input - The request, as for fetch().
+ * @param init - Its options, as for fetch().
+ * @returns The first answer that is not a retryable gateway status — or the
+ *          last attempt's answer, whatever it is.
+ * @throws The fetch() error when it is not a stale-socket failure, or when
+ *         no attempt is left.
  */
 async function fetchWithStaleSocketRetry(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const noStoreInit = { ...init, cache: "no-store" as const };
@@ -108,6 +178,12 @@ async function fetchWithStaleSocketRetry(input: RequestInfo | URL, init?: Reques
   }
 }
 
+/**
+ * Waits.
+ *
+ * @param ms - How long, in milliseconds.
+ * @returns A promise resolved once that time has passed.
+ */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

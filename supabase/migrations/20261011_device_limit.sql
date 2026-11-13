@@ -36,6 +36,21 @@ alter table user_device_replacements enable row level security;
 -- now) or 'limit' (p_max other devices already registered). The advisory
 -- lock serializes two NEW devices of the same account signing in at the
 -- same moment, so they cannot both take the last slot.
+--
+-- FUNCTION  claim_user_device(p_user_id text, p_device_id text, p_label text,
+--             p_max integer) → text
+--   Purpose     Registers the device p_device_id for the account, or
+--               refreshes it when it is already registered (last_seen_at, and
+--               the label when one is given). An advisory lock taken per
+--               account makes two sign-ins from new devices run one after the
+--               other.
+--   Returns     'ok': the device was already registered, or has just been.
+--               'limit': the account already has p_max devices and this one
+--               is not among them; nothing is registered.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/devices.ts
 create or replace function claim_user_device(p_user_id text, p_device_id text, p_label text, p_max integer)
 returns text
 language plpgsql
@@ -60,6 +75,23 @@ $$;
 
 -- Replaces p_old_device_id by this device. Returns 'ok', 'cooldown' (a
 -- replacement already happened within p_cooldown_hours), or 'not_found'.
+--
+-- FUNCTION  replace_user_device(p_user_id text, p_old_device_id text,
+--             p_new_device_id text, p_label text, p_cooldown_hours integer)
+--             → text
+--   Purpose     Replaces one of the account's registered devices by another
+--               and logs the replacement, under the same per-account advisory
+--               lock.
+--   Returns     'cooldown': a replacement was already logged for this account
+--               within the last p_cooldown_hours; nothing changes.
+--               'not_found': p_old_device_id is not registered for this
+--               account; nothing changes.
+--               'ok': the old device is removed, the new one registered and
+--               the replacement logged.
+--   Runs as     the caller (SECURITY INVOKER, the default); language plpgsql.
+--   Privileges  In this file: EXECUTE revoked from public, anon,
+--               authenticated; EXECUTE granted to service_role.
+--   Called by   lib/devices.ts
 create or replace function replace_user_device(p_user_id text, p_old_device_id text, p_new_device_id text, p_label text, p_cooldown_hours integer)
 returns text
 language plpgsql

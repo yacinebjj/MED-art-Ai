@@ -34,6 +34,17 @@ create index if not exists ai_generation_ledger_namespace_idx on public.ai_gener
 alter table public.ai_generation_ledger enable row level security;
 
 -- Hit counter (observability: which namespaces actually save money).
+--
+-- FUNCTION  ai_ledger_record_hit(p_key text) → void
+--   Purpose     Records that a stored AI output was served again instead of
+--               being regenerated: adds 1 to ai_generation_ledger.hits and
+--               sets last_hit_at to now, for the row whose key is p_key.
+--   Returns     Nothing. No row with that key: nothing happens.
+--   Runs as     its owner (SECURITY DEFINER); language sql;
+--               search_path = public.
+--   Privileges  In this file: ALL revoked from public, anon, authenticated.
+--   Called by   lib/ai/generation-ledger.ts
+--   Also in     supabase/schema.sql
 create or replace function public.ai_ledger_record_hit(p_key text)
 returns void
 language sql
