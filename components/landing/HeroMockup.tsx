@@ -77,10 +77,11 @@ function StudioScreen({ fr }: { fr: boolean }) {
   const full = fr ? EXPLANATION_FR : EXPLANATION_EN;
   const [typed, setTyped] = useState(reduce ? full.length : 0);
   const done = typed >= full.length;
-  // Types, then stops ticking (it used to keep waking the page 35 times a second once done).
+  // Streams like a real AI answer — 6 characters every 56 ms, the same ~107 characters a second as
+  // before at half the re-renders and repaints — then stops ticking once done.
   useEffect(() => {
     if (reduce || done) return;
-    const id = window.setInterval(() => setTyped((n) => Math.min(full.length, n + 3)), 28);
+    const id = window.setInterval(() => setTyped((n) => Math.min(full.length, n + 6)), 56);
     return () => window.clearInterval(id);
   }, [full, reduce, done]);
   return (
@@ -125,11 +126,12 @@ function StudioScreen({ fr }: { fr: boolean }) {
 function GroupScreen({ fr }: { fr: boolean }) {
   const reduce = useReducedMotion();
   const [step, setStep] = useState(reduce ? 4 : 0);
+  const done = step >= 4;
   useEffect(() => {
-    if (reduce) return;
+    if (reduce || done) return;
     const id = window.setInterval(() => setStep((s) => Math.min(4, s + 1)), 750);
     return () => window.clearInterval(id);
-  }, [reduce]);
+  }, [reduce, done]);
   return (
     <div className="flex h-full flex-col gap-2 p-3">
       <div className="flex items-center gap-2 border-b border-white/10 pb-2">
@@ -163,7 +165,13 @@ function GroupScreen({ fr }: { fr: boolean }) {
               { label: fr ? "Pneumologie" : "Pulmonology", pct: 33 },
             ].map((o) => (
               <span key={o.label} className="relative mt-1 block overflow-hidden rounded-md bg-white/15 px-1.5 py-0.5">
-                <motion.span className="absolute inset-y-0 left-0 bg-white/25" initial={{ width: 0 }} animate={{ width: `${o.pct}%` }} transition={{ duration: 0.9 }} />
+                <motion.span
+                  className="absolute inset-y-0 left-0 bg-white/25"
+                  style={{ width: `${o.pct}%`, originX: 0 }}
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: 1 }}
+                  transition={{ duration: 0.9 }}
+                />
                 <span className="relative flex justify-between">
                   {o.label}
                   <b>{o.pct}%</b>
