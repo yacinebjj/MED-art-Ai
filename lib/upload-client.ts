@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { RELAY_CHUNK_BYTES, relayUploadId } from "@/lib/upload-relay";
 import type { StudioCourseSummary } from "@/types/studio-course";
 
 export interface UploadedDocument {
@@ -159,37 +160,132 @@ export async function uploadFileToSignedStorage(signUrl: string, signBody: Recor
   }
   const { bucket, path, token } = signData as { bucket: string; path: string; token: string };
 
-  // supabase-js's uploadToSignedUrl has no way to accept an AbortSignal (its
-  // FileOptions type carries no such field — confirmed by reading
-  // @supabase/storage-js's own source, not assumed), so a stalled upload
-  // can't actually be CANCELLED here the way fetchJsonWithTimeout cancels a
-  // plain fetch above. Racing it against a timeout still fixes the real,
-  // reported symptom (the modal's spinner hanging forever with zero
-  // feedback): this function returns/throws promptly either way, even
-  // though the underlying network request may keep running in the
-  // background until it eventually settles on its own.
+  // Step 2, directly: the browser PUTs the file to Storage. A failure where
+  // Storage never answered (the browser's "Failed to fetch": a network that
+  // can't reach supabase.co, a Storage incident — Code Red 2026-11-13) gets
+  // two more tries, then the relay: the same bytes, the same signed token,
+  // carried by MedArt's own server (app/api/upload/relay). A real answer from
+  // Storage (too large, refused…) is final, as before.
   const supabase = createClient();
-  let uploadTimeoutId: ReturnType<typeof setTimeout>;
-  const uploadTimeout = new Promise<never>((_, reject) => {
-    uploadTimeoutId = setTimeout(
-      () => reject(new Error("L'envoi du fichier a pris trop de temps — vérifie ta connexion (ou réessaie avec un fichier plus léger).")),
-      storageUploadTimeoutMs(file.size)
-    );
-  });
-  let uploadError: { message: string } | null;
-  try {
-    ({ error: uploadError } = await Promise.race([supabase.storage.from(bucket).uploadToSignedUrl(path, token, file), uploadTimeout]));
-  } finally {
-    clearTimeout(uploadTimeoutId!);
-  }
-  if (uploadError) {
+  for (let attempt = 0; attempt <= DIRECT_RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) await sleep(DIRECT_RETRY_DELAYS_MS[attempt - 1]);
+    // supabase-js's uploadToSignedUrl has no way to accept an AbortSignal (its
+    // FileOptions type carries no such field — confirmed by reading
+    // @supabase/storage-js's own source, not assumed), so a stalled upload
+    // can't actually be CANCELLED here the way fetchJsonWithTimeout cancels a
+    // plain fetch above. Racing it against a timeout still fixes the real,
+    // reported symptom (the modal's spinner hanging forever with zero
+    // feedback): this function returns/throws promptly either way, even
+    // though the underlying network request may keep running in the
+    // background until it eventually settles on its own.
+    let uploadTimeoutId: ReturnType<typeof setTimeout>;
+    const uploadTimeout = new Promise<"timeout">((resolve) => {
+      uploadTimeoutId = setTimeout(() => resolve("timeout"), storageUploadTimeoutMs(file.size));
+    });
+    let outcome: { error: StorageErrorLike | null } | "timeout";
+    try {
+      outcome = await Promise.race([supabase.storage.from(bucket).uploadToSignedUrl(path, token, file), uploadTimeout]);
+    } catch (error) {
+      outcome = { error: { name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : String(error) } };
+    } finally {
+      clearTimeout(uploadTimeoutId!);
+    }
+    // A stalled direct upload: don't wait that long again — the relay takes over.
+    if (outcome === "timeout") break;
+    const uploadError = outcome.error;
+    if (!uploadError) return { bucket, path };
     const message = uploadError.message ?? "";
+    // An earlier try landed although the browser never heard back: the file is already there.
+    if (attempt > 0 && /already exists|duplicate/i.test(message)) return { bucket, path };
+    if (isTransientFailure(uploadError)) continue;
     if (/exceeded|too large|maximum allowed size|payload too large/i.test(message)) {
       throw new Error("Ce fichier dépasse la taille maximale autorisée par le stockage — essaie un fichier plus léger.");
     }
     throw new Error(`L'envoi du fichier a échoué : ${message || "erreur inconnue."}`);
   }
+
+  await relayUpload(bucket, path, token, file);
   return { bucket, path };
+}
+
+/** Waits between direct tries when Storage never answered (a blip, a dropped connection). */
+const DIRECT_RETRY_DELAYS_MS = [1_200, 3_500];
+
+/** Generous: a relay request carries up to 3.5 MB through MedArt's server, which uploads it in turn. */
+const RELAY_TIMEOUT_MS = 120_000;
+
+interface StorageErrorLike {
+  name?: string;
+  message: string;
+  /** HTTP status of a StorageApiError (an answer Storage did send). */
+  status?: number;
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Not the file's fault: Storage never answered (supabase-js wraps a failed fetch() as a StorageUnknownError), or answered with a server error. */
+function isTransientFailure(error: StorageErrorLike): boolean {
+  if (error.name === "StorageUnknownError") return true;
+  if (typeof error.status === "number" && error.status >= 500) return true;
+  return /failed to fetch|networkerror|network error|load failed|network request failed|fetch failed|err_/i.test(error.message ?? "");
+}
+
+const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  txt: "text/plain",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+};
+
+/** One relay request; a failure that never reached MedArt's server reads as a connection problem, never as "Failed to fetch". */
+async function relayRequest(mode: "whole" | "part" | "complete", headers: Record<string, string>, body: BodyInit): Promise<void> {
+  let outcome: Awaited<ReturnType<typeof fetchJsonWithTimeout>>;
+  try {
+    outcome = await fetchJsonWithTimeout(
+      `/api/upload/relay?mode=${mode}`,
+      { method: "POST", headers, body },
+      RELAY_TIMEOUT_MS,
+      "L'envoi du fichier a pris trop de temps — vérifie ta connexion (ou réessaie avec un fichier plus léger)."
+    );
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error("Connexion perdue pendant l'envoi du fichier — vérifie ta connexion puis réessaie.");
+    throw error;
+  }
+  if (!outcome.ok || outcome.data?.success !== true) {
+    throw new Error(typeof outcome.data?.error === "string" ? outcome.data.error : "L'envoi du fichier a échoué — réessaie dans un instant.");
+  }
+}
+
+/** Step 2 through MedArt's own server (app/api/upload/relay): whole when it fits one request, else in parts assembled there. */
+async function relayUpload(bucket: string, path: string, token: string, file: File): Promise<void> {
+  const contentType = file.type || CONTENT_TYPES_BY_EXTENSION[file.name.split(".").pop()?.toLowerCase() ?? ""] || "application/octet-stream";
+  if (file.size <= RELAY_CHUNK_BYTES) {
+    await relayRequest(
+      "whole",
+      {
+        "content-type": "application/octet-stream",
+        "x-upload-bucket": bucket,
+        "x-upload-path": encodeURIComponent(path),
+        "x-upload-token": token,
+        "x-upload-content-type": contentType,
+      },
+      file
+    );
+    return;
+  }
+  const uploadId = relayUploadId();
+  const parts = Math.ceil(file.size / RELAY_CHUNK_BYTES);
+  for (let index = 0; index < parts; index++) {
+    await relayRequest(
+      "part",
+      { "content-type": "application/octet-stream", "x-upload-id": uploadId, "x-upload-part": String(index), "x-upload-parts": String(parts) },
+      file.slice(index * RELAY_CHUNK_BYTES, (index + 1) * RELAY_CHUNK_BYTES)
+    );
+  }
+  await relayRequest("complete", { "content-type": "application/json" }, JSON.stringify({ bucket, path, token, uploadId, parts, size: file.size, contentType }));
 }
 
 export async function uploadDocumentDirect(file: File, moduleId?: number): Promise<UploadedDocument> {

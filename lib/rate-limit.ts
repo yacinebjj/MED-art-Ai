@@ -128,6 +128,8 @@ export const RATE_LIMITS = {
   medicalImage: { limit: 120, windowMs: 60 * 1000 },
   /** app/api/assistant/medical-image/view/route.ts — each picture of a Copilot reply, served from MedArt's own address (no AI, no cost; the CDN answers repeats). Reopening a long conversation loads all its pictures at once and a failed one tries an alternative, hence the room; the bound keeps one account from pulling repository pictures through us at will. */
   medicalImageView: { limit: 240, windowMs: 60 * 1000 },
+  /** app/api/upload/relay/route.ts — the fallback carrier of an upload whose direct Storage PUT failed (no AI, no cost; up to 4 requests per file: 3 parts + assembly). Room for a batch of 10 files; the bound keeps one account from pushing bytes through us at will. */
+  uploadRelay: { limit: 45, windowMs: 10 * 60 * 1000 },
 } satisfies Record<string, RateLimitConfig>;
 
 /** Seconds until the window resets, for a Retry-After header. */
