@@ -1,19 +1,46 @@
+/**
+ * Supabase — session refresh and page gate, for the middleware.
+ *
+ * Where it runs   In the Edge middleware, on page requests: the root
+ *                 middleware.ts calls updateSession() and never sends it
+ *                 /api/** (those routes verify the user themselves).
+ * Credentials     The public anon key plus the request's session cookie.
+ * Exports         updateSession()
+ *
+ * What it decides, per request:
+ *   - keeps the session cookie fresh on full page loads;
+ *   - sends visitors without a session away from the protected pages
+ *     (PROTECTED_PREFIXES) to /login?next=…;
+ *   - sends signed-in visitors from "/", /login and /register to /dashboard.
+ * It is a navigation gate, never the access control: every /api/** route
+ * checks the user itself (lib/supabase/session-server.ts).
+ */
+
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+
 import { EXPIRED_COOKIE, isDeadSessionError, isSessionCookieName } from "@/lib/supabase/dead-session";
 
+// ---------------------------------------------------------------------------
+// Configuration
+
+/** A cookie as @supabase/ssr hands it to the cookie adapter's setAll(). */
 interface CookieToSet {
   name: string;
   value: string;
   options: CookieOptions;
 }
 
-// "/study" lives outside /dashboard (its own full-page layout, no
-// Sidebar/Topbar chrome) but needs the exact same auth gate — it used to
-// rely solely on "nobody will type this URL directly," which isn't a real
-// guard: its data routes (app/api/srs/*) were always server-gated, but the
-// page itself rendered for anyone who hit the URL.
+/**
+ * The path prefixes that require a session.
+ *
+ * "/study" lives outside /dashboard (its own full-page layout, no
+ * Sidebar/Topbar chrome) but needs the exact same auth gate — it used to
+ * rely solely on "nobody will type this URL directly," which isn't a real
+ * guard: its data routes (app/api/srs/*) were always server-gated, but the
+ * page itself rendered for anyone who hit the URL.
+ */
 const PROTECTED_PREFIXES = ["/dashboard", "/study"];
 
 /**
@@ -25,6 +52,9 @@ const PROTECTED_PREFIXES = ["/dashboard", "/study"];
  */
 const AUTH_CHECK_TIMEOUT_MS = 2500;
 
+// ---------------------------------------------------------------------------
+// Reading the request (no network)
+
 /**
  * A request made by the client-side ROUTER (soft navigation or <Link>
  * prefetch), as opposed to a full document load.
@@ -35,20 +65,39 @@ const AUTH_CHECK_TIMEOUT_MS = 2500;
  * browser-set Fetch Metadata header can: router requests are fetch() calls
  * (`Sec-Fetch-Dest: empty`), a real page load is `document`. Browsers
  * without Fetch Metadata simply take the full (bounded) check below.
+ *
+ * @param request - The incoming request.
+ * @returns true for a soft navigation or a prefetch.
  */
 function isClientRouterRequest(request: NextRequest): boolean {
   return request.headers.get("sec-fetch-dest") === "empty" || request.headers.get("purpose") === "prefetch";
 }
 
-/** A Supabase session cookie is present (`sb-<project>-auth-token`, possibly chunked `.0`, `.1`…). No network involved. */
+/**
+ * A Supabase session cookie is present (`sb-<project>-auth-token`, possibly chunked `.0`, `.1`…). No network involved.
+ *
+ * @param request - The incoming request.
+ * @returns true when the request carries a session cookie — present, not verified.
+ */
 function hasAuthCookie(request: NextRequest): boolean {
   return request.cookies.getAll().some((cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("-auth-token"));
 }
 
+// ---------------------------------------------------------------------------
+// Answers and checks
+
 /**
+ * Redirects to /login?next=<pathname>, so the student comes back to the page
+ * they asked for once signed in.
+ *
  * `sessionResponse` carries what getSession() just wrote: when the refresh
  * token was dead it deleted the session cookie, and dropping that deletion
  * here sent the dead cookie on to /login, which then failed on it again.
+ *
+ * @param request - The incoming request.
+ * @param pathname - The protected page that was requested.
+ * @param sessionResponse - The response whose cookies must travel with the redirect, if any.
+ * @returns The redirect response.
  */
 function redirectToLogin(request: NextRequest, pathname: string, sessionResponse?: NextResponse) {
   const redirectUrl = request.nextUrl.clone();
@@ -63,6 +112,10 @@ function redirectToLogin(request: NextRequest, pathname: string, sessionResponse
  * Supabase Auth itself says the cookie's session is gone for good
  * (lib/supabase/dead-session.ts). A slow or failed check is NOT dead: the
  * cookie keeps its word, as with getSession() alone.
+ *
+ * @param supabase - The request's Supabase client.
+ * @returns true only when Supabase Auth answered, within AUTH_CHECK_TIMEOUT_MS,
+ *          that the session no longer exists.
  */
 async function isDeadSession(supabase: SupabaseClient): Promise<boolean> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -78,6 +131,9 @@ async function isDeadSession(supabase: SupabaseClient): Promise<boolean> {
   if (timeoutId) clearTimeout(timeoutId);
   return dead;
 }
+
+// ---------------------------------------------------------------------------
+// Entry point
 
 /**
  * Refreshes the Supabase auth cookie on full page loads (required so session
@@ -100,6 +156,18 @@ async function isDeadSession(supabase: SupabaseClient): Promise<boolean> {
  *    it times out and a session cookie exists, the page loads anyway: this
  *    redirect is a UX gate, while every /api/** route enforces auth itself
  *    (getAuthenticatedUser), so no data is exposed by letting it through.
+ *
+ * The steps below run in this order; the first that applies answers:
+ *  1. soft navigation or prefetch → cookie presence check only;
+ *  2. no session cookie → public pages pass, protected pages go to /login;
+ *  3. session cookie on "/" → straight to /dashboard;
+ *  4. full page load → bounded getSession() (refreshes the cookie), then:
+ *     timed out → let through; no session on a protected page → /login;
+ *     session on /login or /register → /dashboard, unless Auth says that
+ *     session is dead (then its cookie is deleted and the form is shown).
+ *
+ * @param request - The incoming page request.
+ * @returns The response to send: a pass-through (with any refreshed cookies) or a redirect.
  */
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;

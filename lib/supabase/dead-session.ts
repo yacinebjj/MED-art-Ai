@@ -1,3 +1,15 @@
+/**
+ * Supabase — dead-session helpers.
+ *
+ * Where it runs   Both server runtimes: the Edge middleware
+ *                 (lib/supabase/middleware.ts) and the Node API routes
+ *                 (lib/supabase/session-server.ts). Pure functions only — no
+ *                 network, no cookies API, no runtime-specific import.
+ * Exports         isDeadSessionError()   is this Auth error final?
+ *                 isSessionCookieName()  is this cookie the session itself?
+ *                 EXPIRED_COOKIE         options that delete such a cookie
+ */
+
 import { isAuthSessionMissingError } from "@supabase/supabase-js";
 
 /**
@@ -15,6 +27,14 @@ import { isAuthSessionMissingError } from "@supabase/supabase-js";
  */
 const DEAD_SESSION_CODES = new Set(["user_not_found", "session_not_found", "refresh_token_not_found"]);
 
+/**
+ * Whether a Supabase Auth error means the cookie's session is permanently
+ * gone: supabase-js's own "Auth session missing!" error, or an error whose
+ * `code` is one of DEAD_SESSION_CODES.
+ *
+ * @param error - Whatever a Supabase Auth call returned or threw.
+ * @returns true when no retry or refresh can bring this session back.
+ */
 export function isDeadSessionError(error: unknown): boolean {
   if (isAuthSessionMissingError(error)) return true;
   const code = (error as { code?: unknown } | null)?.code;
@@ -25,6 +45,9 @@ export function isDeadSessionError(error: unknown): boolean {
  * The session cookie itself (`sb-<project>-auth-token`, or its `.0`, `.1`…
  * chunks) — never the PKCE `-code-verifier` cookie that a pending
  * confirmation or password-reset link still needs.
+ *
+ * @param name - A cookie name from the request.
+ * @returns true for the session cookie or one of its numbered chunks.
  */
 export function isSessionCookieName(name: string): boolean {
   return /^sb-.+-auth-token(\.\d+)?$/.test(name);
