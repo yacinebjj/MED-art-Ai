@@ -2,7 +2,6 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
 import { CalendarClock, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -19,7 +18,7 @@ import { OsCard, WidgetSkeleton, useNow } from "./primitives";
  * set right here (kept on this device). The bar shows how much of the
  * revision window, from when the countdown started to the exam, is used up.
  */
-export function ExamCountdownWidget({ userId }: { userId: string | null }) {
+export function ExamCountdownWidget({ userId, cascadeIndex }: { userId: string | null; cascadeIndex: number }) {
   const { language } = useLanguage();
   const overview = useCockpitStore((state) => state.overview);
   const now = useNow();
@@ -35,7 +34,7 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
     return onLocalActivitySynced(() => setCustom(readCustomExam(userId)));
   }, [userId]);
 
-  if (!now || custom === undefined || !overview) return <WidgetSkeleton />;
+  if (!now || custom === undefined || !overview) return <WidgetSkeleton cascadeIndex={cascadeIndex} />;
 
   const fromPlan = overview.nextExam;
   const exam = fromPlan
@@ -86,6 +85,7 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
       iconClassName="from-rose-500 to-pink-500"
       title={tCockpit("examTitle", language)}
       glow="[@media(hover:hover)]:hover:shadow-rose-500/15"
+      cascadeIndex={cascadeIndex}
       action={
         !fromPlan && !editing ? (
           <button type="button" onClick={startEdit} aria-label={tCockpit("examEdit", language)} className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
@@ -94,7 +94,7 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
         ) : null
       }
     >
-      {/* Editing ↔ countdown ↔ empty: each settles in (motion-swap, app/globals.css); the day count has its own rise. */}
+      {/* Editing ↔ countdown ↔ empty: each settles in (motion-swap, app/globals.css); the day count has its own rise (.count-rise, with the card's arrival). */}
       {editing ? (
         <form onSubmit={save} className="motion-swap space-y-2">
           <input
@@ -134,14 +134,9 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
       ) : exam && days !== null ? (
         <>
           <div className="flex items-end gap-3">
-            <motion.p
-              key={days}
-              initial={{ y: 8, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className={cn("text-5xl font-black tabular-nums leading-none tracking-tight", urgent ? "text-rose-600 dark:text-rose-400" : "text-foreground")}
-            >
+            <p key={days} className={cn("count-rise text-5xl font-black tabular-nums leading-none tracking-tight", urgent ? "text-rose-600 dark:text-rose-400" : "text-foreground")}>
               {days}
-            </motion.p>
+            </p>
             <div className="min-w-0 pb-0.5">
               <p className="text-xs font-semibold text-foreground">{days === 0 ? tCockpit("examToday", language) : tCockpit(days === 1 ? "dayLeft" : "daysLeft", language)}</p>
               <p className="truncate text-xs text-muted-foreground">{exam.label}</p>
@@ -156,11 +151,9 @@ export function ExamCountdownWidget({ userId }: { userId: string | null }) {
               <span className="tabular-nums">{elapsedPct}%</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <motion.div
-                className={cn("h-full rounded-full bg-gradient-to-r", urgent ? "from-rose-500 to-orange-500" : "from-rose-400 to-pink-500")}
-                initial={{ width: 0 }}
-                animate={{ width: `${elapsedPct}%` }}
-                transition={{ duration: 0.9, ease: "easeOut" }}
+              <div
+                className={cn("bar-grow h-full w-full origin-left rounded-full bg-gradient-to-r", urgent ? "from-rose-500 to-orange-500" : "from-rose-400 to-pink-500")}
+                style={{ transform: `scaleX(${elapsedPct / 100})` }}
               />
             </div>
             {exam.source === "plan" && (

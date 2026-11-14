@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
 import { ArrowRight, Brain, ChevronDown, Clock3, Flame, Minus, Plus, Target, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Cascade } from "@/components/layout/Cascade";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useFocusLog, usePomodoro } from "@/providers/PomodoroProvider";
@@ -19,11 +19,9 @@ import {
   type FlashcardSessionSummary,
 } from "@/lib/dashboard/local-activity";
 import { tCockpit } from "@/lib/translations/cockpit";
-import { EmptyHint, OsCard, RadialGauge, Skeleton, WidgetSkeleton, useNow } from "./primitives";
+import { EmptyHint, HOME_CASCADE, OsCard, RadialGauge, Skeleton, WIDGET_STEP, WidgetSkeleton, useNow } from "./primitives";
 import { ExamCountdownWidget } from "./ExamCountdownWidget";
 import { ClinicalPearlWidget } from "./ClinicalPearlWidget";
-
-const GRID = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } };
 
 /** Day-of-week initial for the heat strip / bar chart. */
 function weekdayInitial(date: Date, language: Language) {
@@ -32,7 +30,7 @@ function weekdayInitial(date: Date, language: Language) {
 
 // ---------------------------------------------------------------------------
 
-function StreakWidget({ userId }: { userId: string | null }) {
+function StreakWidget({ userId, cascadeIndex }: { userId: string | null; cascadeIndex: number }) {
   const { language } = useLanguage();
   const focusLog = useFocusLog();
   const overview = useCockpitStore((state) => state.overview);
@@ -53,7 +51,7 @@ function StreakWidget({ userId }: { userId: string | null }) {
     [overview, dayCount]
   );
 
-  if (!now || !days) return <WidgetSkeleton />;
+  if (!now || !days) return <WidgetSkeleton cascadeIndex={cascadeIndex} />;
 
   const streak = computeStreak(days, now);
   const strip = recentDays(days, now, 14);
@@ -67,7 +65,7 @@ function StreakWidget({ userId }: { userId: string | null }) {
   }
 
   return (
-    <OsCard icon={Flame} iconClassName="from-orange-500 to-rose-500" title={tCockpit("streakTitle", language)} glow="[@media(hover:hover)]:hover:shadow-orange-500/15">
+    <OsCard icon={Flame} iconClassName="from-orange-500 to-rose-500" title={tCockpit("streakTitle", language)} glow="[@media(hover:hover)]:hover:shadow-orange-500/15" cascadeIndex={cascadeIndex}>
       <div className="flex items-center gap-4">
         <div className="relative">
           {/* CSS keyframes (compositor), not an infinite framer-motion loop on the main thread. */}
@@ -92,13 +90,12 @@ function StreakWidget({ userId }: { userId: string | null }) {
       <div className="mt-4 flex items-end justify-between gap-1" aria-label={tCockpit("streakStripLabel", language)}>
         {strip.map((day, i) => (
           <div key={day.key} className="flex flex-1 flex-col items-center gap-1">
-            <motion.span
-              initial={{ scaleY: 0.3, opacity: 0 }}
-              animate={{ scaleY: 1, opacity: 1 }}
-              transition={{ delay: i * 0.025 }}
+            {/* Rises from the baseline as the card arrives, one day after another (.column-rise, CSS). */}
+            <span
               title={day.date.toLocaleDateString(language === "fr" ? "fr-FR" : "en-GB")}
+              style={{ animationDelay: `calc(var(--cascade-delay, 0ms) + ${i * 25}ms)` }}
               className={cn(
-                "h-6 w-full max-w-[18px] rounded-md",
+                "column-rise h-6 w-full max-w-[18px] origin-bottom rounded-md",
                 day.active ? "bg-gradient-to-t from-orange-500 to-amber-400 shadow-[0_0_10px_rgb(249_115_22/0.35)]" : "bg-muted",
                 i === strip.length - 1 && "ring-2 ring-primary-400/60 ring-offset-1 ring-offset-transparent"
               )}
@@ -126,11 +123,9 @@ function StreakWidget({ userId }: { userId: string | null }) {
           </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-muted">
-          <motion.div
-            className={cn("h-full rounded-full bg-gradient-to-r", goalPct >= 100 ? "from-emerald-500 to-teal-400" : "from-orange-500 to-amber-400")}
-            initial={{ width: 0 }}
-            animate={{ width: `${goalPct}%` }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
+          <div
+            className={cn("bar-grow h-full w-full origin-left rounded-full bg-gradient-to-r", goalPct >= 100 ? "from-emerald-500 to-teal-400" : "from-orange-500 to-amber-400")}
+            style={{ transform: `scaleX(${goalPct / 100})` }}
           />
         </div>
         <p className="mt-1 text-[10px] text-muted-foreground">{tCockpit("goalSource", language).replace("{time}", formatDuration(todaySeconds, language))}</p>
@@ -141,16 +136,16 @@ function StreakWidget({ userId }: { userId: string | null }) {
 
 // ---------------------------------------------------------------------------
 
-function QcmWidget() {
+function QcmWidget({ cascadeIndex }: { cascadeIndex: number }) {
   const { language } = useLanguage();
   const overview = useCockpitStore((state) => state.overview);
-  if (!overview) return <WidgetSkeleton />;
+  if (!overview) return <WidgetSkeleton cascadeIndex={cascadeIndex} />;
   const { qcm, exams } = overview;
   const accuracy = qcm.answeredThisWeek > 0 ? Math.round((qcm.correctThisWeek / qcm.answeredThisWeek) * 100) : null;
   const overall = qcm.answeredTotal > 0 ? Math.round((qcm.correctTotal / qcm.answeredTotal) * 100) : null;
 
   return (
-    <OsCard icon={Target} iconClassName="from-primary-500 to-cyan-500" title={tCockpit("qcmTitle", language)} glow="[@media(hover:hover)]:hover:shadow-primary-500/15">
+    <OsCard icon={Target} iconClassName="from-primary-500 to-cyan-500" title={tCockpit("qcmTitle", language)} glow="[@media(hover:hover)]:hover:shadow-primary-500/15" cascadeIndex={cascadeIndex}>
       <div className="flex items-center gap-4">
         <RadialGauge value={accuracy} gradient={["#0ea5e9", "#2563eb"]}>
           <span className="text-lg font-extrabold tabular-nums text-foreground">{accuracy === null ? "—" : `${accuracy}%`}</span>
@@ -182,7 +177,7 @@ function QcmWidget() {
 
 // ---------------------------------------------------------------------------
 
-function FlashcardWidget({ userId }: { userId: string | null }) {
+function FlashcardWidget({ userId, cascadeIndex }: { userId: string | null; cascadeIndex: number }) {
   const { language } = useLanguage();
   const overview = useCockpitStore((state) => state.overview);
   const [session, setSession] = useState<FlashcardSessionSummary | null | undefined>(undefined);
@@ -190,13 +185,13 @@ function FlashcardWidget({ userId }: { userId: string | null }) {
     setSession(userId ? readFlashcardSession(userId) : null);
   }, [userId]);
 
-  if (session === undefined) return <WidgetSkeleton />;
+  if (session === undefined) return <WidgetSkeleton cascadeIndex={cascadeIndex} />;
   const graded = session ? session.correct + session.incorrect : 0;
   const knownPct = graded > 0 ? Math.round((session!.correct / graded) * 100) : 0;
   const activeModules = overview?.flashcardActiveModuleIds.length ?? null;
 
   return (
-    <OsCard icon={Brain} iconClassName="from-violet-500 to-fuchsia-500" title={tCockpit("flashTitle", language)} glow="[@media(hover:hover)]:hover:shadow-violet-500/15">
+    <OsCard icon={Brain} iconClassName="from-violet-500 to-fuchsia-500" title={tCockpit("flashTitle", language)} glow="[@media(hover:hover)]:hover:shadow-violet-500/15" cascadeIndex={cascadeIndex}>
       {session && graded > 0 ? (
         <>
           <div className="flex items-end justify-between gap-2">
@@ -209,9 +204,12 @@ function FlashcardWidget({ userId }: { userId: string | null }) {
               <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tCockpit("flashToReview", language)}</p>
             </div>
           </div>
-          <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-muted">
-            <motion.div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400" initial={{ width: 0 }} animate={{ width: `${knownPct}%` }} transition={{ duration: 0.8 }} />
-            <motion.div className="h-full bg-gradient-to-r from-rose-400 to-rose-500" initial={{ width: 0 }} animate={{ width: `${100 - knownPct}%` }} transition={{ duration: 0.8 }} />
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-muted">
+            {/* The two shares keep their real widths; the pair fills in from the left as one, as the card arrives (.bar-grow). */}
+            <div className="bar-grow flex h-full w-full origin-left">
+              <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400" style={{ width: `${knownPct}%` }} />
+              <div className="h-full bg-gradient-to-r from-rose-400 to-rose-500" style={{ width: `${100 - knownPct}%` }} />
+            </div>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             {tCockpit("flashSession", language).replace("{n}", String(session.reviewedTotal)).replace("{left}", String(session.remainingInBatch))}
@@ -238,11 +236,11 @@ function FlashcardWidget({ userId }: { userId: string | null }) {
 
 // ---------------------------------------------------------------------------
 
-function FocusWidget() {
+function FocusWidget({ cascadeIndex }: { cascadeIndex: number }) {
   const { language } = useLanguage();
   const { focusLog, isActive, seconds, toggleActive } = usePomodoro();
   const now = useNow();
-  if (!now) return <WidgetSkeleton />;
+  if (!now) return <WidgetSkeleton cascadeIndex={cascadeIndex} />;
 
   const week = focusLastSevenDays(focusLog, now);
   const weekTotal = week.reduce((sum, day) => sum + day.seconds, 0);
@@ -255,6 +253,7 @@ function FocusWidget() {
       iconClassName="from-sky-500 to-indigo-500"
       title={tCockpit("focusTitle", language)}
       glow="[@media(hover:hover)]:hover:shadow-sky-500/15"
+      cascadeIndex={cascadeIndex}
       action={
         isActive ? (
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
@@ -277,15 +276,14 @@ function FocusWidget() {
       <div className="mt-3 flex h-20 items-end justify-between gap-1.5">
         {week.map((day, i) => (
           <div key={day.key} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
-            <motion.div
+            {/* Its real height, grown from the baseline as the card arrives — a scale, not a height: no layout on every frame. */}
+            <div
               title={formatDuration(day.seconds, language)}
               className={cn(
-                "w-full max-w-[22px] rounded-t-md",
+                "column-grow w-full max-w-[22px] origin-bottom rounded-t-md",
                 i === week.length - 1 ? "bg-gradient-to-t from-sky-500 to-indigo-400" : "bg-gradient-to-t from-sky-500/40 to-indigo-400/40"
               )}
-              initial={{ height: 0 }}
-              animate={{ height: `${Math.max(4, (day.seconds / max) * 100)}%` }}
-              transition={{ duration: 0.6, delay: i * 0.04 }}
+              style={{ height: `${Math.max(4, (day.seconds / max) * 100)}%`, animationDelay: `calc(var(--cascade-delay, 0ms) + ${i * 40}ms)` }}
             />
             <span className="text-[9px] font-medium uppercase text-muted-foreground">{weekdayInitial(day.date, language)}</span>
           </div>
@@ -328,7 +326,7 @@ export function AnalyticsHub() {
 
   return (
     <section aria-labelledby="analytics-heading">
-      <div className="mb-3 flex items-end justify-between gap-3">
+      <Cascade at={HOME_CASCADE.analyticsHeading} className="mb-3 flex items-end justify-between gap-3">
         <div>
           <h2 id="analytics-heading" className="text-base font-bold tracking-tight text-foreground sm:text-lg">
             {tCockpit("analyticsHeading", language)}
@@ -340,26 +338,29 @@ export function AnalyticsHub() {
             {tCockpit("retry", language)}
           </button>
         )}
-      </div>
-      <motion.div variants={GRID} initial="hidden" animate="show" className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
-        <StreakWidget userId={userId} />
-        <ExamCountdownWidget userId={userId} />
-        <div className={cn("contents", !showAll && "max-sm:hidden")}>
-          <QcmWidget />
-          <FlashcardWidget userId={userId} />
-          <FocusWidget />
-          <ClinicalPearlWidget userId={userId} />
+      </Cascade>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
+        <StreakWidget userId={userId} cascadeIndex={0} />
+        <ExamCountdownWidget userId={userId} cascadeIndex={1} />
+        {/* Folded away on phones: unfolded, these rise at once, one after another (.cascade-reveal), not on their first-visit beats. */}
+        <div className={cn("contents", !showAll && "max-sm:hidden", showAll && "cascade-reveal")}>
+          <QcmWidget cascadeIndex={2} />
+          <FlashcardWidget userId={userId} cascadeIndex={3} />
+          <FocusWidget cascadeIndex={4} />
+          <ClinicalPearlWidget userId={userId} cascadeIndex={5} />
         </div>
-      </motion.div>
-      <button
-        type="button"
-        onClick={() => setShowAll((v) => !v)}
-        aria-expanded={showAll}
-        className="press-feedback mt-3 flex h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-border/60 bg-background/60 text-sm font-semibold text-muted-foreground sm:hidden"
-      >
-        {showAll ? tCockpit("statsShowLess", language) : tCockpit("statsShowAll", language)}
-        <ChevronDown className={cn("h-4 w-4 transition-transform", showAll && "rotate-180")} />
-      </button>
+      </div>
+      <Cascade at={HOME_CASCADE.analyticsWidgets} index={2} step={WIDGET_STEP} className="mt-3 sm:hidden">
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          aria-expanded={showAll}
+          className="press-feedback flex h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-border/60 bg-background/60 text-sm font-semibold text-muted-foreground"
+        >
+          {showAll ? tCockpit("statsShowLess", language) : tCockpit("statsShowAll", language)}
+          <ChevronDown className={cn("h-4 w-4 transition-transform", showAll && "rotate-180")} />
+        </button>
+      </Cascade>
     </section>
   );
 }

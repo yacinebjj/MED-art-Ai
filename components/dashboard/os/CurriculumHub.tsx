@@ -34,7 +34,8 @@ import { tCockpit } from "@/lib/translations/cockpit";
 import { tDiscovery } from "@/lib/translations/discovery";
 import type { CurriculumModule, CurriculumYearData } from "@/types/academic";
 import type { DashboardModuleStats } from "@/types/dashboard-overview";
-import { Skeleton } from "./primitives";
+import { Cascade, useCascade } from "@/components/layout/Cascade";
+import { HOME_CASCADE, MODULE_STEP, Skeleton } from "./primitives";
 
 // Opened on demand from one card's menu: fetched on first open, and only the
 // open one is mounted — never one closed Dialog per module card in the grid.
@@ -75,12 +76,15 @@ const ACTION_TILE =
 
 const ModuleCard = memo(function ModuleCard({
   entry,
+  index,
   language,
   flashcardsActive,
   onLaunchFlashcards,
   launching,
 }: {
   entry: ModuleEntry;
+  /** Its place in the grid: the cards rise in one after another (HOME_CASCADE.moduleCards) — on arrival, and when a filter brings it in. */
+  index: number;
   language: Language;
   flashcardsActive: boolean;
   onLaunchFlashcards: (moduleId: number) => void;
@@ -88,6 +92,7 @@ const ModuleCard = memo(function ModuleCard({
 }) {
   const router = useRouter();
   const { toast } = useToast();
+  const cascade = useCascade(HOME_CASCADE.moduleCards, index, MODULE_STEP);
   const { module: mod, stats } = entry;
   const [statsOpen, setStatsOpen] = useState(false);
   const deleteKey = `module-sources:${mod.id}`;
@@ -140,14 +145,15 @@ const ModuleCard = memo(function ModuleCard({
   return (
     // No `layout` prop: layout animations measure every card on every
     // re-render of the hub (data, auth and language updates all trigger
-    // one), which made the dashboard stutter on phones.
+    // one), which made the dashboard stutter on phones. The entrance is the
+    // home's CSS cascade (compositor); framer only plays the exit when a
+    // filter takes the card away (AnimatePresence below).
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.25 }}
+      style={cascade.style}
       // .module-card (./module-card.css): the gradient ring, lift and neon hover.
-      className={cn("module-card group relative rounded-3xl p-[1.5px] transition-opacity duration-300", pendingDelete && "pointer-events-none opacity-45 saturate-50")}
+      className={cn(cascade.className, "module-card group relative rounded-3xl p-[1.5px] transition-opacity duration-300", pendingDelete && "pointer-events-none opacity-45 saturate-50")}
       aria-busy={pendingDelete || undefined}
     >
       <div
@@ -224,12 +230,10 @@ const ModuleCard = memo(function ModuleCard({
             <span className="tabular-nums text-foreground">{stats && stats.courseCount > 0 ? `${progress}%` : "—"}</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            {/* scaleX, not width: a transform animates without re-running layout on every frame for every card. */}
-            <motion.div
-              className={cn("h-full w-full origin-left rounded-full bg-gradient-to-r", progress >= MASTERED_PCT ? "from-emerald-500 to-teal-400" : "from-primary-500 to-violet-500")}
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: progress / 100 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
+            {/* scaleX, not width: a transform animates without re-running layout on every frame for every card. It fills as the card arrives (.bar-grow, CSS). */}
+            <div
+              className={cn("bar-grow h-full w-full origin-left rounded-full bg-gradient-to-r", progress >= MASTERED_PCT ? "from-emerald-500 to-teal-400" : "from-primary-500 to-violet-500")}
+              style={{ transform: `scaleX(${progress / 100})` }}
             />
           </div>
         </div>
@@ -310,13 +314,18 @@ const ModuleCard = memo(function ModuleCard({
 
 // ---------------------------------------------------------------------------
 
+/** The curriculum's place while it loads, on the same beats as what replaces it (the pulse lives on an inner layer: one element, one animation). */
 export function CurriculumHubSkeleton() {
   return (
     <div className="space-y-4">
-      <Skeleton className="h-11 w-full rounded-2xl" />
+      <Cascade at={HOME_CASCADE.curriculumBody}>
+        <Skeleton className="h-11 w-full rounded-2xl" />
+      </Cascade>
       <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 sm:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="glass-card h-[250px] animate-pulse rounded-3xl" />
+          <Cascade key={i} at={HOME_CASCADE.moduleCards} index={i} step={MODULE_STEP}>
+            <div className="glass-card h-[250px] animate-pulse rounded-3xl" />
+          </Cascade>
         ))}
       </div>
     </div>
@@ -449,11 +458,11 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
 
   if (entries.length === 0) {
     return (
-      <div className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed px-4 py-12 text-center">
+      <Cascade at={HOME_CASCADE.curriculumBody} className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed px-4 py-12 text-center">
         <FolderOpen className="h-10 w-10 text-muted-foreground/50" />
         <p className="text-sm font-semibold text-foreground">{tCockpit("noModulesTitle", language)}</p>
         <p className="max-w-sm text-xs text-muted-foreground">{tCockpit("noModulesBody", language)}</p>
-      </div>
+      </Cascade>
     );
   }
 
@@ -461,17 +470,20 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
     <div className="space-y-4">
       {/* Toolbar: the teaching-unit filter (only when the year has teaching units). */}
       {data.teachingUnits.length > 0 && (
-        <div className="glass-card flex flex-col gap-2.5 rounded-2xl border border-white/30 p-2.5 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark lg:flex-row lg:items-center">
+        <Cascade
+          at={HOME_CASCADE.curriculumBody}
+          className="glass-card flex flex-col gap-2.5 rounded-2xl border border-white/30 p-2.5 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark lg:flex-row lg:items-center"
+        >
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5">
               <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
               <Select value={unitFilter} onValueChange={setUnitFilter} options={unitOptions} className="h-10 w-[11rem] rounded-xl text-xs sm:w-[13rem]" />
             </div>
           </div>
-        </div>
+        </Cascade>
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      <Cascade at={HOME_CASCADE.curriculumChips} className="flex flex-wrap items-center gap-1.5">
         {statusChips.map((chip) => (
           <button
             key={chip.value}
@@ -509,20 +521,22 @@ export function CurriculumHub({ data }: { data: CurriculumYearData }) {
             </button>
           </span>
         )}
-      </div>
+      </Cascade>
 
       {visible.length === 0 ? (
-        <div className="glass-card flex flex-col items-center gap-2 rounded-3xl border-dashed px-4 py-10 text-center">
+        <Cascade at={HOME_CASCADE.moduleCards} className="glass-card flex flex-col items-center gap-2 rounded-3xl border-dashed px-4 py-10 text-center">
           <Target className="h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">{tCockpit("noModuleMatch", language)}</p>
-        </div>
+        </Cascade>
       ) : (
         <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 sm:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
+          {/* Exits only (a filter taking cards away): entrances are each card's own CSS cascade. */}
           <AnimatePresence initial={false}>
-            {visible.map((entry) => (
+            {visible.map((entry, index) => (
               <ModuleCard
                 key={entry.module.id}
                 entry={entry}
+                index={index}
                 language={language}
                 flashcardsActive={activeFlashcardModuleIds.has(entry.module.id)}
                 onLaunchFlashcards={launchFlashcards}

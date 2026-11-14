@@ -4,16 +4,40 @@ import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Cascade, CascadeDelayProvider, useCascade, useEnclosingCascadeDelay } from "@/components/layout/Cascade";
 
 /**
  * Shared building blocks of the Medical OS dashboard widgets: a glass card
- * with an icon header, a radial gauge, a skeleton, and a client-only clock.
+ * with an icon header, a radial gauge, a skeleton, a client-only clock — and
+ * the beats of the home page's entrance.
  */
 
-export const CARD_ENTRANCE = {
-  hidden: { opacity: 0, y: 14 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] } },
+/**
+ * The home page's entrance (components/layout/Cascade.tsx): when it appears —
+ * on arrival, and every time the student comes back to it — each block rises
+ * in on its own beat, in ms, top to bottom, the way the eye reads it. A block
+ * whose data comes later rises the moment it arrives.
+ */
+export const HOME_CASCADE = {
+  greeting: 0,
+  quickLaunchHeading: 70,
+  resume: 120,
+  /** + TILE_STEP per tile. */
+  labTiles: 170,
+  curriculumHeading: 260,
+  /** The unit toolbar, or the empty / error / no-year state. */
+  curriculumBody: 310,
+  curriculumChips: 340,
+  /** + MODULE_STEP per card (the first ten; the others come with the tenth). */
+  moduleCards: 380,
+  analyticsHeading: 480,
+  /** + WIDGET_STEP per widget. */
+  analyticsWidgets: 520,
 } as const;
+
+export const TILE_STEP = 40;
+export const MODULE_STEP = 40;
+export const WIDGET_STEP = 45;
 
 export function OsCard({
   icon: Icon,
@@ -23,6 +47,7 @@ export function OsCard({
   children,
   className,
   glow,
+  cascadeIndex,
 }: {
   icon: LucideIcon;
   /** Gradient classes for the icon chip, e.g. "from-orange-500 to-amber-500". */
@@ -33,11 +58,15 @@ export function OsCard({
   className?: string;
   /** Hover glow tint (literal class, real-hover devices only), e.g. "[@media(hover:hover)]:hover:shadow-orange-500/15". */
   glow?: string;
+  /** Its place among the home's widgets: they rise in one after another (HOME_CASCADE.analyticsWidgets). */
+  cascadeIndex: number;
 }) {
+  const cascade = useCascade(HOME_CASCADE.analyticsWidgets, cascadeIndex, WIDGET_STEP);
   return (
-    <motion.section
-      variants={CARD_ENTRANCE}
+    <section
+      style={cascade.style}
       className={cn(
+        cascade.className,
         "glass-card group/card relative isolate flex flex-col overflow-hidden rounded-3xl border border-white/30 p-4 shadow-glass transition-[transform,box-shadow] duration-300 dark:border-white/[0.06] dark:shadow-glass-dark sm:p-5 [@media(hover:hover)]:hover:-translate-y-0.5 [@media(hover:hover)]:hover:shadow-xl",
         glow,
         className
@@ -54,8 +83,10 @@ export function OsCard({
         <h3 className="min-w-0 flex-1 truncate text-sm font-bold tracking-tight text-foreground">{title}</h3>
         {action}
       </header>
-      <div className="relative flex min-h-0 flex-1 flex-col">{children}</div>
-    </motion.section>
+      <CascadeDelayProvider value={cascade.delay}>
+        <div className="relative flex min-h-0 flex-1 flex-col">{children}</div>
+      </CascadeDelayProvider>
+    </section>
   );
 }
 
@@ -78,6 +109,8 @@ export function RadialGauge({
   gradient: [string, string];
   children?: ReactNode;
 }) {
+  // The arc draws itself as its card arrives (framer animates the SVG attribute; the card's own entrance is CSS).
+  const delayMs = useEnclosingCascadeDelay();
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const pct = value === null ? 0 : Math.max(0, Math.min(100, value));
@@ -103,7 +136,7 @@ export function RadialGauge({
           strokeDasharray={circumference}
           initial={{ strokeDashoffset: circumference }}
           animate={{ strokeDashoffset: circumference * (1 - pct / 100) }}
-          transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.9, delay: delayMs / 1000, ease: [0.22, 1, 0.36, 1] }}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">{children}</div>
@@ -115,9 +148,10 @@ export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-xl bg-[color-mix(in_oklab,var(--muted)_80%,transparent)]", className)} />;
 }
 
-export function WidgetSkeleton() {
+/** A widget's place while its data loads — it rises on the widget's own beat (`cascadeIndex`, as OsCard). */
+export function WidgetSkeleton({ cascadeIndex }: { cascadeIndex: number }) {
   return (
-    <div className="glass-card flex min-h-[200px] flex-col gap-3 rounded-3xl p-5">
+    <Cascade at={HOME_CASCADE.analyticsWidgets} index={cascadeIndex} step={WIDGET_STEP} className="glass-card flex min-h-[200px] flex-col gap-3 rounded-3xl p-5">
       <div className="flex items-center gap-2.5">
         <Skeleton className="h-8 w-8" />
         <Skeleton className="h-4 w-32" />
@@ -125,7 +159,7 @@ export function WidgetSkeleton() {
       <Skeleton className="h-16 w-full" />
       <Skeleton className="h-3 w-2/3" />
       <Skeleton className="h-3 w-1/2" />
-    </div>
+    </Cascade>
   );
 }
 

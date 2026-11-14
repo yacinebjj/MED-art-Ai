@@ -1036,6 +1036,12 @@ textarea,
     backdrop-filter: blur(8px) !important;
     -webkit-backdrop-filter: blur(8px) !important;
   }
+
+  /* The hourly reminder card (2026-11-14): one small card, over layers that no longer animate on touch. */
+  .azkar-card {
+    backdrop-filter: blur(20px) saturate(170%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(170%) !important;
+  }
 }
 
 /* iOS Safari zooms on focus below 16px — and fields often carry `.text-xs` or
@@ -1224,6 +1230,111 @@ textarea,
 
 .page-reveal > * > *:nth-child(n + 5):not([class*="animate-"]) {
   animation-delay: 240ms;
+}
+
+/* THE HOME CASCADE (components/layout/Cascade.tsx, app/dashboard/(shell)/
+   page.tsx): every block of the home rises in on its own beat — its
+   --cascade-delay, set inline — fading in quickly while it settles on the
+   soft spring from a little lower and a touch smaller. Being `animate-*`, a
+   cascade element escapes the section and surface entrances above, and the
+   glass surfaces inside one arrive with it rather than on a beat of their
+   own. Calm motion: the same arrival, half as far, on a glide. */
+@keyframes cascade-rise {
+  from {
+    translate: 0 22px;
+    scale: 0.98;
+  }
+}
+
+@keyframes cascade-rise-calm {
+  from {
+    translate: 0 10px;
+  }
+}
+
+.animate-cascade {
+  animation:
+    motion-fade-in 420ms var(--ease-glide) var(--cascade-delay, 0ms) backwards,
+    cascade-rise 720ms var(--ease-spring) var(--cascade-delay, 0ms) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-cascade {
+    animation:
+      motion-fade-in 420ms var(--ease-glide) var(--cascade-delay, 0ms) backwards,
+      cascade-rise-calm 560ms var(--ease-glide) var(--cascade-delay, 0ms) backwards;
+  }
+}
+
+.animate-cascade .glass-card:not([class*="animate-"]) {
+  animation: none;
+}
+
+/* Widgets a phone keeps folded (AnalyticsHub's "show all"): their boxes only
+   appear when unfolded, which starts their entrance — at once then, one
+   after another, not on the beats of the page's first arrival. */
+.cascade-reveal > .animate-cascade {
+  --cascade-delay: 0ms !important;
+}
+
+.cascade-reveal > .animate-cascade:nth-child(2) {
+  --cascade-delay: 50ms !important;
+}
+
+.cascade-reveal > .animate-cascade:nth-child(3) {
+  --cascade-delay: 100ms !important;
+}
+
+.cascade-reveal > .animate-cascade:nth-child(n + 4) {
+  --cascade-delay: 150ms !important;
+}
+
+/* Figures that draw themselves as their card arrives (they inherit its
+   --cascade-delay): a bar fills from its start, a column grows from the
+   baseline, a day of the streak strip rises, a number settles. Scales, never
+   widths or heights — no layout on any frame. A bar's later changes glide. */
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes column-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes column-rise {
+  from {
+    opacity: 0;
+    transform: scaleY(0.3);
+  }
+}
+
+@keyframes count-rise {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+.bar-grow {
+  transition: transform 700ms var(--ease-glide);
+  animation: bar-grow 900ms var(--ease-glide) var(--cascade-delay, 0ms) backwards;
+}
+
+/* Their delay is set inline: the card's, plus their place in the row. */
+.column-grow {
+  animation: column-grow 700ms var(--ease-glide) backwards;
+}
+
+.column-rise {
+  animation: column-rise 500ms var(--ease-glide) backwards;
+}
+
+.count-rise {
+  animation: count-rise 520ms var(--ease-spring) var(--cascade-delay, 0ms) backwards;
 }
 
 /* The next flashcard is dealt onto the table (components/study/
@@ -1508,6 +1619,236 @@ details[data-closing="true"] > :not(summary) {
 
 .toast-slot[data-leaving] {
   grid-template-rows: 0fr;
+}
+
+/* HOURLY REMINDER (components/spiritual/AzkarReminder.tsx): a verse or a
+   dhikr in a small glass card. Phones: across the top under the bar, like a
+   notification; from sm: top right, under the floating bar. It drops in on
+   the spring (slides in from the side on wide screens), holds still while it
+   is read, and lifts away. A finger can carry it up or off to the right
+   (inline translate; data-gesture turns the transition off meanwhile): let
+   go past the line, it flies on from where it is; short of it, it springs
+   back. The hairline along its bottom edge is its time left, stopped with
+   the clock. Above the dock and the bars (z 45), under dialogs (z 50): a
+   dialog that opens covers it. */
+.azkar-host {
+  position: fixed;
+  z-index: 45;
+  top: calc(var(--topbar-clearance) + 0.5rem);
+  left: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+@media (min-width: 640px) {
+  .azkar-host {
+    top: var(--topbar-clearance);
+    left: auto;
+    right: 1.5rem;
+    width: 23rem;
+  }
+}
+
+@keyframes azkar-drop {
+  from {
+    translate: 0 -22px;
+    scale: 0.96;
+  }
+}
+
+@keyframes azkar-slide {
+  from {
+    translate: 36px 0;
+    scale: 0.98;
+  }
+}
+
+@keyframes azkar-drop-calm {
+  from {
+    translate: 0 -10px;
+  }
+}
+
+@keyframes azkar-slide-calm {
+  from {
+    translate: 16px 0;
+  }
+}
+
+@keyframes azkar-lift {
+  to {
+    opacity: 0;
+    translate: 0 -14px;
+    scale: 0.97;
+  }
+}
+
+@keyframes azkar-fling-up {
+  to {
+    opacity: 0;
+    translate: 0 -130%;
+  }
+}
+
+@keyframes azkar-fling-right {
+  to {
+    opacity: 0;
+    translate: 115% 0;
+  }
+}
+
+@keyframes azkar-timer {
+  to {
+    scale: 0 1;
+  }
+}
+
+.azkar-card {
+  position: relative;
+  width: 100%;
+  max-width: 26rem;
+  overflow: hidden;
+  padding: 0.75rem 1rem 1rem;
+  border: 1px solid rgb(15 23 42 / 0.08);
+  border-radius: 1.25rem;
+  background-color: rgb(255 255 255 / 0.84);
+  background-image: radial-gradient(120% 90% at 50% -30%, rgb(16 185 129 / 0.12), transparent 62%);
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.05),
+    0 22px 48px -24px rgb(15 23 42 / 0.4);
+  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  pointer-events: auto;
+  touch-action: none;
+  transition: translate 380ms var(--ease-spring);
+  animation:
+    motion-fade-in 260ms var(--ease-glide),
+    azkar-drop 720ms var(--ease-spring);
+}
+
+.dark .azkar-card {
+  border-color: rgb(255 255 255 / 0.09);
+  background-color: rgb(11 14 17 / 0.8);
+  background-image: radial-gradient(120% 90% at 50% -30%, rgb(52 211 153 / 0.14), transparent 62%);
+  box-shadow: 0 24px 56px -24px rgb(0 0 0 / 0.75);
+}
+
+/* Light catching the top edge. */
+.azkar-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 1.25rem auto;
+  height: 1px;
+  background-image: linear-gradient(90deg, transparent, rgb(16 185 129 / 0.6), rgb(14 165 233 / 0.6), transparent);
+  pointer-events: none;
+}
+
+@media (min-width: 640px) {
+  .azkar-card {
+    animation:
+      motion-fade-in 260ms var(--ease-glide),
+      azkar-slide 760ms var(--ease-spring);
+  }
+}
+
+/* Calm motion: the same arrival, half the travel, no bounce (the springs are glides there). */
+@media (prefers-reduced-motion: reduce) {
+  .azkar-card {
+    animation:
+      motion-fade-in 320ms var(--ease-glide),
+      azkar-drop-calm 560ms var(--ease-glide);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) and (min-width: 640px) {
+  .azkar-card {
+    animation:
+      motion-fade-in 320ms var(--ease-glide),
+      azkar-slide-calm 560ms var(--ease-glide);
+  }
+}
+
+.azkar-card[data-gesture] {
+  transition: none;
+}
+
+.azkar-card[data-state="closed"] {
+  pointer-events: none;
+  animation: azkar-lift 280ms var(--ease-exit) forwards;
+}
+
+.azkar-card[data-state="closed"][data-fling="y"] {
+  animation: azkar-fling-up 260ms var(--ease-exit) forwards;
+}
+
+.azkar-card[data-state="closed"][data-fling="x"] {
+  animation: azkar-fling-right 260ms var(--ease-exit) forwards;
+}
+
+.azkar-text {
+  margin-top: 0.375rem;
+  font-size: 1.375rem;
+  line-height: 2;
+  text-align: center;
+  text-wrap: balance;
+  color: rgb(15 23 42);
+}
+
+.dark .azkar-text {
+  color: rgb(255 255 255 / 0.95);
+}
+
+.azkar-bracket {
+  padding-inline: 0.2em;
+  color: rgb(5 150 105);
+}
+
+.dark .azkar-bracket {
+  color: rgb(110 231 183);
+}
+
+.azkar-ayah-sep {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-inline: 0.4em;
+  vertical-align: 0.1em;
+  color: rgb(16 185 129 / 0.75);
+}
+
+.azkar-ayah-sep svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.azkar-source {
+  margin-top: 0.125rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  text-align: center;
+  color: rgb(100 116 139);
+}
+
+.dark .azkar-source {
+  color: rgb(255 255 255 / 0.5);
+}
+
+.azkar-timer {
+  position: absolute;
+  left: 1.25rem;
+  right: 1.25rem;
+  bottom: 0;
+  height: 2px;
+  border-radius: 9999px;
+  background-image: linear-gradient(90deg, rgb(16 185 129 / 0.55), rgb(14 165 233 / 0.55));
+  animation: azkar-timer linear forwards;
+}
+
+.azkar-card[data-paused] .azkar-timer {
+  animation-play-state: paused;
 }
 
 /* The Copilot's picture viewer (components/assistant/MedicalImageLightbox.tsx):

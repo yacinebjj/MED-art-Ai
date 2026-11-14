@@ -6,7 +6,8 @@
  * tabs. Everything here is wired to something real:
  *  - Rappels: push opt-in, reminder cadence (profiles.flashcard_push_interval_minutes
  *    via PATCH /api/profile), priority modules (existing
- *    /api/modules/flashcards + /api/modules/[id]/flashcards);
+ *    /api/modules/flashcards + /api/modules/[id]/flashcards), and the hourly
+ *    verse or dhikr (lib/azkar.ts — this device's choice, in localStorage);
  *  - Moteur IA: the real AI-content language store;
  *  - Apparence: next-themes + night mode, interface language;
  *  - Appareils: the devices actually subscribed to reminders, and Supabase
@@ -32,6 +33,9 @@ import { useLanguage } from "@/providers/LanguageProvider";
 import { useOptionalOnboarding } from "@/lib/onboarding/onboarding-context";
 import { FLASHCARD_PUSH_INTERVALS, type FlashcardPushInterval } from "@/lib/push/cadence";
 import type { CurriculumYearData } from "@/types/academic";
+import { Switch } from "@/components/ui/Switch";
+import { AZKAR_ENABLED } from "@/lib/feature-flags";
+import { AZKAR_PREF_EVENT, AZKAR_SETTINGS_ANCHOR, isAzkarEnabled, requestAzkarNow, setAzkarEnabled } from "@/lib/azkar";
 
 // ── Rappels ──────────────────────────────────────────────────────────────
 
@@ -230,7 +234,96 @@ export function RemindersSection() {
           )}
         </SettingsCardBody>
       </SettingsCard>
+
+      {AZKAR_ENABLED && <SpiritualRemindersCard settled={modules !== null} />}
     </div>
+  );
+}
+
+/**
+ * Rappels spirituels — the hourly verse or dhikr (components/spiritual/
+ * AzkarReminder.tsx): on or off for this device (lib/azkar.ts keeps the
+ * choice in localStorage), a preview, and the credit the Quranic text's
+ * license asks for (Tanzil Project, CC BY 3.0: its source, and a link to
+ * tanzil.net). The reminder card's settings button lands here
+ * (#rappels-spirituels), brought into view once the cards above have loaded
+ * (`settled`), so it doesn't slide away under them.
+ */
+function SpiritualRemindersCard({ settled }: { settled: boolean }) {
+  const { language } = useLanguage();
+  const fr = language === "fr";
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const sync = () => setEnabled(isAzkarEnabled());
+    sync();
+    window.addEventListener(AZKAR_PREF_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(AZKAR_PREF_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  const [broughtIntoView, setBroughtIntoView] = useState(false);
+  useEffect(() => {
+    if (!settled || broughtIntoView || window.location.hash !== `#${AZKAR_SETTINGS_ANCHOR}`) return;
+    setBroughtIntoView(true);
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById(AZKAR_SETTINGS_ANCHOR)?.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" });
+  }, [settled, broughtIntoView]);
+
+  return (
+    <SettingsCard
+      id={AZKAR_SETTINGS_ANCHOR}
+      className="scroll-mt-24"
+      icon={MoonStar}
+      title={fr ? "Rappels spirituels" : "Spiritual reminders"}
+      description={
+        fr
+          ? "Un verset du Coran ou un dhikr, une fois par heure, dans une petite carte qui s'efface d'elle-même."
+          : "A Quranic verse or a dhikr, once an hour, in a small card that fades away on its own."
+      }
+    >
+      <SettingsRows>
+        <SettingsRow
+          label={fr ? "Verset ou dhikr de l'heure" : "Verse or dhikr of the hour"}
+          htmlFor="azkar-reminder-switch"
+          description={
+            fr
+              ? "Jamais pendant une saisie, un examen, une session Pomodoro ou une fenêtre ouverte. Réglage propre à cet appareil."
+              : "Never while you type, during an exam, a Pomodoro focus block or an open window. Set for this device."
+          }
+        >
+          <Switch
+            id="azkar-reminder-switch"
+            checked={enabled ?? true}
+            disabled={enabled === null}
+            onCheckedChange={(next) => {
+              setAzkarEnabled(next);
+              setEnabled(next);
+            }}
+          />
+        </SettingsRow>
+        <SettingsRow label={fr ? "Aperçu" : "Preview"} description={fr ? "Affiche le prochain rappel maintenant." : "Shows the next reminder now."}>
+          <Button type="button" variant="outline" size="sm" onClick={requestAzkarNow} disabled={!enabled}>
+            {fr ? "Afficher un rappel" : "Show a reminder"}
+          </Button>
+        </SettingsRow>
+      </SettingsRows>
+      <p className="border-t border-black/[0.05] px-5 py-3.5 text-[0.75rem] leading-relaxed text-slate-500 dark:border-white/[0.06] dark:text-white/45 sm:px-6">
+        {fr ? "Texte coranique : " : "Quranic text: "}
+        <a
+          href="https://tanzil.net"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-slate-900 dark:text-white/70 dark:decoration-white/25 dark:hover:text-white"
+        >
+          Tanzil Project
+        </a>
+        {fr ? " (licence CC BY 3.0), reproduit sans aucune modification." : " (CC BY 3.0 license), reproduced without any change."}
+      </p>
+    </SettingsCard>
   );
 }
 

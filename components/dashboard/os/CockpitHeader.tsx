@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import { GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { displayFirstName } from "@/lib/display-name";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { GlassArt } from "@/components/ui/GlassArt";
+import { useCascade } from "@/components/layout/Cascade";
 import { translateCurriculumName } from "@/lib/translations/curriculumNames";
 import { tCockpit } from "@/lib/translations/cockpit";
-import { useNow } from "./primitives";
+import { HOME_CASCADE, useNow } from "./primitives";
 
 const QUOTES = {
   fr: [
@@ -57,6 +57,8 @@ export function CockpitHeader() {
   const { profile, curriculumProfile } = useAuth();
   const { language } = useLanguage();
   const now = useNow();
+  // First beat of the home's entrance (components/layout/Cascade.tsx).
+  const cascade = useCascade(HOME_CASCADE.greeting);
   const [quoteIndex, setQuoteIndex] = useState(0);
   useEffect(() => setQuoteIndex(Math.floor(Math.random() * QUOTES.fr.length)), []);
 
@@ -70,11 +72,12 @@ export function CockpitHeader() {
   const specialty = curriculumProfile?.specialty?.name ?? null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-      className="glass-card relative overflow-hidden rounded-3xl border border-white/30 px-1 pt-1 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark flat-on-phone sm:p-6 lg:p-7"
+    <div
+      style={cascade.style}
+      className={cn(
+        cascade.className,
+        "glass-card relative overflow-hidden rounded-3xl border border-white/30 px-1 pt-1 shadow-glass dark:border-white/[0.06] dark:shadow-glass-dark flat-on-phone sm:p-6 lg:p-7"
+      )}
     >
       {/* Decorative glows: desktop only — a 64-unit blur-3xl is a full-layer GPU filter phones pay for on every scroll frame. */}
       <div aria-hidden className="pointer-events-none absolute -left-24 -top-24 hidden h-64 w-64 rounded-full bg-primary-400/20 blur-3xl dark:bg-primary-500/10 sm:block" />
@@ -110,6 +113,6 @@ export function CockpitHeader() {
           />
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
