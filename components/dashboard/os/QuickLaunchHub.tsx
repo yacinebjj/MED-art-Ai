@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
 import { ArrowRight, BookOpen, Brain, History, Mic, Network, PlayCircle, Sparkles, Stethoscope, Table2, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Cascade } from "@/components/layout/Cascade";
 import { useAuth } from "@/providers/AuthProvider";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { useCockpitStore } from "@/store/useCockpitStore";
@@ -15,7 +15,7 @@ import { tCockpit, type CockpitKey } from "@/lib/translations/cockpit";
 import type { LabToolId } from "@/lib/workspace-lab";
 import type { DashboardLabItem } from "@/types/dashboard-overview";
 import { AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE } from "@/lib/feature-flags";
-import { CARD_ENTRANCE, Skeleton } from "./primitives";
+import { HOME_CASCADE, Skeleton, TILE_STEP } from "./primitives";
 
 function relativeTime(iso: string, language: Language): string {
   const diffMinutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
@@ -54,7 +54,7 @@ const TILES: LaunchTile[] = [
     : []),
 ];
 
-function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label: string; href: string; when: string } | null; language: Language }) {
+function LaunchCard({ tile, index, last, language }: { tile: LaunchTile; index: number; last: { label: string; href: string; when: string } | null; language: Language }) {
   const openLauncher = useCockpitUi((state) => state.openLauncher);
   const Icon = tile.icon;
   const body = (
@@ -85,7 +85,7 @@ function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label:
   );
 
   return (
-    <motion.div variants={CARD_ENTRANCE} className="flex flex-col gap-1.5">
+    <Cascade at={HOME_CASCADE.labTiles} index={index} step={TILE_STEP} className="flex flex-col gap-1.5">
       {tile.href ? (
         <Link href={tile.href} className={cardClass}>
           {body}
@@ -107,7 +107,7 @@ function LaunchCard({ tile, last, language }: { tile: LaunchTile; last: { label:
           </span>
         </Link>
       )}
-    </motion.div>
+    </Cascade>
   );
 }
 
@@ -139,21 +139,23 @@ function ResumeCard() {
     return latest ? { ...latest, when: latest.updatedAt } : null;
   }, [overview, lastOpened]);
 
+  // Skeleton and card are two elements (two keys): the card rises when it arrives, at once if the skeleton was already showing.
   if (!overview || lastOpened === undefined) {
     return (
-      <div data-tour="explication" className="glass-card rounded-3xl p-5">
+      <Cascade key="skeleton" at={HOME_CASCADE.resume} data-tour="explication" className="glass-card rounded-3xl p-5">
         <Skeleton className="mb-3 h-4 w-40" />
         <Skeleton className="h-14 w-full" />
         <Skeleton className="mt-3 h-9 w-36" />
-      </div>
+      </Cascade>
     );
   }
 
   const audio = AUDIO_SMART_NOTES_ENABLED ? (overview.lectureNotes[0] ?? null) : null;
 
   return (
-    <motion.div
-      variants={CARD_ENTRANCE}
+    <Cascade
+      key="card"
+      at={HOME_CASCADE.resume}
       data-tour="explication"
       className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary-600 via-teal-600 to-violet-700 p-[1.5px] shadow-xl shadow-primary-500/20"
     >
@@ -179,7 +181,8 @@ function ResumeCard() {
                   <span>{course.qcmMasteryPct}%</span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
-                  <motion.div className="h-full rounded-full bg-white" initial={{ width: 0 }} animate={{ width: `${course.qcmMasteryPct}%` }} transition={{ duration: 0.8 }} />
+                  {/* Fills as the card arrives (.bar-grow): a scale, never a width — no layout on every frame. */}
+                  <div className="bar-grow h-full w-full origin-left rounded-full bg-white" style={{ transform: `scaleX(${course.qcmMasteryPct / 100})` }} />
                 </div>
               </div>
             )}
@@ -222,7 +225,7 @@ function ResumeCard() {
           </div>
         ) : null}
       </div>
-    </motion.div>
+    </Cascade>
   );
 }
 
@@ -252,26 +255,22 @@ export function QuickLaunchHub() {
   }, [overview, language]);
 
   return (
-    <section aria-labelledby="quicklaunch-heading">
-      <div className="mb-3">
+    // animate-none: the section itself holds still (and keeps out of .page-reveal) — its heading and cards rise on their own beats.
+    <section aria-labelledby="quicklaunch-heading" className="animate-none">
+      <Cascade at={HOME_CASCADE.quickLaunchHeading} className="mb-3">
         <h2 id="quicklaunch-heading" className="text-base font-bold tracking-tight text-foreground sm:text-lg">
           {tCockpit("quickLaunchHeading", language)}
         </h2>
         <p className="hidden text-xs text-muted-foreground sm:block">{tCockpit("quickLaunchSub", language)}</p>
-      </div>
-      <motion.div
-        initial="hidden"
-        animate="show"
-        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
-        className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,2fr)]"
-      >
+      </Cascade>
+      <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,2fr)]">
         <ResumeCard />
         <div data-tour="lab" className={cn("grid gap-2.5 sm:gap-4", TILES.length === 4 ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4" : "grid-cols-3")}>
-          {TILES.map((tile) => (
-            <LaunchCard key={tile.id} tile={tile} last={lastByTool.get(tile.tool ?? tile.id) ?? null} language={language} />
+          {TILES.map((tile, index) => (
+            <LaunchCard key={tile.id} tile={tile} index={index} last={lastByTool.get(tile.tool ?? tile.id) ?? null} language={language} />
           ))}
         </div>
-      </motion.div>
+      </div>
     </section>
   );
 }

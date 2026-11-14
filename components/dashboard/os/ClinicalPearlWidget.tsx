@@ -14,7 +14,7 @@ import { OsCard, WidgetSkeleton, useNow } from "./primitives";
 const LETTERS = ["A", "B", "C", "D"];
 
 /** "Cas Flash du Jour": one hand-written clinical question per day, answered in 30 s — no AI call, no credit. */
-export function ClinicalPearlWidget({ userId }: { userId: string | null }) {
+export function ClinicalPearlWidget({ userId, cascadeIndex }: { userId: string | null; cascadeIndex: number }) {
   const { language } = useLanguage();
   const now = useNow();
   const day = now ? localDayKey(now) : null;
@@ -28,7 +28,7 @@ export function ClinicalPearlWidget({ userId }: { userId: string | null }) {
     return onLocalActivitySynced(() => setChoice(readPearlAnswer(userId, day, pearl.id)));
   }, [userId, day, pearl]);
 
-  if (!pearl || !day) return <WidgetSkeleton />;
+  if (!pearl || !day) return <WidgetSkeleton cascadeIndex={cascadeIndex} />;
   const answered = choice !== null;
   const correct = choice === pearl.answer;
 
@@ -44,6 +44,7 @@ export function ClinicalPearlWidget({ userId }: { userId: string | null }) {
       iconClassName="from-emerald-500 to-teal-500"
       title={tCockpit("pearlTitle", language)}
       glow="[@media(hover:hover)]:hover:shadow-emerald-500/15"
+      cascadeIndex={cascadeIndex}
       action={<span className="truncate rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">{pearl.tag[language]}</span>}
     >
       <p className="text-sm font-semibold leading-snug text-foreground">{pearl.question[language]}</p>

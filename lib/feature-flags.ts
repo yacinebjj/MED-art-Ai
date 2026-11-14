@@ -41,3 +41,12 @@ export const INFOGRAPHIC_API = "/api/studio/infographic";
  * buttons disappear. The dashboard's first-run tour is not affected.
  */
 export const PAGE_TOURS_ENABLED = process.env.NEXT_PUBLIC_FEATURE_PAGE_TOURS !== "false";
+
+/**
+ * Hourly spiritual reminder — a Quranic verse or a dhikr in a quiet floating
+ * card (components/spiritual/AzkarReminder.tsx, lib/azkar.ts). On unless
+ * switched off: set NEXT_PUBLIC_FEATURE_AZKAR=false, then redeploy, to
+ * withdraw it everywhere — no card, no Settings entry. Each student can also
+ * turn it off for their device in Paramètres › Rappels.
+ */
+export const AZKAR_ENABLED = process.env.NEXT_PUBLIC_FEATURE_AZKAR !== "false";

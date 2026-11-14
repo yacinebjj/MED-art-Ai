@@ -10,6 +10,7 @@ import { TourHost } from "@/components/onboarding/TourHost";
 import { CopilotReplyNotifier } from "@/components/assistant/CopilotReplyNotifier";
 import { RouteMotionProvider } from "@/providers/RouteMotionProvider";
 import { RouteProgress } from "@/components/layout/RouteProgress";
+import { AzkarReminder } from "@/components/spiritual/AzkarReminder";
 
 /**
  * Root layout for everything under /dashboard/**. Deliberately minimal —
@@ -34,6 +35,8 @@ export default function DashboardLayout({
           <OnboardingProvider>
             {children}
             <TourHost />
+            {/* The hourly verse or dhikr — it waits for tours, and holds tours back while it is on screen. */}
+            <AzkarReminder />
           </OnboardingProvider>
           {/* A Copilot answer that finished while the student was on another page. */}
           <CopilotReplyNotifier />
