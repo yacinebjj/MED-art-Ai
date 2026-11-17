@@ -43,6 +43,16 @@ export const INFOGRAPHIC_API = "/api/studio/infographic";
 export const PAGE_TOURS_ENABLED = process.env.NEXT_PUBLIC_FEATURE_PAGE_TOURS !== "false";
 
 /**
+ * Micro-tutorial videos — the « ▶ » button next to a « ? » guide button
+ * (components/onboarding/HelpVideoButton.tsx, clips in public/help/). On
+ * unless switched off: set NEXT_PUBLIC_FEATURE_HELP_VIDEOS=false, then
+ * redeploy, to withdraw every « ▶ » button at once. The « ? » guides are not
+ * affected. Nothing of it loads with a page: the player and its clip load on
+ * the first tap.
+ */
+export const HELP_VIDEOS_ENABLED = process.env.NEXT_PUBLIC_FEATURE_HELP_VIDEOS !== "false";
+
+/**
  * Hourly spiritual reminder — a Quranic verse or a dhikr in a quiet floating
  * card (components/spiritual/AzkarReminder.tsx, lib/azkar.ts). On unless
  * switched off: set NEXT_PUBLIC_FEATURE_AZKAR=false, then redeploy, to

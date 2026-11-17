@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ChevronRight,
   CircleHelp,
+  CirclePlay,
   ClipboardCheck,
   CloudOff,
   Copy,
@@ -41,6 +42,7 @@ import {
 } from "@/components/ui/DropdownMenu";
 import { Kbd } from "@/components/course/workspace/os/Kbd";
 import { TourReplayButton } from "@/components/onboarding/TourReplayButton";
+import { useHelpVideo } from "@/components/onboarding/HelpVideoButton";
 import { useOptionalOnboarding } from "@/lib/onboarding/onboarding-context";
 import { PAGE_TOURS_ENABLED } from "@/lib/feature-flags";
 import type { WorkspaceDensity } from "@/hooks/useWorkspaceLayout";
@@ -160,6 +162,8 @@ export function WorkspaceCommandBar({
 }: WorkspaceCommandBarProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const onboarding = useOptionalOnboarding();
+  // Phones reach the page's micro-tutorial from the ⋯ menu, like its guide (the « ▶ » sits next to « ? » from sm).
+  const helpVideo = useHelpVideo("module");
   const { toast } = useToast();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -336,6 +340,12 @@ export function WorkspaceCommandBar({
                 Revoir le guide de cette page
               </DropdownMenuItem>
             )}
+            {helpVideo.available && (
+              <DropdownMenuItem className="sm:hidden" onSelect={helpVideo.show}>
+                <CirclePlay className="h-4 w-4" />
+                Voir le tutoriel vidéo
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={handleCopyLink}>
               <Copy className="h-4 w-4" />
@@ -353,6 +363,7 @@ export function WorkspaceCommandBar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {helpVideo.player}
       </div>
     </header>
   );
