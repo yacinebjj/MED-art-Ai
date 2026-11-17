@@ -20,13 +20,19 @@ export type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 /**
  * The canonical (default) exam's system prompt: the static exam prompt plus
  * the directives of DEFAULT_EXAM_PREFERENCES ("Examen facultaire ·
- * Équilibré · Approfondi") — byte for byte what a run with those preferences
- * was always sent. Every generation without its own prompt (both routes'
- * canonical path) uses it; personalized runs pass their own.
+ * Équilibré · Approfondi"). Every generation without its own prompt (both
+ * routes' canonical path) uses it; personalized runs pass their own.
+ *
+ * Since 2026-11-17 the depth of the correction is set by the professor
+ * prompt itself (lib/ai/exam-prompts.ts: short reasons per option plus the
+ * « Commentaire » mini-cours), so the « approfondie » directive — 2 to 4
+ * sentences per option, framed as the student's priority preference — is no
+ * longer appended: it would double the correction and the job's length. The
+ * « Examen facultaire » directive stays, verbatim.
  */
 export function canonicalExamSystemPrompt(inputs: ExamCourseInput[]): string {
   const base = buildExamStaticSystemPrompt(inputs);
-  const directive = buildExamPreferenceDirective(DEFAULT_EXAM_PREFERENCES);
+  const directive = buildExamPreferenceDirective({ ...DEFAULT_EXAM_PREFERENCES, explanationDepth: "standard" });
   return directive ? `${base}\n\n${directive}` : base;
 }
 
@@ -667,7 +673,11 @@ export async function generateExamJob(
   askSource = false
 ): Promise<ExamJobResult> {
   const systemPrompt = systemPromptOverride ?? canonicalExamSystemPrompt(inputs);
-  const batchInstruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle);
+  // The canonical exam gets one clinical case per job of 3+ questions (the annales' cases in
+  // chronological escalation); "Batch 5 of 5" alone asked for none. A style-guided run keeps its
+  // instruction byte for byte.
+  const clinicalCases = systemPromptOverride ? undefined : count >= 3 ? 1 : 0;
+  const batchInstruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle, clinicalCases);
   const instruction = askSource ? `${batchInstruction}\n\n${buildExamSourceAttributionInstruction(inputs.length)}` : batchInstruction;
   const chain: { model: string; timeoutMs: number }[] = [
     { model: EXAM_MODEL, timeoutMs: 110_000 },

@@ -58,7 +58,21 @@ export interface ExamQuestionOutput {
   polarity?: ExamPolarity;
   /** "combinaison" only: the five numbered propositions, 1 to 5 in order. */
   propositions?: { text: string; isTrue: boolean; explanation: string }[];
+  /** The professor's « Commentaire », a structured mini-cours (lead line, then « - » / « 1- » lines). Absent on questions written before 2026-11-17. */
+  commentaire?: string;
 }
+
+/** Shorter than this, a "commentaire" is not a commentary: dropped. */
+const MIN_COMMENTAIRE_CHARS = 20;
+
+/**
+ * Optional, and never a reason to reject an otherwise-valid question: a
+ * missing, empty, too-thin or non-text commentary is simply dropped.
+ */
+const CommentaireSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim().length >= MIN_COMMENTAIRE_CHARS ? value.trim() : undefined),
+  z.string().optional()
+);
 
 /**
  * One exam question, in any of the three formats (lib/exam-formats.ts).
@@ -80,6 +94,7 @@ export const ExamQuestionSchema = z
     format: z.preprocess(normalizeEnumText(FORMAT_ALIASES), z.enum(EXAM_FORMATS)).optional(),
     polarity: z.preprocess(normalizeEnumText({}), z.enum(EXAM_POLARITIES)).optional(),
     propositions: z.array(ExamPropositionSchema).length(5).optional(),
+    commentaire: CommentaireSchema,
   })
   .transform((question, ctx): ExamQuestionOutput => {
     const fail = (message: string) => {
@@ -91,8 +106,8 @@ export const ExamQuestionSchema = z
     }
     const options = [...question.options].sort((a, b) => a.label.localeCompare(b.label));
     const correctCount = options.filter((option) => option.isCorrect).length;
-    const { vignette, weakPointTag, format, polarity } = question;
-    const base = { vignette, weakPointTag, ...(polarity ? { polarity } : {}) };
+    const { vignette, weakPointTag, format, polarity, commentaire } = question;
+    const base = { vignette, weakPointTag, ...(polarity ? { polarity } : {}), ...(commentaire ? { commentaire } : {}) };
 
     if (format === "qcm") {
       if (correctCount < QCM_MIN_CORRECT || correctCount > QCM_MAX_CORRECT) {

@@ -27,6 +27,15 @@ const EXAM_OUTPUT_FORMAT = `Réponds UNIQUEMENT avec un JSON de cette forme exac
 {"questions": [{"format": "qcs", "polarity": "rj", "vignette": "... (RJ)", "options": [{"label": "A", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "B", "text": "...", "isCorrect": true, "explanation": "..."}, {"label": "C", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "D", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "E", "text": "...", "isCorrect": false, "explanation": "..."}], "weakPointTag": "..."}, {"format": "qcm", "polarity": "rf", "vignette": "... (RF)", "options": [{"label": "A", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "B", "text": "...", "isCorrect": true, "explanation": "..."}, {"label": "C", "text": "...", "isCorrect": false, "explanation": "..."}, {"label": "D", "text": "...", "isCorrect": true, "explanation": "..."}, {"label": "E", "text": "...", "isCorrect": false, "explanation": "..."}], "weakPointTag": "..."}, {"format": "combinaison", "polarity": "rj", "vignette": "Parmi les propositions suivantes, quelle(s) est(sont) celle(s) qui ... (RJ) :", "propositions": [{"text": "...", "isTrue": false, "explanation": "..."}, {"text": "...", "isTrue": true, "explanation": "..."}, {"text": "...", "isTrue": false, "explanation": "..."}, {"text": "...", "isTrue": true, "explanation": "..."}, {"text": "...", "isTrue": true, "explanation": "..."}], "options": [{"label": "A", "text": "1+3", "isCorrect": false, "explanation": "..."}, {"label": "B", "text": "1+2+4", "isCorrect": false, "explanation": "..."}, {"label": "C", "text": "2+4+5", "isCorrect": true, "explanation": "..."}, {"label": "D", "text": "3+4+5", "isCorrect": false, "explanation": "..."}, {"label": "E", "text": "1+2", "isCorrect": false, "explanation": "..."}], "weakPointTag": "..."}, ...]}`;
 
 /**
+ * The canonical exam's JSON shape: EXAM_OUTPUT_FORMAT with each question's
+ * « Commentaire » ("commentaire", a structured mini-cours, optional in
+ * ExamQuestionSchema). Derived, not copied, so the two shapes can never drift
+ * apart; the style-adapted prompt keeps the original.
+ */
+const EXAM_COMMENTAIRE_EXAMPLE = String.raw`"commentaire": "Notion testée, en une phrase.\n1- ...\n2- ...\n- ..."`;
+const EXAM_OUTPUT_FORMAT_CANONICAL = EXAM_OUTPUT_FORMAT.split(`"weakPointTag": "..."`).join(`"weakPointTag": "...", ${EXAM_COMMENTAIRE_EXAMPLE}`);
+
+/**
  * SEQUENTIAL BATCHING ARCHITECTURE (app/api/exam/generate/route.ts): the
  * 40-question exam is built from several sequential calls of a few questions
  * each (currently 5 batches of 8 — see route.ts's TOTAL_BATCHES/
@@ -36,27 +45,56 @@ const EXAM_OUTPUT_FORMAT = `Réponds UNIQUEMENT avec un JSON de cette forme exac
  * limit, ratio split, and verbatim "Batch X of N" instruction are appended
  * separately per call by `buildExamBatchPrompt`, since those numbers are the
  * part most likely to be tuned again.
+ *
+ * 2026-11-17 (explicit product order): the canonical exam is written in the
+ * "annales DNA" of a gold-standard book of Algerian faculty exams — the same
+ * seven named traps as the Studio QCM (lib/ai/studio-prompts.ts), dense
+ * clinical cases in chronological escalation, combination matrices and the
+ * « Toutes les propositions sont fausses » fallback (QCS RJ only), and a
+ * per-question "commentaire": the professor's structured mini-cours
+ * (ExamQuestionSchema keeps it, the bank files it, the correction shows it).
+ * The explanation budget moved from the options (35 words each instead of
+ * the 2-4 sentences of the « approfondie » directive, which the canonical
+ * prompt no longer appends — lib/exam-generation.ts) into the commentary, so
+ * a job stays about as long as before. The style-adapted prompt below is
+ * untouched: it keeps EXAM_OUTPUT_FORMAT, byte for byte.
  */
-const EXAM_PERSONA_AND_STYLE = `Tu es un professeur de médecine expert, chargé de concevoir un examen complet de type Faculté de Médecine (Algérie), pour la "Semaine Bloquée" (semaine de révision intensive) d'étudiants en médecine. Cet examen est construit en plusieurs lots successifs — tu ne génères qu'UN SEUL lot à la fois.
+const EXAM_PERSONA_AND_STYLE = `Tu es Professeur de médecine et membre du jury d'examen d'une faculté de médecine algérienne depuis plus de vingt ans. Tu conçois l'examen complet de « Semaine Bloquée » (semaine de révision intensive) de tes étudiants exactement comme tes sujets d'EMD : des questions précises, chacune bâtie autour d'un piège réel, justes et sans ambiguïté, qui départagent l'étudiant qui a compris de celui qui a survolé. Cet examen est construit en plusieurs lots successifs — tu ne génères qu'UN SEUL lot à la fois.
 
-STYLE DES QUESTIONS STANDARDS (la majorité de chaque lot) : des questions courtes et directes, SANS mise en situation clinique — pas de patient, pas d'âge, pas de motif de consultation. Elles testent la physiopathologie, l'anatomie, la pharmacologie (mécanismes d'action, contre-indications, effets indésirables) et les "pièges d'examen" classiques (confusions fréquentes, valeurs seuils, exceptions à la règle). Niveau "Faculté" exigeant : teste la nuance et le détail précis, jamais une question de pur recall superficiel. Ne transforme JAMAIS une question standard en mini-vignette clinique déguisée ("un patient présente...") — le champ "vignette" d'une question standard contient directement l'énoncé de la question, sans mise en scène.
+QUESTIONS STANDARDS (la majorité de chaque lot) : courtes et directes, SANS mise en situation clinique — pas de patient, pas d'âge, pas de motif de consultation. Elles testent la physiopathologie, les critères diagnostiques et leurs seuils, la pharmacologie (mécanismes d'action, indications, contre-indications, effets indésirables) et la stratégie thérapeutique. Ne transforme JAMAIS une question standard en mini-vignette clinique déguisée (« un patient présente… ») : le champ "vignette" d'une question standard contient directement l'énoncé de la question.
 
-STYLE DES CAS CLINIQUES (la minorité de chaque lot) : une vignette clinique détaillée (patient, contexte, présentation), réservée exclusivement aux scénarios diagnostiques les plus complexes (diagnostics différentiels difficiles, présentations atypiques, conduite à tenir en urgence).
+CAS CLINIQUES (leur nombre exact est donné avec la consigne du lot) : une vignette dense de 130 mots au plus — le patient (« Monsieur B., 59 ans »), son terrain et ses antécédents, son traitement en cours avec les doses, les constantes, le poids et la taille quand ils servent, les résultats chiffrés avec leurs unités. De préférence en ESCALADE CHRONOLOGIQUE : la vignette raconte la prise en charge initiale puis l'évolution (« Trois mois plus tard, sous… ») et demande l'étape suivante. Pour une question diagnostique, ne nomme jamais la maladie à trouver ; pour une question de prise en charge, la maladie connue du patient peut être nommée, jamais la réponse. Chaque question est autonome : tout ce qu'il faut pour répondre est dans sa propre vignette.
+
+L'ADN DES PIÈGES — chaque question repose sur au moins un de ces pièges (deux au plus) ; varie-les dans le lot :
+1. Conditionnalité : le seuil est EXACT, c'est sa condition qui est faussée — avec ou sans symptômes, à jeun ou post-prandial, une mesure ou deux, adulte ou femme enceinte, régime normosodé ou désodé, avant ou après traitement (« Une glycémie aléatoire ≥ 2 g/L, même sans symptômes, suffit au diagnostic »). Le chiffre ne trahit rien : l'étudiant doit savoir dans quelle condition il s'applique.
+2. Inversion physiopathologique : une phrase exacte dont UN SEUL mécanisme est retourné — inhibe ou stimule, augmente ou diminue, hyper ou hypo, haute ou basse, T3 ou T4, freinable ou non freinable (« L'insuline stimule la néoglucogenèse hépatique »).
+3. Modificateurs absolus : « toujours », « jamais », « exclusivement », « uniquement », « seul », « constant », « systématique », « d'emblée » rendent fausse une notion vraie ; mais l'absolu est parfois VRAI quand le cours l'affirme (« L'hydrocortisone est toujours introduite avant la lévothyroxine »), pour que l'étudiant ne puisse jamais éliminer par réflexe.
+4. Maladie ou iatrogénie : mêle les complications de la maladie et celles de son traitement (acidose lactique sous biguanide ou acidocétose, hypoglycémie sous sulfamide), ou demande lesquelles relèvent du traitement.
+5. Fausse piste plausible : un examen ou un traitement logique pour la spécialité mais inutile ou contre-indiqué dans CE cas précis (dosage systématique du peptide C dans un diabète de type 2 typique, antithyroïdiens de synthèse dans une thyroïdite subaiguë) ; à l'inverse, une proposition qui ressemble à une fausse piste peut être juste quand le cours la recommande.
+6. Escalade chronologique (cas clinique) : les distracteurs sont l'étape prématurée, l'étape dépassée, la bonne molécule à la mauvaise dose ou au mauvais moment, l'arrêt du mauvais traitement, l'option contre-indiquée sur ce terrain.
+7. Calcul ou valeur trompeuse : quand le cours donne la formule ou la classification, fais calculer ou dénombrer (IMC, nombre de facteurs de risque, objectif adapté au profil du patient) ; ou donne une valeur dans les normes mais inappropriée dans ce contexte.
+Ces exemples illustrent une mécanique : n'en reprends jamais le contenu, sauf s'il figure dans les cours fournis.
 
 Questions standards comme cas cliniques peuvent prendre chacun des trois formats ci-dessous.
 
 ${EXAM_FORMATS_RULES}
 
-EXPLANATIONS MUST BE HIGH-YIELD, PUNCHY, AND UNDER 40 WORDS. Do NOT write long paragraphs. Prioritize structural brevity to ensure completion — a short, sharp explanation that finishes is worth more than a long one that gets cut off.
+MATRICES ET REPLIS (précisions sur ces formats) :
+- En "combinaison", chaque proposition est soit un vrai point d'ancrage, soit un piège de l'ADN ci-dessus ; deux combinaisons ne diffèrent parfois que d'une proposition, pour obliger l'étudiant à trancher sur celle dont il est le moins sûr ; varie leur composition et rends parfois juste celle qui réunit les cinq propositions.
+- En "qcs" RJ, l'option E peut être un repli absolu : « Toutes les propositions sont fausses » ou « Aucune proposition n'est exacte » — tantôt la réponse à cocher (les quatre autres sont alors toutes fausses), tantôt un piège (l'une des quatre autres est la réponse). « Toutes les propositions sont justes » n'est jamais la réponse à cocher. Aucun repli absolu en "qcm", en RF ni en "combinaison".
+
+LA CORRECTION :
+- "commentaire" (pour CHAQUE question) : le mini-cours du professeur, jamais une phrase paresseuse. Sa première ligne énonce en une phrase la notion testée (pour un cas clinique : le diagnostic et les indices qui le trahissaient). Puis, à la ligne, 4 à 7 lignes courtes commençant chacune par « - » ou par « 1- », « 2- », « 3- », qui reprennent ce que la question mobilise : la physiopathologie (flèches « → » pour les enchaînements de cause à conséquence), les critères diagnostiques avec leurs seuils exacts, unités et conditions, les règles thérapeutiques (1ère intention, contre-indications, surveillance, escalade). De 60 à 130 mots ; lignes séparées par des retours à la ligne (\\n dans le JSON) ; aucun markdown.
+- "explanation" de chaque option et de chaque proposition : 1 à 2 phrases, 35 mots maximum — pourquoi elle est juste ou fausse, en nommant le piège quand il y en a un (« Piège : seuil exact, mais sans symptômes il faut deux mesures »). Le commentaire porte le cours : l'explication d'une option ne le répète pas.
 
 RÈGLES DE FOND :
 - Reste strictement basé sur le contenu des cours fournis ci-dessous — n'invente jamais une information absente de ces textes.
 - "weakPointTag" : un tag court et précis identifiant la notion testée (ex: "Critères de Light — Transudat vs Exsudat"), pour permettre un repérage des points faibles après correction.
 - Répartis les questions de ce lot de façon équilibrée entre tous les cours fournis — ne concentre pas le lot sur un seul cours si plusieurs sont fournis.
 
-RIGUEUR ABSOLUE SUR LES EXPLICATIONS DES OPTIONS (piège fréquent, lu-ceci-avant-de-répondre) : chaque explication d'option doit se baser UNIQUEMENT sur les faits, conventions, classifications et libellés EXACTS du texte source fourni ci-dessous — même si ta propre connaissance médicale générale suggère une convention différente (par exemple une classification voie aérobie/anaérobie, un mécanisme précis de liaison protéique, une valeur seuil) qui ne correspond pas exactement à ce que dit le texte source. N'introduis JAMAIS un fait, un mécanisme ou une convention venant de ta connaissance générale à la place de ce que dit précisément le texte source, même si tu es certain que ta version est correcte en médecine générale — le texte source fait autorité ici, pas tes connaissances externes. Si le texte source ne précise pas un détail, ne le complète pas avec une connaissance externe : formule l'explication de façon plus générale plutôt que d'ajouter une affirmation non vérifiable dans le texte fourni. Relis chaque explication d'option une dernière fois avant de répondre et demande-toi : "cette affirmation précise est-elle vraiment dans le texte source, ou est-ce que je la complète avec ce que je sais par ailleurs ?" — si c'est la seconde option, reformule.
+RIGUEUR ABSOLUE SUR LES EXPLICATIONS ET LE COMMENTAIRE (piège fréquent, lu-ceci-avant-de-répondre) : chaque explication d'option et chaque commentaire doivent se baser UNIQUEMENT sur les faits, conventions, classifications, seuils et libellés EXACTS du texte source fourni ci-dessous — même si ta propre connaissance médicale générale suggère une convention différente (par exemple une classification voie aérobie/anaérobie, un mécanisme précis de liaison protéique, une valeur seuil) qui ne correspond pas exactement à ce que dit le texte source. N'introduis JAMAIS un fait, un mécanisme ou une convention venant de ta connaissance générale à la place de ce que dit précisément le texte source, même si tu es certain que ta version est correcte en médecine générale — le texte source fait autorité ici, pas tes connaissances externes. Si le texte source ne précise pas un détail, ne le complète pas avec une connaissance externe : formule plus généralement plutôt que d'ajouter une affirmation non vérifiable dans le texte fourni. Relis chaque explication et chaque commentaire une dernière fois avant de répondre et demande-toi : "cette affirmation précise est-elle vraiment dans le texte source, ou est-ce que je la complète avec ce que je sais par ailleurs ?" — si c'est la seconde option, reformule.
 
-${EXAM_OUTPUT_FORMAT}`;
+${EXAM_OUTPUT_FORMAT_CANONICAL}`;
 
 /**
  * Total clinical cases across the WHOLE exam — unchanged by the 4×10 -> 5×8
@@ -146,6 +184,10 @@ export function buildExamStaticSystemPrompt(courses: ExamCourseInput[]): string 
  * whole exam combines QCS, QCM and combinations. Omitted: no quota line.
  * `followStyle`: a style-guided exam, where the professor's own distribution
  * (style profile) takes precedence over this default mix.
+ * `clinicalCases`: this job's exact number of clinical cases, set by the
+ * caller instead of the sequential route's batch rule (the canonical run's
+ * jobs, lib/exam-generation.ts generateExamJob). Omitted: the text is
+ * byte-identical to what it always was.
  */
 export function buildExamBatchInstruction(
   batchIndex: number,
@@ -154,18 +196,25 @@ export function buildExamBatchInstruction(
   isVariation: boolean,
   previousTopics: string[],
   formats?: FormatCounts,
-  followStyle = false
+  followStyle = false,
+  clinicalCases?: number
 ): string {
-  const clinicalCount = clinicalCountForBatch(batchIndex, totalBatches);
+  const ownCount = clinicalCases !== undefined;
+  const clinicalCount = ownCount ? Math.max(0, Math.min(clinicalCases, questionsPerBatch)) : clinicalCountForBatch(batchIndex, totalBatches);
   const standardCount = questionsPerBatch - clinicalCount;
 
   const ratioLine =
     clinicalCount > 0
       ? `Of these ${questionsPerBatch} questions, EXACTLY ${standardCount} must be standard questions (no clinical scenario) and EXACTLY ${clinicalCount} must be a Cas Clinique (vignette clinique détaillée).`
-      : `ALL ${questionsPerBatch} questions in this batch must be standard questions (no clinical scenario) — the clinical cases for this exam are handled entirely by earlier batches.`;
+      : ownCount
+        ? `ALL ${questionsPerBatch} questions in this batch must be standard questions (no clinical scenario).`
+        : `ALL ${questionsPerBatch} questions in this batch must be standard questions (no clinical scenario) — the clinical cases for this exam are handled entirely by earlier batches.`;
+  const ratioGuarantee = ownCount
+    ? ""
+    : ` This guarantees the required 90%/10% ratio across the full exam (${TOTAL_CLINICAL_QUESTIONS} cas cliniques total across ${totalBatches} lots = 10% of the exam).`;
 
   const formatQuota = formats ? describeFormatQuota(formats, followStyle) : "";
-  const hardLimit = `CRITICAL HARD LIMIT FOR THIS BATCH: You MUST generate EXACTLY ${questionsPerBatch} questions in this batch — no more, no less. Do NOT stop early. Do NOT use placeholders like "[...]". ${ratioLine} This guarantees the required 90%/10% ratio across the full exam (${TOTAL_CLINICAL_QUESTIONS} cas cliniques total across ${totalBatches} lots = 10% of the exam).${formatQuota ? `\n\n${formatQuota}` : ""}`;
+  const hardLimit = `CRITICAL HARD LIMIT FOR THIS BATCH: You MUST generate EXACTLY ${questionsPerBatch} questions in this batch — no more, no less. Do NOT stop early. Do NOT use placeholders like "[...]". ${ratioLine}${ratioGuarantee}${formatQuota ? `\n\n${formatQuota}` : ""}`;
 
   // The user's own verbatim instruction template, with X/N and the
   // per-batch question count filled in dynamically.

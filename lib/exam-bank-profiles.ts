@@ -13,7 +13,8 @@ import type { FormatCounts } from "@/lib/exam-formats";
  *    Équilibré · Approfondi"; students have no settings). Versioned: bump it when
  *    the canonical prompt changes, so questions written under the previous
  *    one are never served as the new exam (as the exam cache key is bumped in
- *    lib/exam-content-cache.ts).
+ *    lib/exam-content-cache.ts). faculte-v2 = the annales-DNA prompt with its
+ *    per-question « Commentaire » (2026-11-17).
  *  - one profile per reference-exam ARCHETYPE (classifyExamStyle): exams
  *    guided by different professors' reference exams of the same archetype
  *    share their questions; each professor's own profile still drives the
@@ -22,7 +23,7 @@ import type { FormatCounts } from "@/lib/exam-formats";
  *    profile sealed by the analysis for that student (lib/exam-style-seal.ts)
  *    may use an archetype bank; an unsealed one is generated from scratch.
  */
-export const CANONICAL_BANK_PROFILE = "faculte-v1";
+export const CANONICAL_BANK_PROFILE = "faculte-v2";
 
 export const EXAM_STYLE_ARCHETYPES = ["direct", "clinique", "pieges"] as const;
 export type ExamStyleArchetype = (typeof EXAM_STYLE_ARCHETYPES)[number];

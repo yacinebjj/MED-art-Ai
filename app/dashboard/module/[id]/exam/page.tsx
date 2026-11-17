@@ -68,7 +68,7 @@ import { useStoredPreference } from "@/components/cyber/hooks";
 import { ReferenceExamUploader } from "@/components/course/workspace/exam/ReferenceExamUploader";
 import { ExamTimer } from "@/components/course/workspace/exam/ExamTimer";
 import { ExamQuestionNavigator } from "@/components/course/workspace/exam/ExamQuestionNavigator";
-import { ExamCombinationText, ExamFormatBadges, ExamPropositionsList, examFormatHint, getQuestionKind } from "@/components/course/workspace/exam/ExamQuestionFormat";
+import { ExamCombinationText, ExamCommentary, ExamFormatBadges, ExamPropositionsList, examFormatHint, getQuestionKind } from "@/components/course/workspace/exam/ExamQuestionFormat";
 import type { ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { runExamGeneration, type ExamRunProgress } from "@/lib/exam-run-client";
 import { isAnswerCorrect, parseAnswerLabels, serializeAnswerLabels } from "@/lib/exam-scoring";
@@ -101,6 +101,8 @@ interface ExamQuestion {
   format?: string;
   polarity?: string;
   propositions?: { text: string; isTrue: boolean; explanation: string }[];
+  /** The professor's « Commentaire » (questions written since 2026-11-17). */
+  commentaire?: string;
 }
 
 interface SavedExam {
@@ -1335,6 +1337,7 @@ export default function ExamGeneratorPage() {
                   <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-sky-300">
                     <Sparkles className="h-3.5 w-3.5" /> Explication détaillée
                   </p>
+                  <ExamCommentary text={q.commentaire} className="mb-3 border-b border-sky-400/15 pb-3 text-[0.95rem] leading-relaxed sm:text-[0.98rem] lg:text-base" />
                   <ul className="space-y-2 break-words text-[0.95rem] leading-relaxed text-slate-200 [overflow-wrap:anywhere] sm:text-[0.98rem] lg:text-base">
                     {q.options.map((opt) => (
                       <li key={opt.label}>

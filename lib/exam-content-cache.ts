@@ -42,12 +42,16 @@ interface ExamCourseForHash {
  * lib/exam-preferences.ts): exams cached under c3 were written without its
  * directives (shorter explanations) and must not be served as the new
  * default exam. Same reason, same discipline as CANONICAL_BANK_PROFILE.
+ *
+ * "c5:" (2026-11-17, the annales-DNA canonical prompt with its per-question
+ * « Commentaire », lib/ai/exam-prompts.ts): exams cached under c4 have
+ * neither, and must not be served as the new default exam.
  */
 export function computeExamContentHash(courses: ExamCourseForHash[]): string {
   const digests = courses
     .map((course) => createHash("sha256").update(normalizeText(course.explication ?? course.raw_text), "utf8").digest("hex"))
     .sort();
-  return createHash("sha256").update(`c4:${digests.join("|")}`, "utf8").digest("hex");
+  return createHash("sha256").update(`c5:${digests.join("|")}`, "utf8").digest("hex");
 }
 
 /** Checked before generating (skipped entirely for variation:true requests — see the route). Returns `null` on any Supabase error or misconfiguration — a lookup failure must never block generation, only skip the optimization. */

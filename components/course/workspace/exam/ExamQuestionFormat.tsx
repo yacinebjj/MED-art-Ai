@@ -125,6 +125,26 @@ export function ExamPropositionsList({ propositions, reveal = false, className }
   );
 }
 
+/**
+ * The professor's « Commentaire » of a corrected question (lib/ai/exam-prompts.ts): its lead
+ * line — the notion tested — in bold, then its structured lines (« - … », « 1- … ») with
+ * their line breaks. Renders nothing for a question without one (written before 2026-11-17).
+ */
+export function ExamCommentary({ text, className }: { text?: string; className?: string }) {
+  const lines = (text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  return (
+    <div className={cn("break-words [overflow-wrap:anywhere]", className)}>
+      <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-sky-300">Commentaire</p>
+      <p className="font-semibold text-white">{lines[0]}</p>
+      {lines.length > 1 && <p className="mt-1 whitespace-pre-line text-slate-200">{lines.slice(1).join("\n")}</p>}
+    </div>
+  );
+}
+
 /** "1+3" → (1 + 3) as number chips; any other text is shown as written. */
 export function ExamCombinationText({ text }: { text: string }) {
   const numbers = parseCombination(text);

@@ -73,6 +73,8 @@ export interface HarvestedExamMeta {
   weakPointTag?: string;
   /** The bank it was written for (lib/exam-bank-profiles.ts): only runs of the same profile reuse it. */
   profile?: string;
+  /** The professor's « Commentaire » (questions written since 2026-11-17). */
+  commentaire?: string;
 }
 
 export type HarvestableQcm = QcmItem & { exam?: HarvestedExamMeta };
@@ -80,13 +82,14 @@ export type HarvestableQcm = QcmItem & { exam?: HarvestedExamMeta };
 /** Only the known fields of a stored `exam` value — a malformed one can never override the question's own text or options. */
 function readHarvestedMeta(raw: unknown): Partial<HarvestedExamMeta> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const { format, polarity, propositions, weakPointTag, profile } = raw as Record<string, unknown>;
+  const { format, polarity, propositions, weakPointTag, profile, commentaire } = raw as Record<string, unknown>;
   return {
     ...(format !== undefined ? { format: format as ExamFormat } : {}),
     ...(polarity !== undefined ? { polarity: polarity as ExamPolarity } : {}),
     ...(propositions !== undefined ? { propositions: propositions as HarvestedExamMeta["propositions"] } : {}),
     ...(typeof weakPointTag === "string" && weakPointTag.trim().length >= 3 ? { weakPointTag } : {}),
     ...(typeof profile === "string" ? { profile } : {}),
+    ...(typeof commentaire === "string" && commentaire.trim() ? { commentaire } : {}),
   };
 }
 
@@ -138,10 +141,15 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
     ...(meta?.polarity !== undefined ? { polarity: meta.polarity } : {}),
     ...(meta?.propositions !== undefined ? { propositions: meta.propositions } : {}),
   };
+  // The professor's « Commentaire »: a harvested exam question keeps its own (none before
+  // 2026-11-17 — its "globale" is only a copy of the right option's explanation); an organic
+  // Studio QCM's is its "globale". ExamQuestionSchema drops one that is too thin.
+  const commentaire = meta ? meta.commentaire : explication?.globale;
   const candidate = {
     vignette: qcm.question,
     options,
     weakPointTag: harvestedTag ?? courseTitle.slice(0, 80),
+    ...(typeof commentaire === "string" ? { commentaire } : {}),
     // A harvested exam question brings its own format; an organic Studio QCM
     // is a QCS (one answer) or a QCM (several) — ExamQuestionSchema decides.
     ...(meta ? formatFields : qcm.reponsesCorrectes.length > 1 ? { format: "qcm" } : {}),
@@ -167,7 +175,8 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
  */
 export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: number, profile: string = CANONICAL_BANK_PROFILE): HarvestableQcm {
   const correctOption = question.options.find((o) => o.isCorrect);
-  const explication = { globale: correctOption?.explanation ?? "" } as QcmItem["explication"];
+  // "globale" is the question's commentary when it has one (since 2026-11-17), else the right option's explanation.
+  const explication = { globale: question.commentaire ?? correctOption?.explanation ?? "" } as QcmItem["explication"];
   for (const option of question.options) {
     explication[option.label as "A" | "B" | "C" | "D" | "E"] = option.explanation;
   }
@@ -181,6 +190,7 @@ export function convertExamQuestionToHarvestableQcm(question: ExamQuestion, id: 
       ...(question.format ? { format: question.format } : {}),
       ...(question.polarity ? { polarity: question.polarity } : {}),
       ...(question.propositions ? { propositions: question.propositions } : {}),
+      ...(question.commentaire ? { commentaire: question.commentaire } : {}),
       weakPointTag: question.weakPointTag,
       profile,
     },

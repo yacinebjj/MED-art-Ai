@@ -108,7 +108,22 @@ function optionClasses(label: string, answered: boolean, selected: string[], cor
   return "border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/40 text-slate-400 dark:text-slate-600";
 }
 
+/**
+ * The professor's « Commentaire » (`explication.globale`): its lead line — the
+ * notion the question tests — and the structured lines after it (« - … »,
+ * « 1- … », lib/ai/studio-prompts.ts). A one-line commentary (every set
+ * written before 2026-11-17) has no rest and renders exactly as before.
+ */
+function splitCommentary(text: string): { lead: string; rest: string } {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return { lead: lines[0] ?? "", rest: lines.slice(1).join("\n") };
+}
+
 function ExplicationBlock({ qcm }: { qcm: Qcm }) {
+  const commentary = splitCommentary(qcm.explication.globale);
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -117,7 +132,8 @@ function ExplicationBlock({ qcm }: { qcm: Qcm }) {
       dir="auto"
       className="rounded-r-xl border-l-4 border-sky-500 bg-sky-50 dark:bg-sky-950/30 p-4 space-y-2"
     >
-      <p className="text-sm font-bold text-sky-900 dark:text-sky-200 leading-relaxed">{qcm.explication.globale}</p>
+      <p className="text-sm font-bold text-sky-900 dark:text-sky-200 leading-relaxed">{commentary.lead}</p>
+      {commentary.rest && <p className="whitespace-pre-line text-sm text-sky-900 dark:text-sky-100 leading-relaxed">{commentary.rest}</p>}
       <ul className="space-y-1.5 text-sm text-sky-800 dark:text-sky-300 leading-relaxed">
         {EXPLICATION_LETTERS.filter((letter) => qcm.options.some((opt) => opt.label === letter)).map((letter) => (
           <li key={letter}>
@@ -368,7 +384,7 @@ function WeakPointsPanel({ wrongQcms, onViewConcept }: { wrongQcms: Qcm[]; onVie
             className="rounded-xl border border-amber-200 dark:border-amber-900/40 bg-white dark:bg-slate-900 p-4 space-y-2"
           >
             <p dir="auto" className="text-sm font-semibold text-slate-800 dark:text-slate-100">{qcm.question}</p>
-            <p dir="auto" className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">{qcm.explication.globale}</p>
+            <p dir="auto" className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">{splitCommentary(qcm.explication.globale).lead}</p>
             <button
               type="button"
               onClick={() => onViewConcept(qcm)}
@@ -668,7 +684,8 @@ export function InteractiveQuiz({
       matchedSection
         ? // This excerpt renders as plain Markdown: no diagram code or picture tag (lib/studio-visuals.ts).
           { title: matchedSection.headingText, content: stripStudioVisuals(matchedSection.content) }
-        : { title: "Explication de cette question", content: qcm.explication.globale }
+        : // Markdown here: hard breaks keep the commentary's lines apart.
+          { title: "Explication de cette question", content: qcm.explication.globale.replace(/\r?\n/g, "  \n") }
     );
   }
 
