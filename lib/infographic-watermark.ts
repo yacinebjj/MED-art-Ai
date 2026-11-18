@@ -231,6 +231,25 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
+/** The sheet + its strip on a canvas, exported as PNG. */
+async function renderSignedSheet(decoded: { source: CanvasImageSource; width: number; height: number }): Promise<Blob> {
+  const { scale, width, imageHeight, layout, height } = watermarkCanvasSize(decoded.width, decoded.height);
+  const fontFamily = brandFontFamily();
+  const [logo] = await Promise.all([loadLogo(), ensureFontsLoaded(layout.fontSize, fontFamily)]);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas indisponible.");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  if (scale === 1) ctx.drawImage(decoded.source, 0, 0);
+  else ctx.drawImage(decoded.source, 0, 0, width, imageHeight);
+  drawWatermarkStrip(ctx, imageHeight, width, layout, logo, fontFamily);
+  return canvasToPng(canvas);
+}
+
 /**
  * The sheet at `imageUrl` with its MedArt AI signature strip, as a PNG. The
  * image is fetched with CORS (Supabase Storage answers
@@ -244,22 +263,77 @@ export async function composeWatermarkedImage(imageUrl: string, signal?: AbortSi
   const decoded = await decodeBlob(await res.blob());
   try {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const { scale, width, imageHeight, layout, height } = watermarkCanvasSize(decoded.width, decoded.height);
-    const fontFamily = brandFontFamily();
-    const [logo] = await Promise.all([loadLogo(), ensureFontsLoaded(layout.fontSize, fontFamily)]);
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas indisponible.");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    if (scale === 1) ctx.drawImage(decoded.source, 0, 0);
-    else ctx.drawImage(decoded.source, 0, 0, width, imageHeight);
-    drawWatermarkStrip(ctx, imageHeight, width, layout, logo, fontFamily);
-    return await canvasToPng(canvas);
+    return await renderSignedSheet(decoded);
   } finally {
     decoded.release();
   }
+}
+
+/**
+ * The same signed PNG, drawn from a sheet the page ALREADY shows — an <img>
+ * loaded with `crossOrigin="anonymous"` (2026-11-18): no second download, no
+ * second decode of the network file. Throws when the image isn't loaded or
+ * the canvas can't be exported (an image loaded without CORS taints it).
+ */
+export async function composeWatermarkedFromImage(image: HTMLImageElement): Promise<Blob> {
+  if (!image.complete || image.naturalWidth === 0 || image.naturalHeight === 0) throw new Error("Image non chargée.");
+  return renderSignedSheet({ source: image, width: image.naturalWidth, height: image.naturalHeight });
+}
+
+// ─── one signed copy per sheet, for the page's lifetime ────────────────────
+
+/** Signed sheets kept per source URL (a few: each is a full-size PNG in memory). */
+const MAX_SIGNED_SHEETS = 3;
+const signedSheetJobs = new Map<string, Promise<Blob>>();
+const signedSheetReady = new Map<string, Blob>();
+/** One object URL per signed sheet, revoked only when the sheet leaves the cache — every viewer of it shares that URL. */
+const signedSheetUrls = new Map<string, string>();
+
+/**
+ * The signed sheet for `sourceUrl`, composed once by `compose` and shared by
+ * every later caller (re-opening the sheet, Télécharger) — a failure is
+ * forgotten, so the next call tries again.
+ */
+export function signedSheetFor(sourceUrl: string, compose: () => Promise<Blob>): Promise<Blob> {
+  const existing = signedSheetJobs.get(sourceUrl);
+  if (existing) return existing;
+  const job = compose().then(
+    (blob) => {
+      signedSheetReady.set(sourceUrl, blob);
+      return blob;
+    },
+    (error) => {
+      signedSheetJobs.delete(sourceUrl);
+      throw error;
+    }
+  );
+  signedSheetJobs.set(sourceUrl, job);
+  while (signedSheetJobs.size > MAX_SIGNED_SHEETS) {
+    const oldest = signedSheetJobs.keys().next().value as string;
+    signedSheetJobs.delete(oldest);
+    signedSheetReady.delete(oldest);
+    const url = signedSheetUrls.get(oldest);
+    if (url) {
+      signedSheetUrls.delete(oldest);
+      URL.revokeObjectURL(url);
+    }
+  }
+  return job;
+}
+
+/** The (stable) object URL of a composed signed sheet. */
+export function signedSheetObjectUrl(sourceUrl: string, blob: Blob): string {
+  const existing = signedSheetUrls.get(sourceUrl);
+  if (existing && signedSheetReady.get(sourceUrl) === blob) return existing;
+  if (existing) URL.revokeObjectURL(existing);
+  const url = URL.createObjectURL(blob);
+  // Only a sheet still in the cache owns a shared URL (an evicted one's URL lives with its viewer).
+  if (signedSheetReady.get(sourceUrl) === blob) signedSheetUrls.set(sourceUrl, url);
+  return url;
+}
+
+/** The signed sheet for `sourceUrl` if it is already composed — shown at once, with no swap. */
+export function readySignedSheet(sourceUrl: string): { blob: Blob; url: string } | null {
+  const blob = signedSheetReady.get(sourceUrl);
+  return blob ? { blob, url: signedSheetObjectUrl(sourceUrl, blob) } : null;
 }

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { OpenRouterError } from "@/lib/ai/openrouter";
-import { buildFicheSynthesePrompt, extractFicheOutline, ficheContentHash, generateFicheImage } from "@/lib/ai/infographic-sheet";
+import { buildFicheSynthesePrompt, courseSubject, extractFicheOutline, ficheContentHash, generateFicheImage } from "@/lib/ai/infographic-sheet";
 import { FICHE_STORAGE_FOLDER, FICHE_SYNTHESE_VERSION, ficheSourceText, isFicheSyntheseUrl } from "@/lib/infographic-fiche-key";
 import {
   lookupStudioInfographicCache,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/studio-infographic-cache";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { LedgerBusyError, runThroughLedger } from "@/lib/ai/generation-ledger";
+import { dispatchPushToUser } from "@/lib/push/dispatch";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -22,22 +24,38 @@ const ROUTE_BUDGET_MS = 280_000;
 
 const INFOGRAPHIC_BUCKET = "studio-infographics";
 
+/**
+ * Browser / CDN cache lifetime of a stored sheet (30 days): the file at a path
+ * is the sheet of one course text, so re-opening it is instant instead of a
+ * fresh download of a heavy illustrated image (Supabase's default is 1 hour).
+ */
+const SHEET_CACHE_CONTROL_SECONDS = "2592000";
+
+/** The bucket exists once this instance has checked it: no listBuckets round trip on every sheet. */
+let infographicBucketReady = false;
+
 interface CourseRow {
   id: number;
   title: string;
   explication: string | null;
   raw_text: string | null;
+  curriculum_module_id?: number | null;
 }
 
 /** Mirrors app/api/upload/route.ts's ensureSourceFilesBucket exactly — a concurrent request can win the race to create the bucket between the listBuckets check and this call, which is not a real failure. */
 async function ensureInfographicBucket(supabase: ReturnType<typeof getSupabaseAdmin>): Promise<void> {
+  if (infographicBucketReady) return;
   const { data: buckets } = await supabase.storage.listBuckets();
-  if (buckets?.some((bucket: { name: string }) => bucket.name === INFOGRAPHIC_BUCKET)) return;
+  if (buckets?.some((bucket: { name: string }) => bucket.name === INFOGRAPHIC_BUCKET)) {
+    infographicBucketReady = true;
+    return;
+  }
 
   const { error } = await supabase.storage.createBucket(INFOGRAPHIC_BUCKET, { public: true });
   if (error && !/already exists/i.test(error.message)) {
     throw error;
   }
+  infographicBucketReady = true;
 }
 
 /**
@@ -130,7 +148,7 @@ export async function POST(request: NextRequest) {
 
   const { data: course, error: courseError } = await supabase
     .from("studio_courses")
-    .select("id, title, explication, raw_text")
+    .select("id, title, explication, raw_text, curriculum_module_id")
     .eq("id", courseId)
     .eq("user_id", user.id)
     .maybeSingle<CourseRow>();
@@ -193,7 +211,9 @@ export async function POST(request: NextRequest) {
 
         await ensureInfographicBucket(supabase);
         const path = `${FICHE_STORAGE_FOLDER}/${contentHash}${shared ? "" : `-${user.id}`}.${imageExtension(contentType)}`;
-        const { error: uploadError } = await supabase.storage.from(INFOGRAPHIC_BUCKET).upload(path, buffer, { contentType, upsert: true });
+        const { error: uploadError } = await supabase.storage
+          .from(INFOGRAPHIC_BUCKET)
+          .upload(path, buffer, { contentType, upsert: true, cacheControl: SHEET_CACHE_CONTROL_SECONDS });
         if (uploadError) throw uploadError;
 
         const generatedUrl = supabase.storage.from(INFOGRAPHIC_BUCKET).getPublicUrl(path).data.publicUrl;
@@ -208,6 +228,16 @@ export async function POST(request: NextRequest) {
     );
 
     await persistInfographicUrl(supabase, courseId, user.id, imageUrl);
+    // "Your sheet is ready" push, like every fresh Studio section — the student
+    // may have left the app while the sheet was drawn. After the response
+    // (waitUntil), so it never delays the sheet itself; fail-open.
+    waitUntil(
+      dispatchPushToUser(user.id, {
+        title: "✅ MedArt AI",
+        body: `Ta fiche de synthèse « ${courseSubject(course.title)} » est prête.`,
+        url: course.curriculum_module_id ? `/dashboard/module/${course.curriculum_module_id}` : "/dashboard",
+      }).catch((error) => console.error("[studio/infographic] Échec envoi push (non bloquant):", error instanceof Error ? error.message : error))
+    );
     return NextResponse.json({ success: true, imageUrl, cached: false });
   } catch (error) {
     await refundGeneration(user.id);

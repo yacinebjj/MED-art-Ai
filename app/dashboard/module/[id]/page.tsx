@@ -48,7 +48,7 @@ import { buildRateLimitMessage, buildRateLimitMessageFromSeconds } from "@/lib/r
 import { uploadDocumentDirect, retryUploadWithOcr } from "@/lib/upload-client";
 import { generateExplicationInParts } from "@/lib/studio-explication-client";
 import { postJsonWithHeartbeat } from "@/lib/heartbeat-fetch";
-import { wait, randomFakeDelayMs } from "@/lib/fake-ai-delay";
+import { wait, randomFakeDelayMs, randomQuickRevealMs } from "@/lib/fake-ai-delay";
 import { useToast } from "@/components/ui/Toast";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { Button } from "@/components/ui/Button";
@@ -281,6 +281,20 @@ async function requestFichePlan(courseId: number): Promise<FichePlanView | null>
     throw new Error(typeof data?.error === "string" ? data.error : "La génération a échoué.");
   }
   return null;
+}
+
+/**
+ * Starts downloading a generated Fiche de Synthèse as soon as its URL is
+ * known — before the cache-hit reveal and before InfographicViewer's chunk
+ * loads — in the same CORS mode as the viewer's <img>, so it is served from
+ * the browser cache when the viewer shows it.
+ */
+function preloadFicheImage(url: string): void {
+  if (typeof Image === "undefined") return;
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.decoding = "async";
+  image.src = url;
 }
 
 /** Derives the plain `Set<DemoSectionId>` StudioPanel/MobileStudioCards expect, scoped to whichever course is currently active — see generatingByKey's own comment for the bug this exists to fix. */
@@ -863,6 +877,9 @@ export default function ModuleWorkspacePage() {
   }, [refreshNotesCount]);
 
   const [openedSection, setOpenedSection] = useState<DemoSectionId | null>(null);
+  /** Read by a generation finishing in the background (the Fiche de Synthèse "ready" toast). */
+  const openedSectionRef = useRef<DemoSectionId | null>(null);
+  openedSectionRef.current = openedSection;
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [noteContent, setNoteContent] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
@@ -926,6 +943,8 @@ export default function ModuleWorkspacePage() {
   // Infographie / Fiche de Synthèse: each course's plan (step 1), previewed
   // while its image is drawn (step 2).
   const [fichePlans, setFichePlans] = useState<Record<number, FichePlanView>>({});
+  /** When each course's Fiche de Synthèse generation started — the preview's elapsed time survives switching tiles. */
+  const [ficheStartedAt, setFicheStartedAt] = useState<Record<number, number>>({});
   // "Afficher le cours" — the self-contained CourseViewer module, decoupled
   // from the isSplitScreen/studioPanel system entirely, showing whichever
   // course's file was requested from the Sources list.
@@ -1246,6 +1265,7 @@ export default function ModuleWorkspacePage() {
           // Fiche de Synthèse, in two steps: the plan (a text model reads the
           // course — free Omni first, ultra-cheap fallback), previewed while
           // the image model draws the sheet from it.
+          setFicheStartedAt((prev) => ({ ...prev, [courseId]: Date.now() }));
           const plan = await requestFichePlan(courseId);
           if (plan) setFichePlans((prev) => ({ ...prev, [courseId]: plan }));
           const res = await fetch("/api/studio/infographic", {
@@ -1259,6 +1279,9 @@ export default function ModuleWorkspacePage() {
           }
           resultValue = data.imageUrl;
           cached = Boolean(data.cached);
+          // The image starts downloading NOW, while the reveal below plays and
+          // the viewer's chunk loads — it is on screen the moment the viewer is.
+          if (typeof data.imageUrl === "string") preloadFicheImage(data.imageUrl);
         } else if (id === "audio") {
           // Same dedicated-route pattern as "infographic" above —
           // a single narrated episode (studio_podcast_cache), never routed
@@ -1326,10 +1349,11 @@ export default function ModuleWorkspacePage() {
           // by courseId (see that route's own comment) instead of trusting this
           // client to resend a 60,000-char payload on every single click.
           // Every section (Explication, Résumé, Cas Clinique, QCM,
-          // Exemples&Analogies) generates its complete content in ONE call on
-          // first open — Résumé's earlier lazy per-mode loading was reverted by
-          // explicit product direction (single-shot, hyper-concise prompt
-          // instead — see STUDIO_RESUME_SYSTEM_PROMPT's own comment).
+          // Exemples&Analogies) generates its complete content in ONE request
+          // on first open — Résumé's earlier lazy per-mode loading was
+          // reverted by explicit product direction; since 2026-11-18 the
+          // server writes its four modes in parallel parts within that one
+          // request (lib/ai/studio-resume.ts).
           const { res, data } = await postStudioGenerate(id, courseId, {
             language: options?.language ?? getContentLanguage(),
             customPrompt: options?.customPrompt,
@@ -1348,8 +1372,10 @@ export default function ModuleWorkspacePage() {
         // since it's cleared only in the `finally` block below, after this
         // resolves. Never applied to a genuine cache miss — a real generation
         // already takes real time.
+        // The Fiche de Synthèse gets a short reveal instead (students found it
+        // slow to appear — see randomQuickRevealMs).
         if (cached) {
-          await wait(randomFakeDelayMs());
+          await wait(id === "infographic" ? randomQuickRevealMs() : randomFakeDelayMs());
         }
 
         // Keyed off the cache (not the `activeCourse` closure, which may now
@@ -1377,6 +1403,19 @@ export default function ModuleWorkspacePage() {
           courseCacheRef.current.set(courseId, updated);
           // Only apply to the visible state if the student hasn't switched to a different course while this was generating.
           setActiveCourse((prev) => (prev && prev.id === courseId ? updated : prev));
+        }
+
+        // The Fiche de Synthèse is the slowest tile: the student often goes on
+        // revising elsewhere meanwhile. When it lands and they aren't looking
+        // at it, say so — with a shortcut to it while they're on its course.
+        if (id === "infographic" && !(openedSectionRef.current === "infographic" && activeCourseRef.current?.id === courseId)) {
+          const onThisCourse = activeCourseRef.current?.id === courseId;
+          toast({
+            variant: "success",
+            title: language === "en" ? "Your summary sheet is ready" : "Ta fiche de synthèse est prête",
+            description: onThisCourse ? undefined : language === "en" ? "Open its course in Sources to see it." : "Ouvre son cours dans Sources pour la voir.",
+            action: onThisCourse ? { label: language === "en" ? "View" : "Voir", onClick: () => startNavTransition(() => setOpenedSection("infographic")) } : undefined,
+          });
         }
       } catch (error) {
         toast({
@@ -2363,7 +2402,10 @@ export default function ModuleWorkspacePage() {
           // The sheet takes shape: its plan (title + six boxes) as soon as
           // step 1 has it, while the image is drawn.
           <div key={`generating-infographic:${activeCourse?.id ?? ""}`} className="animate-fade-in">
-            <InfographicGeneratingView plan={activeCourse ? fichePlans[activeCourse.id] ?? null : null} />
+            <InfographicGeneratingView
+              plan={activeCourse ? fichePlans[activeCourse.id] ?? null : null}
+              startedAt={activeCourse ? ficheStartedAt[activeCourse.id] : undefined}
+            />
           </div>
         ) : (
         <div key="generating" className="animate-fade-in flex h-full flex-col items-center justify-center gap-3 py-20">

@@ -13,9 +13,11 @@ import { FICHE_SYNTHESE_VERSION } from "@/lib/infographic-fiche-key";
  *     extracts its plan: one title, one core topic (with the drawings it
  *     calls for) and exactly six key sub-topics. The code — never the model —
  *     pours them into the strict image prompt (buildFicheSynthesePrompt).
- *     Free PRIMARY_FREE_OMNI first; if it fails, ultra-cheap fallbacks
- *     (Llama 3.1 8B held to a strict JSON schema, then qwen3.7-flash in JSON
- *     mode — a small fraction of a cent per course); if every model fails, a
+ *     Free PRIMARY_FREE_OMNI first — hedged since 2026-11-18: when it has no
+ *     plan after OMNI_HEDGE_AFTER_MS (or fails sooner), the ultra-cheap
+ *     fallbacks (Llama 3.1 8B held to a strict JSON schema, then
+ *     qwen3.7-flash in JSON mode — a small fraction of a cent per course) run
+ *     alongside it and the first valid plan wins; if every model fails, a
  *     plan built from the course's own headings. The step cannot fail.
  *  2. app/api/studio/infographic — that prompt goes to Meta's Muse Image
  *     (FICHE_IMAGE_MODEL); the image is stored and shown in the Studio.
@@ -45,6 +47,14 @@ export const MAX_SOURCE_CHARS_FOR_FICHE = 20_000;
 
 const OMNI_OUTLINE_TIMEOUT_MS = 45_000;
 const CHEAP_OUTLINE_TIMEOUT_MS = 25_000;
+/**
+ * The free Omni model gets this long on its own (2026-11-18): past it, the
+ * cheap fallbacks start IN PARALLEL and the first valid plan wins — so a slow
+ * free model can no longer hold the student on the plan for up to 45 s before
+ * the image is even started. Omni keeps running and still wins when it
+ * answers first.
+ */
+export const OMNI_HEDGE_AFTER_MS = 9_000;
 /** Floor of the image call's time budget (it otherwise gets all the time the route has left). */
 const MIN_IMAGE_TIMEOUT_MS = 30_000;
 /**
@@ -316,50 +326,96 @@ function isStoredOutline(value: unknown): value is StoredOutline {
 
 type OutlineCallOptions = NonNullable<Parameters<typeof callOpenRouter>[1]>;
 
-/** Free Omni first, then the cheap fallbacks; throws only when every model failed. */
-async function extractWithModels(courseTitle: string, sourceText: string): Promise<{ outline: FicheOutline; source: FicheOutlineSource }> {
-  const messages = buildOutlineMessages(courseTitle, sourceText);
-  let lastError: unknown = null;
+const CHEAP_OUTLINE_ATTEMPTS: OutlineCallOptions[] = [
+  // Strict JSON schema (structured outputs): the answer is the object, by construction.
+  { model: FICHE_OUTLINE_CHEAP_MODEL, maxTokens: 1500, temperature: 0.2, responseFormat: OUTLINE_JSON_SCHEMA, timeoutMs: CHEAP_OUTLINE_TIMEOUT_MS, bypassMock: true },
+  // The Copilot's own model (hybrid thinking: reasoning OFF), JSON mode.
+  { model: CHAT_MODEL, maxTokens: 1500, temperature: 0.2, reasoning: { enabled: false }, responseFormat: { type: "json_object" }, timeoutMs: CHEAP_OUTLINE_TIMEOUT_MS, bypassMock: true },
+];
 
-  // One request on the shared free-tier daily ceiling (lib/platform-spend-guard.ts).
-  const capacity = await reserveFreeTierCapacity();
-  if (capacity.allowed) {
-    try {
-      const outline = parseFicheOutline(
-        await callOpenRouter(messages, {
-          model: PRIMARY_FREE_OMNI,
-          maxTokens: FREE_OMNI_MAX_TOKENS,
-          temperature: 0.2,
-          reasoning: { effort: "low" },
-          timeoutMs: OMNI_OUTLINE_TIMEOUT_MS,
-          bypassMock: true,
-        })
-      );
-      if (outline) return { outline, source: "omni" };
-      lastError = new Error("Omni : plan illisible.");
-    } catch (error) {
-      lastError = error;
-    }
-    console.error("[infographic-sheet] Omni gratuit sans plan valide, bascule sur le repli économique:", lastError instanceof Error ? lastError.message : lastError);
-  }
+/** The free Omni model alone; throws when it gives no valid plan. */
+async function extractWithOmni(messages: ChatMessageInput[]): Promise<FicheOutline> {
+  const outline = parseFicheOutline(
+    await callOpenRouter(messages, {
+      model: PRIMARY_FREE_OMNI,
+      maxTokens: FREE_OMNI_MAX_TOKENS,
+      temperature: 0.2,
+      reasoning: { effort: "low" },
+      timeoutMs: OMNI_OUTLINE_TIMEOUT_MS,
+      bypassMock: true,
+    })
+  );
+  if (!outline) throw new Error("Omni : plan illisible.");
+  return outline;
+}
 
-  const cheapAttempts: OutlineCallOptions[] = [
-    // Strict JSON schema (structured outputs): the answer is the object, by construction.
-    { model: FICHE_OUTLINE_CHEAP_MODEL, maxTokens: 1500, temperature: 0.2, responseFormat: OUTLINE_JSON_SCHEMA, timeoutMs: CHEAP_OUTLINE_TIMEOUT_MS, bypassMock: true },
-    // The Copilot's own model (hybrid thinking: reasoning OFF), JSON mode.
-    { model: CHAT_MODEL, maxTokens: 1500, temperature: 0.2, reasoning: { enabled: false }, responseFormat: { type: "json_object" }, timeoutMs: CHEAP_OUTLINE_TIMEOUT_MS, bypassMock: true },
-  ];
-  for (const options of cheapAttempts) {
+/** The ultra-cheap fallbacks, in order; throws the last error when none gives a valid plan. */
+async function extractWithCheapModels(messages: ChatMessageInput[]): Promise<FicheOutline> {
+  let lastError: unknown = new Error("Aucun modèle n'a produit de plan.");
+  for (const options of CHEAP_OUTLINE_ATTEMPTS) {
     try {
       const outline = parseFicheOutline(await callOpenRouter(messages, options));
-      if (outline) return { outline, source: "fallback" };
+      if (outline) return outline;
       lastError = new Error(`${options.model} : plan illisible.`);
     } catch (error) {
       lastError = error;
     }
     console.error(`[infographic-sheet] Repli "${options.model}" sans plan valide:`, lastError instanceof Error ? lastError.message : lastError);
   }
-  throw lastError instanceof Error ? lastError : new Error("Aucun modèle n'a produit de plan.");
+  throw lastError;
+}
+
+/**
+ * Free Omni first, hedged: if it has no valid plan after OMNI_HEDGE_AFTER_MS
+ * (or fails sooner), the cheap fallbacks run alongside it and the first valid
+ * plan wins. Throws only when every model failed.
+ */
+async function extractWithModels(courseTitle: string, sourceText: string): Promise<{ outline: FicheOutline; source: FicheOutlineSource }> {
+  const messages = buildOutlineMessages(courseTitle, sourceText);
+
+  // One request on the shared free-tier daily ceiling (lib/platform-spend-guard.ts).
+  const capacity = await reserveFreeTierCapacity();
+  if (!capacity.allowed) return { outline: await extractWithCheapModels(messages), source: "fallback" };
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let cheapStarted = false;
+    let failures = 0;
+    let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const win = (outline: FicheOutline, source: FicheOutlineSource) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hedgeTimer);
+      resolve({ outline, source });
+    };
+    const lose = (error: unknown) => {
+      failures += 1;
+      if (failures < 2 || settled) return;
+      settled = true;
+      clearTimeout(hedgeTimer);
+      reject(error instanceof Error ? error : new Error("Aucun modèle n'a produit de plan."));
+    };
+    const startCheap = () => {
+      if (cheapStarted || settled) return;
+      cheapStarted = true;
+      extractWithCheapModels(messages).then((outline) => win(outline, "fallback"), lose);
+    };
+
+    extractWithOmni(messages).then(
+      (outline) => win(outline, "omni"),
+      (error) => {
+        console.error("[infographic-sheet] Omni gratuit sans plan valide, bascule sur le repli économique:", error instanceof Error ? error.message : error);
+        lose(error);
+        startCheap();
+      }
+    );
+    hedgeTimer = setTimeout(() => {
+      if (settled) return;
+      console.warn(`[infographic-sheet] Omni sans plan après ${OMNI_HEDGE_AFTER_MS / 1000}s — le repli économique démarre en parallèle.`);
+      startCheap();
+    }, OMNI_HEDGE_AFTER_MS);
+  });
 }
 
 /**

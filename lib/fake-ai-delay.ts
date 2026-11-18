@@ -27,6 +27,19 @@ export function randomFakeDelayMs(): number {
   return Math.floor(MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS));
 }
 
+/**
+ * The Fiche de Synthèse's cache-hit reveal (2026-11-18): a short "it's being
+ * put together" moment instead of the 5-10 s above — students found the
+ * sheet slow to appear, and its image still has to download after the delay
+ * (the page starts that download first, so the reveal doubles as prefetch).
+ */
+const QUICK_REVEAL_MIN_MS = 1500;
+const QUICK_REVEAL_MAX_MS = 2500;
+
+export function randomQuickRevealMs(): number {
+  return Math.floor(QUICK_REVEAL_MIN_MS + Math.random() * (QUICK_REVEAL_MAX_MS - QUICK_REVEAL_MIN_MS));
+}
+
 export function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

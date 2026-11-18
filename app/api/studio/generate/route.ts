@@ -14,7 +14,8 @@ import {
 } from "@/lib/ai/studio-prompts";
 import { parseAndValidateStudioSection } from "@/lib/ai/studio-section-validation";
 import { generateStudioQcmSet } from "@/lib/ai/studio-qcm";
-import { StudioQcmsSchema } from "@/lib/ai/studio-schemas";
+import { generateStudioResumeSet } from "@/lib/ai/studio-resume";
+import { StudioQcmsSchema, StudioResumeSchema } from "@/lib/ai/studio-schemas";
 import { errorMessage, MAX_SOURCE_CHARS } from "@/lib/course-generation-shared";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -269,8 +270,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
   // before the 30-question pipeline (15 questions) must not be served, and a
   // fuzzy delta-adaptation of a 30-question set cannot fit its reduced token
   // ceiling — the batched generation below is the fast path for QCM anyway.
+  // Résumé (since 2026-11-18): same rule, same reasons — its four deep modes
+  // (~12k tokens) are written by five parallel calls (lib/ai/studio-resume.ts);
+  // a single delta-adaptation call would have to rewrite all of them.
+  const isBatchedSection = actionType === "qcm" || actionType === "resume";
+  const batchedSchema = actionType === "qcm" ? StudioQcmsSchema : StudioResumeSchema;
   const cacheResult: StudioCacheLookupResult =
-    actionType === "qcm" && lookedUpCache.hit && (lookedUpCache.matchType !== "exact" || !StudioQcmsSchema.safeParse(lookedUpCache.data).success)
+    isBatchedSection && lookedUpCache.hit && (lookedUpCache.matchType !== "exact" || !batchedSchema.safeParse(lookedUpCache.data).success)
       ? { hit: false }
       : lookedUpCache;
 
@@ -445,8 +451,28 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       }
     };
 
+    // Résumé has its own pipeline too: four deep modes from five parallel
+    // parts, each with its own model fallback and ledger entry
+    // (lib/ai/studio-resume.ts) — one call writing all of them could not
+    // finish inside the budget.
+    const generateResumeSet = async (): Promise<unknown> => {
+      const platformCapacity = await reservePlatformCapacity();
+      if (!platformCapacity.allowed) throw new StudioGenerationFailure(platformCapacity.reason ?? "MedArt Neural Engine est momentanément saturé. Réessaie un peu plus tard.", 503);
+      try {
+        return await generateStudioResumeSet(truncatedContext, { language, languageInstruction, deadlineMs: STUDIO_GENERATION_BUDGET_MS });
+      } catch (error) {
+        if (error instanceof OpenRouterError) throw new StudioGenerationFailure(error.message, error.status);
+        throw new StudioGenerationFailure(errorMessage(error), 502);
+      }
+    };
+
     try {
-      finalData = actionType === "qcm" ? await generateQcmSet() : await runThroughLedger(ledgerSpec, generateValidatedSection);
+      finalData =
+        actionType === "qcm"
+          ? await generateQcmSet()
+          : actionType === "resume"
+            ? await generateResumeSet()
+            : await runThroughLedger(ledgerSpec, generateValidatedSection);
     } catch (error) {
       await refundGeneration(user.id);
       if (error instanceof StudioGenerationFailure) {

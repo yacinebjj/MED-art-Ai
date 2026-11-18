@@ -939,10 +939,10 @@ export const TOURS: Record<TourId, TourDefinition> = {
         icon: Layers,
         ...HUE.cyan,
         badge: { fr: "Résumé", en: "Summary" },
-        title: { fr: "Six formats", en: "Six formats" },
+        title: { fr: "Quatre formats", en: "Four formats" },
         body: {
-          fr: "Smart Summary, Exam Summary, Cheat Sheet, Guideline Summary, Professor Notes et Astuces : change de format d'un appui.",
-          en: "Smart Summary, Exam Summary, Cheat Sheet, Guideline Summary, Professor Notes and Tips: switch format in one tap.",
+          fr: "Smart Summary, Exam Summary, Guideline Summary et Professor Notes : change de format d'un appui.",
+          en: "Smart Summary, Exam Summary, Guideline Summary and Professor Notes: switch format in one tap.",
         },
       },
       {

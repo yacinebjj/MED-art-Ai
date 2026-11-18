@@ -5,8 +5,8 @@ import {
   EXEMPLES_ANALOGIES_SYSTEM_PROMPT,
   EXPLICATION_SYSTEM_PROMPT,
   JSON_ONLY_RULES,
-  RESUME_SYSTEM_PROMPT,
 } from "@/lib/prompts/public-course-sections";
+import { STUDIO_RESUME_SYSTEM_PROMPT } from "@/lib/ai/studio-resume-prompts";
 
 /**
  * The Studio pipeline for the generic curriculum module workspace
@@ -190,45 +190,16 @@ export function resolveCasCliniqueSystemPrompt(studyYear: number | null | undefi
 }
 
 /**
- * RESUME_SYSTEM_PROMPT (imported above) already mandates the exact 6-mode
- * structure — never touched here. The mandate for this override shifted from
- * "never leave a bare keyword, always explain why/how" (verbose by
- * construction — that was actively adding length) to the opposite priority:
- * maximum density. Every bullet still needs enough context to stand alone
- * (a bare keyword is still banned), but now as ONE short, dense sentence
- * instead of an explanatory passage.
- *
- * Single-shot generation (product direction, explicitly reverted from an
- * earlier lazy per-mode-loading + cross-student cache architecture): all 6
- * modes are always generated together in one call, the instant the Résumé
- * tab is opened — no per-mode click-to-generate, no separate cache. The
- * cost lever here is exclusively prompt density (fewer words per bullet),
- * not deferred/partial generation.
- *
- * 2026-11-12 (explicit product order, "strict token economy applies ONLY to
- * the Résumé"): exam-only content, the "why" in the same short sentence, and
- * 7-10 "Pièges QCM" / "Perles cliniques" in the exam mode's `pieges`, each
- * `🚨 **Piège:** … ➡️ **Pourquoi ?** …` or `💎 **Perle:** … ➡️ **Pourquoi ?** …`
- * (GastriteResumeStudio renders that format as a card). Same JSON schema,
- * same token ceiling. Bump STUDIO_RESUME_PROMPT_VERSION (right after this
- * prompt) with every change to it.
+ * Studio « Résumé » — since 2026-11-18 (explicit product order) its own
+ * pipeline, no longer an append on the shared RESUME_SYSTEM_PROMPT: four
+ * modes (Smart Summary, Exam Summary, Guideline Summary, Professor Notes —
+ * « Astuces » and « Cheat Sheet » removed), much deeper, Exam Summary rebuilt
+ * on the QCM « annales DNA » below. Written by five parallel calls
+ * (lib/ai/studio-resume.ts); STUDIO_RESUME_SYSTEM_PROMPT
+ * (lib/ai/studio-resume-prompts.ts) is their shared system prompt, each
+ * part's mission is its user message. Bump STUDIO_RESUME_PROMPT_VERSION
+ * (right below) with every change to those prompts.
  */
-const STUDIO_RESUME_SYSTEM_PROMPT = `${RESUME_SYSTEM_PROMPT}
-
-SURCHARGE OBLIGATOIRE — DENSITÉ MAXIMALE (remplace toute consigne de longueur/verbosité ci-dessus ; la structure des 6 modes reste strictement inchangée) : chaque puce ou point clé (cards.items, cheatsheet cards.items, astuces.details, guideline steps.content, etc.) doit être UNE SEULE phrase courte, dense et autonome — jamais un mot-clé isolé sans aucun contexte, mais jamais non plus une phrase longue ou un mini-paragraphe explicatif. Élimine systématiquement : toute répétition d'une idée déjà énoncée ailleurs dans le même mode, les phrases de transition ou d'introduction sans contenu médical ("il est important de noter que...", "on peut également souligner que..."), et tout mot ou adjectif de remplissage. Le résultat doit être nettement plus compact qu'une rédaction non filtrée, sans jamais donner l'impression d'un résumé tronqué ou incomplet — chaque puce doit rester immédiatement compréhensible seule, juste débarrassée de tout superflu.
-
-INTÉGRITÉ STRUCTURELLE ABSOLUE (ne concerne QUE la structure, jamais le contenu) : quel que soit le degré de concision demandé ci-dessus pour le TEXTE de chaque puce, tu dois TOUJOURS renvoyer la STRUCTURE JSON complète du mode généré (toutes ses clés de premier niveau et imbriquées telles que définies dans le schéma — hero, sections, ddx_table, pieges, cards, steps, quotes, perles, items — même quand une clé n'est pas utilisée par CE mode précis, auquel cas renvoie-la comme tableau vide [] ou objet aux champs vides, jamais comme clé absente). Condense les PHRASES si nécessaire, mais NE SUPPRIME JAMAIS une clé — un JSON auquel il manque ne serait-ce qu'une seule clé est un échec total de la tâche, même si le contenu présent est par ailleurs excellent.
-
-SURCHARGE OBLIGATOIRE — RÉSUMÉ ORIENTÉ EXAMEN, ÉCONOMIE STRICTE DE MOTS (s'ajoute à la densité ci-dessus ; la structure des 6 modes reste strictement inchangée) :
-- 100 % EXAMEN : ne retiens que ce qui tombe aux examens et aux QCM — seuils chiffrés avec leurs unités, signes cardinaux et de gravité, examen de 1ère intention vs examen de référence, traitement de 1ère intention, contre-indications, complications, terrains particuliers, notions que les étudiants confondent. Supprime tout le reste : historique, généralités, détails à faible rendement.
-- LE POURQUOI EN UNE PHRASE : chaque notion porte sa raison (mécanisme ou justification) dans la même phrase courte — jamais plus d'une phrase courte par notion.
-- PIÈGES QCM ET PERLES CLINIQUES, dans l'objet "pieges" du mode "exam" :
-  - "titre" : « Pièges QCM & Perles cliniques » ; "intro" : une seule phrase courte ;
-  - "categories" : exactement deux catégories, dans cet ordre — { "nom": "Pièges QCM", "items": [...] } puis { "nom": "Perles cliniques", "items": [...] } ;
-  - ENTRE 7 ET 10 éléments au total (au moins 5 pièges et au moins 2 perles), "numero" à partir de 1 dans chaque catégorie ;
-  - chaque "text" suit EXACTEMENT l'un de ces deux formats, sur une seule ligne, avec un « Pourquoi » de 10 à 15 mots au maximum :
-    🚨 **Piège:** [la proposition trompeuse ou la confusion classique] ➡️ **Pourquoi ?** [l'explication]
-    💎 **Perle:** [la perle clinique à retenir] ➡️ **Pourquoi ?** [l'explication]`;
 
 /**
  * Version of STUDIO_RESUME_SYSTEM_PROMPT — bump it with every change to that
@@ -236,9 +207,10 @@ SURCHARGE OBLIGATOIRE — RÉSUMÉ ORIENTÉ EXAMEN, ÉCONOMIE STRICTE DE MOTS (s
  * Résumés under "resume:v<version>"), so a résumé written under an older
  * prompt is never served to a new student. 1 = the original rows (filed as
  * plain "resume"); 2 = exam-only, one-sentence "why", 7-10 Pièges QCM &
- * Perles cliniques in the 🚨/💎 format (2026-11-12).
+ * Perles cliniques in the 🚨/💎 format (2026-11-12); 3 = the four deep modes
+ * written in parallel, Exam Summary on the annales DNA (2026-11-18).
  */
-export const STUDIO_RESUME_PROMPT_VERSION = 2;
+export const STUDIO_RESUME_PROMPT_VERSION = 3;
 
 /**
  * Studio Examen QCM — its OWN prompt, no longer an append on the shared
@@ -514,9 +486,11 @@ interface StudioPromptConfig {
 // The other sections are unchanged at 20000 — their own prompts are already
 // scoped properly and don't have the "sans plafond" problem. qcm's ceiling is
 // PER BATCH (lib/ai/studio-qcm.ts): ~600 tokens per question, 5 per batch.
+// resume's is the largest PER PART (lib/ai/studio-resume.ts, each part's own
+// ceiling in RESUME_PART_MAX_TOKENS): it is no longer generated in one call.
 export const STUDIO_PROMPT_CONFIG: Record<JsonSectionId, StudioPromptConfig> = {
   explication: { systemPrompt: STUDIO_EXPLICATION_SYSTEM_PROMPT, maxTokens: 8000 },
-  resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 20000 },
+  resume: { systemPrompt: STUDIO_RESUME_SYSTEM_PROMPT, maxTokens: 7000 },
   cas_clinique: { systemPrompt: STUDIO_CAS_CLINIQUE_SYSTEM_PROMPT, maxTokens: 20000 },
   qcm: { systemPrompt: STUDIO_QCMS_SYSTEM_PROMPT, maxTokens: 7000 },
   exemples_analogies: { systemPrompt: STUDIO_EXEMPLES_ANALOGIES_SYSTEM_PROMPT, maxTokens: 20000 },

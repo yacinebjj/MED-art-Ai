@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { BrandLoader } from "@/components/ui/BrandLoader";
 import { useLanguage } from "@/providers/LanguageProvider";
 import type { FichePlanView } from "@/lib/infographic-fiche-key";
@@ -33,16 +34,62 @@ const BOX_TINTS = [
 
 const SKELETON_BAR = "animate-pulse rounded-full bg-zinc-900/[0.07] dark:bg-white/[0.08]";
 
+/** "1:07" — the time since the generation started. */
+export function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/** The three stages, as the student sees them: the plan (step 1), the drawing (step 2), the sheet on screen. */
+function StageTrack({ planReady, language }: { planReady: boolean; language: "fr" | "en" }) {
+  const stages: { label: string; state: "done" | "active" | "pending" }[] = [
+    { label: language === "fr" ? "Plan du cours" : "Course plan", state: planReady ? "done" : "active" },
+    { label: "Illustration", state: planReady ? "active" : "pending" },
+    { label: language === "fr" ? "Ta fiche" : "Your sheet", state: "pending" },
+  ];
+  return (
+    <ol className="flex items-center gap-1.5 sm:gap-2" aria-label={language === "fr" ? "Étapes de la fiche" : "Sheet steps"}>
+      {stages.map((stage, i) => (
+        <li key={stage.label} className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+          {i > 0 && <span aria-hidden className={cn("h-px w-3 shrink-0 sm:w-6", stage.state === "pending" ? "bg-border" : "bg-foreground/40")} />}
+          <span
+            className={cn(
+              "inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+              stage.state === "done" && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+              stage.state === "active" && "bg-foreground/[0.08] text-foreground",
+              stage.state === "pending" && "text-muted-foreground"
+            )}
+            aria-current={stage.state === "active" ? "step" : undefined}
+          >
+            {stage.state === "done" ? (
+              <Check className="h-3 w-3 shrink-0" />
+            ) : stage.state === "active" ? (
+              <span aria-hidden className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-current" />
+            ) : null}
+            <span className="truncate">{stage.label}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /**
  * The Studio's "Infographie / Fiche de Synthèse" while it is being made: a
  * live preview of the sheet. Before the plan arrives (step 1), six empty
  * pastel boxes; once it does, the real title and the six key topics the
- * image is being drawn from (step 2, which takes the longest).
+ * image is being drawn from (step 2, which takes the longest) — readable in
+ * full, so the wait is already revision. The stages and the time elapsed
+ * show the work moving, and the student is told plainly that they can go on
+ * revising: the sheet lands here, and a toast says so, when it's ready.
  */
-export function InfographicGeneratingView({ plan }: { plan: FichePlanView | null }) {
+export function InfographicGeneratingView({ plan, startedAt }: { plan: FichePlanView | null; startedAt?: number }) {
   const { language } = useLanguage();
   const messages = plan ? DRAWING_MESSAGES : PLAN_MESSAGES;
   const [index, setIndex] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const [mountedAt] = useState(() => Date.now());
+  const since = startedAt ?? mountedAt;
 
   useEffect(() => {
     setIndex(0);
@@ -50,18 +97,32 @@ export function InfographicGeneratingView({ plan }: { plan: FichePlanView | null
     return () => clearInterval(interval);
   }, [messages]);
 
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 py-2 sm:py-4">
-      <div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2.5 shadow-soft">
-        <BrandLoader className="h-6 w-6 shrink-0" />
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">
-            {language === "fr" ? "Ta fiche de synthèse illustrée est en préparation" : "Your illustrated summary sheet is on its way"}
-          </p>
-          <p aria-live="polite" className="text-xs text-muted-foreground">
-            {messages[index % messages.length][language]}
-          </p>
+      <div className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card px-3 py-2.5 shadow-soft">
+        <div className="flex items-center gap-3">
+          <BrandLoader className="h-6 w-6 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">
+              {language === "fr" ? "Ta fiche de synthèse illustrée est en préparation" : "Your illustrated summary sheet is on its way"}
+            </p>
+            <p aria-live="polite" className="text-xs text-muted-foreground">
+              {messages[index % messages.length][language]}
+            </p>
+          </div>
+          <span
+            className="shrink-0 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground"
+            title={language === "fr" ? "Temps écoulé" : "Time elapsed"}
+          >
+            {formatElapsed(now - since)}
+          </span>
         </div>
+        <StageTrack planReady={Boolean(plan)} language={language} />
       </div>
 
       <div className="rounded-3xl border border-border bg-zinc-50 p-3 dark:bg-zinc-900/60 sm:p-4" aria-hidden={!plan}>
@@ -85,7 +146,7 @@ export function InfographicGeneratingView({ plan }: { plan: FichePlanView | null
                         <span className="tabular-nums">{i + 1}.</span> {topic.heading}
                       </p>
                       {topic.details ? (
-                        <p className="mt-1 line-clamp-3 text-[11px] leading-snug text-muted-foreground">{topic.details}</p>
+                        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{topic.details}</p>
                       ) : (
                         <div className="mt-2 space-y-1.5">
                           <div className={cn("h-2 w-full", SKELETON_BAR)} />
@@ -113,10 +174,10 @@ export function InfographicGeneratingView({ plan }: { plan: FichePlanView | null
         </ol>
       </div>
 
-      <p className="text-center text-[11px] text-muted-foreground">
+      <p className="text-balance text-center text-[11px] leading-relaxed text-muted-foreground">
         {language === "fr"
-          ? "Le plan vient de ton cours. L'image illustrée prend en général moins d'une minute."
-          : "The plan comes from your course. The illustrated image usually takes under a minute."}
+          ? "Le plan vient de ton cours : tu peux déjà le réviser. Le dessin de la fiche prend un peu de temps — continue ailleurs si tu veux, elle s'affichera ici et on te prévient dès qu'elle est prête."
+          : "The plan comes from your course: you can already revise it. Drawing the sheet takes a little while — carry on elsewhere if you like; it will appear here and we'll let you know as soon as it's ready."}
       </p>
     </div>
   );
