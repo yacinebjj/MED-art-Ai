@@ -840,7 +840,12 @@ export function StudioPanel({
       </div>
 
       <div className="relative flex-1 overflow-hidden">
-        <div className={cn("h-full overflow-y-auto", openedSection && detailBg)}>
+        {/* overflow-x-hidden: with overflow-y on auto, the browser makes the
+            horizontal axis scrollable too — any content one pixel too wide let
+            the whole panel slide sideways under the student's thumb. The panel
+            is now fixed horizontally; wide content (tables) scrolls inside its
+            own overflow-x-auto wrapper. */}
+        <div className={cn("h-full overflow-y-auto overflow-x-hidden", openedSection && detailBg)}>
           {/* Keyed views: the section view and the browse grid are both divs
               in one slot, so without keys React would reuse one for the other
               and the grid's motion-swap entrance (app/globals.css) would never
@@ -1424,7 +1429,7 @@ export function StudioPanel({
               </button>
             </div>
             {/* text-select-stable — see its own comment in app/globals.css. */}
-            <div ref={containerRef} data-selectable className="text-select-stable flex-1 overflow-y-auto p-6">
+            <div ref={containerRef} data-selectable className="text-select-stable flex-1 overflow-y-auto overflow-x-hidden p-6">
               {detailContent}
             </div>
           </div>,

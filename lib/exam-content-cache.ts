@@ -50,12 +50,17 @@ interface ExamCourseForHash {
  * "c6:" (2026-11-19, the canonical prompt rebuilt block for block on the
  * Studio « Examen QCM » method: the professor's reading, fairness, forbidden
  * list, « Vrai. / Faux. » corrections) — bumped with CANONICAL_BANK_PROFILE.
+ *
+ * "c7:" (2026-11-18, every job a Studio batch — the Studio's blocks imported,
+ * its clinical share, composition, zones and accents, written from the course
+ * itself instead of the Explication): exams cached under c6 were still
+ * « scolaire » and must not be served again — bumped with faculte-v4.
  */
 export function computeExamContentHash(courses: ExamCourseForHash[]): string {
   const digests = courses
     .map((course) => createHash("sha256").update(normalizeText(course.explication ?? course.raw_text), "utf8").digest("hex"))
     .sort();
-  return createHash("sha256").update(`c6:${digests.join("|")}`, "utf8").digest("hex");
+  return createHash("sha256").update(`c7:${digests.join("|")}`, "utf8").digest("hex");
 }
 
 /** Checked before generating (skipped entirely for variation:true requests — see the route). Returns `null` on any Supabase error or misconfiguration — a lookup failure must never block generation, only skip the optimization. */

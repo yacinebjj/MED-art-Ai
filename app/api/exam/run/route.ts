@@ -8,6 +8,7 @@ import { buildExamStyleAdaptedSystemPrompt, type ExamCourseInput } from "@/lib/a
 import { ExamGenerationSchema, ExamQuestionSchema, ExamStyleProfileSchema, type ExamStyleProfile } from "@/lib/ai/exam-schemas";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { BATCH_ACCENTS } from "@/lib/ai/studio-qcm-focus";
 import { reserveExam, refundExam } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { computeExamContentHash, lookupExamCache, recordExamCacheHit, storeExamCache } from "@/lib/exam-content-cache";
@@ -22,7 +23,9 @@ import { assignFormats, normalizeFormatCounts, questionFormat, splitByShares, su
 import {
   EXAM_TARGET_TOTAL,
   MAX_EXAM_VARIATIONS,
+  EXAM_JOB_QUESTIONS,
   MODULE_EXAM_REGENERATE_CAP,
+  buildJobInputs,
   friendlyOpenRouterErrorMessage,
   generateExamJob,
   isMissingRpcError,
@@ -68,20 +71,24 @@ import {
  * recent exams of this module already had: the plan draws other bank
  * questions, or generates new ones that deepen the bank.
  *
- * NO STUDENT SETTINGS: every exam is the canonical one (DEFAULT_EXAM_PREFERENCES,
- * lib/exam-generation.ts canonicalExamSystemPrompt) or follows a reference
- * exam's style. A `preferences` field sent by an older page is ignored.
+ * NO STUDENT SETTINGS: every exam is the canonical one (lib/exam-generation.ts
+ * canonicalExamSystemPrompt) or follows a reference exam's style. A
+ * `preferences` field sent by an older page is ignored.
+ *
+ * EVERY JOB IS A STUDIO BATCH (2026-11-18): 5 questions written from the
+ * course itself (its raw text, never the simplified Explication), the whole
+ * course in the prompt up to the Studio's own source cap, the job's focus
+ * zone and accent in its instruction — exactly how the Studio « Examen QCM »
+ * aims each of its batches (lib/ai/studio-qcm.ts). A job used to see only a
+ * 24k-char slice of the Explication, with no zone and no accent.
  */
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const JOB_QUESTIONS = 5;
+const JOB_QUESTIONS = EXAM_JOB_QUESTIONS;
 const JOB_MAX_COURSES = 5;
 const JOB_MAX_SEGMENTS = 12;
-const MIN_SEGMENT_CHARS = 2_500;
-/** Source text per job: ~7k tokens, measured enough for 5 precise QCMs (more only cost time and money). */
-const JOB_INPUT_CHARS = 24_000;
 const MAX_FINAL_QUESTIONS = 60;
 /** Batch calls one run may make (jobs + silent retries), per server instance. */
 const RUN_BATCH_LIMIT = { limit: 120, windowMs: 30 * 60_000 };
@@ -107,6 +114,10 @@ interface ExamJob {
   formats?: FormatCounts;
   /** Per course (same order as courseIds): questions the shared bank already holds for it — see jobInputs. */
   depths?: number[];
+  /** The job's accent among the Studio's six (lib/ai/studio-qcm-focus.ts), set by the plan. */
+  accent?: number;
+  /** [position, of]: the job's place among the exam's lots, set by the plan. */
+  lot?: [number, number];
 }
 
 interface RunParams {
@@ -223,37 +234,6 @@ function distribute(courseIds: number[], total: number, caps: Map<number, number
     if (!progressed) break;
   }
   return courseIds.map((id) => ({ id, count: counts.get(id)! }));
-}
-
-/**
- * The course text each job reads. `depthById` (the shared bank's question
- * count per course, from the plan): a course the bank already covers is read
- * from a further window of its text — depth 0 is the opening, exactly as
- * before — so as the bank deepens its questions spread over the whole course
- * instead of piling up on its first pages.
- */
-function jobInputs(courses: EligibleCourseRow[], segment: [number, number] | null, depthById: Map<number, number> | null): ExamCourseInput[] {
-  const cap = Math.max(500, Math.floor(JOB_INPUT_CHARS / Math.max(1, courses.length)));
-  return courses.map((course) => {
-    let text = course.explication ?? course.raw_text;
-    let title = course.title;
-    const depth = depthById?.get(course.id) ?? 0;
-    if (segment) {
-      // A slice is never shorter than MIN_SEGMENT_CHARS: a short course is
-      // cut into fewer slices, and jobs sharing a slice are told to vary.
-      const [index, of] = segment;
-      const slices = Math.max(1, Math.min(of, Math.floor(text.length / MIN_SEGMENT_CHARS)));
-      const slice = (index + depth) % slices;
-      const size = Math.ceil(text.length / slices);
-      if (slices > 1) text = text.slice(slice * size, (slice + 1) * size);
-      title = slices > 1 ? `${course.title} (partie ${slice + 1}/${slices})` : course.title;
-      if (of > slices) title += ` — série ${index + 1}/${of} : choisis des notions différentes des autres séries`;
-    } else if (depth > 0 && text.length > cap) {
-      const windows = Math.ceil(text.length / cap);
-      text = text.slice(Math.min((depth % windows) * cap, text.length - cap));
-    }
-    return { title, text: text.slice(0, cap) };
-  });
 }
 
 /** Per-instance run state: a run is assembled OR refunded, never both. */
@@ -442,7 +422,9 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
     }
     const planned = assignFormats(planJobs(needs), subtractFormats(formatTargets, pooled.map(questionFormat)));
     const depths = depthById;
-    const jobs = depths ? planned.map((job) => ({ ...job, depths: job.courseIds.map((id) => depths.get(id) ?? 0) })) : planned;
+    const jobs = (depths ? planned.map((job) => ({ ...job, depths: job.courseIds.map((id) => depths.get(id) ?? 0) })) : planned)
+      // Each job a Studio batch: its accent (the next of the six) and its place among the lots.
+      .map((job, index, all) => ({ ...job, accent: index % BATCH_ACCENTS.length, lot: [index + 1, all.length] as [number, number] }));
 
     if (jobs.length === 0) {
       // Fully covered by already-generated questions: finished right here —
@@ -481,7 +463,7 @@ async function handlePlan(userId: string, user: NonNullable<Awaited<ReturnType<t
 
 function parseJob(raw: unknown, allowed: Set<number>): ExamJob | null {
   if (!raw || typeof raw !== "object") return null;
-  const { courseIds, count, segment, formats, depths } = raw as Record<string, unknown>;
+  const { courseIds, count, segment, formats, depths, accent, lot } = raw as Record<string, unknown>;
   if (!Array.isArray(courseIds) || courseIds.length === 0 || courseIds.length > JOB_MAX_COURSES) return null;
   if (!courseIds.every((id) => typeof id === "number" && allowed.has(id))) return null;
   if (typeof count !== "number" || !Number.isInteger(count) || count < 1 || count > 8) return null;
@@ -498,8 +480,22 @@ function parseJob(raw: unknown, allowed: Set<number>): ExamJob | null {
     Array.isArray(depths) && depths.length === courseIds.length && depths.every((depth) => typeof depth === "number" && Number.isInteger(depth) && depth >= 0 && depth <= 100_000)
       ? (depths as number[])
       : undefined;
+  // The Studio batch's aim: anything malformed falls back to a valid default (the accent of its slice, no lot number).
+  const validAccent = typeof accent === "number" && Number.isInteger(accent) && accent >= 0 && accent < BATCH_ACCENTS.length ? accent : seg ? seg[0] % BATCH_ACCENTS.length : 0;
+  const validLot =
+    Array.isArray(lot) && lot.length === 2 && lot.every((n) => typeof n === "number" && Number.isInteger(n)) && (lot[0] as number) >= 1 && (lot[0] as number) <= (lot[1] as number) && (lot[1] as number) <= 200
+      ? ([lot[0], lot[1]] as [number, number])
+      : undefined;
   // A re-queued job comes back with a smaller count: its tally is rescaled, never trusted as-is.
-  return { courseIds: courseIds as number[], count, segment: seg, formats: normalizeFormatCounts(formats, count), ...(validDepths ? { depths: validDepths } : {}) };
+  return {
+    courseIds: courseIds as number[],
+    count,
+    segment: seg,
+    formats: normalizeFormatCounts(formats, count),
+    ...(validDepths ? { depths: validDepths } : {}),
+    accent: validAccent,
+    ...(validLot ? { lot: validLot } : {}),
+  };
 }
 
 async function handleBatch(userId: string, params: RunParams, runToken: string, rawJob: unknown): Promise<NextResponse> {
@@ -518,7 +514,7 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
   if (courses.length === 0) return bad("Cours introuvables pour ce lot.", 404);
 
   const depths = job.depths;
-  const inputs = jobInputs(courses, job.segment, depths ? new Map(job.courseIds.map((id, index) => [id, depths[index]])) : null);
+  const { inputs, zone } = buildJobInputs(courses, job.segment, depths ? new Map(job.courseIds.map((id, index) => [id, depths[index]])) : null);
   // The professor's style, or (undefined) the canonical prompt — generateExamJob's default.
   const systemPrompt = params.styleProfile ? buildExamStyleAdaptedSystemPrompt(inputs, params.styleProfile) : undefined;
 
@@ -526,7 +522,11 @@ async function handleBatch(userId: string, params: RunParams, runToken: string, 
     // Several courses in one job that feeds a bank: each question names its source course.
     const bankProfile = params.bankProfile;
     const askSource = bankProfile !== null && courses.length > 1;
-    const { questions, sources } = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt, job.formats, Boolean(params.styleProfile), askSource);
+    const { questions, sources } = await generateExamJob(inputs, job.count, params.isVariation, systemPrompt, job.formats, Boolean(params.styleProfile), askSource, {
+      zone,
+      accent: job.accent ?? 0,
+      ...(job.lot ? { lot: job.lot } : {}),
+    });
     // Canonical and archetype questions feed their shared bank, each under the
     // course it was written from (`inputs` and the prompt list the courses in
     // `courses` order); a question no course can be verified for stays out.

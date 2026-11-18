@@ -510,12 +510,18 @@ function MasterclassSummary({ mode }: { mode: GastriteResumeMode }) {
             </div>
             <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{renderInlineBold(s6.intro)}</p>
             <div className="space-y-3">
+              {/* The badge used to be `shrink-0` on one line: since 2026-11-18 it holds
+                  a consequence « in a few words » (e.g. « Hospitalisation en soins
+                  intensifs + antihypertenseur IV »), ~300 px that could neither shrink
+                  nor wrap, so on a phone the whole Studio panel slid sideways by up to
+                  140 px. Now the row wraps: the badge drops under its label and wraps
+                  its own text when it must. */}
               {s6.rows.map((row, i) => {
                 const tone = SECTION6_ROW_TONES[i % SECTION6_ROW_TONES.length];
                 return (
-                  <div key={`${i}-${row.label}`} className={cn("flex justify-between items-center gap-3 bg-white dark:bg-slate-900 p-3 rounded-lg shadow-sm", tone.border)}>
-                    <span className="font-bold text-slate-700 dark:text-slate-200">{renderInlineBold(row.label ?? "")}</span>
-                    <span className={cn("shrink-0 px-3 py-1 text-xs font-bold rounded-full", tone.badge)}>{row.badge}</span>
+                  <div key={`${i}-${row.label}`} className={cn("flex flex-wrap justify-between items-center gap-x-3 gap-y-2 bg-white dark:bg-slate-900 p-3 rounded-lg shadow-sm", tone.border)}>
+                    <span className="min-w-0 font-bold text-slate-700 dark:text-slate-200">{renderInlineBold(row.label ?? "")}</span>
+                    <span className={cn("max-w-full px-3 py-1 text-xs font-bold rounded-full", tone.badge)}>{row.badge}</span>
                   </div>
                 );
               })}
@@ -1020,7 +1026,10 @@ export function GastriteResumeStudio({ data }: { data: GastriteResumeData }) {
   useToolTour("tool-resume");
 
   return (
-    <div className="animate-fade-in">
+    // min-w-0 + break-words: the Résumé never claims more width than its panel —
+    // a long unbreakable token (a cascade written with arrows, a long word in
+    // a title) breaks instead of pushing the panel sideways.
+    <div className="animate-fade-in min-w-0 max-w-full break-words">
       <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/30" data-tour="res-score">
         <Flame className="h-4 w-4" />
         Tombabilité à l&apos;examen : {data.tombabilite}%

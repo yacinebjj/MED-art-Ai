@@ -106,6 +106,33 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 /**
+ * Written under the CURRENT Studio « Examen QCM » prompt (v3, the annales DNA,
+ * 2026-11-17 — STUDIO_QCM_PROMPT_VERSION in lib/ai/studio-prompts.ts)? Its
+ * "globale" is the professor's structured « Commentaire » — a lead line, then
+ * « - » / « 1- » lines — and every option's explanation opens with « Vrai. »
+ * or « Faux. ». studio_courses.qcms carries no version, and a set generated
+ * before (v1: recall questions; v2: a two-sentence principle) used to pool
+ * verbatim into the Module exam — a « scolaire » question in an exam that
+ * must carry the Studio's DNA (2026-11-18). Such a set is now left to fresh
+ * generation, like any other incompatible QCM.
+ */
+export function hasStudioDnaSignature(qcm: QcmItem): boolean {
+  // Untrusted stored JSON: read field by field, whatever its shape.
+  const explication = qcm.explication as unknown as Partial<Record<string, unknown>> | undefined;
+  const globale = typeof explication?.globale === "string" ? explication.globale : "";
+  const lines = globale
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const listed = lines.slice(1).filter((line) => /^(?:[-•–]|\d+\s*[-.)])\s*\S/.test(line)).length;
+  if (lines.length < 3 || listed < 2) return false;
+  return EXAM_OPTION_LABELS.every((label) => {
+    const text = explication?.[label];
+    return typeof text === "string" && /^(?:vrai|faux)\b/i.test(text.trim());
+  });
+}
+
+/**
  * Converts one Studio QCM into the Exam's native format ONLY when it's
  * already structurally compatible — returns null otherwise (see this
  * module's own header comment for why nothing here ever fabricates a
@@ -134,6 +161,8 @@ function convertIfCompatible(qcm: QcmItem, courseTitle: string): ExamQuestion | 
   if (options.filter((o) => o.isCorrect).length !== qcm.reponsesCorrectes.length) return null;
 
   const meta = readHarvestedMeta((qcm as HarvestableQcm).exam);
+  // An organic Studio QCM pools only when written under the CURRENT Studio prompt: the exam must carry its DNA.
+  if (!meta && !hasStudioDnaSignature(qcm)) return null;
   const harvestedTag = meta?.weakPointTag;
   // The bank tag (meta.profile) is the lookup's business, never part of the question.
   const formatFields = {

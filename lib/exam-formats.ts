@@ -26,8 +26,13 @@ export type ExamPolarity = (typeof EXAM_POLARITIES)[number];
 
 export type FormatCounts = Record<ExamFormat, number>;
 
-/** Default mix of an exam, when the professor's style does not set another one. */
-export const EXAM_FORMAT_SHARES: FormatCounts = { qcs: 0.4, qcm: 0.35, combinaison: 0.25 };
+/**
+ * Default mix of an exam, when the professor's style does not set another one:
+ * the Studio « Examen QCM » batch (since 2026-11-18 — was 40 / 35 / 25), i.e.
+ * per 5 questions 2 combinations (type K), 2 QCS (one of them the RF) and 1
+ * multi-answer QCM.
+ */
+export const EXAM_FORMAT_SHARES: FormatCounts = { qcs: 0.4, qcm: 0.2, combinaison: 0.4 };
 
 /** A QCM has several answers to tick — never one (that is a QCS), never all five (no discrimination left). */
 export const QCM_MIN_CORRECT = 2;

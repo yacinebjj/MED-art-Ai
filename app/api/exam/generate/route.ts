@@ -413,7 +413,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         // pass: unlike Explication's within-course continuity (adjacent
         // parts of the SAME subject), cross-course topic overlap between
         // independently-selected courses (different subjects) was never a
-        // meaningful risk — buildExamBatchInstruction's topic list exists to
+        // meaningful risk — buildExamLotInstruction's topic list exists to
         // stop the SAME course re-testing the same notion, which stays fully
         // enforced within each course's own (still-sequential) internal
         // batch loop.

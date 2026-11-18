@@ -1,11 +1,13 @@
 /**
- * The "Générateur d'Examen" exam profile. Students have no settings: the
- * default preferences ARE the exam ("Examen facultaire · Équilibré ·
- * Approfondi"), and their directives are part of the prompt of every exam
- * without a reference exam (canonicalExamSystemPrompt, lib/exam-generation.ts)
- * — the exam served from the shared question bank and the exam cache. The
- * other values and their directive texts stay defined: the profile is
- * changed here, never by a request.
+ * The "Générateur d'Examen" exam profile. Students have no settings.
+ *
+ * Since 2026-11-18 NO directive of this file reaches a prompt: the canonical
+ * exam is the Studio « Examen QCM » at 100 % (lib/ai/exam-prompts.ts), whose
+ * prompt has no « PRÉFÉRENCES DE L'ÉTUDIANT » block — canonicalExamSystemPrompt
+ * (lib/exam-generation.ts) no longer appends one. The values and their texts
+ * stay defined (ExamPreferencesSchema still reads what older pages send, then
+ * ignores it); re-attaching a directive changes the canonical prompt: bump
+ * CANONICAL_BANK_PROFILE and the exam cache key with it.
  */
 import { z } from "zod";
 
@@ -25,11 +27,9 @@ export const ExamPreferencesSchema = z.object({
 export type ExamPreferences = z.infer<typeof ExamPreferencesSchema>;
 
 /**
- * The canonical exam (product decision, 2026-10-23 — was intermédiaire /
- * équilibré / standard, which had no directive): its two directives below are
- * applied to every exam without a reference exam. Changing it changes the canonical prompt —
- * bump CANONICAL_BANK_PROFILE (lib/exam-bank-profiles.ts) and the exam cache
- * key (lib/exam-content-cache.ts) with it.
+ * The canonical exam's profile (product decision, 2026-10-23). Its directives
+ * were appended to the canonical prompt until 2026-11-18 — no longer (see this
+ * file's header): the exam's level is the Studio « Examen QCM »'s.
  */
 export const DEFAULT_EXAM_PREFERENCES: ExamPreferences = {
   difficulty: "examen_blanc",

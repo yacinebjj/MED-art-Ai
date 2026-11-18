@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { callOpenRouter, OpenRouterError, EXAM_FALLBACK_MODEL, EXAM_MODEL } from "@/lib/ai/openrouter";
-import { buildExamBatchInstruction, buildExamSourceAttributionInstruction, buildExamStaticSystemPrompt, type ExamCourseInput } from "@/lib/ai/exam-prompts";
+import { buildExamLotInstruction, buildExamSourceAttributionInstruction, buildExamStaticSystemPrompt, type ExamCourseInput, type ExamLotFocus } from "@/lib/ai/exam-prompts";
 import { ExamQuestionSchema } from "@/lib/ai/exam-schemas";
-import { parseJsonResponse } from "@/lib/course-generation-shared";
+import { BATCH_ACCENTS, MIN_CHARS_FOR_ZONES, splitIntoFocusZones } from "@/lib/ai/studio-qcm-focus";
+import { MAX_SOURCE_CHARS, parseJsonResponse } from "@/lib/course-generation-shared";
 import type { ExamQuestion } from "@/lib/exam-pooling";
 import { readSourceCourse } from "@/lib/exam-question-bank";
-import { DEFAULT_EXAM_PREFERENCES, buildExamPreferenceDirective } from "@/lib/exam-preferences";
 import { buildFormatDeck, normalizeFormatCounts, pickByFormats, tallyFormats, type FormatCounts } from "@/lib/exam-formats";
 
 /**
@@ -18,22 +18,89 @@ import { buildFormatDeck, normalizeFormatCounts, pickByFormats, tallyFormats, ty
 export type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
 /**
- * The canonical (default) exam's system prompt: the static exam prompt plus
- * the directives of DEFAULT_EXAM_PREFERENCES ("Examen facultaire ·
- * Équilibré · Approfondi"). Every generation without its own prompt (both
- * routes' canonical path) uses it; personalized runs pass their own.
+ * The canonical (default) exam's system prompt: the Studio « Examen QCM »
+ * method (lib/ai/exam-prompts.ts) and the courses. Every generation without
+ * its own prompt (both routes' canonical path) uses it; personalized runs
+ * pass their own.
  *
- * Since 2026-11-17 the depth of the correction is set by the professor
- * prompt itself (lib/ai/exam-prompts.ts: short reasons per option plus the
- * « Commentaire » mini-cours), so the « approfondie » directive — 2 to 4
- * sentences per option, framed as the student's priority preference — is no
- * longer appended: it would double the correction and the job's length. The
- * « Examen facultaire » directive stays, verbatim.
+ * 2026-11-18: the « PRÉFÉRENCES DE L'ÉTUDIANT » block (« Examen facultaire »,
+ * DEFAULT_EXAM_PREFERENCES) is no longer appended — the Studio's prompt has no
+ * such block, and the exam must be the Studio's at 100 %.
  */
 export function canonicalExamSystemPrompt(inputs: ExamCourseInput[]): string {
-  const base = buildExamStaticSystemPrompt(inputs);
-  const directive = buildExamPreferenceDirective({ ...DEFAULT_EXAM_PREFERENCES, explanationDepth: "standard" });
-  return directive ? `${base}\n\n${directive}` : base;
+  return buildExamStaticSystemPrompt(inputs);
+}
+
+/**
+ * The course text the exam is written from: the course itself (raw_text), as
+ * in the Studio — never the student's Explication, a rewrite « with very
+ * simple words » that drops the exact thresholds, conditions and doses the
+ * traps are built on (2026-11-18). The Explication only stands in for a course
+ * with no text of its own.
+ */
+export function courseSourceText(course: { raw_text: string | null; explication: string | null }): string {
+  return course.raw_text && course.raw_text.trim().length > 0 ? course.raw_text : course.explication ?? "";
+}
+
+/** Questions per job of the client-orchestrated run (app/api/exam/run): one Studio batch. */
+export const EXAM_JOB_QUESTIONS = 5;
+/** Course text in one job's prompt: the Studio's own source cap, shared by the job's courses. */
+export const JOB_INPUT_CHARS = MAX_SOURCE_CHARS;
+/** A focus zone of a split course is never shorter than this: a short course is cut into fewer zones. */
+export const MIN_SEGMENT_CHARS = 2_500;
+/** Questions a job adds to the bank of its course — a deeper bank reads a further zone of the course. */
+const BANK_QUESTIONS_PER_ZONE = EXAM_JOB_QUESTIONS;
+
+/**
+ * The course text and the aim of one job of the run — a Studio batch
+ * (lib/ai/studio-qcm.ts), written from the course itself (courseSourceText):
+ *  - one course: the WHOLE course is in the prompt (up to the Studio's cap);
+ *    a course split into several jobs (`segment` [index, of]) gives each job
+ *    its FOCUS ZONE (the Studio's own cut, splitIntoFocusZones) — a zone is
+ *    never shorter than MIN_SEGMENT_CHARS, so a short course is cut into fewer
+ *    zones and the jobs sharing one are told to vary; an unsplit course the
+ *    bank already covers (`depthById`, its bank question count) is aimed at a
+ *    further zone, so as the bank deepens its questions spread over the whole
+ *    course; a first job on an unsplit course covers it whole;
+ *  - several courses (small needs packed together): their texts share the
+ *    cap, a course the bank already covers read from a further window; no zone.
+ * (Until 2026-11-18 a job saw a 24k-char slice of the Explication, no zone.)
+ */
+export function buildJobInputs(
+  courses: EligibleCourseRow[],
+  segment: [number, number] | null,
+  depthById: Map<number, number> | null
+): { inputs: ExamCourseInput[]; zone: string | null } {
+  if (courses.length === 1) {
+    const course = courses[0];
+    const text = courseSourceText(course).slice(0, JOB_INPUT_CHARS);
+    const step = Math.floor((depthById?.get(course.id) ?? 0) / BANK_QUESTIONS_PER_ZONE);
+    let title = course.title;
+    let zone: string | null = null;
+    if (segment) {
+      const [index, of] = segment;
+      const zones = text.length >= MIN_CHARS_FOR_ZONES ? Math.max(1, Math.min(of, Math.floor(text.length / MIN_SEGMENT_CHARS))) : 1;
+      if (zones > 1) zone = splitIntoFocusZones(text, zones)[(index + step) % zones];
+      if (of > zones) title += ` — série ${index + 1}/${of} : choisis des notions différentes des autres séries`;
+    } else if (step > 0 && text.length >= MIN_CHARS_FOR_ZONES) {
+      const zones = splitIntoFocusZones(text, BATCH_ACCENTS.length);
+      zone = zones[step % zones.length];
+    }
+    return { inputs: [{ title, text }], zone };
+  }
+  const cap = Math.max(500, Math.floor(JOB_INPUT_CHARS / Math.max(1, courses.length)));
+  return {
+    inputs: courses.map((course) => {
+      let text = courseSourceText(course);
+      const step = Math.floor((depthById?.get(course.id) ?? 0) / BANK_QUESTIONS_PER_ZONE);
+      if (step > 0 && text.length > cap) {
+        const windows = Math.ceil(text.length / cap);
+        text = text.slice(Math.min((step % windows) * cap, text.length - cap));
+      }
+      return { title: course.title, text: text.slice(0, cap) };
+    }),
+    zone: null,
+  };
 }
 
 /** PostgREST "function not found" (RPC not deployed on this database yet). */
@@ -371,7 +438,7 @@ export function buildCourseInputs(courses: EligibleCourseRow[], budgetCourseCoun
   const perCourseCap = Math.max(500, Math.min(MAX_PER_COURSE_CHARS, Math.floor(MAX_TOTAL_EXAM_CHARS / Math.max(1, budgetCourseCount))));
   return courses.map((course) => ({
     title: course.title,
-    text: (course.explication ?? course.raw_text).slice(0, perCourseCap),
+    text: courseSourceText(course).slice(0, perCourseCap),
   }));
 }
 
@@ -383,13 +450,10 @@ export function buildCourseInputs(courses: EligibleCourseRow[], budgetCourseCoun
  * `questionsInThisBatch` is rarely the original fixed 8 anymore; the schema
  * is built to match whatever count was actually requested.
  *
- * `batchIndex`/`totalBatches` are passed purely to reuse
- * buildExamBatchInstruction's existing clinical/standard ratio framing
- * (clinicalCountForBatch returns 0 once batchIndex exceeds its internal
- * TOTAL_CLINICAL_QUESTIONS constant) — every shortfall chunk is deliberately
- * requested as "all standard" questions, since pooled questions already
- * supply most of the exam's real content and a partial top-up chunk doesn't
- * divide cleanly into the original 90/10 standard/clinical ratio.
+ * `batchIndex` picks the chunk's accent among the Studio's six (2026-11-18:
+ * the chunks used to be framed as "all standard questions, no clinical
+ * scenario" — now each is a Studio lot, with the method's own share of
+ * clinical vignettes); `totalBatches` is kept for the call sites.
  *
  * The system message is the STATIC half (persona + full course content, see
  * buildExamStaticSystemPrompt) — byte-identical across every shortfall chunk
@@ -434,7 +498,7 @@ export async function generateExamBatch(
       break;
     }
     try {
-      const batchInstruction = buildExamBatchInstruction(batchIndex, totalBatches, questionsInThisBatch, isVariation, previousTopics, formats, followStyle);
+      const batchInstruction = buildExamLotInstruction(questionsInThisBatch, formats, { accent: batchIndex, zone: null }, { isVariation, previousTopics, followStyle });
       const raw = await callOpenRouter(
         [
           { role: "system", content: staticSystemPrompt },
@@ -539,10 +603,8 @@ export async function generateExamBatch(
  * cover — in chunks of up to QUESTIONS_PER_BATCH, sequentially (each chunk
  * told every topic already covered by pooling AND by earlier chunks in this
  * same request, so "ensure new QCMs are completely distinct and
- * non-overlapping with the existing ones" is enforced for real). Every
- * chunk uses batchIndex/totalBatches values chosen so
- * buildExamBatchInstruction's clinical-ratio math always yields "all
- * standard" — see generateExamBatch's own comment for why.
+ * non-overlapping with the existing ones" is enforced for real). Each chunk
+ * is a Studio lot with its own accent (the next of the six).
  */
 export async function generateShortfallQuestions(
   inputs: ExamCourseInput[],
@@ -560,12 +622,9 @@ export async function generateShortfallQuestions(
   const topics = [...poolTopics];
   let remaining = totalNeeded;
   const deck = buildFormatDeck(normalizeFormatCounts(formats, totalNeeded));
-  // ALL-STANDARD FRAMING: TOTAL_CLINICAL_QUESTIONS inside exam-prompts.ts is
-  // 4 — any batchIndex/totalBatches pair above that always yields 0 clinical
-  // questions for that chunk (see clinicalCountForBatch). Fixed at 5 for
-  // every chunk deliberately, not incremented per-chunk — purely cosmetic
-  // prompt framing, not a student-facing number.
-  const ALL_STANDARD_BATCH_INDEX = 5;
+  const totalChunks = Math.max(1, Math.ceil(totalNeeded / QUESTIONS_PER_BATCH));
+  // Each chunk's accent: the next of the Studio's six (lib/ai/studio-qcm-focus.ts).
+  let chunk = 0;
 
   while (remaining > 0) {
     // Out of time: return what this request already has — the caller's floor decides.
@@ -586,8 +645,8 @@ export async function generateShortfallQuestions(
     const chunkFormats = tallyFormats(deck.slice(totalNeeded - remaining, totalNeeded - remaining + count));
     const batchQuestions = await generateExamBatch(
       inputs,
-      ALL_STANDARD_BATCH_INDEX,
-      ALL_STANDARD_BATCH_INDEX,
+      chunk++,
+      totalChunks,
       QUESTIONS_PER_BATCH,
       isVariation,
       topics,
@@ -660,6 +719,11 @@ export interface ExamJobResult {
  * for one missing QCM is what multiplied time and cost before).
  * `askSource`: a job over several courses whose questions go to the shared
  * bank — each question is asked to name its source course.
+ * `focus`: the Studio batch's aim — the job's zone of its course (or none:
+ * the course(s) whole), its accent and its place among the exam's lots.
+ * The share of clinical vignettes is the method's own (lib/ai/exam-prompts.ts:
+ * at least 2 per lot of 5 on a clinical course, as in the Studio) — the job
+ * no longer orders "exactly one clinical case" (2026-11-18).
  */
 export async function generateExamJob(
   inputs: ExamCourseInput[],
@@ -670,15 +734,12 @@ export async function generateExamJob(
   formats?: FormatCounts,
   /** Style-guided exam: the professor's distribution may replace the default quota. */
   followStyle = false,
-  askSource = false
+  askSource = false,
+  focus: ExamLotFocus = { accent: 0, zone: null }
 ): Promise<ExamJobResult> {
   const systemPrompt = systemPromptOverride ?? canonicalExamSystemPrompt(inputs);
-  // One clinical case per job of 3+ questions (the annales' cases in chronological escalation);
-  // "Batch 5 of 5" alone asked for none. Exact for the canonical exam; for a style-guided one
-  // (since 2026-11-19) a default the professor's own share of clinical cases replaces.
-  const clinicalCases = count >= 3 ? 1 : 0;
-  const batchInstruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle, clinicalCases);
-  const instruction = askSource ? `${batchInstruction}\n\n${buildExamSourceAttributionInstruction(inputs.length)}` : batchInstruction;
+  const lotInstruction = buildExamLotInstruction(count, formats, focus, { isVariation, followStyle });
+  const instruction = askSource ? `${lotInstruction}\n\n${buildExamSourceAttributionInstruction(inputs.length)}` : lotInstruction;
   const chain: { model: string; timeoutMs: number }[] = [
     { model: EXAM_MODEL, timeoutMs: 110_000 },
     { model: EXAM_FALLBACK_MODEL, timeoutMs: 80_000 },

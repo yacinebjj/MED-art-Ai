@@ -1,6 +1,7 @@
 import { callOpenRouterChain } from "@/lib/ai/call-resilient";
 import { FLASHCARD_MODEL, STUDIO_MODEL } from "@/lib/ai/openrouter";
 import { STUDIO_BYPASS_MOCK, STUDIO_PROMPT_CONFIG, buildStudioSystemMessage } from "@/lib/ai/studio-prompts";
+import { MIN_CHARS_FOR_ZONES, WHOLE_COURSE_BLOCK, accentLine, splitIntoFocusZones, zoneBlock } from "@/lib/ai/studio-qcm-focus";
 import { STUDIO_QCM_TOTAL, StudioGeneratedQcmSchema, StudioQcmsSchema, type StudioGeneratedQcm } from "@/lib/ai/studio-schemas";
 import { parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
 
@@ -28,17 +29,10 @@ import { parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-
 
 const QCM_BATCH_COUNT = 6;
 const QCMS_PER_BATCH = STUDIO_QCM_TOTAL / QCM_BATCH_COUNT;
-/** Below this, the course is too short to slice meaningfully — every batch sees all of it, with a different accent. */
-const MIN_CHARS_FOR_ZONES = 3_000;
 
-const BATCH_ACCENTS = [
-  "les mécanismes et les enchaînements de cause à conséquence",
-  "les prédictions : ce qui se passe quand un élément est altéré, bloqué, absent ou en excès",
-  "les mises en situation concrètes à interpréter avec les notions du cours",
-  "la distinction entre notions proches que les étudiants confondent",
-  "l'intégration entre parties du cours (mécanisme → signe → examen → conduite à tenir)",
-  "les nuances, exceptions et conditions qui changent la conclusion",
-] as const;
+// Zones, accents and their wording live in lib/ai/studio-qcm-focus.ts: the
+// Module exam aims each of its jobs with the very same words.
+export { splitIntoFocusZones } from "@/lib/ai/studio-qcm-focus";
 
 export interface StudioQcmSet {
   titre_section: string;
@@ -46,47 +40,13 @@ export interface StudioQcmSet {
   qrocs: never[];
 }
 
-/**
- * Cuts the course into `count` contiguous zones of similar length, each cut
- * moved to the next line break when one is close (else the next space), so a
- * zone never starts mid-word and rarely mid-paragraph.
- */
-export function splitIntoFocusZones(text: string, count: number): string[] {
-  const clean = text.trim();
-  const size = clean.length / count;
-  const cuts = [0];
-  for (let i = 1; i < count; i++) {
-    const ideal = Math.round(i * size);
-    const lineBreak = clean.indexOf("\n", ideal);
-    const space = clean.indexOf(" ", ideal);
-    let cut = lineBreak !== -1 && lineBreak - ideal <= size * 0.2 ? lineBreak : space !== -1 ? space : ideal;
-    cut = Math.max(cut, cuts[cuts.length - 1]);
-    cuts.push(cut);
-  }
-  cuts.push(clean.length);
-  return cuts.slice(0, -1).map((start, i) => clean.slice(start, cuts[i + 1]).trim());
-}
-
 function buildBatchInstruction(batchIndex: number, zone: string | null): string {
   const header = `LOT ${batchIndex + 1} sur ${QCM_BATCH_COUNT} — génère EXACTEMENT ${QCMS_PER_BATCH} QCM (ids 1 à ${QCMS_PER_BATCH}), ni plus ni moins.`;
-  const accent = `Accent de ce lot : ${BATCH_ACCENTS[batchIndex % BATCH_ACCENTS.length]} (au moins 2 questions dans cet esprit, les autres variées selon les types demandés).`;
-  if (!zone) {
-    return `${header}
-
-Le cours est court : couvre-le en entier, en choisissant ses notions centrales sous l'angle de l'accent ci-dessous — les autres lots, avec d'autres accents, testent les mêmes notions sous d'autres angles, donc ne te contente pas de l'angle le plus évident.
-
-${accent}`;
-  }
   return `${header}
 
-ZONE DE FOCUS de ce lot (extrait du cours ci-dessus ; les autres lots couvrent le reste du cours) :
-<<<
-${zone}
->>>
+${zone ? zoneBlock(zone, QCMS_PER_BATCH) : WHOLE_COURSE_BLOCK}
 
-Au moins ${QCMS_PER_BATCH - 1} questions sur ${QCMS_PER_BATCH} portent sur les notions CENTRALES de cette zone — celles qu'un examinateur juge essentielles, jamais un détail anecdotique. Une question d'intégration peut relier cette zone au reste du cours. Si la zone ne contient que peu de contenu médical (sommaire, bibliographie, introduction), appuie-toi sur les notions du cours les plus proches de cette zone.
-
-${accent}`;
+${accentLine(batchIndex)}`;
 }
 
 /** Accepts both the batch shape {"qcms": [...]} and the legacy nested {"qcms": {"qcms": [...]}}. */
