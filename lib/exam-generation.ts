@@ -673,10 +673,10 @@ export async function generateExamJob(
   askSource = false
 ): Promise<ExamJobResult> {
   const systemPrompt = systemPromptOverride ?? canonicalExamSystemPrompt(inputs);
-  // The canonical exam gets one clinical case per job of 3+ questions (the annales' cases in
-  // chronological escalation); "Batch 5 of 5" alone asked for none. A style-guided run keeps its
-  // instruction byte for byte.
-  const clinicalCases = systemPromptOverride ? undefined : count >= 3 ? 1 : 0;
+  // One clinical case per job of 3+ questions (the annales' cases in chronological escalation);
+  // "Batch 5 of 5" alone asked for none. Exact for the canonical exam; for a style-guided one
+  // (since 2026-11-19) a default the professor's own share of clinical cases replaces.
+  const clinicalCases = count >= 3 ? 1 : 0;
   const batchInstruction = buildExamBatchInstruction(5, 5, count, isVariation, [], formats, followStyle, clinicalCases);
   const instruction = askSource ? `${batchInstruction}\n\n${buildExamSourceAttributionInstruction(inputs.length)}` : batchInstruction;
   const chain: { model: string; timeoutMs: number }[] = [

@@ -7,9 +7,7 @@ import { parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-
 import type {
   GastriteDdxTable,
   GastriteGuidelineStep,
-  GastritePerle,
   GastritePieges,
-  GastriteQuote,
   GastriteResumeCard,
   GastriteResumeHero,
   GastriteResumeMode,
@@ -18,14 +16,14 @@ import type {
 } from "@/lib/course-slug-content";
 
 /**
- * Studio « Résumé » — built from FIVE parallel calls instead of one
+ * Studio « Résumé » — built from FOUR parallel calls instead of one
  * (product order 2026-11-18: « Astuces » and « Cheat Sheet » removed, Exam
- * Summary rebuilt on the QCM « annales DNA », Smart Summary, Guideline
- * Summary and Professor Notes made far deeper).
+ * Summary rebuilt on the QCM « annales DNA », Smart Summary and Guideline
+ * Summary made far deeper; 2026-11-19: « Professor Notes » removed too).
  *
- * Why parallel: the deeper Résumé is ~12k output tokens. STUDIO_MODEL
- * (Qwen3-235B, ~38-70 tok/s) writing it in one call would need 3-5 minutes —
- * past the route's 250 s generation budget. Five parts of ~2-4k tokens run
+ * Why parallel: the deeper Résumé is ~10k output tokens. STUDIO_MODEL
+ * (Qwen3-235B, ~38-70 tok/s) writing it in one call would need 3-4 minutes —
+ * past the route's 250 s generation budget. Four parts of ~2-4k tokens run
  * side by side, so the whole Résumé lands in roughly the time of the longest
  * part. Same pattern as the 30-question QCM set (lib/ai/studio-qcm.ts): each
  * part is its own model chain (STUDIO_MODEL, then the much faster
@@ -34,8 +32,8 @@ import type {
  * already succeeded are replayed for free.
  *
  * Parts: Smart Summary sections 1-5 (+ its title), Smart Summary sections
- * 6-10, Exam Summary, Guideline Summary, Professor Notes. Each answers a
- * small natural JSON object (lib/ai/studio-resume-prompts.ts); the code below
+ * 6-10, Exam Summary, Guideline Summary. Each answers a small natural JSON
+ * object (lib/ai/studio-resume-prompts.ts); the code below
  * normalizes it and maps it onto the GastriteResumeMode shape the Studio
  * renders (components/course/workspace/GastriteResumeStudio.tsx).
  */
@@ -263,30 +261,6 @@ export function parseGuidelinePart(raw: string): GuidelinePart {
   };
 }
 
-export interface ProfessorPart {
-  citations: { texte: string; contexte: string }[];
-  secrets: string[];
-  redFlags: string[];
-  detailsQcm: string[];
-  perles: string[];
-}
-
-export function parseProfessorPart(raw: string): ProfessorPart {
-  const data = parsePartObject(raw);
-  const part: ProfessorPart = {
-    citations: objectList(data.citations, 8)
-      .map((item) => ({ texte: cleanText(item.texte ?? item.text), contexte: cleanText(item.contexte) }))
-      .filter((item) => item.texte),
-    secrets: textList(data.secrets, 14),
-    redFlags: textList(data.red_flags, 12),
-    detailsQcm: textList(data.details_qcm, 18),
-    perles: textList(data.perles, 10),
-  };
-  const points = part.secrets.length + part.redFlags.length + part.detailsQcm.length;
-  if (points < 10) throw new Error(`Professor Notes incomplètes : ${points} points (10 au moins).`);
-  return part;
-}
-
 // ─── assembly ──────────────────────────────────────────────────────────────
 
 const LABELS = {
@@ -311,10 +285,6 @@ const LABELS = {
     faussesPistesTitle: "Fausses pistes",
     faussesPistesHeaders: ["Piste", "Pourquoi elle tente", "Ce qui tranche"],
     guidelineBadge: "Parcours clinique",
-    professorBadge: "Notes de stage",
-    secrets: "Secrets cliniques",
-    redFlags: "Red flags",
-    detailsQcm: "Détails pointus QCM",
   },
   en: {
     examBadge: "Sniper mode",
@@ -337,10 +307,6 @@ const LABELS = {
     faussesPistesTitle: "Red herrings",
     faussesPistesHeaders: ["Lead", "Why it tempts", "What settles it"],
     guidelineBadge: "Clinical pathway",
-    professorBadge: "Ward notes",
-    secrets: "Clinical secrets",
-    redFlags: "Red flags",
-    detailsQcm: "Sharp MCQ details",
   },
 } as const;
 
@@ -432,21 +398,9 @@ export function buildGuidelineMode(part: GuidelinePart, labels: Labels): Gastrit
   return mode;
 }
 
-export function buildProfessorMode(part: ProfessorPart, labels: Labels): GastriteResumeMode {
-  const mode = baseMode("professor", "Professor Notes", hero({ badge: labels.professorBadge, titre: "Professor Notes" }));
-  mode.quotes = part.citations.map((quote): GastriteQuote => ({ text: quote.texte, contexte: quote.contexte }));
-  mode.cards = [
-    ...listCard(labels.secrets, part.secrets, "indigo"),
-    ...listCard(labels.redFlags, part.redFlags, "rose"),
-    ...listCard(labels.detailsQcm, part.detailsQcm, "amber"),
-  ];
-  mode.perles = part.perles.map((text): GastritePerle => ({ type: "perle", text }));
-  return mode;
-}
-
-/** The four modes in the Studio's order (Smart, Exam, Guideline, Professor), validated against StudioResumeSchema. */
+/** The three modes in the Studio's order (Smart, Exam, Guideline), validated against StudioResumeSchema. */
 export function assembleStudioResume(
-  parts: { smartA: SmartFirstHalf; smartB: SmartSecondHalf; exam: ExamPart; guideline: GuidelinePart; professor: ProfessorPart },
+  parts: { smartA: SmartFirstHalf; smartB: SmartSecondHalf; exam: ExamPart; guideline: GuidelinePart },
   language: "fr" | "en"
 ): StudioResumeSet {
   const labels = LABELS[language];
@@ -456,7 +410,6 @@ export function assembleStudioResume(
       buildSmartMode(parts.smartA, parts.smartB),
       buildExamMode(parts.exam, labels),
       buildGuidelineMode(parts.guideline, labels),
-      buildProfessorMode(parts.professor, labels),
     ],
   };
   StudioResumeSchema.parse(set);
@@ -471,7 +424,6 @@ const PART_LEDGER_CHECKS: Record<ResumePartId, (value: Json) => boolean> = {
   "smart-b": (value) => Array.isArray(value.sections) && value.sections.length >= 4,
   exam: (value) => typeof value.tombabilite === "number" && Array.isArray(value.pieges) && value.pieges.length >= 6,
   guideline: (value) => Array.isArray(value.etapes) && value.etapes.length >= 4,
-  professor: (value) => Array.isArray(value.secrets) && Array.isArray(value.redFlags) && Array.isArray(value.detailsQcm),
 };
 
 /**
@@ -514,30 +466,20 @@ export async function generateStudioResumeSet(
     ).then((result) => result.value);
   }
 
-  const [smartA, smartB, exam, guideline, professor] = await Promise.allSettled([
+  const [smartA, smartB, exam, guideline] = await Promise.allSettled([
     runPart("smart-a", parseSmartFirstHalf),
     runPart("smart-b", parseSmartSecondHalf),
     runPart("exam", parseExamPart),
     runPart("guideline", parseGuidelinePart),
-    runPart("professor", parseProfessorPart),
   ]);
 
-  if (
-    smartA.status === "rejected" ||
-    smartB.status === "rejected" ||
-    exam.status === "rejected" ||
-    guideline.status === "rejected" ||
-    professor.status === "rejected"
-  ) {
-    const failed = [smartA, smartB, exam, guideline, professor].filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (smartA.status === "rejected" || smartB.status === "rejected" || exam.status === "rejected" || guideline.status === "rejected") {
+    const failed = [smartA, smartB, exam, guideline].filter((result): result is PromiseRejectedResult => result.status === "rejected");
     for (const failure of failed) console.error("[studio:resume] Partie en échec :", failure.reason);
     throw new Error(
-      `${failed.length} partie(s) du Résumé sur 5 n'ont pas pu être générées à temps. Réessaie — ta génération n'a pas été décomptée et les parties déjà prêtes seront réutilisées.`
+      `${failed.length} partie(s) du Résumé sur 4 n'ont pas pu être générées à temps. Réessaie — ta génération n'a pas été décomptée et les parties déjà prêtes seront réutilisées.`
     );
   }
 
-  return assembleStudioResume(
-    { smartA: smartA.value, smartB: smartB.value, exam: exam.value, guideline: guideline.value, professor: professor.value },
-    options.language
-  );
+  return assembleStudioResume({ smartA: smartA.value, smartB: smartB.value, exam: exam.value, guideline: guideline.value }, options.language);
 }

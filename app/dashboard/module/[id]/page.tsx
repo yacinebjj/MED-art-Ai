@@ -1352,7 +1352,7 @@ export default function ModuleWorkspacePage() {
           // Exemples&Analogies) generates its complete content in ONE request
           // on first open — Résumé's earlier lazy per-mode loading was
           // reverted by explicit product direction; since 2026-11-18 the
-          // server writes its four modes in parallel parts within that one
+          // server writes its modes in parallel parts within that one
           // request (lib/ai/studio-resume.ts).
           const { res, data } = await postStudioGenerate(id, courseId, {
             language: options?.language ?? getContentLanguage(),

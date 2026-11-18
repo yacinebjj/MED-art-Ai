@@ -14,7 +14,8 @@ import type { FormatCounts } from "@/lib/exam-formats";
  *    the canonical prompt changes, so questions written under the previous
  *    one are never served as the new exam (as the exam cache key is bumped in
  *    lib/exam-content-cache.ts). faculte-v2 = the annales-DNA prompt with its
- *    per-question « Commentaire » (2026-11-17).
+ *    per-question « Commentaire » (2026-11-17); faculte-v3 = the same method
+ *    as the Studio « Examen QCM », block for block (2026-11-19).
  *  - one profile per reference-exam ARCHETYPE (classifyExamStyle): exams
  *    guided by different professors' reference exams of the same archetype
  *    share their questions; each professor's own profile still drives the
@@ -23,7 +24,7 @@ import type { FormatCounts } from "@/lib/exam-formats";
  *    profile sealed by the analysis for that student (lib/exam-style-seal.ts)
  *    may use an archetype bank; an unsealed one is generated from scratch.
  */
-export const CANONICAL_BANK_PROFILE = "faculte-v2";
+export const CANONICAL_BANK_PROFILE = "faculte-v3";
 
 export const EXAM_STYLE_ARCHETYPES = ["direct", "clinique", "pieges"] as const;
 export type ExamStyleArchetype = (typeof EXAM_STYLE_ARCHETYPES)[number];
@@ -34,8 +35,13 @@ export const EXAM_STYLE_ARCHETYPE_LABELS: Record<ExamStyleArchetype, string> = {
   pieges: "Pièges / négations",
 };
 
+/**
+ * v2 (2026-11-19): the style-adapted prompt carries the Studio « Examen QCM »
+ * method and the « Commentaire » — questions written under v1 have neither,
+ * and are never served again.
+ */
 export function styleBankProfile(archetype: ExamStyleArchetype): string {
-  return `style-${archetype}-v1`;
+  return `style-${archetype}-v2`;
 }
 
 /** Lower case, accents removed: "Cas Cliniques" and "cas cliniques" read the same. */

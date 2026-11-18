@@ -18,13 +18,11 @@ import {
   Microscope,
   ShieldAlert,
   XCircle,
-  Info,
   Siren,
   ClipboardList,
   ClipboardCheck,
   Crosshair,
   Syringe,
-  BookOpen,
   EyeOff,
   Zap,
   Flame,
@@ -35,7 +33,6 @@ import {
   TrendingUp,
   Calculator,
   Gauge,
-  KeyRound,
   Users,
   HeartPulse,
   CircleCheck,
@@ -59,15 +56,14 @@ interface GastriteResumeModeChrome {
 }
 
 /**
- * The Résumé's four modes (product order 2026-11-18: « Cheat Sheet » and
- * « Astuces » removed). A résumé saved before that still holds those two
- * modes in its data; they are simply no longer offered.
+ * The Résumé's three modes (product order: « Cheat Sheet » and « Astuces »
+ * removed 2026-11-18, « Professor Notes » 2026-11-19). A résumé saved before
+ * still holds those modes in its data; they are simply no longer offered.
  */
 const MODES: GastriteResumeModeChrome[] = [
   { id: "smart", label: "Smart Summary", icon: Sparkles },
   { id: "exam", label: "Exam Summary", icon: Star },
   { id: "guideline", label: "Guideline Summary", icon: Landmark },
-  { id: "professor", label: "Professor Notes", icon: GraduationCap },
 ];
 
 /* ----------------------------------------------------------------------- */
@@ -1015,119 +1011,6 @@ function GuidelineSummaryContent({ mode }: { mode: GastriteResumeMode }) {
 }
 
 /* ----------------------------------------------------------------------- */
-/* "Professor Notes" mode — notepad/quote style, clinical pearls.           */
-/* ----------------------------------------------------------------------- */
-
-/** The professor's rubrics (résumés since 2026-11-18), matched on the card's tone. */
-const PROFESSOR_CARD_STYLES: Record<string, { icon: LucideIcon; wrap: string; title: string; dot: string; body: string }> = {
-  indigo: {
-    icon: KeyRound,
-    wrap: "border-indigo-200 bg-indigo-50/70 dark:border-indigo-900/40 dark:bg-indigo-950/20",
-    title: "text-indigo-700 dark:text-indigo-300",
-    dot: "bg-indigo-500",
-    body: "text-indigo-950 dark:text-indigo-100",
-  },
-  rose: {
-    icon: Siren,
-    wrap: "border-rose-200 bg-rose-50/70 dark:border-rose-900/40 dark:bg-rose-950/20",
-    title: "text-rose-700 dark:text-rose-300",
-    dot: "bg-rose-500",
-    body: "text-rose-950 dark:text-rose-100",
-  },
-  amber: {
-    icon: Crosshair,
-    wrap: "border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20",
-    title: "text-amber-700 dark:text-amber-300",
-    dot: "bg-amber-500",
-    body: "text-amber-950 dark:text-amber-100",
-  },
-};
-
-function ProfessorNotesContent({ mode }: { mode: GastriteResumeMode }) {
-  return (
-    <motion.div
-      variants={STAGGER_CONTAINER}
-      initial="hidden"
-      animate="visible"
-      className="w-full mx-auto space-y-8 font-sans text-slate-800 dark:text-slate-200 pb-4"
-    >
-      <motion.div variants={SCALE_IN} className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800 p-8 shadow-xl border border-slate-300 dark:border-slate-700">
-        <div className="relative z-10 flex items-center gap-4">
-          <div className="p-4 bg-slate-800 dark:bg-slate-700 rounded-2xl shadow-lg text-white">
-            <BookOpen className="w-10 h-10" />
-          </div>
-          <div>
-            <span className="px-3 py-1 text-[10px] font-black uppercase tracking-widest bg-slate-800/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 rounded-full border border-slate-400/30">
-              {mode.hero.badge}
-            </span>
-            <h1 className="text-2xl md:text-4xl font-black text-slate-900 dark:text-white tracking-tight mt-2">
-              {mode.hero.titre}
-            </h1>
-          </div>
-        </div>
-      </motion.div>
-
-      <motion.section variants={FADE_UP} className="space-y-4">
-        {mode.quotes.map((quote, i) => (
-          <div key={i} className="rounded-2xl bg-white dark:bg-slate-900 border-l-4 border-slate-400 dark:border-slate-600 p-6 shadow-sm">
-            <p className="italic text-slate-700 dark:text-slate-300 text-base leading-relaxed">« {renderInlineBold(quote.text)} »</p>
-            <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 uppercase tracking-wide">— {quote.contexte}</p>
-          </div>
-        ))}
-      </motion.section>
-
-      {/* Secrets cliniques, red flags, détails pointus QCM — résumés since 2026-11-18. */}
-      {mode.cards.length > 0 && (
-        <motion.section variants={FADE_UP} className="space-y-4">
-          {mode.cards.map((card, i) => {
-            const style = PROFESSOR_CARD_STYLES[card.tone ?? ""] ?? PROFESSOR_CARD_STYLES.indigo;
-            const Icon = style.icon;
-            return (
-              <div key={`${i}-${card.titre}`} className={cn("rounded-2xl border p-5 shadow-sm", style.wrap)}>
-                <h2 className={cn("mb-3 flex items-center gap-2 text-base font-black uppercase tracking-wide", style.title)}>
-                  <Icon className="h-5 w-5 shrink-0" /> {card.titre}
-                </h2>
-                <ul className={cn("grid grid-cols-1 gap-x-6 gap-y-2.5 text-sm leading-relaxed md:grid-cols-2", style.body)}>
-                  {card.items.map((item, j) => (
-                    <li key={j} className="flex gap-2">
-                      <span aria-hidden className={cn("mt-[0.55em] h-1.5 w-1.5 shrink-0 rounded-full", style.dot)} />
-                      <span className="min-w-0">{renderInlineBold(item)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </motion.section>
-      )}
-
-      {mode.perles.length > 0 && (
-        <motion.section variants={FADE_UP} className="space-y-3">
-          <div className="flex items-center gap-3 border-b-2 border-amber-500/30 pb-3">
-            <div className="p-2 bg-amber-500/10 rounded-lg text-amber-500"><Lightbulb className="w-6 h-6" /></div>
-            <h2 className="text-xl font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide">Perles Cliniques</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {mode.perles.map((perle, i) => {
-              const Icon = perle.type === "perle" ? Lightbulb : Info;
-              const label = perle.type === "perle" ? "Perle" : "Conseil";
-              return (
-                <div key={i} className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-                  <Icon className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-sm text-amber-900 dark:text-amber-200">
-                    <strong>{label} :</strong> {renderInlineBold(perle.text)}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </motion.section>
-      )}
-    </motion.div>
-  );
-}
-
-/* ----------------------------------------------------------------------- */
 /* Shell — tombabilité badge + pill nav + mode dispatch.                    */
 /* ----------------------------------------------------------------------- */
 
@@ -1167,7 +1050,6 @@ export function GastriteResumeStudio({ data }: { data: GastriteResumeData }) {
       {activeMode && activeModeId === "smart" && <MasterclassSummary mode={activeMode} />}
       {activeMode && activeModeId === "exam" && <ExamSummaryContent mode={activeMode} />}
       {activeMode && activeModeId === "guideline" && <GuidelineSummaryContent mode={activeMode} />}
-      {activeMode && activeModeId === "professor" && <ProfessorNotesContent mode={activeMode} />}
     </div>
   );
 }

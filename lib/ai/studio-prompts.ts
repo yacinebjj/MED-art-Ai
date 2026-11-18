@@ -191,11 +191,11 @@ export function resolveCasCliniqueSystemPrompt(studyYear: number | null | undefi
 
 /**
  * Studio « Résumé » — since 2026-11-18 (explicit product order) its own
- * pipeline, no longer an append on the shared RESUME_SYSTEM_PROMPT: four
- * modes (Smart Summary, Exam Summary, Guideline Summary, Professor Notes —
- * « Astuces » and « Cheat Sheet » removed), much deeper, Exam Summary rebuilt
- * on the QCM « annales DNA » below. Written by five parallel calls
- * (lib/ai/studio-resume.ts); STUDIO_RESUME_SYSTEM_PROMPT
+ * pipeline, no longer an append on the shared RESUME_SYSTEM_PROMPT: three
+ * modes (Smart Summary, Exam Summary, Guideline Summary — « Astuces » and
+ * « Cheat Sheet » removed 2026-11-18, « Professor Notes » 2026-11-19), much
+ * deeper, Exam Summary rebuilt on the QCM « annales DNA » below. Written by
+ * four parallel calls (lib/ai/studio-resume.ts); STUDIO_RESUME_SYSTEM_PROMPT
  * (lib/ai/studio-resume-prompts.ts) is their shared system prompt, each
  * part's mission is its user message. Bump STUDIO_RESUME_PROMPT_VERSION
  * (right below) with every change to those prompts.
@@ -208,9 +208,10 @@ export function resolveCasCliniqueSystemPrompt(studyYear: number | null | undefi
  * prompt is never served to a new student. 1 = the original rows (filed as
  * plain "resume"); 2 = exam-only, one-sentence "why", 7-10 Pièges QCM &
  * Perles cliniques in the 🚨/💎 format (2026-11-12); 3 = the four deep modes
- * written in parallel, Exam Summary on the annales DNA (2026-11-18).
+ * written in parallel, Exam Summary on the annales DNA (2026-11-18); 4 = the
+ * same without « Professor Notes » (2026-11-19).
  */
-export const STUDIO_RESUME_PROMPT_VERSION = 3;
+export const STUDIO_RESUME_PROMPT_VERSION = 4;
 
 /**
  * Studio Examen QCM — its OWN prompt, no longer an append on the shared

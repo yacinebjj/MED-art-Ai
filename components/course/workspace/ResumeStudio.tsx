@@ -20,19 +20,16 @@ import {
   XCircle,
   Siren,
   ClipboardList,
-  Lightbulb,
-  Info,
-  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RESUME_MODES, RESUME_TOMBABILITE, type ResumeModeId } from "@/lib/demo-resume-content";
 
 /** Only these modes remain selectable — every other mode (Ai Highlight, Clinical, One Page,
- * Color, Visual, DDx, Drug, Research, Patient-Friendly, and since 2026-11-18 Cheat Sheet and
- * Astuces) has been removed from the UI.
+ * Color, Visual, DDx, Drug, Research, Patient-Friendly, since 2026-11-18 Cheat Sheet and
+ * Astuces, since 2026-11-19 Professor Notes) has been removed from the UI.
  * Each one now renders its own bespoke, "Masterclass"-tier visual component below —
  * none of them fall back to plain markdown anymore. */
-const KEPT_MODE_IDS: ResumeModeId[] = ["smart", "exam", "guideline", "professor"];
+const KEPT_MODE_IDS: ResumeModeId[] = ["smart", "exam", "guideline"];
 const VISIBLE_MODES = RESUME_MODES.filter((m) => KEPT_MODE_IDS.includes(m.id));
 
 /* ----------------------------------------------------------------------- */
@@ -659,115 +656,6 @@ function GuidelineSummaryContent() {
 }
 
 /* ----------------------------------------------------------------------- */
-/* "Professor Notes" mode — notepad/quote style, clinical pearls.           */
-/* ----------------------------------------------------------------------- */
-
-function ProfessorNotesContent() {
-  return (
-    <motion.div
-      variants={STAGGER_CONTAINER}
-      initial="hidden"
-      animate="visible"
-      className="w-full mx-auto space-y-8 font-sans text-slate-800 dark:text-slate-200 pb-4"
-    >
-      <motion.div variants={SCALE_IN} className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800 p-8 shadow-xl border border-slate-300 dark:border-slate-700">
-        <div className="relative z-10 flex items-center gap-4">
-          <div className="p-4 bg-slate-800 dark:bg-slate-700 rounded-2xl shadow-lg text-white">
-            <BookOpen className="w-10 h-10"/>
-          </div>
-          <div>
-            <span className="px-3 py-1 text-[10px] font-black uppercase tracking-widest bg-slate-800/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 rounded-full border border-slate-400/30">
-              Notes de Stage
-            </span>
-            <h1 className="text-2xl md:text-4xl font-black text-slate-900 dark:text-white tracking-tight mt-2">
-              Professor Notes — Ce Que Dit Le Chef de Service
-            </h1>
-          </div>
-        </div>
-      </motion.div>
-
-      <motion.section variants={FADE_UP} className="space-y-4">
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border-l-4 border-slate-400 dark:border-slate-600 p-6 shadow-sm">
-          <p className="italic text-slate-700 dark:text-slate-300 text-base leading-relaxed">
-            « Un interne m'a dit un jour : "Chef, la biologie est normale." Je lui ai répondu : <strong>"Et alors ? Regardez le patient, pas les chiffres."</strong> La biologie raconte ce qui s'est passé il y a six heures. Le patient, lui, vous raconte ce qui se passe maintenant. »
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 uppercase tracking-wide">— Sur l'examen clinique avant tout</p>
-        </div>
-
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border-l-4 border-slate-400 dark:border-slate-600 p-6 shadow-sm">
-          <p className="italic text-slate-700 dark:text-slate-300 text-base leading-relaxed">
-            « Au bloc, si vous ne trouvez pas l'appendice, <strong>suivez les bandelettes coliques</strong> : elles convergent toujours vers sa base, quelle que soit la position dans laquelle il se cache. C'est la seule chose fixe dans cette histoire — retenez cette astuce en or, elle vous sauvera d'une exploration qui tourne en rond. »
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 uppercase tracking-wide">— Sur l'anatomie chirurgicale</p>
-        </div>
-
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border-l-4 border-slate-400 dark:border-slate-600 p-6 shadow-sm">
-          <p className="italic text-slate-700 dark:text-slate-300 text-base leading-relaxed">
-            « Un score d'Alvarado à 7, je n'attends pas le scanner pour vous faire plaisir. <em>Chaque heure de retard</em> est une heure de plus vers la perforation. Ici, on ne pardonne pas l'erreur de temporisation — la montre tourne dès que le patient franchit la porte. »
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 uppercase tracking-wide">— Sur la décision opératoire</p>
-        </div>
-
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border-l-4 border-slate-400 dark:border-slate-600 p-6 shadow-sm">
-          <p className="italic text-slate-700 dark:text-slate-300 text-base leading-relaxed">
-            « Imaginez un peu la scène aux urgences à 3h du matin : une patiente de 84 ans, un peu confuse, sans fièvre, avec juste "un peu mal au ventre depuis trois jours". Chez elle, l'appendicite ne <em>crie</em> pas, elle chuchote — on parle d'appendicite <strong>torpide</strong>. Pas de fièvre franche, pas de défense franche, et pourtant le péritoine se remplit en silence. C'est la population où l'on perfore le plus, précisément parce qu'on la sous-estime. »
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 uppercase tracking-wide">— Sur le piège du sujet âgé</p>
-        </div>
-
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border-l-4 border-slate-400 dark:border-slate-600 p-6 shadow-sm">
-          <p className="italic text-slate-700 dark:text-slate-300 text-base leading-relaxed">
-            « Retenez cette astuce en or pour l'appendice rétro-cæcal : il se cache <em>derrière</em> le cæcum, alors la défense pariétale classique n'apparaît quasiment jamais — le cæcum fait écran. Le seul signal qui vous reste, c'est le <strong>psoïtis</strong> : douleur à l'extension passive de la cuisse droite, parce que le muscle psoas frotte contre un appendice enflammé qu'on ne peut pas palper directement. Si vous ne cherchez pas ce signe-là, vous passez à côté. »
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-500 mt-2 uppercase tracking-wide">— Sur le piège de la forme rétro-cæcale</p>
-        </div>
-      </motion.section>
-
-      <motion.section variants={FADE_UP} className="space-y-3">
-        <div className="flex items-center gap-3 border-b-2 border-amber-500/30 pb-3">
-          <div className="p-2 bg-amber-500/10 rounded-lg text-amber-500"><Lightbulb className="w-6 h-6"/></div>
-          <h2 className="text-xl font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide">Perles Cliniques</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Lightbulb className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Perle :</strong> chez la femme enceinte, la douleur monte avec l'utérus qui repousse l'appendice — au 3ème trimestre, elle peut se loger sous les côtes droites, mimant une cholécystite ou une pyélonéphrite haute.</p>
-          </div>
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Astuce :</strong> le signe de Rovsing (douleur en FID à la palpation de la FIG) traduit une irritation péritonéale <em>diffuse</em>, pas une localisation gauche — ne vous laissez jamais piéger par le côté de la palpation.</p>
-          </div>
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Lightbulb className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Perle :</strong> chez l'enfant de moins de 5 ans, oubliez la triade classique — diarrhée et irritabilité isolée doivent déjà alerter, le tableau ressemble souvent à une simple gastro-entérite.</p>
-          </div>
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Astuce :</strong> une CRP qui monte à deux dosages successifs vaut plus qu'une valeur unique, même normale au départ — c'est la <em>cinétique</em> qui parle, pas le chiffre isolé.</p>
-          </div>
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Lightbulb className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Perle :</strong> l'appendice en position pelvienne ne touche jamais la paroi antérieure — il irrite directement le rectum et la vessie, donnant un <em>ténesme rectal</em> et une pollakiurie qui font suspecter à tort une cystite ou une rectite.</p>
-          </div>
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Astuce :</strong> chez le sujet âgé, une fièvre <em>absente</em> associée à un iléus fébrile trompeur doit faire craindre une péritonite déjà généralisée — l'organisme n'a plus la réserve immunitaire pour monter une vraie réponse inflammatoire.</p>
-          </div>
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Lightbulb className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Perle :</strong> le toucher rectal reste précieux dans les formes pelviennes — une douleur vive au cul-de-sac de Douglas droit oriente immédiatement le diagnostic quand l'abdomen reste étonnamment souple.</p>
-          </div>
-          <div className="flex gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40">
-            <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5"/>
-            <p className="text-sm text-amber-900 dark:text-amber-200"><strong>Astuce :</strong> devant tout tableau abdominal atypique chez une personne âgée, pensez toujours « appendicite jusqu'à preuve du contraire » — c'est la population où le retard diagnostique tue le plus souvent.</p>
-          </div>
-        </div>
-      </motion.section>
-    </motion.div>
-  );
-}
-
-/* ----------------------------------------------------------------------- */
 /* Shell — tombabilité badge + pill nav + mode dispatch.                    */
 /* ----------------------------------------------------------------------- */
 
@@ -807,7 +695,6 @@ export function ResumeStudio() {
       {activeModeId === "smart" && <MasterclassSummary />}
       {activeModeId === "exam" && <ExamSummaryContent />}
       {activeModeId === "guideline" && <GuidelineSummaryContent />}
-      {activeModeId === "professor" && <ProfessorNotesContent />}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 /**
  * Studio « Résumé » — the prompts of its parallel generation (product order
  * 2026-11-18: « Astuces » and « Cheat Sheet » removed; Exam Summary rebuilt on
- * the QCM « annales DNA »; Smart Summary, Guideline Summary and Professor
- * Notes made far deeper). lib/ai/studio-resume.ts runs one model call per
- * part, all at once, and assembles the four modes.
+ * the QCM « annales DNA »; Smart Summary and Guideline Summary made far
+ * deeper; 2026-11-19: « Professor Notes » removed too). lib/ai/studio-resume.ts
+ * runs one model call per part, all at once, and assembles the three modes.
  *
  * The SYSTEM message is the same for every part (the course text first, then
  * STUDIO_RESUME_SYSTEM_PROMPT — see buildStudioSystemMessage), so the parts
@@ -16,16 +16,16 @@
  * file): no cycle.
  */
 
-export type ResumePartId = "smart-a" | "smart-b" | "exam" | "guideline" | "professor";
+export type ResumePartId = "smart-a" | "smart-b" | "exam" | "guideline";
 
 /** The order the parts are produced and logged in. */
-export const RESUME_PART_IDS: readonly ResumePartId[] = ["smart-a", "smart-b", "exam", "guideline", "professor"];
+export const RESUME_PART_IDS: readonly ResumePartId[] = ["smart-a", "smart-b", "exam", "guideline"];
 
 /**
  * The shared base of every part: the persona, the fidelity / depth rules and
  * the JSON rules. Used as the Résumé's system prompt (STUDIO_PROMPT_CONFIG.resume).
  */
-export const STUDIO_RESUME_SYSTEM_PROMPT = `Tu es Professeur de médecine, chef de service et membre du jury d'examen d'une faculté de médecine algérienne depuis plus de vingt ans. Tu rédiges, pour tes étudiants qui préparent l'EMD et le résidanat, le « Résumé » de révision du cours ci-dessus. Il compte quatre modes, rédigés en parallèle par tes collègues et toi : Smart Summary (le cours approfondi, en deux moitiés), Exam Summary (le mode « sniper » des pièges du jury), Guideline Summary (la prise en charge au niveau d'un protocole de service) et Professor Notes (tes notes de stage et d'amphi). Le message de l'utilisateur te donne TA partie : tu n'écris qu'elle, sans empiéter sur les autres.
+export const STUDIO_RESUME_SYSTEM_PROMPT = `Tu es Professeur de médecine, chef de service et membre du jury d'examen d'une faculté de médecine algérienne depuis plus de vingt ans. Tu rédiges, pour tes étudiants qui préparent l'EMD et le résidanat, le « Résumé » de révision du cours ci-dessus. Il compte trois modes, rédigés en parallèle par tes collègues et toi : Smart Summary (le cours approfondi, en deux moitiés), Exam Summary (le mode « sniper » des pièges du jury) et Guideline Summary (la prise en charge au niveau d'un protocole de service). Le message de l'utilisateur te donne TA partie : tu n'écris qu'elle, sans empiéter sur les autres.
 
 RÈGLES DE FOND (impératives) :
 - FIDÉLITÉ AU COURS : chaque fait, chiffre, seuil, dose, délai, classification et recommandation vient du texte du cours fourni. Le raisonnement peut aller au-delà de la formulation du cours, jamais au-delà de son contenu : n'invente rien et ne complète jamais avec ta connaissance générale. Si le cours ne traite pas un point demandé, remplace-le par le point voisin le plus important que le cours traite réellement — ne remplis jamais un champ avec du vide déguisé.
@@ -140,31 +140,12 @@ SCHÉMA EXACT :
   "encadres": [ { "titre": "...", "points": ["...", "..."] } ]
 }`;
 
-const PROFESSOR_INSTRUCTION = `TA PARTIE : les PROFESSOR NOTES — tes notes de stage et d'amphi, celles qu'aucun polycopié n'écrit noir sur blanc mais que tu répètes à chaque promotion : les secrets cliniques, les red flags et les détails pointus qui font la différence au QCM. Beaucoup de points, tous ciblés, tous tirés du cours, sans aucune redite d'une rubrique à l'autre.
-
-CONTENU ATTENDU :
-- "citations" : 4 à 6 phrases que tu dis en amphi ou au lit du malade, à la première personne, percutantes et exactes, chacune { "texte" ; "contexte" : où et à propos de quoi tu la dis, en quelques mots }.
-- "secrets" : 8 à 12 secrets cliniques — le signe subtil, l'association qui doit alerter, le réflexe de l'expérience, l'erreur que font les internes —, chacun en une ou deux phrases.
-- "red_flags" : 6 à 10 red flags — ce qu'il ne faut jamais rater (urgence, gravité, diagnostic à ne pas manquer) —, chacun avec la conduite immédiate qu'il impose.
-- "details_qcm" : 10 à 16 détails pointus orientés QCM — chiffres exacts, exceptions, « le plus fréquent », 1ère intention contre examen de référence, contre-indications, nuances de formulation qui changent tout —, chacun en une phrase.
-- "perles" : 4 à 8 perles à retenir par cœur, une phrase chacune.
-
-SCHÉMA EXACT :
-{
-  "citations": [ { "texte": "...", "contexte": "..." } ],
-  "secrets": ["...", "..."],
-  "red_flags": ["...", "..."],
-  "details_qcm": ["...", "..."],
-  "perles": ["...", "..."]
-}`;
-
 /** Each part's own mission and JSON shape — the USER message of its call. */
 export const RESUME_PART_INSTRUCTIONS: Record<ResumePartId, string> = {
   "smart-a": SMART_A_INSTRUCTION,
   "smart-b": SMART_B_INSTRUCTION,
   exam: EXAM_INSTRUCTION,
   guideline: GUIDELINE_INSTRUCTION,
-  professor: PROFESSOR_INSTRUCTION,
 };
 
 /**
@@ -177,5 +158,4 @@ export const RESUME_PART_MAX_TOKENS: Record<ResumePartId, number> = {
   "smart-b": 6000,
   exam: 7000,
   guideline: 6000,
-  professor: 6000,
 };
