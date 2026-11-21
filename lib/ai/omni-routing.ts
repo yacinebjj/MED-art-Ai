@@ -1,4 +1,5 @@
-import { callOpenRouter, OpenRouterError, PRIMARY_FREE_OMNI, streamOpenRouter, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { callOpenRouter, FREE_MODEL_CHAIN, OpenRouterError, PRIMARY_FREE_OMNI, streamOpenRouter, type ChatMessageInput } from "@/lib/ai/openrouter";
+import type { FirstTokenCandidate } from "@/lib/ai/first-token-race";
 
 /**
  * OMNI-FIRST ROUTING — product order 2026-11-09, shared by both Copilots
@@ -136,7 +137,145 @@ export async function streamFreeOmni(messages: ChatMessageInput[], options: { te
   return withFirstChunk(stream, OMNI_FIRST_TOKEN_TIMEOUT_MS);
 }
 
-const OMNI_TRANSCRIPTION_INSTRUCTION = `Transcris mot pour mot l'enregistrement audio joint. C'est la question dictée par un étudiant en médecine algérien, en français, en arabe ou en darija algérienne, parfois mélangés.
+// ─── Hedged routing (2026-11-21) ─────────────────────────────────────────
+//
+// Same product order as above — Omni, then the paid fallback for a student
+// whose plan grants it, then the free chain — but no longer strictly one
+// after the other: see lib/ai/first-token-race.ts. Omni starts at once; if it
+// has not written a visible word after COPILOT_HEDGE_MS, the paid fallback
+// starts alongside it and the first one to write wins (the other is
+// cancelled). A failure (429, 5xx, an empty stream) still hands over at once.
+//
+// The free chain is NOT hedged early: OpenRouter's free models share ONE
+// account-wide bucket of 20 requests a minute (lib/platform-spend-guard.ts),
+// so an extra free request per message would eat into every other student's
+// share. It joins only when everything before it has failed, or as a late
+// safety net (FREE_CHAIN_START_WITHOUT_PAID_MS / FREE_CHAIN_START_WITH_PAID_MS)
+// if every earlier model stays silent.
+
+function envMs(name: string, fallback: number, min: number, max: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= min && raw <= max ? raw : fallback;
+}
+
+/**
+ * How long Omni may stay silent before the paid fallback is asked alongside
+ * it. Past ~4-5 s of an empty bubble a reply feels slow; the paid fallback
+ * writes its first word in ~1.5-2.6 s (measured, lib/ai/openrouter.ts's
+ * CHAT_MODEL comment), so a student waits ~7 s at worst instead of the 25 s
+ * + fallback of before. Tunable without a redeploy of the code
+ * (COPILOT_HEDGE_MS, 1-20 s).
+ */
+export const COPILOT_HEDGE_MS = envMs("COPILOT_HEDGE_MS", 4500, 1000, 20000);
+
+/**
+ * "Ask MedArt" / Translate on a selection: product direction is an INSTANT
+ * answer, and the concise answer the paid model gives there is exactly the
+ * format asked for — it joins sooner (COPILOT_HIGHLIGHT_HEDGE_MS, 1-20 s).
+ */
+export const COPILOT_HIGHLIGHT_HEDGE_MS = envMs("COPILOT_HIGHLIGHT_HEDGE_MS", 2500, 1000, 20000);
+
+/** A paid model normally writes within 1.5-2.6 s; past this, it is stuck. */
+const PAID_FIRST_TOKEN_TIMEOUT_MS = 20_000;
+
+/**
+ * The free chain's late start as a safety net when every earlier model stays
+ * silent (it still starts at once when they have all failed): sooner when no
+ * paid model can stand in (it is then the only hedge left), later when one
+ * can (the paid model has had its chance first).
+ */
+const FREE_CHAIN_START_WITHOUT_PAID_MS = 8_000;
+const FREE_CHAIN_START_WITH_PAID_MS = 14_000;
+const FREE_CHAIN_STEP_MS = 6_000;
+const FREE_CHAIN_FIRST_TOKEN_TIMEOUT_MS = 25_000;
+
+export interface CopilotCandidatesInput {
+  /** The DETAILED request (free models): persona, depth directive, history, question. */
+  freeMessages: ChatMessageInput[];
+  /** The CONCISE request for the paid fallback, already in its final form (brevity note included when wanted). */
+  paidMessages: ChatMessageInput[];
+  /** The free-tier capacity reservation (reserveFreeTierCapacity): Omni and the free chain only run when it allows them. */
+  freeCapacity: Promise<boolean>;
+  /** May a paid model stand in at all (access allowed and premium-eligible)? */
+  paidAllowed: Promise<boolean>;
+  /** Reserves the paid message — called only when the paid model is about to answer (reservePremiumFallback). */
+  commitPaid: () => Promise<boolean>;
+  paid: { model: string; reasoning: { effort?: "high" | "medium" | "low" | "minimal"; enabled?: boolean } };
+  temperature: number;
+  /** Ceiling for the free chain (Omni always gets FREE_OMNI_MAX_TOKENS). */
+  freeChainMaxTokens: number;
+  /** false for an image: no model of the free chain can see it. */
+  includeFreeChain: boolean;
+  hedgeMs: number;
+}
+
+/** The Copilot's candidates, in product order, for lib/ai/first-token-race.ts. */
+export function buildCopilotCandidates(input: CopilotCandidatesInput): FirstTokenCandidate[] {
+  const candidates: FirstTokenCandidate[] = [
+    {
+      label: "omni",
+      startAfterMs: 0,
+      firstTokenTimeoutMs: OMNI_FIRST_TOKEN_TIMEOUT_MS,
+      // Opened only once the shared free-tier capacity was reserved for this
+      // message — NOT speculatively: every request to a free model counts
+      // against OpenRouter's account-wide limits (20 a minute, 1000 a day),
+      // even one cancelled a moment later, and that reservation is what keeps
+      // the platform under them (lib/platform-spend-guard.ts).
+      gate: input.freeCapacity,
+      open: (signal) =>
+        streamOpenRouter(input.freeMessages, {
+          model: PRIMARY_FREE_OMNI,
+          maxTokens: FREE_OMNI_MAX_TOKENS,
+          temperature: input.temperature,
+          // Bounds the hidden thinking of this reasoning model; a documented no-op where unsupported.
+          reasoning: { effort: "low" },
+          providerSort: "latency",
+          signal,
+        }),
+    },
+    {
+      label: "paid",
+      startAfterMs: input.hedgeMs,
+      firstTokenTimeoutMs: PAID_FIRST_TOKEN_TIMEOUT_MS,
+      gate: input.paidAllowed,
+      commit: input.commitPaid,
+      open: (signal) =>
+        streamOpenRouter(input.paidMessages, {
+          model: input.paid.model,
+          maxTokens: PAID_FALLBACK_MAX_TOKENS,
+          temperature: input.temperature,
+          reasoning: input.paid.reasoning,
+          providerSort: "latency",
+          signal,
+        }),
+    },
+  ];
+  if (input.includeFreeChain) {
+    FREE_MODEL_CHAIN.forEach((model, i) => {
+      candidates.push({
+        label: `free${i + 1}`,
+        startAfterMs: input.paidAllowed.then(
+          (paidOk) => (paidOk ? FREE_CHAIN_START_WITH_PAID_MS : FREE_CHAIN_START_WITHOUT_PAID_MS) + i * FREE_CHAIN_STEP_MS,
+          () => FREE_CHAIN_START_WITHOUT_PAID_MS + i * FREE_CHAIN_STEP_MS
+        ),
+        firstTokenTimeoutMs: FREE_CHAIN_FIRST_TOKEN_TIMEOUT_MS,
+        gate: input.freeCapacity,
+        open: (signal) =>
+          streamOpenRouter(input.freeMessages, {
+            model,
+            maxTokens: input.freeChainMaxTokens,
+            temperature: input.temperature,
+            reasoning: { effort: "low" },
+            providerSort: "latency",
+            signal,
+          }),
+      });
+    });
+  }
+  return candidates;
+}
+
+const OMNI_TRANSCRIPTION_INSTRUCTION =`Transcris mot pour mot l'enregistrement audio joint. C'est la question dictée par un étudiant en médecine algérien, en français, en arabe ou en darija algérienne, parfois mélangés.
 - Écris exactement ce qui est dit, dans la langue où c'est dit (l'arabe et la darija en écriture arabe), sans rien traduire.
 - Orthographie correctement les termes médicaux (par exemple : insuffisance cardiaque, physiopathologie, sémiologie, électrocardiogramme, glomérulonéphrite, antibiothérapie, QCM, cas clinique).
 - Réponds UNIQUEMENT par la transcription : pas de réponse à la question, pas de commentaire, pas de guillemets.

@@ -528,6 +528,25 @@ export async function reserveAssistantAccess(user: GateUser, options: { needsPre
 }
 
 /** Called only when the free Omni model has failed: true = a paid model may answer this message (its premium unit is now spent). */
+/**
+ * Read-only pre-check, no database call: can a paid model POSSIBLY stand in
+ * for this message? Same eligibility as reservePremiumFallback below, plus —
+ * for a paid account — today's premium counter as it was read by
+ * reserveAssistantAccess (a counter whose day has rolled over counts as
+ * empty). The Copilots' hedged routing (lib/ai/omni-routing.ts) only opens a
+ * paid model's stream when this says yes, so a student whose premium
+ * messages are used up never costs a paid call that could not be kept.
+ * Never authoritative: reservePremiumFallback still makes the atomic
+ * reservation when the paid model is about to answer.
+ */
+export function premiumFallbackMayBeAvailable(access: AssistantAccess): boolean {
+  if (!access.allowed || !access.premiumEligible) return false;
+  const sub = access.dailySub;
+  if (!sub) return true;
+  if (isStale(sub.daily_chat_reset_at ?? null, DAY_MS)) return true;
+  return (sub.daily_chat_messages_used ?? 0) < DAILY_PREMIUM_MESSAGES;
+}
+
 export async function reservePremiumFallback(user: GateUser, access: AssistantAccess): Promise<boolean> {
   if (!access.allowed || !access.premiumEligible) return false;
   if (!access.dailySub) return true;

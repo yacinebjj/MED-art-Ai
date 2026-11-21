@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
-import { PAID_FALLBACK_MAX_TOKENS, streamFreeOmni, withPaidFallbackBrevity } from "@/lib/ai/omni-routing";
+import { OpenRouterError, CHAT_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { COPILOT_HEDGE_MS, COPILOT_HIGHLIGHT_HEDGE_MS, buildCopilotCandidates, withPaidFallbackBrevity } from "@/lib/ai/omni-routing";
+import { RaceFailedError, raceFirstToken } from "@/lib/ai/first-token-race";
+import { createCopilotTimer } from "@/lib/ai/copilot-timing";
 import { isSmallTalk } from "@/lib/chat-intent";
 import { errorMessage, sanitizeForPostgres } from "@/lib/course-generation-shared";
 import { waitUntil } from "@vercel/functions";
 import { retrieveRelevantContext, retrieveRelevantContextForStudioCourses } from "@/lib/chat-context-retrieval";
+import { getEmbedding } from "@/lib/ai/embeddings";
 import { MAX_CHAT_SOURCE_COURSES, isChatMode, type ChatMode } from "@/lib/chat-constants";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import {
+  premiumFallbackMayBeAvailable,
   reserveChatMessage,
   refundChatMessage,
   reserveAssistantAccess,
@@ -19,7 +23,7 @@ import {
   type AssistantAccess,
 } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
-import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
+import { reserveFreeTierCapacity, type PlatformCapacityResult } from "@/lib/platform-spend-guard";
 import type { AnswerDepth } from "@/lib/ai/answer-depth";
 import { MEDICAL_IMAGE_DIRECTIVE } from "@/lib/ai/medical-image-directive";
 import {
@@ -280,6 +284,7 @@ export async function DELETE(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const timer = createCopilotTimer("workspace");
   // Auth required — this triggers a real, billed OpenRouter call, and every
   // page that renders this chat already sits behind the /dashboard/** auth
   // gate, so a logged-out caller here is never a legitimate student, only a
@@ -287,6 +292,7 @@ export async function POST(request: NextRequest) {
   // caller stream a real answer without persisting it — that fallback is
   // intentionally removed: zero anonymous access, full stop.)
   const user = await getAuthenticatedUser();
+  timer.mark("auth");
   if (!user) {
     return NextResponse.json({ error: "Tu dois être connecté(e)." }, { status: 401 });
   }
@@ -383,20 +389,51 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Plan quota gate — highlight mode's own pool (chatMessageCap, the
-  // free-form pool below, is checked separately further down).
-  // `access` decides whether a PAID model may stand in if the free Omni model
-  // fails (reservePremiumFallback, at that moment only — lib/subscription.ts).
-  let access: AssistantAccess | null = null;
-  if (isHighlightMode) {
-    // A selection question is a message too: it uses the free trial's 20.
-    access = await reserveAssistantAccess(user);
-    if (!access.allowed) return quotaBlockedResponse(access);
-    const gate = await reserveHighlightMessage(user);
-    if (!gate.allowed) {
-      return NextResponse.json({ error: gate.reason }, { status: 403 });
+  // Plan quota gates — strictly SEQUENTIAL relative to EACH OTHER (each is a
+  // real reserve-with-refund-on-failure operation: running them concurrently
+  // would let a later gate's RPC fire — and increment its own counter — even
+  // when an earlier gate had already rejected the request, over-charging a
+  // student's quota for a message that never actually sent). The chain as a
+  // whole, though, runs ALONGSIDE the course-context retrieval and the
+  // model's own time-to-first-token (2026-11-21): it is awaited only right
+  // before the first byte would reach the student, and a refusal there
+  // cancels the model before anything is sent.
+  //  - Highlight mode ("Ask MedArt" / Translate on a selection): the access
+  //    gate (a selection question is a message too: it uses the free trial's
+  //    20), then its own separate highlightMessageCap pool.
+  //  - Normal chat: the access gate (reserveAssistantAccess — may this message
+  //    be sent, and may a paid model stand in if the free Omni model fails?
+  //    Monetization v2: free trial = 20 messages for life, then paywall; paid
+  //    = 20 premium-model messages a day, spent only when a paid model
+  //    actually answers — reservePremiumFallback. Small talk — "salut",
+  //    "merci", "ça va ?", lib/chat-intent.ts — is never worth a paid call),
+  //    then the legacy monthly chat pool (reserveChatMessage — refunded by
+  //    refundChatMessage if every model then fails). Semantic caching was
+  //    REMOVED (product direction): every message reaches a real model call.
+  type GateOutcome = { ok: true; access: AssistantAccess } | { ok: false; response: NextResponse };
+  const gatesPromise: Promise<GateOutcome> = (async (): Promise<GateOutcome> => {
+    if (isHighlightMode) {
+      const highlightAccess = await reserveAssistantAccess(user);
+      if (!highlightAccess.allowed) return { ok: false, response: quotaBlockedResponse(highlightAccess) };
+      const gate = await reserveHighlightMessage(user);
+      if (!gate.allowed) return { ok: false, response: NextResponse.json({ error: gate.reason }, { status: 403 }) };
+      return { ok: true, access: highlightAccess };
     }
-  }
+    const chatAccess = await reserveAssistantAccess(user, { needsPremium: !isSmallTalk(message) });
+    if (!chatAccess.allowed) return { ok: false, response: quotaBlockedResponse(chatAccess) };
+    const chatGate = await reserveChatMessage(user);
+    if (!chatGate.allowed) return { ok: false, response: NextResponse.json({ error: chatGate.reason }, { status: 403 }) };
+    return { ok: true, access: chatAccess };
+  })();
+  // The free-tier models' own hard, EXTERNAL, account-wide daily request cap
+  // (shared with app/api/dashboard-assistant/route.ts, the voice dictation and
+  // lib/cache-prewarming.ts — see that function's own comment), reserved once
+  // for this message, after the student's own gates said yes. When it is
+  // spent, the free models are skipped, never the paid fallback.
+  const capacityPromise: Promise<PlatformCapacityResult> = gatesPromise.then((gates) => (gates.ok ? reserveFreeTierCapacity() : { allowed: false }));
+  // Never left rejected and unobserved if the request ends early.
+  gatesPromise.catch(() => undefined);
+  capacityPromise.catch(() => undefined);
 
   const trimmedAdjacentContext =
     isHighlightMode && typeof adjacentContext === "string" && adjacentContext.trim()
@@ -426,12 +463,22 @@ export async function POST(request: NextRequest) {
   // before the daily/chat gates (and, transitively, the model call itself)
   // even started, for zero benefit to anything before that closure runs.
   // Fired without blocking instead; awaited where it's actually needed.
+  // A highlight question is only saved once its gates said yes (they used to
+  // run before this point; a refused selection question was never saved).
   let userMessageIdPromise: Promise<number | null> = Promise.resolve(null);
   if (supabase && user) {
-    userMessageIdPromise = Promise.resolve(
+    const gatedSave = isHighlightMode ? gatesPromise.then((gates) => gates.ok, () => false) : Promise.resolve(true);
+    userMessageIdPromise = gatedSave.then((save) => {
+      if (!save) return null;
+      return saveUserMessage();
+    });
+  }
+  async function saveUserMessage(): Promise<number | null> {
+    if (!supabase) return null;
+    return Promise.resolve(
       supabase
         .from("course_chat_history")
-        .insert({ user_id: user.id, course_slug: courseSlug, role: "user", content: message })
+        .insert({ user_id: user!.id, course_slug: courseSlug, role: "user", content: message as string })
         .select("id")
         .single()
     ).then(({ data, error }) => {
@@ -444,6 +491,7 @@ export async function POST(request: NextRequest) {
       return (data as { id: number }).id;
     });
   }
+  userMessageIdPromise.catch(() => undefined);
 
   // CAS 2 — Cache Miss: resolve context via RAG chunk retrieval ONLY.
   //
@@ -489,6 +537,14 @@ export async function POST(request: NextRequest) {
             // query for all ids (same IDOR reasoning as the single-course
             // check below); the active course itself must be owned, exactly
             // as before, or the turn gets no course context at all.
+            // The retrieval query, and its embedding requested AT ONCE
+            // (2026-11-21): that OpenRouter round trip is the slowest step
+            // here, and it only depends on the student's own words — it no
+            // longer waits for the ownership check below (which still guards
+            // every read of a course's content, exactly as before).
+            const retrievalQuery = [message, ...conversation.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
+            const embedding = getEmbedding(retrievalQuery);
+            embedding.catch(() => undefined);
             if (studioIdMatch && supabase && (isStructured || extraSourceCourseIds.length > 0)) {
               const activeId = Number(studioIdMatch[1]);
               const requestedIds = [activeId, ...extraSourceCourseIds.filter((id) => id !== activeId)].slice(0, MAX_CHAT_SOURCE_COURSES);
@@ -502,8 +558,7 @@ export async function POST(request: NextRequest) {
               // Active course first — purely cosmetic for the ranking (all
               // chunks compete equally), but keeps the order deterministic.
               owned.sort((a, b) => requestedIds.indexOf(a.id) - requestedIds.indexOf(b.id));
-              const retrievalQuery = [message, ...conversation.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
-              return await retrieveRelevantContextForStudioCourses(retrievalQuery, owned, message);
+              return await retrieveRelevantContextForStudioCourses(retrievalQuery, owned, message, { embedding });
             }
 
             let chunkSource: { studioCourseId: number } | { legacyCourseSlug: string } | null = studioIdMatch
@@ -530,8 +585,7 @@ export async function POST(request: NextRequest) {
             // conversation, read above for the model call itself) so a
             // follow-up's embedding carries the real topic forward, not just its
             // own bare wording.
-            const retrievalQuery = [message, ...conversation.slice(-2).map((turn) => turn.content.slice(0, RETRIEVAL_HISTORY_CHARS))].join("\n");
-            return await retrieveRelevantContext(retrievalQuery, chunkSource, message);
+            return await retrieveRelevantContext(retrievalQuery, chunkSource, message, { embedding });
           } catch (error) {
             // Fails open to `null` (no course context at all), NEVER to the full
             // raw text — see the strict rule above.
@@ -541,45 +595,17 @@ export async function POST(request: NextRequest) {
         })()
       : Promise.resolve(null);
 
-  // Access gate (reserveAssistantAccess) — may this message be sent, and may a
-  // paid model stand in if the free Omni model fails? The daily premium
-  // counter (the same atomic, TOCTOU-safe reserve_daily_chat_messages_used RPC)
-  // is only touched by reservePremiumFallback, when that paid call actually
-  // happens. Highlight mode ("Ask MedArt" on a selection) took its access
-  // above, with its own separate highlightMessageCap pool.
-  //
-  // This gate, reserveChatMessage, and reserveFreeTierCapacity stay strictly
-  // SEQUENTIAL relative to EACH OTHER (unlike contextPromise above) — each
-  // is a real reserve-with-refund-on-failure operation (see
-  // reserveChatMessage's own comment: it increments a usage counter
-  // immediately, refunded only if the generation later fails). Running them
-  // concurrently would let a later gate's RPC fire — and increment its own
-  // counter — even when an earlier gate had already rejected the request,
-  // over-charging a student's quota for a message that never actually sent.
-  // Monetization v2: free trial = 20 messages for life (then paywall);
-  // paid = 20 premium-model messages a day, then the free models, silently —
-  // and since 2026-11-09 a premium message is only spent when the paid model
-  // actually answers (the free Omni model failed). Small talk ("salut",
-  // "merci", "ça va ?") is never worth a paid call — see lib/chat-intent.ts.
-  if (!isHighlightMode) {
-    access = await reserveAssistantAccess(user, { needsPremium: !isSmallTalk(message) });
-    if (!access.allowed) return quotaBlockedResponse(access);
+  // A refused gate answers at once — it must not wait for the course context.
+  const refusedEarly = await Promise.race([
+    gatesPromise.then((gates) => (gates.ok ? null : gates), () => null),
+    contextPromise.then(() => null),
+  ]);
+  if (refusedEarly) {
+    timer.log("quota-blocked");
+    return refusedEarly.response;
   }
-
-  // Semantic caching REMOVED (product direction) — every chat message now
-  // always reaches a real OpenRouter call below, no "serve a stored answer
-  // for a similar-enough prior question" interception. isHighlightMode is
-  // excluded — it already reserved its own separate pool above. If the
-  // generation below then fails before producing a reply,
-  // refundChatMessage() undoes this.
-  if (!isHighlightMode) {
-    const chatGate = await reserveChatMessage(user);
-    if (!chatGate.allowed) {
-      return NextResponse.json({ error: chatGate.reason }, { status: 403 });
-    }
-  }
-
   const sourceText = await contextPromise;
+  timer.mark("context");
 
   // Cached (static) content — system persona + course text. `false` below
   // (was `useAnthropicCaching`, computed from the old hybrid router): this
@@ -633,100 +659,90 @@ export async function POST(request: NextRequest) {
   const freeModelMessages = buildMessages("detailed");
   const paidModelMessages = buildMessages("concise");
 
-  // Omni-first routing (lib/ai/omni-routing.ts) — the first attempt that
-  // succeeds wins:
-  //  1. PRIMARY_FREE_OMNI for every message (8192-token ceiling: free).
-  //  2. Only if it failed, CHAT_MODEL for a student whose plan grants it
-  //     (500-token ceiling, asked for a short answer).
-  //  3. The rest of FREE_MODEL_CHAIN, the last zero-cost safety net.
+  // Hedged model race (2026-11-21 — lib/ai/first-token-race.ts, candidates
+  // in lib/ai/omni-routing.ts's buildCopilotCandidates), same product order
+  // as the Omni-first routing of 2026-11-09:
+  //  1. PRIMARY_FREE_OMNI for every message (8192 tokens: free), the moment
+  //     the student's gates and the free-tier capacity said yes — never
+  //     before: a free request counts against OpenRouter's account-wide
+  //     limits even when cancelled.
+  //  2. CHAT_MODEL for a student whose plan grants it (500 tokens, a short
+  //     answer asked for), as soon as Omni has failed OR after the hedge delay
+  //     of Omni silence (COPILOT_HEDGE_MS; COPILOT_HIGHLIGHT_HEDGE_MS for
+  //     "Ask MedArt" / Translate, product direction: an INSTANT answer). The
+  //     first of the two to write wins, the other is cancelled; the daily
+  //     premium message is reserved only when the paid model is about to answer.
+  //  3. FREE_MODEL_CHAIN, the last zero-cost safety net, once every model
+  //     before it has failed (or as a late net if they all stay silent).
   // A model erroring (saturation, a provider hiccup, a 429) is the EXPECTED,
   // routine case on free endpoints, not an exceptional one.
-  let responseStream: ReadableStream<Uint8Array> | null = null;
-  let lastError: unknown = null;
   const maxTokensForThisTurn = isHighlightMode ? MAX_OUTPUT_TOKENS_HIGHLIGHT : MAX_OUTPUT_TOKENS_NORMAL;
-
-  // The free-tier models' own hard, EXTERNAL, account-wide daily request cap
-  // (shared with app/api/dashboard-assistant/route.ts, the voice dictation and
-  // lib/cache-prewarming.ts — see that function's own comment), reserved once
-  // for this message before its first free call. When it is spent, the free
-  // models are skipped, never the paid fallback.
-  const freeTierCapacity = await reserveFreeTierCapacity();
-
-  if (freeTierCapacity.allowed) {
-    try {
-      // Resolves once Omni's first visible word has arrived; throws (429, 5xx,
-      // an empty or broken stream, 25 s of silence) so the next attempt runs.
-      responseStream = await streamFreeOmni(freeModelMessages, { temperature: 0.3 });
-    } catch (error) {
-      lastError = error;
-      console.error("[courses/chat POST] Omni gratuit indisponible, bascule sur le repli:", error instanceof Error ? error.message : error);
-    }
-  }
-
-  if (!responseStream && access && (await reservePremiumFallback(user, access))) {
-    try {
+  const accessPromise: Promise<AssistantAccess | null> = gatesPromise.then((gates) => (gates.ok ? gates.access : null));
+  accessPromise.catch(() => undefined);
+  const race = raceFirstToken(
+    buildCopilotCandidates({
+      freeMessages: freeModelMessages,
+      // The concise persona; a free-form answer also gets the short-answer note
+      // so it never stops mid-sentence (a highlight answer is already short by its prompt).
+      paidMessages: isHighlightMode ? paidModelMessages : withPaidFallbackBrevity(paidModelMessages),
+      freeCapacity: capacityPromise.then((result) => result.allowed, () => false),
+      paidAllowed: accessPromise.then((gateAccess) => (gateAccess ? premiumFallbackMayBeAvailable(gateAccess) : false), () => false),
+      commitPaid: async () => {
+        const gateAccess = await accessPromise;
+        return gateAccess ? reservePremiumFallback(user, gateAccess) : false;
+      },
       // CHAT_MODEL: qwen3.7-flash — a hybrid thinking model, so reasoning is
-      // switched OFF explicitly (measured: 0 reasoning tokens). The concise
-      // persona; a free-form answer also gets the short-answer note so it
-      // never stops mid-sentence (a highlight answer is already short by its prompt).
-      responseStream = await streamOpenRouter(isHighlightMode ? paidModelMessages : withPaidFallbackBrevity(paidModelMessages), {
-        model: CHAT_MODEL,
-        temperature: 0.3,
-        maxTokens: PAID_FALLBACK_MAX_TOKENS,
-        reasoning: { enabled: false },
-        providerSort: "latency",
-      });
-    } catch (error) {
-      lastError = error;
-      console.error("[courses/chat POST] CHAT_MODEL indisponible, bascule sur la chaîne gratuite:", error instanceof Error ? error.message : error);
-    }
+      // switched OFF explicitly (measured: 0 reasoning tokens).
+      paid: { model: CHAT_MODEL, reasoning: { enabled: false } },
+      temperature: 0.3,
+      freeChainMaxTokens: maxTokensForThisTurn,
+      includeFreeChain: true,
+      hedgeMs: isHighlightMode ? COPILOT_HIGHLIGHT_HEDGE_MS : COPILOT_HEDGE_MS,
+    })
+  );
+
+  let gates: GateOutcome;
+  try {
+    gates = await gatesPromise;
+  } catch (error) {
+    race.abort();
+    throw error;
   }
-
-  if (!responseStream) {
-    if (!freeTierCapacity.allowed) {
-      // The student's own unit was already reserved above — a platform-wide
-      // saturation they can't do anything about must not cost them it.
-      if (!isHighlightMode) {
-        await refundChatMessage(user.id);
-      } else {
-        await refundHighlightMessage(user.id);
-      }
-      return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
-    }
-
-    for (const model of FREE_MODEL_CHAIN) {
-      try {
-        responseStream = await streamOpenRouter(freeModelMessages, {
-          model,
-          temperature: 0.3,
-          maxTokens: maxTokensForThisTurn,
-          reasoning: { effort: "low" },
-          providerSort: "latency",
-        });
-        break;
-      } catch (error) {
-        lastError = error;
-        console.error(
-          `[courses/chat POST] Modèle gratuit "${model}" indisponible, bascule sur le suivant:`,
-          error instanceof Error ? error.message : error
-        );
-      }
-    }
+  timer.mark("gates");
+  if (!gates.ok) {
+    race.abort();
+    timer.log("quota-blocked");
+    return gates.response;
   }
+  const freeTierCapacity = await capacityPromise;
+  timer.mark("capacity");
 
-  if (!responseStream) {
+  let responseStream: ReadableStream<Uint8Array>;
+  try {
+    const outcome = await race.promise;
+    timer.mark("first_token");
+    timer.log(`ok:${outcome.label}`, outcome.attempts);
+    responseStream = outcome.stream;
+  } catch (error) {
+    const lastError = error instanceof RaceFailedError ? error.lastError : error;
+    timer.mark("failed");
+    timer.log("all-failed", error instanceof RaceFailedError ? error.attempts : undefined);
     // Every model tried (Omni, the paid fallback if granted, then the free
     // chain) failed. Refund whatever credit was reserved — a transient outage
-    // across the whole free tier shouldn't cost the student their monthly
-    // allowance. refundChatMessage/refundHighlightMessage take the user's
-    // id (a string), not the whole authenticated User object.
+    // across the whole free tier, or a platform-wide saturation the student
+    // can't do anything about, shouldn't cost the student their allowance.
+    // refundChatMessage/refundHighlightMessage take the user's id (a string),
+    // not the whole authenticated User object.
     if (!isHighlightMode) {
       await refundChatMessage(user.id);
     } else {
       await refundHighlightMessage(user.id);
     }
+    if (!freeTierCapacity.allowed) {
+      return NextResponse.json({ error: freeTierCapacity.reason }, { status: 503 });
+    }
     const errMessage = lastError instanceof Error ? lastError.message : String(lastError);
-    const status = lastError instanceof OpenRouterError ? lastError.status : 500;
+    const status = upstreamStatus(lastError);
     console.error("[courses/chat POST] Tous les modèles gratuits ont échoué:", { status, message: errMessage });
     return NextResponse.json(
       { error: "L'assistant est momentanément indisponible (forte demande sur les modèles gratuits) — réessaie dans une minute." },
@@ -815,6 +831,14 @@ export async function POST(request: NextRequest) {
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Cache": "MISS",
+      "Server-Timing": timer.serverTiming(),
     },
   });
+}
+
+/** The HTTP status a failed model call carried (OpenRouterError, or the race's own timeout / empty-stream errors), 500 otherwise. */
+function upstreamStatus(error: unknown): number {
+  if (error instanceof OpenRouterError) return error.status;
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : 500;
 }

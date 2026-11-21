@@ -156,6 +156,90 @@ function toEmbeddingArray(value: number[] | string): number[] {
   }
 }
 
+/**
+ * Per-instance cache of a course's indexed chunks, embeddings already parsed
+ * (2026-11-21, Copilot latency work). Every Workspace message used to
+ * re-download ALL of its course's chunks with their 1536-float embeddings
+ * (~19 KB of JSON text each, up to MAX_CHUNKS=25 per course) and re-parse
+ * them, before it could rank a single one — a student's follow-up questions
+ * paid that again and again for the same, unchanging rows.
+ *
+ * Safe to cache: a course's chunks are written ONCE, when it is indexed
+ * (lib/studio-explication-delta.ts — "No-op if already indexed"), and never
+ * rewritten. An EMPTY result (not indexed yet) is never cached, so a course
+ * indexed a moment later is picked up on the very next message. Bounded in
+ * time (CHUNK_CACHE_TTL_MS) and size (CHUNK_CACHE_MAX_COURSES, oldest
+ * evicted first). The chapters of the Explication are NOT cached: they are
+ * rewritten when an Explication is (re)generated, and their query is light.
+ *
+ * Holds only what the database already returned for a course id: the
+ * ownership check that guards every read stays in app/api/courses/chat
+ * (every request), never here.
+ */
+const CHUNK_CACHE_TTL_MS = 15 * 60 * 1000;
+const CHUNK_CACHE_MAX_COURSES = 64;
+
+interface CachedChunk {
+  content: string;
+  chunkIndex: number | undefined;
+  embedding: number[];
+}
+
+const chunkCache = new Map<string, { expiresAt: number; chunks: CachedChunk[] }>();
+
+function readChunkCache(key: string): CachedChunk[] | null {
+  const hit = chunkCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    chunkCache.delete(key);
+    return null;
+  }
+  // Re-insert: Map order doubles as least-recently-used order.
+  chunkCache.delete(key);
+  chunkCache.set(key, hit);
+  return hit.chunks;
+}
+
+function writeChunkCache(key: string, chunks: CachedChunk[]): void {
+  if (chunks.length === 0) return;
+  chunkCache.set(key, { expiresAt: Date.now() + CHUNK_CACHE_TTL_MS, chunks });
+  while (chunkCache.size > CHUNK_CACHE_MAX_COURSES) {
+    const oldest = chunkCache.keys().next().value;
+    if (oldest === undefined) break;
+    chunkCache.delete(oldest);
+  }
+}
+
+/** A course's chunks (cached, see above). Throws on a database error — callers fail open. */
+async function loadChunks(source: ChunkSource): Promise<CachedChunk[]> {
+  const key = "studioCourseId" in source ? `studio:${source.studioCourseId}` : `legacy:${source.legacyCourseSlug}`;
+  const cached = readChunkCache(key);
+  if (cached) return cached;
+  const supabase = getSupabaseAdmin();
+  const { data, error } =
+    "studioCourseId" in source
+      ? await supabase.from("studio_course_chunks").select("content, embedding, chunk_index").eq("course_id", source.studioCourseId)
+      : await supabase.from("course_source_chunks").select("content, embedding").eq("course_slug", source.legacyCourseSlug);
+  if (error) throw new Error(error.message);
+  const chunks = ((data ?? []) as ChunkRow[]).map((row) => ({ content: row.content, chunkIndex: row.chunk_index, embedding: toEmbeddingArray(row.embedding) }));
+  writeChunkCache(key, chunks);
+  return chunks;
+}
+
+/** For tests: forget every cached course. */
+export function clearChunkCacheForTests(): void {
+  chunkCache.clear();
+}
+
+export interface RetrievalOptions {
+  /**
+   * The question's embedding, already requested by the caller — lets the
+   * route start that call (the slowest step, a round trip to OpenRouter)
+   * alongside its own ownership check instead of after it.
+   */
+  embedding?: Promise<number[]>;
+}
+
 export type ChunkSource = { studioCourseId: number } | { legacyCourseSlug: string };
 
 /**
@@ -166,7 +250,7 @@ export type ChunkSource = { studioCourseId: number } | { legacyCourseSlug: strin
  * course text anywhere upstream — that fallback no longer exists in this
  * codebase, by strict product rule (see this route's own callers).
  */
-export async function retrieveRelevantContext(question: string, source: ChunkSource, broadHint?: string): Promise<string | null> {
+export async function retrieveRelevantContext(question: string, source: ChunkSource, broadHint?: string, options: RetrievalOptions = {}): Promise<string | null> {
   if (!isSupabaseConfigured()) return null;
   // `broadHint` (the student's current message alone) decides breadth when
   // given — `question` may carry history text, and a "résumé" in a PREVIOUS
@@ -175,34 +259,38 @@ export async function retrieveRelevantContext(question: string, source: ChunkSou
 
   try {
     const supabase = getSupabaseAdmin();
-    const { data, error } =
+    // All three at once since 2026-11-21 (Copilot latency work). They used to
+    // be chained — chunks first, and the embedding (a real, paid OpenRouter
+    // call) only once chunks were known to exist, so an unindexed course
+    // never paid for a wasted embedding. That saving is a few millionths of
+    // a dollar (text-embedding-3-small, one short query) and only for a
+    // course caught in the brief window before it is indexed, while the
+    // chaining cost EVERY Workspace message a full embedding round trip on
+    // its critical path — the trade was reversed on purpose. The embedding
+    // promise is caught here so an unindexed course (nothing to rank) never
+    // leaves it rejected and unobserved.
+    const embeddingPromise = options.embedding ?? getEmbedding(question);
+    embeddingPromise.catch(() => undefined);
+    const chapterPromise =
       "studioCourseId" in source
-        ? await supabase.from("studio_course_chunks").select("content, embedding, chunk_index").eq("course_id", source.studioCourseId)
-        : await supabase.from("course_source_chunks").select("content, embedding").eq("course_slug", source.legacyCourseSlug);
-
-    if (error) {
-      console.error("[chat-context-retrieval] Échec lecture des chunks (fail-open, aucun contexte de cours):", error.message);
+        ? // A network-level failure here only costs the polished chapters (raw chunks are used), never the whole context.
+          Promise.resolve(supabase.from("studio_course_explication_chapters").select("heading, content, source_chunk_indices").eq("course_id", source.studioCourseId)).catch(
+            (chapterError: unknown) => ({ data: null, error: { message: chapterError instanceof Error ? chapterError.message : String(chapterError) } })
+          )
+        : Promise.resolve(null);
+    let chunks: CachedChunk[];
+    try {
+      chunks = await loadChunks(source);
+    } catch (chunkError) {
+      console.error("[chat-context-retrieval] Échec lecture des chunks (fail-open, aucun contexte de cours):", chunkError instanceof Error ? chunkError.message : chunkError);
       return null;
     }
-    if (!data || data.length === 0) return null; // not indexed yet — no context, don't fail.
+    if (chunks.length === 0) return null; // not indexed yet — no context, don't fail.
 
-    // The embedding call (getEmbedding, a REAL paid OpenRouter call) only
-    // fires past this point — deliberately AFTER confirming chunks actually
-    // exist, never before, so an unindexed course never pays for a wasted
-    // embedding. But once we know chunks exist, the Explication-chapters
-    // lookup below doesn't depend on the embedding result (or vice versa) —
-    // only on `source`, already known — so the two run concurrently instead
-    // of strictly one after the other, shaving a full DB round trip off this
-    // route's pre-stream latency for every Workspace-course chat message.
-    const [questionEmbedding, chapterFetch] = await Promise.all([
-      getEmbedding(question),
-      "studioCourseId" in source
-        ? supabase.from("studio_course_explication_chapters").select("heading, content, source_chunk_indices").eq("course_id", source.studioCourseId)
-        : Promise.resolve(null),
-    ]);
+    const [questionEmbedding, chapterFetch] = await Promise.all([embeddingPromise, chapterPromise]);
 
-    const ranked = (data as ChunkRow[])
-      .map((row) => ({ content: row.content, chunkIndex: row.chunk_index, similarity: cosineSimilarity(questionEmbedding, toEmbeddingArray(row.embedding)) }))
+    const ranked = chunks
+      .map((row) => ({ content: row.content, chunkIndex: row.chunkIndex, similarity: cosineSimilarity(questionEmbedding, row.embedding) }))
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
 
@@ -244,10 +332,6 @@ export async function retrieveRelevantContext(question: string, source: ChunkSou
   }
 }
 
-interface LabeledChunkRow extends ChunkRow {
-  course_id: number;
-}
-
 interface LabeledExplicationChapterRow extends ExplicationChapterRow {
   course_id: number;
 }
@@ -269,7 +353,8 @@ interface LabeledExplicationChapterRow extends ExplicationChapterRow {
 export async function retrieveRelevantContextForStudioCourses(
   question: string,
   courses: { id: number; title: string }[],
-  broadHint?: string
+  broadHint?: string,
+  options: RetrievalOptions = {}
 ): Promise<string | null> {
   if (!isSupabaseConfigured() || courses.length === 0) return null;
   const isBroad = BROAD_QUESTION_PATTERN.test(broadHint ?? question);
@@ -281,28 +366,31 @@ export async function retrieveRelevantContextForStudioCourses(
 
   try {
     const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase
-      .from("studio_course_chunks")
-      .select("content, embedding, chunk_index, course_id")
-      .in("course_id", courseIds);
-
-    if (error) {
-      console.error("[chat-context-retrieval] Échec lecture des chunks multi-sources (fail-open):", error.message);
+    // Everything at once, each course's chunks from the per-instance cache
+    // (see loadChunks) — was one chunk query, THEN the embedding + chapters.
+    const embeddingPromise = options.embedding ?? getEmbedding(question);
+    embeddingPromise.catch(() => undefined);
+    const chapterPromise = Promise.resolve(
+      supabase.from("studio_course_explication_chapters").select("heading, content, source_chunk_indices, course_id").in("course_id", courseIds)
+    ).catch((chapterError: unknown) => ({ data: null, error: { message: chapterError instanceof Error ? chapterError.message : String(chapterError) } }));
+    let perCourse: { courseId: number; chunks: CachedChunk[] }[];
+    try {
+      perCourse = await Promise.all(courseIds.map(async (courseId) => ({ courseId, chunks: await loadChunks({ studioCourseId: courseId }) })));
+    } catch (chunkError) {
+      console.error("[chat-context-retrieval] Échec lecture des chunks multi-sources (fail-open):", chunkError instanceof Error ? chunkError.message : chunkError);
       return null;
     }
-    if (!data || data.length === 0) return null;
+    const data = perCourse.flatMap(({ courseId, chunks }) => chunks.map((chunk) => ({ ...chunk, courseId })));
+    if (data.length === 0) return null;
 
-    const [questionEmbedding, chapterFetch] = await Promise.all([
-      getEmbedding(question),
-      supabase.from("studio_course_explication_chapters").select("heading, content, source_chunk_indices, course_id").in("course_id", courseIds),
-    ]);
+    const [questionEmbedding, chapterFetch] = await Promise.all([embeddingPromise, chapterPromise]);
 
-    const ranked = (data as LabeledChunkRow[])
+    const ranked = data
       .map((row) => ({
         content: row.content,
-        chunkIndex: row.chunk_index,
-        courseId: row.course_id,
-        similarity: cosineSimilarity(questionEmbedding, toEmbeddingArray(row.embedding)),
+        chunkIndex: row.chunkIndex,
+        courseId: row.courseId,
+        similarity: cosineSimilarity(questionEmbedding, row.embedding),
       }))
       .sort((a, b) => b.similarity - a.similarity)
       // The same polycop imported into two checked courses yields identical

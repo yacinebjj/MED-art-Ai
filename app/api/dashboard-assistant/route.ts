@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
-import { OpenRouterError, streamOpenRouter, FREE_MODEL_CHAIN, CHAT_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
-import { PAID_FALLBACK_MAX_TOKENS, streamFreeOmni, withPaidFallbackBrevity } from "@/lib/ai/omni-routing";
+import { OpenRouterError, CHAT_MODEL, ECONOMY_MODEL, type ChatMessageInput } from "@/lib/ai/openrouter";
+import { COPILOT_HEDGE_MS, buildCopilotCandidates, withPaidFallbackBrevity } from "@/lib/ai/omni-routing";
+import { RaceFailedError, raceFirstToken } from "@/lib/ai/first-token-race";
+import { createCopilotTimer } from "@/lib/ai/copilot-timing";
 import { isSmallTalk } from "@/lib/chat-intent";
 
 // ── Vision (images in the assistant) ────────────────────────────────────
@@ -21,8 +23,8 @@ Si l'image est illisible ou insuffisante, dis-le clairement plutôt que d'invent
 
 type VisionPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { reserveFreeTierCapacity } from "@/lib/platform-spend-guard";
-import { reserveAssistantAccess, reservePremiumFallback } from "@/lib/subscription";
+import { reserveFreeTierCapacity, type PlatformCapacityResult } from "@/lib/platform-spend-guard";
+import { premiumFallbackMayBeAvailable, reserveAssistantAccess, reservePremiumFallback, type AssistantAccess } from "@/lib/subscription";
 import { quotaBlockedResponse } from "@/lib/quota-response";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { isAssistantMode, isAssistantStyle, type AssistantMode } from "@/lib/assistant-modes";
@@ -67,6 +69,12 @@ export const maxDuration = 300;
  * only then), capped at 500 tokens and asked for a short answer. A text
  * message then still has the rest of FREE_MODEL_CHAIN as a zero-cost
  * safety net.
+ *
+ * HEDGED since 2026-11-21 (see the race at the end of POST): the order is
+ * the same, but a silent Omni no longer holds the student for 25 s before
+ * the paid fallback is even asked — after COPILOT_HEDGE_MS the paid model
+ * runs alongside it and the first to write answers. Every request logs where
+ * its time went (`[copilot:timing]`, lib/ai/copilot-timing.ts).
  *
  * FREE_MODEL_CHAIN lives in lib/ai/openrouter.ts (shared with courses/chat
  * and lib/cache-prewarming.ts) — see that constant's own comment for the
@@ -122,7 +130,9 @@ const ANSWER_TEMPERATURE = 0.3;
 const SYSTEM_PROMPT = DASHBOARD_ASSISTANT_SYSTEM_PROMPT;
 
 export async function POST(request: NextRequest) {
+  const timer = createCopilotTimer("dashboard");
   const user = await getAuthenticatedUser();
+  timer.mark("auth");
   if (!user) {
     return NextResponse.json({ error: "Tu dois être connecté(e)." }, { status: 401 });
   }
@@ -205,18 +215,8 @@ export async function POST(request: NextRequest) {
   const deliver = (stream: ReadableStream<Uint8Array>) =>
     new NextResponse(isReplyId(replyId) ? streamReplyInBackground(stream, { userId: user.id, replyId, language: language === "en" ? "en" : "fr" }) : stream, {
       status: 200,
-      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Server-Timing": timer.serverTiming() },
     });
-
-  // Access gate (see this file's header comment) — may this message be sent,
-  // and may a paid model stand in if the free Omni model fails? Monetization
-  // v2: free trial = 20 messages for life (then paywall); paid = 20 premium
-  // messages a day — spent only when the paid fallback actually answers
-  // (reservePremiumFallback below). Small talk ("salut", "merci", "ça va ?")
-  // is never worth a paid call — see lib/chat-intent.ts. An image always may,
-  // whatever the caption says.
-  const access = await reserveAssistantAccess(user, { needsPremium: Boolean(imageDataUrl) || !isSmallTalk(message) });
-  if (!access.allowed) return quotaBlockedResponse(access);
 
   const promptOptions = {
     mode: isAssistantMode(mode) ? mode : undefined,
@@ -272,97 +272,113 @@ export async function POST(request: NextRequest) {
   );
   const paidModelMessages = buildRequest(SYSTEM_PROMPT, selectHistory(conversation, PAID_FALLBACK_HISTORY_BUDGET));
 
-  // Omni-first routing (lib/ai/omni-routing.ts) — the first attempt that
-  // succeeds wins:
-  //  1. PRIMARY_FREE_OMNI for every message, text or image (8192 tokens: free).
-  //  2. Only if it failed, for a student whose plan grants it, the paid model —
-  //     CHAT_MODEL for text, ECONOMY_MODEL for an image — at 500 tokens, a
-  //     short answer asked for.
-  //  3. Text only: the rest of FREE_MODEL_CHAIN, the zero-cost safety net (no
-  //     free model there can see an image).
+  // ── Gates, then the hedged model race (2026-11-21) ──────────────────────
+  // The gates keep their order and their meaning, strictly one after the
+  // other (each reserves a counter): the access gate (may this message be
+  // sent, may a paid model stand in — monetization v2: free trial = 20
+  // messages for life, then paywall; paid = 20 premium messages a day, spent
+  // only when a paid model actually answers; small talk — lib/chat-intent.ts
+  // — never worth a paid call; an image always may), then the shared
+  // external free-tier ceiling (reserveFreeTierCapacity's own comment).
+  //
+  // The model race (lib/ai/first-token-race.ts, candidates in
+  // lib/ai/omni-routing.ts's buildCopilotCandidates) is set up ALONGSIDE them,
+  // each model opening as soon as its own gate said yes:
+  //  1. PRIMARY_FREE_OMNI, for every message, text or image (8192 tokens:
+  //     free), the moment the free-tier capacity is reserved — never before:
+  //     a free request counts against OpenRouter's account-wide limits even
+  //     when cancelled.
+  //  2. The paid model — CHAT_MODEL for text, ECONOMY_MODEL for an image, 500
+  //     tokens, a short answer asked for — for a student whose plan grants
+  //     it, as soon as Omni has failed OR after COPILOT_HEDGE_MS of Omni
+  //     silence; the first of the two to write wins, the other is cancelled.
+  //     The daily premium message is reserved only when the paid model is
+  //     about to answer.
+  //  3. Text only: FREE_MODEL_CHAIN, the zero-cost safety net, once every
+  //     model before it has failed (or as a late net if they all stay silent).
   // A model erroring (saturation, a provider hiccup, a 429) is the EXPECTED,
   // routine case on free endpoints, not an exceptional one.
-  let lastError: unknown = null;
-
-  // The shared external free-tier ceiling (see reserveFreeTierCapacity's own
-  // comment), reserved once for this message before its first free call.
-  // When it is spent, the free models are skipped, never the paid fallback.
-  const capacity = await reserveFreeTierCapacity();
-
-  if (capacity.allowed) {
-    try {
-      // Resolves once Omni's first visible word has arrived; throws (429, 5xx,
-      // an empty or broken stream, 25 s of silence) so the next attempt runs.
-      return deliver(await streamFreeOmni(freeModelMessages, { temperature: ANSWER_TEMPERATURE }));
-    } catch (error) {
-      lastError = error;
-      console.error("[dashboard-assistant] Omni gratuit indisponible, bascule sur le repli:", error instanceof Error ? error.message : error);
-    }
-  }
-
-  const paidFallback = await reservePremiumFallback(user, access);
-  if (paidFallback) {
-    try {
-      const stream = imageDataUrl
-        ? // Gemini's hidden thinking capped (uncapped, it billed 965 reasoning tokens for one question, live 2026-10-12).
-          await streamOpenRouter(withPaidFallbackBrevity(paidModelMessages), {
-            model: ECONOMY_MODEL,
-            maxTokens: PAID_FALLBACK_MAX_TOKENS,
-            temperature: 0.3,
-            reasoning: { effort: "low" },
-            providerSort: "latency",
-          })
-        : // CHAT_MODEL: qwen3.7-flash, a hybrid thinking model — reasoning switched OFF explicitly.
-          await streamOpenRouter(withPaidFallbackBrevity(paidModelMessages), {
-            model: CHAT_MODEL,
-            maxTokens: PAID_FALLBACK_MAX_TOKENS,
-            temperature: ANSWER_TEMPERATURE,
-            reasoning: { enabled: false },
-            providerSort: "latency",
-          });
-      return deliver(stream);
-    } catch (error) {
-      lastError = error;
-      console.error("[dashboard-assistant] Modèle payant de repli indisponible:", error instanceof Error ? error.message : error);
-    }
-  }
-
-  if (imageDataUrl) {
-    // No free text model can stand in for an image.
-    console.error("[dashboard-assistant] Analyse d'image échouée:", lastError instanceof Error ? lastError.message : lastError);
-    if (access.premiumEligible && !paidFallback && access.dailySub) {
-      return NextResponse.json(
-        { error: "Tu as utilisé toutes tes analyses avancées du jour (images comprises). Elles se rechargent demain — tu peux continuer en texte d'ici là." },
-        { status: 429 }
-      );
-    }
-    return NextResponse.json({ error: "L'analyse de l'image n'a pas pu aboutir. Réessaie dans un instant." }, { status: 502 });
-  }
-
-  if (!capacity.allowed) {
-    return NextResponse.json({ error: capacity.reason }, { status: 503 });
-  }
-
-  for (const model of FREE_MODEL_CHAIN) {
-    try {
-      const stream = await streamOpenRouter(freeModelMessages, { model, maxTokens: MAX_OUTPUT_TOKENS, temperature: ANSWER_TEMPERATURE, reasoning: { effort: "low" }, providerSort: "latency" });
-      return deliver(stream);
-    } catch (error) {
-      lastError = error;
-      console.error(
-        `[dashboard-assistant] Modèle gratuit "${model}" indisponible, bascule sur le suivant:`,
-        error instanceof Error ? error.message : error
-      );
-    }
-  }
-
-  // Omni, the paid fallback (when granted) and every free model failed — the
-  // ONLY case the student sees an error. A paid model is never called past
-  // the one fallback its plan grants.
-  const status = lastError instanceof OpenRouterError ? lastError.status : 503;
-  console.error("[dashboard-assistant] Tous les modèles gratuits ont échoué:", lastError instanceof Error ? lastError.message : lastError);
-  return NextResponse.json(
-    { error: "L'assistant gratuit est momentanément indisponible (forte demande) — réessaie dans une minute." },
-    { status: status >= 400 && status < 600 ? status : 503 }
+  const accessPromise = reserveAssistantAccess(user, { needsPremium: Boolean(imageDataUrl) || !isSmallTalk(message) });
+  const capacityPromise: Promise<PlatformCapacityResult> = accessPromise.then((gate) => (gate.allowed ? reserveFreeTierCapacity() : { allowed: false }));
+  let paidCommitRefused = false;
+  const race = raceFirstToken(
+    buildCopilotCandidates({
+      freeMessages: freeModelMessages,
+      paidMessages: withPaidFallbackBrevity(paidModelMessages),
+      freeCapacity: capacityPromise.then((result) => result.allowed, () => false),
+      paidAllowed: accessPromise.then((gate) => premiumFallbackMayBeAvailable(gate), () => false),
+      commitPaid: async () => {
+        const reserved = await reservePremiumFallback(user, await accessPromise);
+        if (!reserved) paidCommitRefused = true;
+        return reserved;
+      },
+      // Gemini's hidden thinking capped (uncapped, it billed 965 reasoning tokens for one question, live 2026-10-12);
+      // CHAT_MODEL (qwen3.7-flash) is a hybrid thinking model — reasoning switched OFF explicitly.
+      paid: imageDataUrl ? { model: ECONOMY_MODEL, reasoning: { effort: "low" } } : { model: CHAT_MODEL, reasoning: { enabled: false } },
+      temperature: ANSWER_TEMPERATURE,
+      freeChainMaxTokens: MAX_OUTPUT_TOKENS,
+      includeFreeChain: !imageDataUrl,
+      hedgeMs: COPILOT_HEDGE_MS,
+    })
   );
+
+  let access: AssistantAccess;
+  try {
+    access = await accessPromise;
+  } catch (error) {
+    race.abort();
+    throw error;
+  }
+  timer.mark("access");
+  if (!access.allowed) {
+    race.abort();
+    timer.log("quota-blocked");
+    return quotaBlockedResponse(access);
+  }
+  const capacity = await capacityPromise;
+  timer.mark("capacity");
+
+  try {
+    const outcome = await race.promise;
+    timer.mark("first_token");
+    timer.log(`ok:${outcome.label}`, outcome.attempts);
+    return deliver(outcome.stream);
+  } catch (error) {
+    const lastError = error instanceof RaceFailedError ? error.lastError : error;
+    timer.mark("failed");
+    timer.log("all-failed", error instanceof RaceFailedError ? error.attempts : undefined);
+
+    if (imageDataUrl) {
+      // No free text model can stand in for an image.
+      console.error("[dashboard-assistant] Analyse d'image échouée:", lastError instanceof Error ? lastError.message : lastError);
+      if (access.premiumEligible && access.dailySub && (paidCommitRefused || !premiumFallbackMayBeAvailable(access))) {
+        return NextResponse.json(
+          { error: "Tu as utilisé toutes tes analyses avancées du jour (images comprises). Elles se rechargent demain — tu peux continuer en texte d'ici là." },
+          { status: 429 }
+        );
+      }
+      return NextResponse.json({ error: "L'analyse de l'image n'a pas pu aboutir. Réessaie dans un instant." }, { status: 502 });
+    }
+
+    if (!capacity.allowed) {
+      return NextResponse.json({ error: capacity.reason }, { status: 503 });
+    }
+
+    // Omni, the paid fallback (when granted) and every free model failed — the
+    // ONLY case the student sees an error. A paid model is never called past
+    // the one fallback its plan grants.
+    const status = upstreamStatus(lastError);
+    console.error("[dashboard-assistant] Tous les modèles gratuits ont échoué:", lastError instanceof Error ? lastError.message : lastError);
+    return NextResponse.json(
+      { error: "L'assistant gratuit est momentanément indisponible (forte demande) — réessaie dans une minute." },
+      { status: status >= 400 && status < 600 ? status : 503 }
+    );
+  }
+}
+
+/** The HTTP status a failed model call carried (OpenRouterError, or the race's own timeout / empty-stream errors), 503 otherwise. */
+function upstreamStatus(error: unknown): number {
+  if (error instanceof OpenRouterError) return error.status;
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : 503;
 }

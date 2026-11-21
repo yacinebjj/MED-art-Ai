@@ -1496,6 +1496,13 @@ export async function streamOpenRouter(
     reasoning?: { effort?: "high" | "medium" | "low" | "minimal"; max_tokens?: number; exclude?: boolean; enabled?: boolean };
     /** OpenRouter provider routing — "latency" favours the fastest first token for a chat reply. */
     providerSort?: "throughput" | "latency" | "price";
+    /**
+     * Aborts the upstream request (headers or body) from outside — the
+     * Copilots' hedged race (lib/ai/first-token-race.ts) cancels the models
+     * that lose, so a losing model stops generating at once instead of
+     * running on for nothing.
+     */
+    signal?: AbortSignal;
   }
 ): Promise<ReadableStream<Uint8Array>> {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -1510,6 +1517,15 @@ export async function streamOpenRouter(
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const externalSignal = options?.signal;
+  if (externalSignal) {
+    const onExternalAbort = () => {
+      clearTimeout(timeoutId);
+      timeoutController.abort();
+    };
+    if (externalSignal.aborted) onExternalAbort();
+    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
 
   let res: Response;
   try {
@@ -1539,6 +1555,10 @@ export async function streamOpenRouter(
       signal: timeoutController.signal,
     });
   } catch (error) {
+    if (externalSignal?.aborted) {
+      // Cancelled on purpose (a hedged model that lost the race) — not a failure, nothing to log as one.
+      throw new OpenRouterError("Requête annulée.", 499);
+    }
     if (error instanceof Error && error.name === "AbortError") {
       console.error(`OpenRouter stream fetch timed out after ${timeoutMs}ms`);
       throw new OpenRouterError("MedArt Neural Engine met trop de temps à répondre. Réessaie dans un instant.", 504);
