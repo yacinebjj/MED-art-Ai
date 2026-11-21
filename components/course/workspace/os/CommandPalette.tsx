@@ -235,13 +235,12 @@ export function CommandPalette({ open, onOpenChange, items, groupOrder, placehol
                           isActive ? "bg-primary-50 text-foreground dark:bg-primary-950/50" : "text-[color-mix(in_oklab,var(--foreground)_85%,transparent)]"
                         )}
                       >
-                        {isActive && (
-                          <motion.span
-                            layoutId="command-palette-active"
-                            className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-primary-500"
-                            transition={{ type: "spring", stiffness: 600, damping: 40 }}
-                          />
-                        )}
+                        {/* A plain span, not a framer-motion `layoutId` rail: in framer-motion 11 a
+                            layout element that unmounts inside an AnimatePresence child is never
+                            unregistered from it, so once the active row had moved (arrow keys or
+                            mouse hover), the palette's exit never completed — an invisible
+                            full-screen overlay stayed on top and blocked every click until reload. */}
+                        {isActive && <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-primary-500" />}
                         <span
                           className={cn(
                             "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors",
