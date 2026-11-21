@@ -673,11 +673,30 @@ function CharCounter({ length, max }: { length: number; max: number }) {
 /* Setup screen                                                             */
 /* ----------------------------------------------------------------------- */
 
+/*
+ * The selected level's pill is ONE always-mounted span that slides with a CSS
+ * transform — deliberately not a framer-motion `layoutId` pill.
+ *
+ * This picker lives inside the setup screen, a child of the simulator's
+ * <AnimatePresence mode="wait">. In framer-motion 11, every `layout`/`layoutId`
+ * element registers with its AnimatePresence child on mount but is never
+ * unregistered on unmount (usePresence drops register()'s cleanup). A
+ * conditionally rendered pill therefore left a stale "exit not finished" entry
+ * each time the level changed: the setup screen could never finish leaving, so
+ * after choosing "Externe" or "Concours", "Lancer le cas" left the panel blank.
+ * A span that never unmounts registers nothing.
+ *
+ * Geometry mirrors the radiogroup's classes: grid-cols-3, gap-1 and p-1
+ * (0.25rem each) → each column is (100% − 2 × padding − 2 × gap) / 3 wide, and
+ * column n starts n × (column + gap) from the first one.
+ */
+const DIFFICULTY_PILL_WIDTH = `calc((100% - 0.5rem - ${DIFFICULTY_OPTIONS.length - 1} * 0.25rem) / ${DIFFICULTY_OPTIONS.length})`;
+
 function DifficultyPicker({ value, onChange, disabled }: { value: Difficulty; onChange: (value: Difficulty) => void; disabled: boolean }) {
   const buttonsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const descriptionId = useId();
-  const indicatorId = useId();
   const selected = DIFFICULTY_OPTIONS.find((option) => option.id === value) ?? DIFFICULTY_OPTIONS[0];
+  const selectedIndex = DIFFICULTY_OPTIONS.indexOf(selected);
 
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const count = DIFFICULTY_OPTIONS.length;
@@ -699,8 +718,17 @@ function DifficultyPicker({ value, onChange, disabled }: { value: Difficulty; on
         aria-label="Niveau de difficulté"
         aria-describedby={descriptionId}
         data-tour="case-level"
-        className="grid grid-cols-3 gap-1 rounded-2xl border border-border bg-slate-100/80 p-1 dark:bg-slate-900/60"
+        className="relative grid grid-cols-3 gap-1 rounded-2xl border border-border bg-slate-100/80 p-1 dark:bg-slate-900/60"
       >
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute bottom-1 left-1 top-1 rounded-xl bg-white shadow-soft ring-1 ring-primary-500/20 transition-transform duration-300 ease-out motion-reduce:transition-none dark:bg-slate-800 dark:ring-primary-400/20",
+            // Dims with the buttons while a case is starting, as when it sat inside the selected one.
+            disabled && "opacity-60"
+          )}
+          style={{ width: DIFFICULTY_PILL_WIDTH, transform: `translateX(calc(${selectedIndex} * (100% + 0.25rem)))` }}
+        />
         {DIFFICULTY_OPTIONS.map((option, index) => {
           const isSelected = option.id === value;
           const Icon = option.icon;
@@ -723,14 +751,6 @@ function DifficultyPicker({ value, onChange, disabled }: { value: Difficulty; on
                 isSelected ? "text-primary-700 dark:text-primary-200" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {isSelected && (
-                <motion.span
-                  layoutId={indicatorId}
-                  transition={SPRING}
-                  className="absolute inset-0 rounded-xl bg-white shadow-soft ring-1 ring-primary-500/20 dark:bg-slate-800 dark:ring-primary-400/20"
-                  aria-hidden
-                />
-              )}
               <span className="relative flex flex-col items-center gap-1">
                 <Icon className="h-4 w-4" aria-hidden />
                 <span className="truncate">{option.label}</span>
