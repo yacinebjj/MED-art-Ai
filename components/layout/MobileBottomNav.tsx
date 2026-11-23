@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
+  Microscope,
   NotebookPen,
   Settings,
   Sparkles,
@@ -31,13 +32,14 @@ import { InstallAppSheetEntry } from "@/components/pwa/InstallAppEntry";
 import { UnifiedLanguageSwitch } from "./cockpit/UnifiedLanguageSwitch";
 import { THEME_MODE_ICONS, THEME_MODE_LABELS, useThemeMode, type ThemeMode } from "./cockpit/ThemeModeSwitcher";
 
-// Short, one-word labels: five of them share ~375px, so "MedArt Assistant"
+// Short, one-word labels: six of them share ~375px, so "MedArt Assistant"
 // or "Espace Étude" would wrap or truncate under the icon.
 const TAB_LABELS = {
   home: { fr: "Accueil", en: "Home" },
   assistant: { fr: "Copilot", en: "Copilot" },
   study: { fr: "Réviser", en: "Review" },
   notes: { fr: "Notes", en: "Notes" },
+  atlas: { fr: "Atlas", en: "Atlas" },
   more: { fr: "Profil", en: "Profile" },
 } satisfies Record<string, Record<Language, string>>;
 
@@ -46,11 +48,13 @@ interface Tab {
   key: keyof typeof TAB_LABELS;
   icon: LucideIcon;
   isActive: (pathname: string) => boolean;
+  /** Glowing dot on the icon, like the desktop sidebar's NEW pill. */
+  badge?: "new";
 }
 
-// The 4 places a student goes every day get a permanent thumb target. Every
-// other destination lives in the Menu sheet — native iOS/Android bars stop at
-// 5 items for the same reason.
+// The 4 places a student goes every day, plus the Atlas Zoom, get a permanent
+// thumb target. Every other destination lives in the Menu sheet — native
+// iOS/Android bars stay this short for the same reason.
 const TABS: Tab[] = [
   {
     href: "/dashboard",
@@ -61,6 +65,7 @@ const TABS: Tab[] = [
   { href: "/dashboard/assistant", key: "assistant", icon: Sparkles, isActive: (p) => p === "/dashboard/assistant" },
   { href: "/dashboard/study", key: "study", icon: Brain, isActive: (p) => p === "/dashboard/study" },
   { href: "/dashboard/notes", key: "notes", icon: NotebookPen, isActive: (p) => p === "/dashboard/notes" },
+  { href: "/dashboard/atlas", key: "atlas", icon: Microscope, isActive: (p) => p.startsWith("/dashboard/atlas"), badge: "new" },
 ];
 
 const MENU_ROUTES = ["/dashboard/billing", "/dashboard/settings", "/dashboard/todo", "/dashboard/groups"];
@@ -200,7 +205,7 @@ function MenuSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
 /**
  * Native-app-style bottom tab bar (< lg; Sidebar.tsx is desktop-only).
  * Floating glass pill offset above the iOS home indicator by the safe area;
- * each tab is a full flex-1 column at least 56px tall. The 5th slot is the
+ * each tab is a full flex-1 column at least 56px tall. The last slot is the
  * student's own avatar: it opens the account sheet (bottom sheet) instead of
  * a tiny dropdown anchored to the screen edge.
  *
@@ -255,7 +260,8 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
         {TABS.map((tab, index) => (
           <TabButton
             key={tab.href}
-            icon={tab.icon}
+            icon={tab.badge ? undefined : tab.icon}
+            visual={tab.badge ? <NewDotIcon icon={tab.icon} active={index === highlightIndex} /> : undefined}
             label={TAB_LABELS[tab.key][language]}
             active={index === highlightIndex}
             current={tab.isActive(pathname)}
@@ -281,6 +287,19 @@ export function MobileBottomNav({ hidden = false }: { hidden?: boolean }) {
       </nav>
       <MenuSheet open={menuOpen} onOpenChange={setMenuOpen} />
     </>
+  );
+}
+
+/** A tab icon carrying the "new" dot — drawn through TabButton's `visual` slot, so the active lift still applies. */
+function NewDotIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
+  return (
+    <span className="relative flex">
+      <Icon
+        className={cn("h-[22px] w-[22px] transition-colors duration-300", active ? "text-primary-600 dark:text-primary-300" : "text-muted-foreground")}
+        strokeWidth={active ? 2.4 : 2}
+      />
+      <span aria-hidden className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)] ring-2 ring-white dark:ring-slate-900" />
+    </span>
   );
 }
 

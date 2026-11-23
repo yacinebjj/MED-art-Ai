@@ -1,5 +1,5 @@
 /**
- * Atlas Zoom — the 12 zoomable anatomy atlases.
+ * Atlas Zoom — the 14 zoomable anatomy atlases.
  *
  * Each atlas lives in public/atlas-zoom/<slug>/ :
  *   atlas.txt    the atlas page, fetched by AtlasViewer and run in an <iframe srcdoc>
@@ -10,7 +10,7 @@
  * medallion art in public/atlas-zoom/_hub/.
  */
 
-export type AtlasCategory = "thorax" | "digestif" | "genital";
+export type AtlasCategory = "thorax" | "digestif" | "genital" | "neuro" | "locomoteur";
 
 export interface AtlasEntry {
   slug: string;
@@ -32,6 +32,8 @@ export interface AtlasEntry {
   firstPlate: string;
   /** [short label, full title] of every plate, in order. Searchable; a hit opens the atlas on that plate. */
   plates: readonly (readonly [string, string])[];
+  /** false when the atlas does not number its plates in one sequence (La Main: 8 tissues × 3 scales). */
+  numbered?: boolean;
   /** Extra search terms (synonyms, eponyms, adjectives). */
   keywords: string;
   /** Shown in the hero showcase rather than in the grid. */
@@ -350,6 +352,74 @@ export const ATLASES: readonly AtlasEntry[] = [
       ["Ovocyte II", "Cytologie de l’ovocyte II mature et de la zone pellucide"],
       ["Cellule lutéale", "Cytologie de la cellule lutéale (corps jaune) et stéroïdogenèse"],
       ["Cils & pinopodes", "Cytologie de l’épithélium tubaire et endométrial (cils et pinopodes)"],
+    ],
+  },
+  {
+    slug: "cerveau-moelle",
+    number: 13,
+    name: "Cerveau & Moelle",
+    short: "Cerveau & moelle",
+    tagline: "Lobes, polygone de Willis et moelle épinière, jusqu’à la synapse.",
+    category: "neuro",
+    categories: ["neuro"],
+    stages: ORGAN_STAGES,
+    scale: "×1 → ×10 000",
+    pins: 107,
+    firstPlate: "p1",
+    available: true,
+    keywords: "neuro neurologie neuroanatomie cerveau cerebral encephale systeme nerveux central snc lobes sillons gyrus rolando sylvius cortex tronc cerebral cervelet bulbe pont mesencephale willis carotide vertebrale moelle epiniere medullaire racines meninges dure-mere arachnoide pie-mere lcr ventricules plexus choroides barriere hemato-encephalique bhe neurone axone dendrite synapse neurotransmetteur nevroglie astrocyte oligodendrocyte microglie myeline substance grise blanche",
+    plates: [
+      ["Encéphale", "Anatomie externe de l’encéphale : lobes, sillons et tronc cérébral"],
+      ["Coupe & Willis", "Anatomie interne de l’encéphale : coupe sagittale et polygone de Willis"],
+      ["Moelle", "Anatomie de la moelle épinière, méninges et racines rachidiennes"],
+      ["Moelle (histo)", "Histologie de la moelle épinière : substance grise et substance blanche"],
+      ["Méninges & BHE", "Histologie des méninges, plexus choroïdes et barrière hémato-encéphalique"],
+      ["Cortex", "Histologie du cortex cérébral (6 couches) et du cortex cérébelleux"],
+      ["Neurone", "Cytologie du neurone multipolaire : corps cellulaire et axone"],
+      ["Synapse", "Ultrastructure de la synapse chimique et transmission synaptique"],
+      ["Névroglie", "Cytologie de la névroglie centrale : astrocyte, oligodendrocyte et microglie"],
+    ],
+  },
+  {
+    slug: "main",
+    number: 14,
+    name: "La Main",
+    short: "Main",
+    tagline: "Huit tissus à disséquer, de la peau du pli palmaire jusqu’à l’ostéocyte.",
+    category: "locomoteur",
+    categories: ["locomoteur"],
+    stages: ORGAN_STAGES,
+    scale: "×1 → ×10 000",
+    pins: 111,
+    firstPlate: "peau0",
+    numbered: false,
+    available: true,
+    keywords: "main poignet doigts pouce membre superieur locomoteur appareil locomoteur peau dermatoglyphes ongle hypoderme graisse tissu adipeux adipocyte muscles myologie thenar hypothenar interosseux lombricaux sarcomere tendons flechisseurs extenseurs gaines synoviales canal carpien camper ligaments poulies articulations vaisseaux arcade palmaire artere radiale ulnaire endothelium nerfs median ulnaire radial schwann myeline os osteologie carpe scaphoide metacarpiens phalanges osteoblaste osteocyte osteoclaste",
+    plates: [
+      ["Peau · Anatomie", "Anatomie de surface et peau de la main"],
+      ["Peau · Histologie", "Histologie de la peau palmaire (peau épaisse)"],
+      ["Peau · Cytologie", "Cytologie de la peau : kératinocyte et mélanocyte"],
+      ["Graisse · Anatomie", "Tissu adipeux, hypoderme et aponévrose palmaire"],
+      ["Graisse · Histologie", "Histologie du tissu adipeux blanc (hypoderme)"],
+      ["Graisse · Cytologie", "Ultrastructure de l’adipocyte"],
+      ["Muscles · Anatomie", "Myologie de la main : muscles intrinsèques"],
+      ["Muscles · Histologie", "Histologie du muscle strié squelettique"],
+      ["Muscles · Cytologie", "Cytologie du muscle squelettique : myocyte et sarcomère"],
+      ["Tendons · Anatomie", "Tendons fléchisseurs, extenseurs et gaines synoviales"],
+      ["Tendons · Histologie", "Histologie du tendon : tissu conjonctif dense orienté"],
+      ["Tendons · Cytologie", "Cytologie du tendon : ultrastructure du ténocyte"],
+      ["Ligaments · Anatomie", "Ligaments, articulations et poulies digitales"],
+      ["Ligaments · Histologie", "Histologie du ligament : tissu conjonctif dense"],
+      ["Ligaments · Cytologie", "Cytologie du ligament : fibroblaste ligamentaire"],
+      ["Vaisseaux · Anatomie", "Vascularisation artérielle et veineuse de la main"],
+      ["Vaisseaux · Histologie", "Histologie des vaisseaux sanguins : artère et veine"],
+      ["Vaisseaux · Cytologie", "Cytologie vasculaire : cellule endothéliale et capillaire"],
+      ["Nerfs · Anatomie", "Innervation de la main : nerfs médian, ulnaire et radial"],
+      ["Nerfs · Histologie", "Histologie du nerf périphérique"],
+      ["Nerfs · Cytologie", "Cytologie du nerf : axone myélinisé et cellule de Schwann"],
+      ["Os · Anatomie", "Ostéologie de la main et du poignet (vue palmaire)"],
+      ["Os · Histologie", "Histologie du tissu osseux : os compact et os spongieux"],
+      ["Os · Cytologie", "Cytologie osseuse : ostéoblaste, ostéocyte et ostéoclaste"],
     ],
   },
 ];

@@ -517,8 +517,13 @@ function q(s){return d.querySelector(s);}
 var loader=q('#loader');
 function isReady(){return !loader||loader.classList.contains('done');}
 function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
-function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;var list=A.PLATES||A.L;k=Math.floor(k);if(!list||!(k>=0&&k<list.length))return;
-  try{A.flyHome(k);var h=d.getElementById('hint');if(h)h.classList.add('gone');}catch(e){}}
+function hideHint(){var h=d.getElementById('hint');if(h)h.classList.add('gone');}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;k=Math.floor(k);
+  if(A.TISSUES&&typeof A.setTissue==='function'){var T=A.TISSUES,per=(T[0]&&T[0].levels&&T[0].levels.length)||3,t=Math.floor(k/per),lv=k%per;
+    if(!(t>=0&&t<T.length))return;
+    try{Promise.resolve(A.setTissue(t,true)).then(function(){A.flyHome(lv);hideHint();},function(){});}catch(e){}return;}
+  var list=A.PLATES||A.L;if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);hideHint();}catch(e){}}
 if(!root.classList.contains('az-embed')){
   var top=q('.top');
   if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');

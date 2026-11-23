@@ -14,7 +14,7 @@ import { HandText } from "./HandText";
 import styles from "./atlas-zoom.module.css";
 
 /*
- * Atlas Zoom hub (/dashboard/atlas): the Tronc showcase, then the 11 organ medallions with
+ * Atlas Zoom hub (/dashboard/atlas): the Tronc showcase, then the 13 other atlas medallions with
  * filters and instant search. An atlas opens in AtlasViewer, driven by the URL
  * (?organe=<slug>[&planche=<n>]) so Back closes it and a link reopens it. Next.js syncs
  * useSearchParams with history.pushState/replaceState, so opening costs no navigation.
@@ -27,6 +27,8 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "thorax", label: "Thorax" },
   { id: "digestif", label: "Digestif" },
   { id: "genital", label: "Génital" },
+  { id: "neuro", label: "Neuro" },
+  { id: "locomoteur", label: "Locomoteur" },
 ];
 
 const GRID_ATLASES = ATLASES.filter((atlas) => !atlas.featured);
@@ -132,12 +134,12 @@ export function AtlasZoomHub() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   const counts = useMemo(() => {
-    const result: Record<Filter, number> = { all: GRID_ATLASES.length, thorax: 0, digestif: 0, genital: 0 };
+    const result: Record<Filter, number> = { all: GRID_ATLASES.length, thorax: 0, digestif: 0, genital: 0, neuro: 0, locomoteur: 0 };
     for (const atlas of GRID_ATLASES) for (const category of atlas.categories) result[category] += 1;
     return result;
   }, []);
 
-  // No query: the 11 organs (the Tronc has the showcase). A query searches all 12.
+  // No query: the 13 atlases below the showcase (the Tronc has it). A query searches all 14.
   const matches = useMemo<AtlasMatch[]>(() => {
     const found = searchAtlases(deferredQuery ? ATLASES : GRID_ATLASES, deferredQuery);
     return filter === "all" ? found : found.filter((match) => match.atlas.categories.includes(filter));
@@ -430,7 +432,8 @@ function Medallion({
       <span className={styles.tagline}>{atlas.tagline}</span>
       {plate != null && (
         <span className={styles.hit}>
-          ↳ Planche {plate + 1} · {atlas.plates[plate]?.[0]}
+          ↳ {atlas.numbered === false ? "" : `Planche ${plate + 1} · `}
+          {atlas.plates[plate]?.[0]}
         </span>
       )}
       <span className={styles.stages}>

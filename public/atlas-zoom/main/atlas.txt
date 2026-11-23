@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#191d21">
+<title>La Main · Atlas zoomable · MedArt AI Studio</title>
+<link rel="preload" href="/atlas-zoom/main/peau0.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<style>
+.az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
+.az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
+.az-embed .top .scale{margin-left:auto}.az-embed .scale .sbar{margin-top:0}
+.az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
+.az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
+@media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+</style>
+<meta name="description" content="Atlas médical à zoom continu : de l’anatomie externe de l’estomac jusqu’à l’ultrastructure de la cellule pariétale.">
+<style>
+@font-face{font-family:'Kalam';font-weight:400;font-display:swap;src:url(/atlas-zoom/_shared/kalam-400.woff2) format('woff2')}
+@font-face{font-family:'Kalam';font-weight:700;font-display:swap;src:url(/atlas-zoom/_shared/kalam-700.woff2) format('woff2')}
+:root{--bg:#191d21;--ink:#f6efe2;--chalk:#f3e2bd;--soft:rgba(240,233,220,.74);--mute:rgba(232,226,214,.5);--line:rgba(243,226,189,.14);--acc:#ffb86b;--acc2:#7fd8ff;
+  --hand:'Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',system-ui,sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab}#cv.drag{cursor:grabbing}
+/* slate atmosphere: vignette + chalk grain (static layers, composited once) */
+.vig{position:fixed;inset:0;pointer-events:none;z-index:1;background:radial-gradient(130% 100% at 50% 48%,transparent 52%,rgba(6,8,10,.55) 100%)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.06;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scrim{position:fixed;left:0;right:0;top:0;height:120px;z-index:2;pointer-events:none;background:linear-gradient(rgba(13,16,21,.66),rgba(13,16,21,.3) 55%,transparent)}
+/* pins */
+#pins{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pin{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
+.pin.on{opacity:1}.pin.on button{pointer-events:auto}
+.pin button{all:unset;cursor:pointer;position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.pin i{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff6e4,var(--acc) 60%,#e07a2c);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 16px 3px rgba(255,184,107,.55);transition:transform .25s var(--ease)}
+.pin b{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,184,107,.75);animation:pulse 2.2s var(--ease) infinite}
+.pin.portal i{background:radial-gradient(circle at 40% 35%,#eafaff,var(--acc2) 60%,#2f8fc0);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 20px 5px rgba(127,216,255,.6)}
+.pin.portal b{border-color:rgba(127,216,255,.85);animation-duration:1.6s}
+.pin.seen i{filter:saturate(.55) brightness(.92)}
+.pin button:hover i,.pin.active i{transform:scale(1.25)}
+.pin span{position:absolute;left:22px;top:-13px;white-space:nowrap;padding:5px 11px;border-radius:999px;font:700 15px/1.1 var(--hand);color:var(--chalk);background:rgba(20,24,28,.86);border:1px solid var(--line);opacity:0;transform:translateX(-4px);transition:.25s var(--ease);pointer-events:none}
+.pin .go{all:unset;cursor:pointer;position:absolute;left:24px;top:-16px;white-space:nowrap;padding:7px 14px 7px 13px;border-radius:999px;font:700 15.5px/1.1 var(--hand);color:#e6f8ff;background:linear-gradient(135deg,rgba(30,74,104,.9),rgba(16,40,60,.92));border:1px solid rgba(127,216,255,.55);box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 22px rgba(127,216,255,.35),0 8px 24px -8px rgba(0,0,0,.7);animation:glow 2.4s var(--ease) infinite;transition:transform .2s var(--ease),filter .2s}
+.pin.on .go{pointer-events:auto}.pin .go:hover{transform:translateX(3px);filter:brightness(1.15)}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 18px rgba(127,216,255,.28),0 8px 24px -8px rgba(0,0,0,.7)}50%{box-shadow:0 0 0 1px rgba(127,216,255,.25),0 0 30px rgba(127,216,255,.55),0 8px 24px -8px rgba(0,0,0,.7)}}
+.pin button:hover+span,.pin.active span{opacity:1;transform:none}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.55);opacity:0}}
+/* glass */
+.glass{background:linear-gradient(160deg,rgba(40,45,52,.78),rgba(22,26,31,.86));border:1px solid rgba(243,226,189,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 30px 70px -24px rgba(0,0,0,.75)}
+@supports (backdrop-filter:blur(1px)){.glass{background:linear-gradient(160deg,rgba(40,45,52,.62),rgba(22,26,31,.74));backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%)}}
+/* header */
+.top{position:fixed;left:0;right:0;top:0;z-index:6;display:flex;align-items:flex-start;gap:18px;padding:16px 22px;pointer-events:none}
+.top>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:8px 14px 8px 9px;border-radius:16px}
+.brand svg{width:32px;height:32px;flex:none}.brand b{display:block;font-weight:700;font-size:13.5px;letter-spacing:-.01em}.brand em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:1px}
+.crumb{margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;padding-top:4px;max-width:46vw}
+.crumb .path{font:600 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:rgba(236,230,218,.66);text-shadow:0 1px 8px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.crumb .path b{color:var(--acc)}
+.crumb h2{margin:0;font:700 25px/1.15 var(--hand);color:var(--chalk);text-shadow:0 2px 18px rgba(0,0,0,.6);transition:opacity .3s}
+.scale{min-width:170px;padding:10px 14px;border-radius:16px;text-align:right}
+.scale .m{font:800 24px/1 var(--sans);letter-spacing:-.03em;color:#fff}.scale .m small{font-size:13px;color:var(--mute);font-weight:600;margin-left:6px;letter-spacing:.06em;text-transform:uppercase}
+.sbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;font:600 11.5px var(--sans);color:var(--soft)}
+.sbar i{display:block;height:6px;border:1.5px solid rgba(243,226,189,.85);border-top:0;transition:width .25s var(--ease)}
+/* side controls */
+.ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px;border-radius:22px}
+.ctrl button{all:unset;cursor:pointer;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:var(--ink);transition:background .2s}
+.ctrl button:hover{background:rgba(255,255,255,.08)}.ctrl svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rail{position:relative;width:38px;height:min(300px,38vh);margin:4px 0;cursor:pointer;touch-action:none}
+.rail .tr{position:absolute;left:18px;top:6px;bottom:6px;width:2px;border-radius:2px;background:rgba(243,226,189,.18)}
+.rail .fill{position:absolute;left:18px;top:6px;width:2px;border-radius:2px;background:linear-gradient(var(--acc),var(--acc2))}
+.rail .tick{position:absolute;left:8px;width:22px;height:2px;margin-top:-1px;background:rgba(243,226,189,.35);border-radius:2px}
+.rail .tick{cursor:pointer}.rail .tick span{position:absolute;right:32px;top:-14px;padding:4px 8px 3px;border-radius:9px;background:rgba(18,22,27,.72);border:1px solid rgba(243,226,189,.08);font:700 13.5px/1 var(--hand);color:var(--mute);white-space:nowrap;text-align:right;cursor:pointer}.rail .tick em{display:block;font:600 9.5px var(--sans);letter-spacing:.08em;font-style:normal;margin-top:1px}
+.rail .tick.on span{color:var(--chalk)}
+.rail .th{position:absolute;left:7px;width:24px;height:24px;margin-top:-12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#ffd9a8);box-shadow:0 0 0 4px rgba(255,184,107,.22),0 4px 14px rgba(0,0,0,.5)}
+/* tissue dock */
+.dock{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:6;display:flex;gap:4px;padding:6px;border-radius:24px;max-width:calc(100vw - 20px)}
+.tis{all:unset;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:66px;padding:5px 0 4px;border-radius:17px;transition:background .3s var(--ease)}
+.tis img{width:46px;height:42px;object-fit:cover;border-radius:12px;display:block;border:1px solid rgba(243,226,189,.16);filter:saturate(.7) brightness(.78);transition:.3s var(--ease)}
+.tis b{font:700 13px/1 var(--hand);color:var(--mute);transition:color .3s}
+.tis:hover{background:rgba(255,255,255,.05)}.tis:hover img{filter:saturate(.9) brightness(.95)}
+.tis.on{background:rgba(255,184,107,.12)}.tis.on img{filter:none;border-color:var(--acc);box-shadow:0 0 16px rgba(255,184,107,.38);transform:translateY(-2px)}.tis.on b{color:var(--chalk)}
+.tis::after{content:'';position:absolute;left:50%;bottom:-3px;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--acc);opacity:0;transition:.3s}.tis.on::after{opacity:1}
+/* scale track (1× → 100× → 10 000×) */
+.lvb{position:relative;display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;font:700 11px/1.1 var(--sans);color:var(--soft);text-align:center}
+.lvb span{display:flex;flex-direction:column;align-items:center;min-width:40px}.lvb span:first-of-type{align-items:flex-start}.lvb span:last-of-type{align-items:flex-end}
+.lvb em{font:600 9px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-style:normal;margin-top:2px}
+.lvb .lt{position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:rgba(243,226,189,.14);overflow:hidden}.lvb .lt i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.wait{position:fixed;left:50%;top:50%;z-index:7;width:34px;height:34px;margin:-17px;opacity:0;transition:opacity .2s;pointer-events:none}.wait.on{opacity:1}
+.wait i{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(243,226,189,.2);border-top-color:var(--acc);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+/* study card */
+.card{position:fixed;z-index:8;right:84px;top:150px;width:min(390px,calc(100vw - 32px));max-height:calc(100vh - 262px);overflow:auto;padding:20px 22px 18px;border-radius:24px;opacity:0;transform:translateX(18px) scale(.98);pointer-events:none;transition:opacity .35s var(--ease),transform .45s var(--ease);scrollbar-width:none}
+.card::-webkit-scrollbar{display:none}.card.on{opacity:1;transform:none;pointer-events:auto}
+.card .chip{display:inline-flex;align-items:center;gap:7px;font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}.card .chip i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.card.portal .chip i{background:var(--acc2);box-shadow:0 0 10px var(--acc2)}
+.card h3{margin:8px 34px 10px 0;font:700 26px/1.12 var(--hand);color:var(--chalk)}
+.card p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--soft)}.card p b{color:#fff;font-weight:650}
+.trap{position:relative;margin:12px 0 4px;padding:12px 14px 12px 16px;border-radius:16px;background:linear-gradient(135deg,rgba(255,120,90,.15),rgba(255,120,90,.04));border:1px solid rgba(255,140,110,.3);font-size:13.2px;line-height:1.55;color:#f6e3dc}
+.trap span{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:800 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#ff9a7e}
+.note{margin-top:10px;font-size:12px;line-height:1.5;color:var(--mute);border-left:2px solid rgba(243,226,189,.25);padding-left:10px}
+.card .x{all:unset;cursor:pointer;position:absolute;right:14px;top:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:var(--soft)}.card .x:hover{background:rgba(255,255,255,.08)}
+.card .act{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:13px;font:700 13px var(--sans);background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--ink);transition:.2s}
+.btn:hover{background:rgba(255,255,255,.12)}.btn.dive{background:linear-gradient(135deg,#7fd8ff,#4aa9e0);color:#06202e;border:0}.btn.dive:hover{filter:brightness(1.08)}
+.card .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font:600 11px var(--sans);color:var(--mute)}
+.card .nav button{all:unset;cursor:pointer;padding:6px 9px;border-radius:9px;color:var(--soft)}.card .nav button:hover{background:rgba(255,255,255,.07)}
+/* hint + loader */
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;padding:16px 20px;border-radius:20px;text-align:center;font:700 18px var(--hand);color:var(--chalk);transition:opacity .6s;pointer-events:none}
+.hint small{display:block;margin-top:4px;font:500 12px var(--sans);color:var(--soft)}.hint.gone{opacity:0}
+.hint svg{width:26px;height:38px;display:block;margin:0 auto 8px}.hint svg .w{animation:wheel 1.4s var(--ease) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}100%{transform:translateY(8px);opacity:0}}
+#loader{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);transition:opacity .7s,visibility .7s}#loader.done{opacity:0;visibility:hidden}
+#loader h1{margin:0;font:700 44px var(--hand);color:var(--chalk);text-align:center}#loader p{margin:6px 0 22px;color:var(--soft);font-size:14px;text-align:center}
+#loader .tr{width:240px;height:2px;margin:0 auto;border-radius:2px;background:rgba(243,226,189,.15);overflow:hidden}#loader .tr i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .3s}
+#loader .msg{margin-top:12px;text-align:center;font-size:12px;color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:9;padding:9px 14px;border-radius:13px;font:600 12.5px var(--sans);color:var(--soft);opacity:0;transition:opacity .4s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:1050px){.crumb .path{display:none}.crumb{max-width:40vw}}
+@media (max-width:900px){.tis{width:52px}.tis b{font-size:11.5px}.tis img{width:40px;height:36px}}
+@media (max-width:760px){
+  .top{padding:10px 10px;gap:8px}.brand{padding:6px 9px 6px 6px}.brand em{display:none}.brand b{font-size:12px}.crumb{display:none}
+  .scale{min-width:0;padding:8px 10px}.scale .m{font-size:19px}
+  .ctrl{right:8px;top:auto;bottom:66px;transform:none;padding:6px 4px;gap:2px}.ctrl button{width:34px;height:34px}.rail{height:120px}.rail .tick span{display:none}
+  .dock{bottom:8px;gap:1px;padding:4px;border-radius:18px}.tis{width:calc((100vw - 34px)/8);max-width:46px;padding:3px 0;border-radius:12px}.tis img{width:34px;height:32px;border-radius:9px}.tis b{display:none}.tis.on img{transform:none}
+  .lvb{margin-top:6px;padding-top:7px;gap:6px;font-size:10px}.lvb em{display:none}.lvb span{min-width:0}
+  .card{left:8px;right:8px;top:auto;bottom:58px;width:auto;max-height:54vh;transform:translateY(24px);border-radius:22px}
+  .pin .go{font-size:13.5px;padding:6px 11px;left:20px;top:-14px}
+  .pin span{display:none}.scrim{height:84px}
+  .hint{padding:12px 16px;font-size:15px;max-width:78vw}.hint small{font-size:11px}
+}
+@media (prefers-reduced-motion:reduce){.pin b,.pin .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Atlas zoomable de la main"></canvas>
+<div class="vig"></div><div class="grain"></div><div class="scrim"></div>
+<div id="pins"></div>
+<header class="top">
+  <div class="brand glass"><svg viewBox="0 0 32 32" fill="none"><rect x=".5" y=".5" width="31" height="31" rx="9" fill="#232830" stroke="rgba(243,226,189,.25)"/><path d="M11.5 25c-2.2-1.6-4.4-4.3-5.2-6.6-.5-1.3.9-2.2 1.9-1.3l2.3 2.2V9.6c0-.9.7-1.6 1.5-1.6s1.5.7 1.5 1.6V15m0-6.8V7.4c0-.9.7-1.6 1.5-1.6s1.5.7 1.5 1.6V15m0-6.6c0-.9.7-1.6 1.5-1.6s1.5.7 1.5 1.6V15m0-4.6c0-.9.7-1.6 1.5-1.6s1.5.7 1.5 1.6v7.4c0 4.2-2.6 7.2-6.6 7.2" stroke="#ffb86b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.5" cy="19" r="2" stroke="#7fd8ff" stroke-width="1.4"/></svg>
+    <div><b>MedArt AI Studio</b><em>Atlas zoomable · La main</em></div></div>
+  <div class="crumb"><div class="path" id="path"></div><h2 id="ltitle"></h2></div>
+  <div class="scale glass"><div class="m" id="mag">×1</div><div class="sbar"><i id="sbi"></i><span id="sbt">5 cm</span></div><div class="lvb"><div class="lt"><i id="lvf"></i></div><span>1×<em>Organe</em></span><span>100×<em>Tissu</em></span><span>10 000×<em>Cellule</em></span></div></div>
+</header>
+<nav class="ctrl glass" aria-label="Zoom">
+  <button id="zin" title="Zoomer (+)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="rail" id="rail" title="Profondeur"><div class="tr"></div><div class="fill" id="rfill"></div><div class="th" id="rth"></div></div>
+  <button id="zout" title="Dézoomer (−)"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <button id="reset" title="Vue d’ensemble (R)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+  <button id="fs" title="Plein écran (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+<nav class="dock glass" id="dock" aria-label="Tissus"></nav>
+<aside class="card glass" id="card" aria-live="polite"></aside>
+<div class="hint glass" id="hint"><svg viewBox="0 0 26 38" fill="none"><rect x="1.5" y="1.5" width="23" height="35" rx="11.5" stroke="#f3e2bd" stroke-width="2"/><rect class="w" x="11.5" y="8" width="3" height="7" rx="1.5" fill="#ffb86b"/></svg>
+  <span id="hint1">Faites défiler pour plonger dans le tissu</span><small id="hint2">Molette · double-clic · points lumineux · ←/→ changer de tissu · ↑/↓ changer d’échelle</small></div>
+<div class="toast glass" id="toast"></div><div class="wait" id="wait"><i></i></div>
+<div id="loader"><div><h1>La Main</h1><p>8 tissus · 3 échelles — de l’organe à la cellule</p><div class="tr"><i id="lb"></i></div><div class="msg" id="lmsg">Chargement des planches…</div></div></div>
+<script>window.__IMG__={"peau0":"/atlas-zoom/main/peau0.webp","peau0_t":"/atlas-zoom/main/peau0_t.webp","graisse0":"/atlas-zoom/main/graisse0.webp","graisse0_t":"/atlas-zoom/main/graisse0_t.webp","muscle0":"/atlas-zoom/main/muscle0.webp","muscle0_t":"/atlas-zoom/main/muscle0_t.webp","tendon0":"/atlas-zoom/main/tendon0.webp","tendon0_t":"/atlas-zoom/main/tendon0_t.webp","ligament0":"/atlas-zoom/main/ligament0.webp","ligament0_t":"/atlas-zoom/main/ligament0_t.webp","vaisseau0":"/atlas-zoom/main/vaisseau0.webp","vaisseau0_t":"/atlas-zoom/main/vaisseau0_t.webp","os0":"/atlas-zoom/main/os0.webp","os0_t":"/atlas-zoom/main/os0_t.webp","nerf0":"/atlas-zoom/main/nerf0.webp","nerf0_t":"/atlas-zoom/main/nerf0_t.webp","peau1":"/atlas-zoom/main/peau1.webp","peau1_t":"/atlas-zoom/main/peau1_t.webp","graisse1":"/atlas-zoom/main/graisse1.webp","graisse1_t":"/atlas-zoom/main/graisse1_t.webp","muscle1":"/atlas-zoom/main/muscle1.webp","muscle1_t":"/atlas-zoom/main/muscle1_t.webp","tendon1":"/atlas-zoom/main/tendon1.webp","tendon1_t":"/atlas-zoom/main/tendon1_t.webp","ligament1":"/atlas-zoom/main/ligament1.webp","ligament1_t":"/atlas-zoom/main/ligament1_t.webp","vaisseau1":"/atlas-zoom/main/vaisseau1.webp","vaisseau1_t":"/atlas-zoom/main/vaisseau1_t.webp","nerf1":"/atlas-zoom/main/nerf1.webp","nerf1_t":"/atlas-zoom/main/nerf1_t.webp","os1":"/atlas-zoom/main/os1.webp","os1_t":"/atlas-zoom/main/os1_t.webp","peau2":"/atlas-zoom/main/peau2.webp","peau2_t":"/atlas-zoom/main/peau2_t.webp","graisse2":"/atlas-zoom/main/graisse2.webp","graisse2_t":"/atlas-zoom/main/graisse2_t.webp","muscle2":"/atlas-zoom/main/muscle2.webp","muscle2_t":"/atlas-zoom/main/muscle2_t.webp","tendon2":"/atlas-zoom/main/tendon2.webp","tendon2_t":"/atlas-zoom/main/tendon2_t.webp","ligament2":"/atlas-zoom/main/ligament2.webp","ligament2_t":"/atlas-zoom/main/ligament2_t.webp","vaisseau2":"/atlas-zoom/main/vaisseau2.webp","vaisseau2_t":"/atlas-zoom/main/vaisseau2_t.webp","nerf2":"/atlas-zoom/main/nerf2.webp","nerf2_t":"/atlas-zoom/main/nerf2_t.webp","os2":"/atlas-zoom/main/os2.webp","os2_t":"/atlas-zoom/main/os2_t.webp"};window.__META__={"peau0": {"w": 1440, "h": 1323, "bg": [31, 34, 48]}, "graisse0": {"w": 1440, "h": 1323, "bg": [25, 29, 41]}, "muscle0": {"w": 1440, "h": 1323, "bg": [24, 28, 40]}, "tendon0": {"w": 1440, "h": 1323, "bg": [27, 32, 55]}, "ligament0": {"w": 1440, "h": 1323, "bg": [31, 37, 57]}, "vaisseau0": {"w": 1440, "h": 1323, "bg": [22, 29, 56]}, "os0": {"w": 1440, "h": 1311, "bg": [29, 30, 44]}, "nerf0": {"w": 1440, "h": 1323, "bg": [23, 31, 56]}, "peau1": {"w": 1440, "h": 1323, "bg": [27, 39, 56]}, "graisse1": {"w": 1440, "h": 1354, "bg": [27, 33, 49]}, "muscle1": {"w": 1440, "h": 1323, "bg": [23, 34, 48]}, "tendon1": {"w": 1440, "h": 1323, "bg": [27, 37, 47]}, "ligament1": {"w": 1440, "h": 1323, "bg": [29, 38, 55]}, "vaisseau1": {"w": 1440, "h": 1323, "bg": [29, 38, 53]}, "nerf1": {"w": 1440, "h": 1323, "bg": [20, 31, 45]}, "os1": {"w": 1440, "h": 1323, "bg": [28, 37, 61]}, "peau2": {"w": 1440, "h": 1323, "bg": [33, 38, 58]}, "graisse2": {"w": 1440, "h": 1231, "bg": [34, 40, 65]}, "muscle2": {"w": 1440, "h": 1328, "bg": [35, 42, 56]}, "tendon2": {"w": 1440, "h": 1337, "bg": [36, 42, 56]}, "ligament2": {"w": 1440, "h": 1323, "bg": [26, 33, 50]}, "vaisseau2": {"w": 1440, "h": 1323, "bg": [27, 33, 48]}, "nerf2": {"w": 1440, "h": 1323, "bg": [31, 37, 49]}, "os2": {"w": 1440, "h": 1323, "bg": [32, 35, 53]}};window.__TEX__="/atlas-zoom/_shared/board.webp";</script>
+<script>// La Main — contenu des 24 planches (8 tissus × 3 échelles). Coordonnées normalisées dans la planche recadrée.
+// portal : { c:[x,y], w } = rectangle (largeur relative) où vit la planche de l'échelle suivante.
+const TISSUES = [
+ { key: 'peau', name: 'Peau', short: 'Peau', levels: [
+  { img: 'peau0', title: 'Anatomie de surface et peau de la main', portal: { c: [0.26, 0.45], w: 0.2 }, pins: [
+   { x: .30, y: .085, t: 'Peau palmaire & dermatoglyphes', p: 'Peau <b>épaisse</b> et glabre : couche cornée très épaisse, ni poils ni glandes sébacées, très riche en <b>glandes sudoripares eccrines</b>. Les crêtes épidermiques dessinent les <b>dermatoglyphes</b> (empreintes), fixés vers le 4e mois de vie fœtale.', trap: 'La peau épaisse se définit par l’épaisseur de l’<b>épiderme</b> (pas du derme) et ne se trouve qu’aux paumes et aux plantes.' },
+   { x: .317, y: .496, t: 'Plis palmaires', p: 'Plis de flexion où la peau est <b>amarrée à l’aponévrose palmaire</b> par des travées fibreuses : peau peu mobile, adaptée à la préhension. Le pli palmaire distal répond aux articulations MCP des doigts ulnaires.', trap: 'Un pli palmaire transverse unique évoque une <b>trisomie 21</b>, sans être spécifique (présent chez quelques % de la population générale).' },
+   { x: .628, y: .659, t: 'Tabatière anatomique', p: 'Dépression radiale du poignet entre le <b>long extenseur du pouce</b> (en dedans) et le <b>long abducteur + court extenseur du pouce</b> (en dehors). Plancher : <b>scaphoïde</b> et trapèze ; contenu : l’<b>artère radiale</b>.', trap: 'Douleur à la palpation de la tabatière après une chute sur la main tendue = <b>fracture du scaphoïde</b> jusqu’à preuve du contraire, même si la radio initiale est normale.' },
+   { x: .756, y: .087, t: 'Appareil unguéal', p: 'La tablette unguéale (kératine dure) est produite par la <b>matrice</b>, sous le repli proximal ; la <b>lunule</b> est la partie visible de la matrice. Croissance ≈ 3 mm par mois aux mains.', trap: 'Une plaie de la matrice mal réparée laisse une <b>dystrophie unguéale définitive</b> : le lit de l’ongle se répare sous loupe.' },
+   { x: .26, y: .45, portal: 'Zoomer dans la peau', t: 'Peau de l’éminence thénar', p: 'Sa peau épaisse est innervée par la <b>branche cutanée palmaire du nerf médian</b>, née au-dessus du canal carpien. Plongez pour voir les couches de l’épiderme et les mécanorécepteurs.', trap: 'Cette branche passe <b>au-dessus</b> du rétinaculum : la sensibilité de l’éminence thénar est <b>conservée</b> dans le syndrome du canal carpien.' } ] },
+  { img: 'peau1', title: 'Histologie de la peau palmaire (peau épaisse)', portal: { c: [0.62, 0.50], w: 0.16 }, pins: [
+   { x: .256, y: .23, t: 'Couches de l’épiderme', p: 'Peau épaisse : 5 couches — basale, épineuse, granuleuse, <b>claire (stratum lucidum)</b> et cornée très épaisse. Épithélium pavimenteux stratifié <b>kératinisé</b>.', trap: 'Le stratum lucidum n’existe que dans la peau épaisse. Renouvellement épidermique complet en ≈ 4 semaines.' },
+   { x: .733, y: .508, t: 'Corpuscule de Meissner', p: 'Mécanorécepteur encapsulé au <b>sommet des papilles dermiques</b>, à adaptation rapide : <b>toucher fin</b> et discrimination, très dense à la pulpe des doigts.', trap: 'Meissner = derme papillaire (superficiel) ; Pacini = derme profond / hypoderme (vibrations). Ne pas confondre avec le plexus de Meissner du tube digestif.' },
+   { x: .428, y: .834, t: 'Corpuscule de Pacini', p: 'Volumineux corpuscule lamellaire « en bulbe d’oignon » du <b>derme profond et de l’hypoderme</b> : <b>vibrations</b> et pression, adaptation très rapide.', trap: 'Les lamelles concentriques sont des cellules périneurales aplaties autour d’une terminaison nerveuse unique.' },
+   { x: .239, y: .689, t: 'Glandes sudoripares eccrines', p: 'Glandes tubuleuses <b>pelotonnées</b> du derme profond, au canal excréteur spiralé dans l’épiderme ; innervation <b>sympathique cholinergique</b>.', trap: 'Paradoxe classique : fibres sympathiques mais médiateur <b>acétylcholine</b> (récepteurs muscariniques) → l’hyperhidrose palmaire se traite par toxine botulique.' },
+   { x: .62, y: .50, portal: 'Entrer dans la cellule', t: 'Couche basale', p: 'Kératinocytes en division et <b>mélanocytes</b> (≈ 1 pour 4 à 10 cellules basales) formant l’unité épidermo-mélanique.', trap: 'Le nombre de mélanocytes est le même quelle que soit la couleur de peau : seules la quantité et le type de mélanine varient.' } ] },
+  { img: 'peau2', title: 'Cytologie de la peau : kératinocyte et mélanocyte', pins: [
+   { x: .267, y: .26, t: 'Desmosomes', p: 'Jonctions d’ancrage entre kératinocytes, faites de <b>cadhérines</b> (desmogléines, desmocollines) reliées aux tonofilaments de kératine : elles donnent l’aspect « épineux » en microscopie optique.', trap: 'Auto-anticorps anti-<b>desmogléine</b> → <b>pemphigus</b> : bulle intra-épidermique, signe de Nikolsky positif.' },
+   { x: .489, y: .798, t: 'Hémidesmosomes', p: 'Ancrent la cellule basale à la <b>lame basale</b> (intégrine α6β4, BP180 / collagène XVII, BP230).', trap: 'Auto-anticorps anti-BP180 / BP230 → <b>pemphigoïde bulleuse</b> : bulle <b>sous</b>-épidermique, tendue, du sujet âgé.' },
+   { x: .378, y: .218, t: 'Tonofilaments de kératine', p: 'Filaments intermédiaires de <b>kératine</b> (K5/K14 dans la couche basale, K1/K10 au-dessus) insérés sur les desmosomes : résistance mécanique.', trap: 'Mutation de K5/K14 → <b>épidermolyse bulleuse simple</b> (clivage dans la couche basale).' },
+   { x: .839, y: .32, t: 'Mélanocyte & mélanosomes', p: 'Cellule dendritique issue des <b>crêtes neurales</b> ; synthétise la mélanine (tyrosinase) dans les <b>mélanosomes</b>, transférés par ses prolongements aux kératinocytes, où ils coiffent le noyau.', trap: 'Dans l’albinisme, les mélanocytes sont <b>présents</b> mais la tyrosinase est déficiente.' } ] } ] },
+
+ { key: 'graisse', name: 'Tissu adipeux', short: 'Graisse', levels: [
+  { img: 'graisse0', title: 'Tissu adipeux, hypoderme et aponévrose palmaire', portal: { c: [0.645, 0.70], w: 0.2 }, pins: [
+   { x: .506, y: .085, t: 'Pulpe digitale', p: 'Graisse <b>cloisonnée en loges</b> par des septa fibreux tendus de la peau au périoste de P3 : coussin de préhension peu déformable.', trap: 'Ces loges closes expliquent la douleur pulsatile du <b>panaris pulpaire</b> et le risque d’ostéite de P3 : drainage chirurgical précoce.' },
+   { x: .561, y: .599, t: 'Aponévrose palmaire moyenne', p: 'Lame fibreuse triangulaire prolongeant le long palmaire, divisée en <b>bandelettes prétendineuses</b> vers les doigts ; elle protège les pédicules et ancre la peau.', trap: 'Sa rétraction fibreuse = <b>maladie de Dupuytren</b> : nodules palmaires puis flexion progressive des 4e et 5e doigts.' },
+   { x: .40, y: .447, t: 'Ligament natatoire', p: 'Ligament transverse superficiel tendu dans les <b>commissures interdigitales</b>, en avant des pédicules digitaux.', trap: 'Atteint dans la maladie de Dupuytren → rétraction des commissures et limitation de l’écartement des doigts.' },
+   { x: .483, y: .792, t: 'Muscle court palmaire', p: 'Petit muscle peaucier de l’éminence hypothénar : plisse la peau et protège le nerf et l’artère ulnaires du canal de Guyon.', trap: 'C’est le seul muscle de la main innervé par la <b>branche superficielle</b> du nerf ulnaire.' },
+   { x: .645, y: .70, portal: 'Zoomer dans la graisse', t: 'Coussinet adipeux hypothénarien', p: '<b>Tissu adipeux blanc</b> de structure, amortisseur des appuis palmaires.', trap: 'La graisse de structure (pulpe, paume, talon) est peu mobilisée lors du jeûne, contrairement à la graisse de réserve.' } ] },
+  { img: 'graisse1', title: 'Histologie du tissu adipeux blanc (hypoderme)', portal: { c: [0.778, 0.449], w: 0.16 }, pins: [
+   { x: .333, y: .473, t: 'Lobules & septa', p: 'Hypoderme : <b>lobules</b> d’adipocytes séparés par des <b>septa</b> conjonctifs (travées) où cheminent vaisseaux et nerfs.', trap: 'Inflammation des septa = panniculite <b>septale</b> (érythème noueux) ; des lobules = panniculite <b>lobulaire</b>.' },
+   { x: .667, y: .272, t: 'Adipocytes uniloculaires', p: 'Grandes cellules (50 à 150 µm) à <b>vacuole lipidique unique</b>, optiquement vide en HE (lipides dissous par les solvants).', trap: 'Pour voir les lipides : coupe à congélation + <b>Soudan</b> ou <b>Oil Red O</b>.' },
+   { x: .639, y: .567, t: 'Noyau en bague à chaton', p: 'Noyau aplati, <b>refoulé en périphérie</b> par la gouttelette lipidique.', trap: 'Graisse <b>brune</b> : adipocytes <b>multiloculaires</b>, noyau central, très riches en mitochondries (UCP1 / thermogénine).' },
+   { x: .778, y: .449, portal: 'Entrer dans la cellule', t: 'L’adipocyte', p: 'Cellule de réserve (triglycérides) et cellule <b>endocrine</b> : leptine, adiponectine.', trap: 'La leptine signale l’état des réserves à l’hypothalamus (satiété) ; l’obésité commune s’accompagne d’une <b>résistance</b> à la leptine.' } ] },
+  { img: 'graisse2', title: 'Ultrastructure de l’adipocyte', pins: [
+   { x: .489, y: 0.355, t: 'Gouttelette lipidique', p: 'Triglycérides stockés dans une gouttelette <b>sans bicouche</b>, limitée par une monocouche de phospholipides et la <b>périlipine</b>.', trap: 'La périlipine contrôle l’accès des lipases : elle n’est pas un organite membranaire.' },
+   { x: .756, y: 0.446, t: 'REL, mitochondries & lipolyse', p: 'Les catécholamines (récepteurs β3) activent la <b>lipase hormono-sensible</b> via l’AMPc ; l’<b>insuline</b> stimule la lipogenèse.', trap: 'L’insuline est la principale hormone <b>anti</b>lipolytique.' },
+   { x: .294, y: 0.608, t: 'Cavéoles', p: 'Invaginations riches en <b>cavéoline</b> : captation des acides gras et signalisation de l’insuline (translocation de GLUT4).', trap: '<b>GLUT4</b> = transporteur de glucose insulino-dépendant de l’adipocyte et du muscle.' },
+   { x: .233, y: 0.757, t: 'Capillaire & lame basale', p: 'Chaque adipocyte est entouré d’une <b>lame basale</b> et touche un capillaire : la <b>lipoprotéine lipase</b> endothéliale libère les acides gras des chylomicrons et VLDL.', trap: 'Comme la fibre musculaire, l’adipocyte (cellule d’origine mésenchymateuse) possède une lame basale propre.' } ] } ] },
+
+ { key: 'muscle', name: 'Muscles', short: 'Muscles', levels: [
+  { img: 'muscle0', title: 'Myologie de la main : muscles intrinsèques', portal: { c: [0.41, 0.58], w: 0.2 }, pins: [
+   { x: .40, y: .52, t: 'Éminence thénar', p: 'Court abducteur et opposant du pouce (<b>nerf médian</b>), court fléchisseur du pouce (chef superficiel : médian ; chef profond : ulnaire).', trap: 'Canal carpien évolué → <b>amyotrophie thénarienne</b> et perte de l’opposition du pouce.' },
+   { x: .367, y: .657, t: 'Adducteur du pouce', p: 'Deux chefs, oblique et transverse ; innervé par la <b>branche profonde du nerf ulnaire</b>.', trap: 'Paralysie ulnaire → <b>signe de Froment</b> : la pince pouce-index est compensée par la flexion de l’IP (long fléchisseur du pouce, nerf médian).' },
+   { x: .55, y: .55, t: 'Lombricaux & interosseux', p: 'Fléchissent les MCP et étendent les IP. Interosseux palmaires = <b>ad</b>ducteurs, dorsaux = <b>ab</b>ducteurs (axe du 3e doigt), tous innervés par l’ulnaire ; lombricaux I–II : médian, III–IV : ulnaire.', trap: 'Moyen mnémotechnique <b>PAD–DAB</b>. Paralysie ulnaire → <b>griffe</b> des 4e et 5e doigts.', note: 'Sur la planche, les flèches « Muscles lombricaux » pointent vers l’éminence thénar : les lombricaux naissent en réalité des tendons du fléchisseur profond, au milieu de la paume.' },
+   { x: .656, y: .536, t: 'Éminence hypothénar', p: 'Abducteur, court fléchisseur et opposant du 5e doigt, innervés par la <b>branche profonde du nerf ulnaire</b>.', trap: 'Atteinte ulnaire au canal de Guyon : amyotrophie hypothénarienne et des interosseux, avec sensibilité dorsale conservée.' },
+   { x: .41, y: .58, portal: 'Zoomer dans le muscle', t: 'Muscle strié squelettique', p: 'Muscle volontaire organisé en faisceaux enveloppés de tissu conjonctif : épimysium, périmysium, endomysium.', trap: 'Les muscles intrinsèques permettent la motricité fine ; leur atteinte (ulnaire surtout) ruine la préhension fine.' } ] },
+  { img: 'muscle1', title: 'Histologie du muscle strié squelettique', portal: { c: [0.667, 0.476], w: 0.16 }, pins: [
+   { x: .211, y: .307, t: 'Épi-, péri- et endomysium', p: 'Épimysium autour du muscle, <b>périmysium</b> autour des faisceaux, <b>endomysium</b> autour de chaque fibre (avec ses capillaires).', trap: 'Inflammation <b>périmysiale</b> périfasciculaire = dermatomyosite ; <b>endomysiale</b> = polymyosite.' },
+   { x: .856, y: .476, t: 'Noyaux périphériques', p: 'La fibre (rhabdomyocyte) est un <b>syncytium</b> plurinucléé, à noyaux <b>périphériques</b> sous le sarcolemme.', trap: 'Des noyaux centraux nombreux signent une régénération ou une myopathie (≠ cardiomyocyte : noyau central normal).' },
+   { x: .894, y: .567, t: 'Cellule satellite', p: 'Cellule souche quiescente située entre sarcolemme et lame basale : assure la <b>régénération</b> musculaire.', trap: 'Le myocarde n’a pas de cellules satellites : l’infarctus cicatrise par fibrose.' },
+   { x: .667, y: .476, portal: 'Entrer dans la cellule', t: 'Striation transversale', p: 'Alternance de bandes <b>A</b> (sombres, anisotropes) et <b>I</b> (claires, isotropes) due à l’agencement régulier des myofilaments.', trap: 'À la contraction, seule la bande A garde sa longueur.' } ] },
+  { img: 'muscle2', title: 'Cytologie du muscle squelettique : myocyte et sarcomère', pins: [
+   { x: .43, y: .36, t: 'Triade', p: '<b>Tubule T</b> encadré de deux citernes terminales du réticulum sarcoplasmique, à la <b>jonction des bandes A et I</b> : couplage excitation–contraction (DHPR ↔ RyR1).', trap: 'Squelettique : <b>triade</b> à la jonction A–I ; myocarde : <b>diade</b> à la strie Z. Mutation de RyR1 → <b>hyperthermie maligne</b>.' },
+   { x: .60, y: .45, t: 'Sarcomère', p: 'Unité contractile entre deux <b>stries Z</b> : bande A (myosine, longueur constante), bande I (actine seule), zone H et ligne M.', trap: 'À la contraction : I et H raccourcissent, A ne change pas (glissement des filaments).' },
+   { x: .267, y: .486, t: 'Myofibrilles', p: 'Cylindres de sarcomères en série (actine, myosine) occupant l’essentiel du sarcoplasme, entourés du réticulum sarcoplasmique.', trap: 'Le Ca²⁺ libéré par RyR1 se fixe sur la <b>troponine C</b> et démasque les sites de l’actine.' },
+   { x: .644, y: .57, t: 'Mitochondries & types de fibres', p: 'Fibres de type I : lentes, oxydatives, riches en mitochondries et myoglobine ; type II : rapides, glycolytiques.', trap: 'Type I = « rouge, lent, endurant » ; type II = « blanc, rapide, fatigable ».' } ] } ] },
+
+ { key: 'tendon', name: 'Tendons', short: 'Tendons', levels: [
+  { img: 'tendon0', title: 'Tendons fléchisseurs, extenseurs et gaines synoviales', portal: { c: [0.489, 0.56], w: 0.2 }, pins: [
+   { x: .417, y: .378, t: 'Chiasma de Camper', p: 'Le <b>fléchisseur superficiel</b> (FSD) se divise en deux languettes qui laissent passer le <b>fléchisseur profond</b> (FSP), se croisent (chiasma) puis s’insèrent sur <b>P2</b>.', trap: 'FSD → P2 (flexion de l’IPP) ; FSP → P3 (flexion de l’IPD). On teste le FSD en bloquant les autres doigts en extension.' },
+   { x: .42, y: .24, t: 'Zone II de Verdan', p: 'Dans le canal digital, FSD et FSP glissent ensemble sous les poulies : c’est le « <b>no man’s land</b> ».', trap: 'Les plaies des fléchisseurs en zone II ont le pronostic le plus délicat (adhérences) : réparation spécialisée et rééducation précoce.' },
+   { x: .322, y: .548, t: 'Long fléchisseur du pouce', p: 'Seul fléchisseur de l’IP du pouce, innervé par le <b>nerf interosseux antérieur</b> (branche du médian).', trap: 'Atteinte du nerf interosseux antérieur : impossible de faire le « O » pouce-index, <b>sans</b> trouble sensitif.' },
+   { x: .533, y: .777, t: 'Canal carpien', p: 'Tunnel ostéo-fibreux : os du carpe en arrière, <b>rétinaculum des fléchisseurs</b> en avant. Contenu : 9 tendons (4 FSD, 4 FSP, long fléchisseur du pouce) et le <b>nerf médian</b>.', trap: 'Le tendon du <b>long palmaire</b>, le nerf et l’artère ulnaires passent <b>en dehors</b> du canal carpien.' },
+   { x: .656, y: .705, t: 'Gaines synoviales', p: 'Gaine digito-carpienne <b>ulnaire</b> (fléchisseurs, prolongée au 5e doigt) et <b>radiale</b> (long fléchisseur du pouce).', trap: 'Une ténosynovite suppurée du pouce ou du 5e doigt peut diffuser à l’autre gaine : <b>phlegmon à bascule</b>.', note: 'Sur la planche, l’étiquette en bas à gauche « gaine digito-carpienne ulnaire » pointe vers le côté radial : il s’agit de la gaine radiale.' },
+   { x: .489, y: .56, portal: 'Zoomer dans le tendon', t: 'Tendons fléchisseurs', p: 'Tissu conjonctif dense <b>orienté</b> qui transmet la force du muscle à l’os.', trap: 'Un tendon sectionné se rétracte vers son muscle : le moignon proximal est parfois loin de la plaie.' } ] },
+  { img: 'tendon1', title: 'Histologie du tendon : tissu conjonctif dense orienté', portal: { c: [0.689, 0.476], w: 0.16 }, pins: [
+   { x: .278, y: .307, t: 'Épiténon & endoténon', p: 'Fibrilles → fibres → faisceaux primaires et secondaires, séparés par l’<b>endoténon</b> (vaisseaux, nerfs), le tout entouré de l’<b>épiténon</b>.', trap: 'Vascularisation pauvre → cicatrisation lente (6 à 12 semaines) : rééducation protégée après suture.' },
+   { x: .644, y: .174, t: 'Collagène de type I parallèle', p: 'Fibres de <b>collagène I</b> parallèles et ondulées (« crimp »), très résistantes à la traction ; substance fondamentale réduite.', trap: 'Tendon = conjonctif dense <b>orienté</b> (unitendu) ; derme = conjonctif dense <b>non orienté</b> (entrecroisé).' },
+   { x: .244, y: .706, t: 'Vaisseaux de l’endoténon', p: 'Apport par les <b>vincula</b> dans la gaine digitale et par l’endoténon ; nutrition aussi par diffusion synoviale.', trap: 'Léser les vincula expose à la nécrose et à la rupture : on les préserve pendant la réparation.' },
+   { x: .689, y: .476, portal: 'Entrer dans la cellule', t: 'Ténocytes', p: 'Fibroblastes tendineux aplatis, alignés en files entre les fibres de collagène.', trap: 'Les ténocytes sont peu nombreux et peu actifs : le tendon adulte se répare lentement.' } ] },
+  { img: 'tendon2', title: 'Cytologie du tendon : ultrastructure du ténocyte', pins: [
+   { x: .50, y: .531, t: 'Noyau fusiforme', p: 'Ténocyte : cellule fusiforme à longs prolongements, cytoplasme réduit au repos.', trap: 'Ténoblaste (actif, arrondi, en croissance ou cicatrisation) → ténocyte (quiescent, allongé).' },
+   { x: .478, y: .362, t: 'RER & Golgi : procollagène', p: 'Synthèse du <b>procollagène</b> : hydroxylation des prolines et lysines dans le RER (vitamine C), triple hélice, sécrétion via le Golgi, clivage extracellulaire en tropocollagène.', trap: 'Carence en <b>vitamine C</b> (scorbut) → collagène instable : gingivorragies, retard de cicatrisation.' },
+   { x: .444, y: .124, t: 'Fibrilles de collagène', p: 'Le tropocollagène s’assemble en fibrilles à <b>striation périodique de 67 nm</b> (décalage d’un quart), stabilisées par des pontages (lysyl oxydase).', trap: 'Une striation de 64–67 nm en MET signe le collagène fibrillaire (types I, II, III).' },
+   { x: .767, y: .29, t: 'Jonctions communicantes', p: 'Les prolongements des ténocytes sont reliés par des <b>jonctions gap</b> (connexine 43) : réseau mécanosensible.', trap: 'La mise en charge contrôlée stimule la synthèse de collagène : c’est la base de la rééducation tendineuse.' } ] } ] },
+
+ { key: 'ligament', name: 'Ligaments & poulies', short: 'Ligaments', levels: [
+  { img: 'ligament0', title: 'Ligaments, articulations et poulies digitales', portal: { c: [0.63, 0.43], w: 0.2 }, pins: [
+   { x: .394, y: .163, t: 'Poulies A1 à A5', p: 'Poulies <b>annulaires</b> (A1, A3, A5 en regard des articulations ; A2, A4 sur les diaphyses de P1 et P2) et <b>cruciformes</b> (C1 à C3) : elles plaquent les fléchisseurs contre l’os.', trap: '<b>A2 et A4</b> sont indispensables : leur rupture donne l’effet « corde d’arc ». Le doigt à ressaut siège sur <b>A1</b>.' },
+   { x: .422, y: .405, t: 'Plaque palmaire', p: 'Fibrocartilage antérieur des articulations MCP et IP qui empêche l’hyperextension.', trap: 'Entorse en hyperextension de l’IPP → lésion de la plaque palmaire, avec risque de déformation en col de cygne.' },
+   { x: .522, y: .49, t: 'Ligament métacarpien transverse profond', p: 'Relie les plaques palmaires des MCP II à V.', trap: 'Les <b>lombricaux</b> passent en avant de ce ligament, les <b>interosseux</b> en arrière.' },
+   { x: .478, y: .726, t: 'Rétinaculum des fléchisseurs', p: 'Tendu des tubercules du <b>scaphoïde</b> et du <b>trapèze</b> au <b>pisiforme</b> et au <b>crochet de l’hamatum</b> : toit du canal carpien.', trap: 'Sa section chirurgicale décomprime le nerf médian ; attention aux variantes de la branche motrice thénarienne.' },
+   { x: .63, y: .43, portal: 'Zoomer dans le ligament', t: 'Ligaments collatéraux MCP', p: 'Tendus en <b>flexion</b> aux MCP (effet came de la tête métacarpienne) : on immobilise donc les MCP fléchies.', trap: 'Pouce : rupture du ligament collatéral ulnaire de la MCP (pouce du skieur) ; l’interposition de l’aponévrose de l’adducteur = <b>lésion de Stener</b> → chirurgie.' } ] },
+  { img: 'ligament1', title: 'Histologie du ligament : tissu conjonctif dense', portal: { c: [0.667, 0.508], w: 0.16 }, pins: [
+   { x: .267, y: .302, t: 'Collagène I et III', p: 'Conjonctif dense régulier mais aux fibres légèrement <b>entrecroisées</b> (≠ tendon strictement parallèle) : résiste à des tractions multidirectionnelles.', trap: 'Le ligament contient plus de collagène III et d’élastine que le tendon.' },
+   { x: .844, y: .302, t: 'Fibres élastiques', p: 'Élastine sur un échafaudage de microfibrilles de <b>fibrilline</b> : retour élastique.', trap: 'Mutation de la fibrilline-1 → <b>syndrome de Marfan</b> (hyperlaxité, ectopie du cristallin, dilatation aortique).' },
+   { x: .244, y: .834, t: 'Enthèse', p: 'Zone d’insertion osseuse : ligament → fibrocartilage non minéralisé → fibrocartilage minéralisé → os.', trap: 'Les enthésites sont la signature des <b>spondyloarthrites</b> (talalgie, dactylite).' },
+   { x: .667, y: .508, portal: 'Entrer dans la cellule', t: 'Fibroblastes ligamentaires', p: 'Peu nombreux, allongés entre les faisceaux, ils entretiennent la matrice.', trap: 'Faible cellularité et faible vascularisation : un ligament rompu cicatrise lentement et souvent incomplètement.' } ] },
+  { img: 'ligament2', title: 'Cytologie du ligament : fibroblaste ligamentaire', pins: [
+   { x: .489, y: .52, t: 'Noyau ovoïde', p: 'Fibroblaste actif : noyau ovoïde à nucléole visible, cytoplasme basophile riche en RER.', trap: 'Fibrocyte (quiescent) : noyau allongé, dense, cytoplasme réduit.' },
+   { x: .678, y: .726, t: 'Vésicules d’exocytose', p: 'Sécrétion de procollagène et de tropoélastine.', trap: 'Le procollagène est clivé <b>hors de la cellule</b> en tropocollagène ; un défaut de ce clivage donne un syndrome d’Ehlers-Danlos (dermatosparaxis).' },
+   { x: .80, y: .254, t: 'Intégrines', p: 'Adhérences focales qui relient le cytosquelette d’actine à la matrice (fibronectine) : mécanotransduction.', trap: 'Les intégrines sont des récepteurs hétérodimériques α/β entre matrice et cytosquelette.' },
+   { x: .889, y: .677, t: 'Élastine & collagène', p: 'Fibres élastiques (élastine pontée par la desmosine) et fibres de collagène I et III.', trap: 'La desmosine et l’isodesmosine sont des pontages spécifiques de l’élastine.', note: 'La planche indique « endochemeaux » : il s’agit d’une coquille (cytosquelette, microfilaments d’actine).' } ] } ] },
+
+ { key: 'vaisseau', name: 'Vaisseaux', short: 'Vaisseaux', levels: [
+  { img: 'vaisseau0', title: 'Vascularisation artérielle et veineuse de la main', portal: { c: [0.522, 0.40], w: 0.2 }, pins: [
+   { x: .433, y: .103, t: 'Artères radiale & ulnaire', p: 'Les deux artères de l’avant-bras s’anastomosent dans la main par deux arcades.', trap: '<b>Test d’Allen</b> avant une ponction ou un prélèvement de l’artère radiale : il vérifie la suppléance ulnaire.' },
+   { x: .567, y: .453, t: 'Arcade palmaire profonde', p: 'Formée surtout par l’<b>artère radiale</b>, au contact des bases des métacarpiens, accompagnée de la branche profonde du nerf ulnaire.', trap: 'Profonde = radiale (plus proximale) ; superficielle = ulnaire.', note: 'L’étiquette « arcade palmaire superficielle » apparaît deux fois sur la planche.' },
+   { x: .311, y: .532, t: 'Artère principale du pouce', p: 'Branche de l’artère radiale qui vascularise les deux bords palmaires du pouce.', trap: 'Ne pas la confondre avec l’artère radiale de l’index.' },
+   { x: .633, y: .713, t: 'Artères digitales propres', p: 'Sur les faces latérales des doigts, accompagnées des nerfs digitaux palmaires.', trap: 'Au doigt, le <b>nerf</b> est en avant (palmaire) de l’artère : une plaie latérale avec saignement artériel fait rechercher une lésion nerveuse.' },
+   { x: .522, y: .40, portal: 'Zoomer dans l’artère', t: 'Arcade palmaire superficielle', p: 'Surtout formée par l’<b>artère ulnaire</b> (complétée par le rameau palmaire superficiel de la radiale), sous l’aponévrose palmaire ; elle donne les artères digitales palmaires communes.', trap: 'Elle se projette au niveau du bord distal du pouce en abduction (ligne de Kaplan).' } ] },
+  { img: 'vaisseau1', title: 'Histologie des vaisseaux sanguins : artère et veine', portal: { c: [0.60, 0.38], w: 0.16 }, pins: [
+   { x: .228, y: .302, t: 'Limitantes élastiques', p: 'Artère musculaire : <b>limitante élastique interne</b> nette et festonnée entre intima et média, limitante externe plus fine.', trap: 'Une LEI bien visible signe une artère ; elle est absente ou discrète dans une veine.' },
+   { x: .767, y: .484, t: 'Média', p: 'Couche de <b>cellules musculaires lisses</b> circulaires, épaisse dans les artères musculaires (radiale, ulnaire).', trap: 'Artère musculaire (distribution) ≠ artère élastique (aorte, nombreuses lames élastiques).' },
+   { x: .433, y: .52, t: 'Veine & valvules', p: 'Paroi fine, lumière large et irrégulière, <b>valvules</b> (replis de l’intima) empêchant le reflux.', trap: 'Veine : adventice > média ; artère : média > adventice.' },
+   { x: .60, y: .38, portal: 'Entrer dans la cellule', t: 'Intima', p: 'Endothélium reposant sur sa lame basale et un mince tissu sous-endothélial.', trap: 'La lésion initiale de l’athérosclérose siège dans l’<b>intima</b>.' } ] },
+  { img: 'vaisseau2', title: 'Cytologie vasculaire : cellule endothéliale et capillaire', pins: [
+   { x: .678, y: .363, t: 'Jonctions serrées & adhérentes', p: 'Jonctions serrées (claudines, occludine) et adhérentes (VE-cadhérine) : contrôlent la perméabilité paracellulaire.', trap: 'Barrière hémato-encéphalique = jonctions serrées très étanches ; capillaires sinusoïdes (foie) = discontinus.' },
+   { x: .256, y: .665, t: 'Corps de Weibel-Palade', p: 'Granules en bâtonnets stockant le <b>facteur von Willebrand</b> et la <b>P-sélectine</b>.', trap: 'La desmopressine libère le vWF de ces granules : traitement de la maladie de Willebrand de type 1.' },
+   { x: .378, y: .351, t: 'Transcytose (cavéoles)', p: 'Vésicules transportant albumine et macromolécules à travers l’endothélium continu.', trap: 'Capillaire continu (muscle, peau) : transcytose ; fenêtré (rein, glandes endocrines) : pores de 60 à 80 nm.' },
+   { x: .311, y: .26, t: 'Glycocalyx endothélial', p: 'Couche de protéoglycanes tapissant la lumière : anticoagulante et sensible au cisaillement (libération de NO).', trap: 'L’endothélium produit le <b>NO</b> et la prostacycline ; la dysfonction endothéliale est le premier stade de l’athérosclérose.' },
+   { x: .244, y: .80, t: 'Péricyte', p: 'Cellule contractile entourant le capillaire et partageant sa lame basale.', trap: 'En MET, péricyte + lame basale commune = repère d’un capillaire ou d’une veinule.' } ] } ] },
+
+ { key: 'nerf', name: 'Nerfs', short: 'Nerfs', levels: [
+  { img: 'nerf0', title: 'Innervation de la main : nerfs médian, ulnaire et radial', portal: { c: [0.525, 0.14], w: 0.2 }, pins: [
+   { x: .517, y: .239, t: 'Canal carpien', p: 'Le nerf médian passe sous le rétinaculum des fléchisseurs avec les 9 tendons fléchisseurs.', trap: 'Syndrome du canal carpien : paresthésies nocturnes des 3½ premiers doigts, signes de <b>Tinel</b> et <b>Phalen</b> ; sensibilité de l’éminence thénar conservée.' },
+   { x: .444, y: .318, t: 'Branche motrice thénarienne', p: 'Branche récurrente du médian vers le court abducteur, l’opposant et le chef superficiel du court fléchisseur du pouce.', trap: 'Surnommée « nerf à un million de dollars » : une petite plaie thénarienne peut supprimer l’opposition du pouce.' },
+   { x: .644, y: .294, t: 'Canal de Guyon', p: 'Tunnel entre le <b>pisiforme</b> et le <b>crochet de l’hamatum</b>, sous le ligament carpien palmaire : nerf et artère ulnaires.', trap: 'Compression au Guyon : déficit des muscles intrinsèques mais sensibilité du <b>dos</b> de la main conservée (le rameau cutané dorsal naît plus haut).' },
+   { x: .617, y: .487, t: 'Branche profonde du nerf ulnaire', p: 'Motrice : hypothénar, interosseux, lombricaux III–IV, adducteur du pouce et chef profond du court fléchisseur.', trap: 'Lésion → <b>griffe ulnaire</b> et signe de Froment ; « paradoxe ulnaire » : griffe plus marquée lors d’une lésion distale.' },
+   { x: .361, y: .862, t: 'Nerfs digitaux palmaires propres', p: 'Sensitifs, sur les bords palmaires des doigts, en avant des artères.', trap: 'Bilan de toute plaie digitale : discrimination à deux points (normale < 6 mm à la pulpe).', note: 'Sur la planche, une étiquette « rameau superficiel du nerf radial » est placée côté ulnaire du poignet : ce rameau innerve le dos du bord radial de la main. L’étiquette « trecreires » est une coquille.' },
+   { x: .525, y: .14, portal: 'Zoomer dans le nerf', t: 'Nerf médian au poignet', p: 'Nerf mixte : fascicules moteurs et sensitifs entourés d’épinèvre.', trap: 'Le médian au poignet innerve la « LOAF » : lombricaux I–II, opposant, abducteur court, fléchisseur court (chef superficiel).' } ] },
+  { img: 'nerf1', title: 'Histologie du nerf périphérique', portal: { c: [0.667, 0.50], w: 0.16 }, pins: [
+   { x: .206, y: .197, t: 'Épinèvre', p: 'Tissu conjonctif dense entourant le nerf et ses fascicules, contenant les vasa nervorum.', trap: 'En microchirurgie : suture épineurale ou périneurale (fasciculaire).' },
+   { x: .222, y: .294, t: 'Périnèvre', p: 'Gaine de chaque <b>fascicule</b> : cellules épithélioïdes jointives (jonctions serrées) formant la <b>barrière hémato-nerveuse</b>.', trap: 'Le périnèvre est la couche la plus résistante à la traction et la barrière de diffusion du nerf.' },
+   { x: .578, y: .414, t: 'Endonèvre', p: 'Tissu conjonctif lâche entre les fibres nerveuses (réticuline, capillaires).', trap: 'Seddon : neurapraxie (myéline), axonotmésis (axone, gaines conservées), neurotmésis (section complète).' },
+   { x: .667, y: .50, portal: 'Entrer dans la cellule', t: 'Axones myélinisés', p: 'Fibre myélinisée : axone + gaine de myéline formée par les cellules de Schwann.', trap: 'Les fibres myélinisées conduisent jusqu’à 120 m/s, les amyéliniques autour de 1 m/s.' } ] },
+  { img: 'nerf2', title: 'Cytologie du nerf : axone myélinisé et cellule de Schwann', pins: [
+   { x: .367, y: .293, t: 'Nœud de Ranvier', p: 'Interruption de la myéline entre deux cellules de Schwann, riche en <b>canaux Na⁺ voltage-dépendants</b> : conduction <b>saltatoire</b>.', trap: 'Démyélinisation (Guillain-Barré) → ralentissement et blocs de conduction à l’EMG.' },
+   { x: .606, y: .354, t: 'Cellule de Schwann', p: 'Myélinise <b>un seul segment d’un seul axone</b> (≠ oligodendrocyte, qui myélinise plusieurs axones dans le SNC).', trap: 'Origine : <b>crêtes neurales</b>. Elle guide la repousse axonale (bandes de Büngner) : la régénération est possible dans le SNP.' },
+   { x: .667, y: .548, t: 'Gaine de myéline', p: 'Enroulement concentrique de la membrane schwannienne (protéines P0, PMP22) : lamelles denses en MET.', trap: 'Duplication de <b>PMP22</b> → Charcot-Marie-Tooth de type 1A.' },
+   { x: .867, y: .149, t: 'Canaux Na⁺ et K⁺', p: 'Entrée de Na⁺ (dépolarisation) puis sortie de K⁺ (repolarisation) ; la Na⁺/K⁺-ATPase restaure les gradients.', trap: 'Les anesthésiques locaux bloquent les canaux Na⁺ ; les fibres fines sont bloquées en premier.' } ] } ] },
+
+ { key: 'os', name: 'Os (ostéologie)', short: 'Os', levels: [
+  { img: 'os0', title: 'Ostéologie de la main et du poignet (vue palmaire)', portal: { c: [0.49, 0.48], w: 0.2 }, pins: [
+   { x: .433, y: .257, t: 'Scaphoïde', p: 'Os latéral de la rangée proximale, pont entre les deux rangées : le plus souvent fracturé.', trap: 'Vascularisation <b>rétrograde</b> (distale → proximale) : fracture du col → pseudarthrose et <b>nécrose du pôle proximal</b>.' },
+   { x: .489, y: .312, t: 'Lunatum', p: 'Os central de la rangée proximale, articulé avec le radius.', trap: '<b>Maladie de Kienböck</b> (ostéonécrose du lunatum) ; la luxation péri-lunaire est une urgence (compression du médian).' },
+   { x: .578, y: .33, t: 'Hamatum & pisiforme', p: 'Le crochet de l’hamatum et le pisiforme bordent le <b>canal de Guyon</b> et reçoivent le rétinaculum des fléchisseurs.', trap: 'Fracture du crochet de l’hamatum (golf, tennis) : douleur hypothénarienne, risque pour le nerf ulnaire.' },
+   { x: .394, y: .312, t: 'Trapèze', p: 'Articulation trapézo-métacarpienne en <b>selle</b> : clé de l’opposition du pouce.', trap: '<b>Rhizarthrose</b> = arthrose trapézo-métacarpienne, fréquente chez la femme après 50 ans.' },
+   { x: .439, y: .088, t: 'Radius distal', p: 'Épiphyse articulée avec le scaphoïde et le lunatum.', trap: 'Fracture de <b>Pouteau-Colles</b> : déplacement postérieur (dos de fourchette) ; Goyrand-Smith : antérieur.' },
+   { x: .578, y: .463, t: 'Métacarpiens', p: 'Cinq os longs (base, corps, tête).', trap: 'Fracture du col du 5e métacarpien = <b>fracture du boxeur</b> : vérifier l’absence de rotation (chevauchement des doigts en flexion).' },
+   { x: .49, y: .48, portal: 'Zoomer dans l’os', t: 'Diaphyse du 3e métacarpien', p: 'Os <b>compact</b> (cortical) autour de la cavité médullaire ; épiphyses en os <b>spongieux</b>.', trap: 'Chez l’enfant, le cartilage de croissance (physe) est un point faible : classification de Salter-Harris.' } ] },
+  { img: 'os1', title: 'Histologie du tissu osseux : os compact et os spongieux', portal: { c: [0.84, 0.50], w: 0.16 }, pins: [
+   { x: .289, y: .366, t: 'Ostéon (système de Havers)', p: 'Unité de l’os compact : <b>lamelles concentriques</b> autour d’un canal de Havers (vaisseaux, nerfs).', trap: 'Les canaux de <b>Volkmann</b>, transversaux, relient les canaux de Havers entre eux et au périoste.' },
+   { x: .489, y: .50, t: 'Os spongieux', p: 'Travées anastomosées orientées selon les contraintes, entre lesquelles se trouve la moelle.', trap: 'Remodelage plus rapide : l’os spongieux est touché en premier par l’ostéoporose (vertèbres, poignet).' },
+   { x: .256, y: .137, t: 'Périoste', p: 'Couche fibreuse externe et couche ostéogénique interne ; fibres de Sharpey ancrées dans l’os.', trap: 'Le périoste assure la croissance en épaisseur et le cal osseux ; il est épais chez l’enfant (fractures « en bois vert »).' },
+   { x: .84, y: .50, portal: 'Entrer dans la cellule', t: 'Ostéocytes & ostéoplastes', p: 'Ostéocytes logés dans leurs ostéoplastes, reliés par des canalicules.', trap: 'Les ostéocytes sont les cellules les plus nombreuses de l’os : ce sont des mécanosenseurs.', note: 'La planche indique « coupe tridimensionnelle de la bone » : coquille anglaise pour « de l’os ».' } ] },
+  { img: 'os2', title: 'Cytologie osseuse : ostéoblaste, ostéocyte et ostéoclaste', pins: [
+   { x: .278, y: .33, t: 'Ostéoblaste', p: 'Cellule cubique basophile bordant les surfaces osseuses : sécrète l’<b>ostéoïde</b> (collagène I) puis le minéralise (phosphatase alcaline).', trap: 'Rachitisme / ostéomalacie = défaut de <b>minéralisation</b> de l’ostéoïde ; la phosphatase alcaline osseuse est un marqueur de formation.' },
+   { x: .489, y: .258, t: 'Ostéocyte', p: 'Ostéoblaste emmuré dans un <b>ostéoplaste</b>, aux prolongements reliés par des jonctions gap dans les canalicules ; mécanosenseur qui sécrète la <b>sclérostine</b>.', trap: 'Un anti-sclérostine (romosozumab) est un traitement anabolique de l’ostéoporose.' },
+   { x: .667, y: .403, t: 'Ostéoclaste', p: 'Cellule géante <b>multinucléée</b> issue de la lignée <b>monocyto-macrophagique</b>, activée par <b>RANKL</b>.', trap: 'L’ostéoclaste n’est <b>pas</b> d’origine mésenchymateuse. Bisphosphonates et dénosumab (anti-RANKL) inhibent la résorption.' },
+   { x: .733, y: .524, t: 'Lacune de Howship', p: 'Bordure en brosse + zone de scellement : la pompe à protons acidifie, la <b>cathepsine K</b> et les MMP dégradent la matrice.', trap: 'Ostéopétrose = déficit de résorption (anhydrase carbonique II, pompe à protons) → os denses mais fragiles.' },
+   { x: .50, y: .741, t: 'Matrice minéralisée', p: 'Environ 65 % de minéral (<b>hydroxyapatite</b>), 25 % de matière organique (surtout collagène I) et 10 % d’eau.', trap: 'Ostéogenèse imparfaite = anomalie du collagène I : sclérotiques bleues, fractures multiples.' } ] } ] },
+];
+</script>
+<script>// La Main — atlas à zoom continu, 8 tissus × 3 échelles (Canvas 2D, zéro WebGL, zéro dépendance).
+// Chaque tissu est une chaîne de 3 planches emboîtées (Anatomie ⊃ Histologie ⊃ Cytologie) parcourue
+// par une seule caméra ; le sélecteur de tissu « pèle » d'une chaîne à l'autre par un dévoilement radial.
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const META = window.__META__, IMG = window.__IMG__; const NT = TISSUES.length, NLV = 3;
+const LEVEL = ['Anatomie', 'Histologie', 'Cytologie'], SCALE = ['Organe', 'Tissu', 'Cellule'], MAGN = [1, 100, 10000], REALW = [26, 0.26, 0.0026];
+const CTA = ['Zoomer dans le tissu', 'Entrer dans la cellule'];
+
+// ───────────── worlds: per tissue, each plate lives inside its parent's portal rectangle
+const R = TISSUES.map((T) => { const r = []; const m0 = META[T.levels[0].img]; r.push({ x: 0, y: 0, w: 1, h: m0.h / m0.w });
+  for (let k = 1; k < NLV; k++) { const p = T.levels[k - 1].portal, par = r[k - 1], m = META[T.levels[k].img]; const w = par.w * p.w, h = w * (m.h / m.w);
+    r.push({ x: par.x + p.c[0] * par.w - w / 2, y: par.y + p.c[1] * par.h - h / 2, w, h }); } return r; });
+
+// ───────────── canvas & view
+const cv = $('#cv'), ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false, railH = 200;
+const offs = [null, null]; const offx = [null, null];
+function off(i) { if (!offs[i]) { offs[i] = document.createElement('canvas'); offx[i] = offs[i].getContext('2d'); } if (offs[i].width !== cv.width || offs[i].height !== cv.height) { offs[i].width = cv.width; offs[i].height = cv.height; } return offx[i]; }
+function layout() {
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const top = mobile ? 58 : 76, bottom = mobile ? 86 : 104, left = mobile ? 4 : 22, right = mobile ? 4 : 92;
+  aw = (W - left - right) * 0.98; ah = (H - top - bottom) * 0.98; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
+  railH = ($('#rail').clientHeight || 200) - 12; need();
+}
+const homeZ = (t, k) => Math.min(aw / R[t][k].w, ah / R[t][k].h);
+const home = (t, k) => ({ cx: R[t][k].x + R[t][k].w / 2, cy: R[t][k].y + R[t][k].h / 2, z: homeZ(t, k) });
+let cur = 0; const cam = { cx: 0.5, cy: 0.46, z: 600 };
+const sig = (t, k, z) => z / homeZ(t, k);
+const toS = (c, wx, wy) => [vcx + (wx - c.cx) * c.z, vcy + (wy - c.cy) * c.z];
+const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
+function alphas(t, z) { const a = []; for (let k = 0; k < NLV; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(t, k, z)); const D = k === NLV - 1 ? 1 : 1 - sst(0.82, 1.0, sig(t, k + 1, z)); a.push(A * D); } return a; }
+function dominant(t = cur, z = cam.z) { const a = alphas(t, z); let b = 0; for (let k = 1; k < NLV; k++) if (a[k] > a[b]) b = k; return b; }
+
+// ───────────── images: decoded on demand, small LRU keeps memory low on phones
+const imgs = {}, thumbs = {}, lru = [];
+function thumb(key) { if (!thumbs[key]) { const i = new Image(); i.src = IMG[key + '_t']; thumbs[key] = i; } return thumbs[key]; }
+function want(key) { let e = imgs[key]; if (!e) { const i = new Image(); i.decoding = 'async'; i.src = IMG[key]; e = imgs[key] = { i, ok: false }; e.p = i.decode().then(() => { e.ok = true; need(); }).catch(() => { e.ok = !!i.naturalWidth; need(); }); }
+  const j = lru.indexOf(key); if (j >= 0) lru.splice(j, 1); lru.push(key);
+  while (lru.length > (mobile ? 7 : 11)) { const k = lru.shift(); if (imgs[k]) { imgs[k].i.src = ''; delete imgs[k]; } } return e; }
+function prefetch() { const T = TISSUES[cur]; T.levels.forEach((l) => want(l.img)); [cur - 1, cur + 1].forEach((t) => t >= 0 && t < NT && want(TISSUES[t].levels[dominant()].img)); }
+
+// ───────────── rendering (only when something changes)
+let dirty = true, raf = 0, quality = 'high', texPat = null, texImg = null;
+function need() { dirty = true; if (!raf) raf = requestAnimationFrame(frame); }
+function drawPlate(c, t, k, alpha, cm) {
+  const key = TISSUES[t].levels[k].img; const e = imgs[key]; const im = e && e.ok ? e.i : thumb(key); if (!im || !im.naturalWidth) return;
+  const r = R[t][k]; const [x, y] = toS(cm, r.x, r.y); const sw = r.w * cm.z, sh = r.h * cm.z; const NW = im.naturalWidth, NH = im.naturalHeight;
+  const dx0 = Math.max(0, x), dy0 = Math.max(0, y), dx1 = Math.min(W, x + sw), dy1 = Math.min(H, y + sh); if (dx1 <= dx0 || dy1 <= dy0) return;
+  c.globalAlpha = alpha; c.drawImage(im, ((dx0 - x) / sw) * NW, ((dy0 - y) / sh) * NH, ((dx1 - dx0) / sw) * NW, ((dy1 - dy0) / sh) * NH, dx0 * DPR, dy0 * DPR, (dx1 - dx0) * DPR, (dy1 - dy0) * DPR); c.globalAlpha = 1;
+}
+function renderChain(c, t, cm) {
+  const a = alphas(t, cm.z);
+  for (let k = 0; k < NLV; k++) { if (a[k] < 0.004) continue; const sg = sig(t, k, cm.z);
+    if (k > 0 && sg < 0.97) { // a deeper scale opens through a soft radial iris centred on its portal
+      const o = off(0); const r = R[t][k]; const [x0, y0] = toS(cm, r.x, r.y); const sw = r.w * cm.z, sh = r.h * cm.z;
+      const bx = Math.max(0, Math.floor(x0 * DPR)), by = Math.max(0, Math.floor(y0 * DPR)), bw = Math.min(cv.width, Math.ceil((x0 + sw) * DPR)) - bx, bh = Math.min(cv.height, Math.ceil((y0 + sh) * DPR)) - by;
+      if (bw <= 0 || bh <= 0) continue;
+      o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(bx, by, bw, bh); o.imageSmoothingQuality = quality; drawPlate(o, t, k, 1, cm);
+      const cx = (x0 + sw / 2) * DPR, cy = (y0 + sh / 2) * DPR, rr = Math.max(sw, sh) * (0.3 + 0.5 * sst(0.5, 0.97, sg)) * DPR;
+      const g = o.createRadialGradient(cx, cy, rr * 0.42, cx, cy, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(bx, by, bw, bh); o.globalCompositeOperation = 'source-over';
+      c.globalAlpha = a[k]; c.drawImage(offs[0], bx, by, bw, bh, bx, by, bw, bh); c.globalAlpha = 1;
+    } else drawPlate(c, t, k, a[k], cm); }
+  return a;
+}
+function bgOf(t, z) { const a = alphas(t, z); let s = 0, col = [0, 0, 0]; a.forEach((v, k) => { const b = META[TISSUES[t].levels[k].img].bg; s += v; for (let i = 0; i < 3; i++) col[i] += b[i] * v; }); return col.map((v) => v / Math.max(1e-6, s)); }
+let peel = null; // tissue switch: { from, cm, t0, dur, cx, cy }
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
+  let bg = bgOf(cur, cam.z); let k = 1;
+  if (peel) { k = ease(clamp((performance.now() - peel.t0) / peel.dur, 0, 1)); const b0 = bgOf(peel.from, peel.cm.z); bg = b0.map((v, i) => v + (bg[i] - v) * k); }
+  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v)).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.55; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  if (peel) { // previous tissue underneath, the new one revealed through an expanding soft circle ("peeling" a layer)
+    renderChain(ctx, peel.from, peel.cm);
+    const o = off(1); o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(0, 0, cv.width, cv.height); o.imageSmoothingQuality = quality;
+    renderChain(o, cur, cam); const D = Math.hypot(W, H) * DPR; const rr = Math.max(1, D * (0.05 + 1.05 * k));
+    const g = o.createRadialGradient(peel.cx * DPR, peel.cy * DPR, rr * 0.62, peel.cx * DPR, peel.cy * DPR, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(0, 0, cv.width, cv.height); o.globalCompositeOperation = 'source-over';
+    ctx.drawImage(offs[1], 0, 0); if (k >= 1) peel = null;
+  } else renderChain(ctx, cur, cam);
+  updateHUD(); updatePins();
+}
+
+// ───────────── camera dynamics
+const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
+const zMin = () => homeZ(cur, 0) * 0.7, zMax = () => homeZ(cur, NLV - 1) * 3.4;
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function clampCenter() { const r = R[cur][dominant()]; const m = 0.12 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m, r.y + r.h + m); }
+function steer(dt, strength) { const k = dominant(); if (k >= NLV - 1) return 0; const sg = sig(cur, k, cam.z); if (sg <= 1.9) return 0; const r = R[cur][k + 1]; const kk = sst(1.9, 3.0, sg) * strength;
+  cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+function frame() {
+  raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = !!peel;
+  if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
+    const w = Math.abs(f.z1 - f.z0) / f.z1 < 1e-3 ? e : (1 / z - 1 / f.z0) / (1 / f.z1 - 1 / f.z0); cam.z = z; cam.cx = f.c0[0] + (f.c1[0] - f.c0[0]) * w; cam.cy = f.c0[1] + (f.c1[1] - f.c0[1]) * w;
+    if (u >= 1) { flight = null; if (f.done) f.done(); } else moving = true; }
+  else {
+    if (Math.abs(pend) > 1e-4) { const step = pend * (1 - Math.exp(-dt * 16)); pend -= step; zoomAt(anchorS[0], anchorS[1], Math.exp(step)); moving = true; if (step > 0) steering = true; } else pend = 0;
+    if (Math.abs(vel[0]) + Math.abs(vel[1]) > 0.02) { cam.cx -= vel[0] / cam.z; cam.cy -= vel[1] / cam.z; const d = Math.exp(-dt * 6); vel[0] *= d; vel[1] *= d; moving = true; } else vel = [0, 0];
+    if (steering) { if (steer(dt, 1 - Math.exp(-dt * 7)) > 1e-4) moving = true; if (Math.abs(pend) < 1e-4) steering = false; }
+    clampCenter(); }
+  if (dirty || moving) { dirty = false; quality = moving || ptrs.size ? 'medium' : 'high'; render(); }
+  if (moving) raf = requestAnimationFrame(frame); else if (quality !== 'high') { clearTimeout(frame.hq); frame.hq = setTimeout(() => { if (!raf && !ptrs.size) { quality = 'high'; render(); } }, 90); }
+}
+function flyTo(cx, cy, z, dur, done) { flight = { t0: performance.now(), dur: dur ?? clamp(0.7 + Math.abs(Math.log(z / cam.z)) * 0.3, 0.7, 2.4) * 1000, c0: [cam.cx, cam.cy], c1: [cx, cy], z0: cam.z, z1: z, done }; pend = 0; vel = [0, 0]; need(); }
+function flyHome(k, done) { const h = home(cur, k); flyTo(h.cx, h.cy, h.z, undefined, done); }
+function camAtDepth(t) { t = clamp(t, 0, NLV - 1); const k = Math.min(NLV - 2, Math.floor(t)); const f = t - k; const a = home(cur, k), b = home(cur, k + 1);
+  const z = Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * f); const w = (1 / z - 1 / a.z) / (1 / b.z - 1 / a.z); return { cx: a.cx + (b.cx - a.cx) * w, cy: a.cy + (b.cy - a.cy) * w, z }; }
+function depthOf() { const k = dominant(); if (k >= NLV - 1) return NLV - 1; return k + clamp(Math.log(Math.max(1e-6, sig(cur, k, cam.z))) / Math.log(homeZ(cur, k + 1) / homeZ(cur, k)), 0, 1); }
+
+// tissue switch ("peel"): keeps the scale; at the organ level the hand stays exactly in place
+async function setTissue(t, viaKey) {
+  t = (t + NT) % NT; if (t === cur) return; closeCard(); const lv = dominant(); const T = TISSUES[t];
+  const e = want(T.levels[lv].img); if (!e.ok) { $('#wait').classList.add('on'); await e.p; $('#wait').classList.remove('on'); }
+  const from = cur, cmFrom = { cx: cam.cx, cy: cam.cy, z: cam.z };
+  cur = t; flight = null; pend = 0; vel = [0, 0];
+  if (lv > 0) { const h = home(t, lv); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z; } else { cam.z = clamp(cam.z, homeZ(t, 0) * 0.7, homeZ(t, 0) * 2.4); }
+  const p = lastPointer && !viaKey ? lastPointer : [vcx, vcy]; peel = { from, cm: cmFrom, t0: performance.now(), dur: 720, cx: p[0], cy: p[1] };
+  levelKey = ''; prefetch(); hideHint(); need();
+}
+
+// ───────────── HUD
+let levelKey = '', hudKey = '';
+function niceLen(cmPerPx) { const target = cmPerPx * 92; const e = Math.pow(10, Math.floor(Math.log10(target))); const m = target / e; const n = (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; return [n, n / cmPerPx]; }
+function fmtLen(cm) { if (cm >= 1) return `${+cm.toPrecision(3)} cm`; if (cm >= 0.1) return `${+(cm * 10).toPrecision(3)} mm`; if (cm >= 1e-4) return `${+(cm * 1e4).toPrecision(3)} µm`; return `${+(cm * 1e7).toPrecision(3)} nm`; }
+function fmtMag(m) { if (m < 10) return '×' + m.toFixed(1).replace('.', ',').replace(',0', ''); const e = Math.pow(10, Math.floor(Math.log10(m)) - 1); return '×' + Math.round(Math.round(m / e) * e).toLocaleString('fr-FR'); }
+function updateHUD() {
+  const a = alphas(cur, cam.z); let sw = 0, lm = 0, lr = 0;
+  for (let k = 0; k < NLV; k++) { if (a[k] < 0.01) continue; const s = sig(cur, k, cam.z); sw += a[k]; lm += a[k] * Math.log(MAGN[k] * s); lr += a[k] * Math.log(REALW[k] / (R[cur][k].w * cam.z)); }
+  const M = Math.exp(lm / sw), cmPerPx = Math.exp(lr / sw); const k = dominant(); const [n, px] = niceLen(cmPerPx);
+  const key = `${fmtMag(M)}|${k}|${Math.round(px)}|${fmtLen(n)}`;
+  if (key !== hudKey) { hudKey = key; $('#mag').innerHTML = `${fmtMag(M)}<small>${SCALE[k]}</small>`; $('#sbi').style.width = `${Math.round(px)}px`; $('#sbt').textContent = fmtLen(n); }
+  const lk = `${cur}|${k}`; if (lk !== levelKey) { const first = !levelKey; levelKey = lk; const T = TISSUES[cur];
+    $('#ltitle').textContent = T.levels[k].title; $('#path').innerHTML = `La main &nbsp;›&nbsp; ${T.name} &nbsp;›&nbsp; <b>${LEVEL[k]}</b>`;
+    document.querySelectorAll('.tis').forEach((b, i) => b.classList.toggle('on', i === cur)); document.querySelectorAll('.rail .tick').forEach((el, i) => el.classList.toggle('on', i === k));
+    if (!first) toast(`${T.name} · ${LEVEL[k]} ${fmtMag(MAGN[k])}`); prefetch(); }
+  const t = depthOf(); $('#rth').style.top = `${6 + (t / (NLV - 1)) * railH}px`; $('#rfill').style.height = `${(t / (NLV - 1)) * railH}px`; $('#lvf').style.width = `${(t / (NLV - 1)) * 100}%`;
+}
+
+// ───────────── hotspots
+const pinEls = [];
+function buildPins() { const host = $('#pins');
+  TISSUES.forEach((T, t) => T.levels.forEach((L, k) => L.pins.forEach((p, j) => { const el = document.createElement('div'); el.className = 'pin' + (p.portal ? ' portal' : '');
+    el.innerHTML = `<button aria-label="${p.t.replace(/"/g, '')}"><b></b><i></i></button>` + (p.portal ? `<button class="go">${p.portal} →</button>` : `<span>${p.t}</span>`);
+    el.querySelector('button').addEventListener('click', (ev) => { ev.stopPropagation(); openCard(t, k, j, true); });
+    if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
+    host.appendChild(el); pinEls.push({ el, t, k, j, vis: false }); }))); }
+function updatePins() { const a = alphas(cur, cam.z);
+  for (const P of pinEls) { let show = false, x = 0, y = 0;
+    if (P.t === cur && !peel) { const p = TISSUES[P.t].levels[P.k].pins[P.j]; const sg = sig(cur, P.k, cam.z); show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.2 : 3.6);
+      if (show) { const r = R[cur][P.k]; [x, y] = toS(cam, r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; } }
+    if (show) { P.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; if (!P.vis) { P.el.classList.add('on'); P.vis = true; } } else if (P.vis) { P.el.classList.remove('on'); P.vis = false; } } }
+
+// ───────────── study card
+let open = null; const seen = new Set();
+function openCard(t, k, j, fly) {
+  const L = TISSUES[t].levels[k]; const p = L.pins[j]; open = { t, k, j }; seen.add(`${t}.${k}.${j}`); const n = L.pins.length;
+  pinEls.forEach((P) => { P.el.classList.toggle('active', P.t === t && P.k === k && P.j === j); P.el.classList.toggle('seen', seen.has(`${P.t}.${P.k}.${P.j}`)); });
+  const C = $('#card'); C.classList.toggle('portal', !!p.portal);
+  C.innerHTML = `<button class="x" aria-label="Fermer">✕</button><div class="chip"><i></i>${TISSUES[t].name} · ${LEVEL[k]} ${fmtMag(MAGN[k])}</div><h3>${p.t}</h3><p>${p.p}</p>
+    <div class="trap"><span>⚠ Piège d’EMD</span>${p.trap}</div>${p.note ? `<div class="note">Note sur la planche : ${p.note}</div>` : ''}
+    <div class="act">${p.portal ? `<button class="btn dive">${p.portal} →</button>` : ''}<button class="btn zoom">Recentrer</button></div>
+    <div class="nav"><button class="pv">← Précédent</button><span>${j + 1} / ${n} · ${[...seen].filter((s) => s.startsWith(`${t}.${k}.`)).length} vus</span><button class="nx">Suivant →</button></div>`;
+  C.querySelector('.x').onclick = closeCard; C.querySelector('.zoom').onclick = () => focusPin(t, k, j);
+  C.querySelector('.pv').onclick = () => openCard(t, k, (j - 1 + n) % n, true); C.querySelector('.nx').onclick = () => openCard(t, k, (j + 1) % n, true);
+  if (p.portal) C.querySelector('.dive').onclick = () => { closeCard(); flyHome(k + 1); };
+  C.classList.add('on'); if (fly) focusPin(t, k, j); hideHint();
+}
+function closeCard() { open = null; $('#card').classList.remove('on'); pinEls.forEach((P) => P.el.classList.remove('active')); }
+function focusPin(t, k, j) { const p = TISSUES[t].levels[k].pins[j]; const r = R[t][k]; const wx = r.x + p.x * r.w, wy = r.y + p.y * r.h; const z = homeZ(t, k) * (p.portal ? 1.45 : 1.8);
+  const fx = mobile ? vcx : Math.min(vcx, (W - 92 - 400) / 2 + 24), fy = mobile ? Math.min(vcy, H * 0.25) : vcy; flyTo(wx - (fx - vcx) / z, wy - (fy - vcy) / z, z); }
+
+// ───────────── input
+let hintGone = false, lastPointer = null; function hideHint() { if (hintGone) return; hintGone = true; $('#hint').classList.add('gone'); }
+let tt = 0; function toast(s) { const t = $('#toast'); t.textContent = s; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1700); }
+function zoomBy(f, sx = vcx, sy = vcy) { flight = null; anchorS = [sx, sy]; pend = clamp(pend + Math.log(f), -3, 3); need(); hideHint(); }
+addEventListener('wheel', (e) => { if (e.target.closest && e.target.closest('.card,.dock,.ctrl,.top')) { if (!e.target.closest('.card,.dock')) e.preventDefault(); return; }
+  e.preventDefault(); let d = e.deltaY; if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= H; zoomBy(Math.exp(-d * (e.ctrlKey ? 0.006 : 0.0016)), e.clientX, e.clientY); }, { passive: false });
+let lastPinch = 0, lastMid = null, downAt = 0, lastTap = 0, moved = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); flight = null; pend = 0; vel = [0, 0]; downAt = performance.now(); moved = 0; cv.classList.add('drag');
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a[0] - b[0], a[1] - b[1]); lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; } hideHint(); });
+cv.addEventListener('pointermove', (e) => { lastPointer = [e.clientX, e.clientY]; if (!ptrs.has(e.pointerId)) return; const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 1) { const dx = e.clientX - prev[0], dy = e.clientY - prev[1]; moved += Math.abs(dx) + Math.abs(dy); cam.cx -= dx / cam.z; cam.cy -= dy / cam.z; vel = [dx * 0.9, dy * 0.9]; clampCenter(); need(); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.cx -= (mid[0] - lastMid[0]) / cam.z; cam.cy -= (mid[1] - lastMid[1]) / cam.z; if (lastPinch) { const f = d / lastPinch; zoomAt(mid[0], mid[1], f); if (f > 1) steer(0, 0.06); }
+    lastPinch = d; lastMid = mid; moved += 10; vel = [0, 0]; clampCenter(); need(); } });
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = 0; if (ptrs.size === 1) lastMid = [...ptrs.values()][0];
+  if (!ptrs.size) { cv.classList.remove('drag'); if (performance.now() - downAt > 80) need(); else vel = [0, 0];
+    if (moved < 6 && performance.now() - downAt < 300) { const tn = performance.now(); if (tn - lastTap < 320) { zoomBy(2.2, e.clientX, e.clientY); lastTap = 0; } else { lastTap = tn; if (open) closeCard(); } } } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; const k = e.key;
+  if (k === 'f' || k === 'F') toggleFS(); else if (k === '+' || k === '=') zoomBy(1.35); else if (k === '-' || k === '_') zoomBy(1 / 1.35);
+  else if (k === 'ArrowRight') setTissue(cur + 1, true); else if (k === 'ArrowLeft') setTissue(cur - 1, true);
+  else if (k === 'ArrowUp' || k === 'PageDown') { closeCard(); flyHome(Math.min(NLV - 1, dominant() + 1)); } else if (k === 'ArrowDown' || k === 'PageUp') { closeCard(); flyHome(Math.max(0, dominant() - 1)); }
+  else if (k === 'r' || k === 'R' || k === '0') { closeCard(); flyHome(0); } else if (k === 'Escape') closeCard(); else if (/^[1-8]$/.test(k)) setTissue(+k - 1, true); else return;
+  e.preventDefault(); hideHint(); });
+function toggleFS() { const d = document, el = d.documentElement; if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); else (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); }
+$('#zin').onclick = () => zoomBy(1.6); $('#zout').onclick = () => zoomBy(1 / 1.6); $('#reset').onclick = () => { closeCard(); flyHome(0); }; $('#fs').onclick = toggleFS;
+// depth rail (3 scales)
+const rail = $('#rail'); LEVEL.forEach((l, i) => { const t = document.createElement('div'); t.className = 'tick'; t.style.top = `calc(6px + ${(i / (NLV - 1)) * 100}% - ${(i / (NLV - 1)) * 12}px)`; t.innerHTML = `<span>${l}<em>${fmtMag(MAGN[i])}</em></span>`; t.onclick = (ev) => { ev.stopPropagation(); closeCard(); flyHome(i); }; rail.appendChild(t); });
+let railDrag = false; const railSet = (e) => { const r = rail.getBoundingClientRect(); const c = camAtDepth(clamp((e.clientY - r.top - 6) / (r.height - 12), 0, 1) * (NLV - 1)); flight = null; pend = 0; vel = [0, 0]; cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; need(); hideHint(); };
+rail.addEventListener('pointerdown', (e) => { if (e.target.closest('.tick span')) return; railDrag = true; rail.setPointerCapture(e.pointerId); railSet(e); }); rail.addEventListener('pointermove', (e) => railDrag && railSet(e)); rail.addEventListener('pointerup', () => (railDrag = false));
+// tissue dock
+TISSUES.forEach((T, i) => { const b = document.createElement('button'); b.className = 'tis'; b.title = `${T.name} (${i + 1})`; b.innerHTML = `<img alt="" src="${IMG[T.levels[0].img + '_t']}"><b>${T.short}</b>`; b.onclick = () => setTissue(i, true); $('#dock').appendChild(b); });
+addEventListener('resize', () => { const t = depthOf(); layout(); const c = camAtDepth(t); if (!flight) { cam.z = c.z; } need(); });
+
+// ───────────── boot
+async function boot() {
+  if (matchMedia('(pointer:coarse)').matches) { $('#hint1').textContent = 'Pincez pour plonger'; $('#hint2').textContent = 'Glisser pour explorer · double-tap · touchez les points lumineux · choisissez un tissu en bas'; }
+  buildPins(); layout();
+  if (window.__TEX__) { texImg = new Image(); texImg.src = window.__TEX__; texImg.decode().then(() => { texPat = ctx.createPattern(texImg, 'repeat'); need(); }).catch(() => {}); }
+  const h = home(0, 0); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z * 0.92; $('#lb').style.width = '40%';
+  await want(TISSUES[0].levels[0].img).p; $('#lb').style.width = '100%'; prefetch(); render();
+  setTimeout(() => { $('#loader').classList.add('done'); flyTo(h.cx, h.cy, h.z, 1300); }, 120);
+}
+window.__atlas = { cam, flyHome, setTissue, openCard, depthOf, dominant: () => dominant(), cur: () => cur, R, TISSUES, alphasNow: () => alphas(cur, cam.z) };
+boot().catch((e) => { $('#lmsg').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+<script>(function(){
+var d=document,w=window,root=d.documentElement;
+['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+function q(s){return d.querySelector(s);}
+var loader=q('#loader');
+function isReady(){return !loader||loader.classList.contains('done');}
+function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
+function hideHint(){var h=d.getElementById('hint');if(h)h.classList.add('gone');}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;k=Math.floor(k);
+  if(A.TISSUES&&typeof A.setTissue==='function'){var T=A.TISSUES,per=(T[0]&&T[0].levels&&T[0].levels.length)||3,t=Math.floor(k/per),lv=k%per;
+    if(!(t>=0&&t<T.length))return;
+    try{Promise.resolve(A.setTissue(t,true)).then(function(){A.flyHome(lv);hideHint();},function(){});}catch(e){}return;}
+  var list=A.PLATES||A.L;if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);hideHint();}catch(e){}}
+if(!root.classList.contains('az-embed')){
+  var top=q('.top');
+  if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');
+    a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Atlas Zoom</span>';
+    top.insertBefore(a,top.firstChild);}
+  var pm=/[?&]planche=(\d{1,2})(?:&|$)/.exec(location.search);
+  if(pm)whenReady(function(){setTimeout(function(){gotoPlate(+pm[1]-1);},0);});
+  return;
+}
+var target=(self.origin&&self.origin!=='null')?self.origin:'*';
+function post(type,data){try{var m={source:'medart-atlas',type:type};if(data){for(var k in data)m[k]=data[k];}w.parent.postMessage(m,target);}catch(e){}}
+w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(target!=='*'&&e.origin!==target)||!m||m.source!=='medart-hub')return;
+  if(m.type==='inset'&&typeof m.top==='number'&&m.top>=0&&m.top<400){root.style.setProperty('--az-top',Math.round(m.top)+'px');}
+  else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
+post('hello');
+w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
+function read(){
+  var level='',mag='';
+  if(mEl){var sm=mEl.querySelector('small');level=sm?sm.textContent.trim():'';
+    for(var n=mEl.firstChild;n;n=n.nextSibling){if(n!==sm)mag+=n.textContent||'';}mag=mag.trim();}
+  var k=-1,n=0;try{var A=w.__atlas;if(A){k=A.dominant();var list=A.PLATES||A.L;n=list?list.length:0;}}catch(e){}
+  return {title:tEl?tEl.textContent.trim():'',level:level,mag:mag,index:k,count:n};
+}
+function flush(){var s=read(),key=s.title+'|'+s.level+'|'+s.index;
+  if(key!==last){last=key;lastMag=s.mag;post('state',s);return;}
+  if(s.mag!==lastMag){lastMag=s.mag;post('mag',{mag:s.mag});}}
+function schedule(){if(timer)return;timer=setTimeout(function(){timer=0;flush();},120);}
+[tEl,mEl,pEl].forEach(function(el){if(el)new MutationObserver(schedule).observe(el,{childList:true,characterData:true,subtree:true});});
+whenReady(function(){post('ready');flush();});
+w.addEventListener('keydown',function(e){var k=e.key;if((k==='f'||k==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;e.stopPropagation();e.preventDefault();post('fullscreen');}},true);
+flush();
+})();</script>
+</body>
+</html>

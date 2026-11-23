@@ -54,6 +54,8 @@ const MENU_GROUPS: { label: string; pick: (atlas: AtlasEntry) => boolean }[] = [
   { label: "Thorax", pick: (atlas) => !atlas.featured && atlas.category === "thorax" },
   { label: "Digestif", pick: (atlas) => !atlas.featured && atlas.category === "digestif" },
   { label: "Génital", pick: (atlas) => !atlas.featured && atlas.category === "genital" },
+  { label: "Neuro", pick: (atlas) => !atlas.featured && atlas.category === "neuro" },
+  { label: "Locomoteur", pick: (atlas) => !atlas.featured && atlas.category === "locomoteur" },
 ];
 
 const asText = (value: unknown) => (typeof value === "string" ? value.slice(0, 240) : "");
