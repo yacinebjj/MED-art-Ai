@@ -15,6 +15,7 @@ import {
   ListTodo,
   LoaderCircle,
   Mic,
+  Microscope,
   NotebookPen,
   Sparkles,
   Timer,
@@ -182,10 +183,12 @@ const LAB_HUES: Record<string, HueName> = { "case-simulator": "lime", matrix: "e
 
 type NavEntry = {
   id: string;
-  labelKey: CockpitKey;
   icon: LucideIcon;
   hue: HueName;
-} & ({ href: string; isActive?: (pathname: string, tab: string | null) => boolean } | { launch: LauncherTarget });
+  /** Small glowing "NEW" pill after the label (a dot on the icon chip in rail mode). */
+  badge?: "new";
+} & ({ labelKey: CockpitKey } | { label: Record<Language, string> }) &
+  ({ href: string; isActive?: (pathname: string, tab: string | null) => boolean } | { launch: LauncherTarget });
 
 interface NavSection {
   titleKey: CockpitKey;
@@ -207,6 +210,15 @@ const SECTIONS: NavSection[] = [
       },
       { id: "assistant", labelKey: "navAssistant", icon: Sparkles, href: "/dashboard/assistant", hue: "fuchsia" },
       { id: "evaluation", labelKey: "navEvaluation", icon: FileQuestion, launch: { kind: "exam" }, hue: "orange" },
+      {
+        id: "atlas",
+        label: { fr: "Atlas Zoom", en: "Atlas Zoom" },
+        icon: Microscope,
+        href: "/dashboard/atlas",
+        hue: "rose",
+        badge: "new",
+        isActive: (p) => p.startsWith("/dashboard/atlas"),
+      },
     ],
   },
   {
@@ -287,7 +299,7 @@ function NavSectionsWithTab(props: { collapsed: boolean; pathname: string; langu
 
 function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry; collapsed: boolean; pathname: string; tab: string | null; language: Language }) {
   const openLauncher = useCockpitUi((state) => state.openLauncher);
-  const label = tCockpit(entry.labelKey, language);
+  const label = "labelKey" in entry ? tCockpit(entry.labelKey, language) : entry.label[language];
   const Icon = entry.icon;
   const isActive = "href" in entry ? (entry.isActive ? entry.isActive(pathname, tab) : pathname === entry.href) : false;
   const hue = HUES[entry.hue];
@@ -330,8 +342,16 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
         )}
       >
         <Icon className={cn("h-[17px] w-[17px]", hue.icon)} strokeWidth={2.2} />
+        {entry.badge === "new" && collapsed && (
+          <span aria-hidden className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)] ring-2 ring-white dark:ring-slate-900" />
+        )}
       </span>
       {!collapsed && <span className="relative z-10 truncate">{label}</span>}
+      {entry.badge === "new" && !collapsed && (
+        <span className="relative z-10 ml-auto shrink-0 rounded-full bg-gradient-to-r from-rose-500 to-fuchsia-500 px-1.5 text-[9px] font-black uppercase leading-4 tracking-[0.12em] text-white shadow-[0_0_10px_rgba(244,63,94,0.55)] motion-safe:animate-[pulse_3s_ease-in-out_infinite]">
+          New
+        </span>
+      )}
     </>
   );
 

@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#191d21">
+<title>La Cavité Orale · Atlas zoomable · MedArt AI Studio</title>
+<link rel="preload" href="/atlas-zoom/cavite-orale/p1.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<style>
+.az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
+.az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
+.az-embed .top .scale{margin-left:auto}.az-embed .scale .sbar{margin-top:0}
+.az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
+.az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
+@media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+</style>
+<meta name="description" content="La cavité orale en 9 planches et 3 actes : de la bouche au bourgeon du goût, à l’odontoblaste et au canal strié salivaire, en zoom continu.">
+<style>
+@font-face{font-family:'Kalam';font-weight:400;font-display:swap;src:url(/atlas-zoom/_shared/kalam-400.woff2) format('woff2')}
+@font-face{font-family:'Kalam';font-weight:700;font-display:swap;src:url(/atlas-zoom/_shared/kalam-700.woff2) format('woff2')}
+:root{--bg:#191d21;--ink:#f6efe2;--chalk:#f3e2bd;--soft:rgba(240,233,220,.74);--mute:rgba(232,226,214,.5);--line:rgba(243,226,189,.14);--acc:#ffb86b;--acc2:#7fd8ff;
+  --hand:'Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',system-ui,sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab}#cv.drag{cursor:grabbing}
+/* slate atmosphere: vignette + chalk grain (static layers, composited once) */
+.vig{position:fixed;inset:0;pointer-events:none;z-index:1;background:radial-gradient(130% 100% at 50% 48%,transparent 52%,rgba(6,8,10,.55) 100%)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.06;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scrim{position:fixed;left:0;right:0;top:0;height:120px;z-index:2;pointer-events:none;background:linear-gradient(rgba(13,16,21,.66),rgba(13,16,21,.3) 55%,transparent)}
+/* pins */
+#pins{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pin{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
+.pin.on{opacity:1}.pin.on button{pointer-events:auto}
+.pin button{all:unset;cursor:pointer;position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.pin i{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff6e4,var(--acc) 60%,#e07a2c);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 16px 3px rgba(255,184,107,.55);transition:transform .25s var(--ease)}
+.pin b{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,184,107,.75);animation:pulse 2.2s var(--ease) infinite}
+.pin.portal i{background:radial-gradient(circle at 40% 35%,#eafaff,var(--acc2) 60%,#2f8fc0);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 20px 5px rgba(127,216,255,.6)}
+.pin.portal b{border-color:rgba(127,216,255,.85);animation-duration:1.6s}
+.pin.seen i{filter:saturate(.55) brightness(.92)}
+.pin button:hover i,.pin.active i{transform:scale(1.25)}
+.pin span{position:absolute;left:22px;top:-13px;white-space:nowrap;padding:5px 11px;border-radius:999px;font:700 15px/1.1 var(--hand);color:var(--chalk);background:rgba(20,24,28,.86);border:1px solid var(--line);opacity:0;transform:translateX(-4px);transition:.25s var(--ease);pointer-events:none}
+.pin .go{all:unset;cursor:pointer;position:absolute;left:24px;top:-16px;white-space:nowrap;padding:7px 14px 7px 13px;border-radius:999px;font:700 15.5px/1.1 var(--hand);color:#e6f8ff;background:linear-gradient(135deg,rgba(30,74,104,.9),rgba(16,40,60,.92));border:1px solid rgba(127,216,255,.55);box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 22px rgba(127,216,255,.35),0 8px 24px -8px rgba(0,0,0,.7);animation:glow 2.4s var(--ease) infinite;transition:transform .2s var(--ease),filter .2s}
+.pin.on .go{pointer-events:auto}.pin.left .go{left:auto;right:24px}.pin.left .go:hover{transform:translateX(-3px)}.pin .go:hover{transform:translateX(3px);filter:brightness(1.15)}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 18px rgba(127,216,255,.28),0 8px 24px -8px rgba(0,0,0,.7)}50%{box-shadow:0 0 0 1px rgba(127,216,255,.25),0 0 30px rgba(127,216,255,.55),0 8px 24px -8px rgba(0,0,0,.7)}}
+.pin button:hover+span,.pin.active span{opacity:1;transform:none}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.55);opacity:0}}
+/* glass */
+.glass{background:linear-gradient(160deg,rgba(40,45,52,.78),rgba(22,26,31,.86));border:1px solid rgba(243,226,189,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 30px 70px -24px rgba(0,0,0,.75)}
+@supports (backdrop-filter:blur(1px)){.glass{background:linear-gradient(160deg,rgba(40,45,52,.62),rgba(22,26,31,.74));backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%)}}
+/* header */
+.top{position:fixed;left:0;right:0;top:0;z-index:6;display:flex;align-items:flex-start;gap:18px;padding:16px 22px;pointer-events:none}
+.top>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:8px 14px 8px 9px;border-radius:16px}
+.brand svg{width:32px;height:32px;flex:none}.brand b{display:block;font-weight:700;font-size:13.5px;letter-spacing:-.01em}.brand em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:1px}
+.crumb{margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;padding-top:4px;max-width:46vw}
+.crumb .path{font:600 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:rgba(236,230,218,.66);text-shadow:0 1px 8px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.crumb .path b{color:var(--acc)}
+.crumb h2{margin:0;font:700 25px/1.15 var(--hand);color:var(--chalk);text-shadow:0 2px 18px rgba(0,0,0,.6);transition:opacity .3s}
+.scale{min-width:170px;padding:10px 14px;border-radius:16px;text-align:right}
+.scale .m{font:800 24px/1 var(--sans);letter-spacing:-.03em;color:#fff}.scale .m small{font-size:13px;color:var(--mute);font-weight:600;margin-left:6px;letter-spacing:.06em;text-transform:uppercase}
+.sbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;font:600 11.5px var(--sans);color:var(--soft)}
+.sbar i{display:block;height:6px;border:1.5px solid rgba(243,226,189,.85);border-top:0;transition:width .25s var(--ease)}
+/* side controls */
+.ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px;border-radius:22px}
+.ctrl button{all:unset;cursor:pointer;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:var(--ink);transition:background .2s}
+.ctrl button:hover{background:rgba(255,255,255,.08)}.ctrl svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rail{position:relative;width:38px;height:min(330px,40vh);margin:4px 0;cursor:pointer;touch-action:none}
+.rail .tr{position:absolute;left:18px;top:6px;bottom:6px;width:2px;border-radius:2px;background:rgba(243,226,189,.18)}
+.rail .fill{position:absolute;left:18px;top:6px;width:2px;border-radius:2px;background:linear-gradient(var(--acc),var(--acc2))}
+.rail .tick{position:absolute;left:13px;width:12px;height:2px;margin-top:-1px;background:rgba(243,226,189,.28);border-radius:2px}.rail .tick.major{left:8px;width:22px;background:rgba(243,226,189,.45)}.rail .tick::before{content:"";position:absolute;left:-6px;right:-6px;top:-7px;bottom:-7px}
+.rail .tick{cursor:pointer}.rail .tick span{position:absolute;right:32px;top:-14px;padding:4px 8px 3px;border-radius:9px;background:rgba(18,22,27,.72);border:1px solid rgba(243,226,189,.08);font:700 13.5px/1 var(--hand);color:var(--mute);white-space:nowrap;text-align:right;cursor:pointer}.rail .tick em{display:block;font:600 9.5px var(--sans);letter-spacing:.08em;font-style:normal;margin-top:1px}
+.rail .tick span{opacity:0;transition:opacity .3s}.ctrl:hover .rail .tick span{opacity:1}.rail .tick.cur span{color:var(--chalk)}.rail .tick.on{background:var(--acc)}
+.rail .th{position:absolute;left:7px;width:24px;height:24px;margin-top:-12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#ffd9a8);box-shadow:0 0 0 4px rgba(255,184,107,.22),0 4px 14px rgba(0,0,0,.5)}
+/* plate dock, grouped by act */
+.dock{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:6px 8px 7px;border-radius:22px;max-width:calc(100vw - 16px)}
+.grp{display:flex;flex-direction:column;gap:4px;padding:0 4px}.grp+.grp{border-left:1px solid rgba(243,226,189,.1);padding-left:10px}
+.gh{display:flex;align-items:baseline;gap:6px;padding-left:4px;font:700 10px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);transition:color .3s}
+.gh b{font:700 12px var(--hand);letter-spacing:0;color:var(--acc);opacity:.6}.gh em{font-style:normal;font-weight:600;letter-spacing:.04em;text-transform:none;opacity:.8}
+.grp.on .gh{color:var(--soft)}.grp.on .gh b{opacity:1}
+.gt{display:flex;gap:3px}
+.pl{all:unset;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:78px;padding:3px 0 2px;border-radius:13px;transition:background .3s var(--ease)}
+.pl img{width:70px;height:39px;object-fit:cover;border-radius:9px;display:block;border:1px solid rgba(243,226,189,.16);filter:saturate(.7) brightness(.75);transition:.3s var(--ease)}
+.pl i{position:absolute;left:6px;top:6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;display:grid;place-items:center;font:800 9.5px var(--sans);font-style:normal;color:#1a1d21;background:rgba(243,226,189,.85)}
+.pl b{font:700 12px/1.05 var(--hand);color:var(--mute);transition:color .3s;max-width:76px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl:hover{background:rgba(255,255,255,.05)}.pl:hover img{filter:saturate(.9) brightness(.95)}
+.pl.on{background:rgba(255,184,107,.12)}.pl.on img{filter:none;border-color:var(--acc);box-shadow:0 0 16px rgba(255,184,107,.38)}.pl.on b{color:var(--chalk)}.pl.on i{background:var(--acc)}
+/* scale track (1× → 100× → 10 000×) */
+.lvb{position:relative;display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;font:700 11px/1.1 var(--sans);color:var(--soft);text-align:center}
+.lvb span{display:flex;flex-direction:column;align-items:center;min-width:40px}.lvb span:first-of-type{align-items:flex-start}.lvb span:last-of-type{align-items:flex-end}
+.lvb em{font:600 9px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-style:normal;margin-top:2px}
+.lvb .lt{position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:rgba(243,226,189,.14);overflow:hidden}.lvb .lt i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.wait{position:fixed;left:50%;top:50%;z-index:7;width:34px;height:34px;margin:-17px;opacity:0;transition:opacity .2s;pointer-events:none}.wait.on{opacity:1}
+.wait i{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(243,226,189,.2);border-top-color:var(--acc);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+/* study card */
+.card{position:fixed;z-index:8;right:84px;top:150px;width:min(390px,calc(100vw - 32px));max-height:calc(100vh - 262px);overflow:auto;padding:20px 22px 18px;border-radius:24px;opacity:0;transform:translateX(18px) scale(.98);pointer-events:none;transition:opacity .35s var(--ease),transform .45s var(--ease);scrollbar-width:none}
+.card::-webkit-scrollbar{display:none}.card.on{opacity:1;transform:none;pointer-events:auto}
+.card .chip{display:inline-flex;align-items:center;gap:7px;font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}.card .chip i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.card.portal .chip i{background:var(--acc2);box-shadow:0 0 10px var(--acc2)}
+.card h3{margin:8px 34px 10px 0;font:700 26px/1.12 var(--hand);color:var(--chalk)}
+.card p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--soft)}.card p b{color:#fff;font-weight:650}
+.trap{position:relative;margin:12px 0 4px;padding:12px 14px 12px 16px;border-radius:16px;background:linear-gradient(135deg,rgba(255,120,90,.15),rgba(255,120,90,.04));border:1px solid rgba(255,140,110,.3);font-size:13.2px;line-height:1.55;color:#f6e3dc}
+.trap span{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:800 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#ff9a7e}
+.note{margin-top:10px;font-size:12px;line-height:1.5;color:var(--mute);border-left:2px solid rgba(243,226,189,.25);padding-left:10px}
+.card .x{all:unset;cursor:pointer;position:absolute;right:14px;top:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:var(--soft)}.card .x:hover{background:rgba(255,255,255,.08)}
+.card .act{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:13px;font:700 13px var(--sans);background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--ink);transition:.2s}
+.btn:hover{background:rgba(255,255,255,.12)}.btn.dive{background:linear-gradient(135deg,#7fd8ff,#4aa9e0);color:#06202e;border:0}.btn.dive:hover{filter:brightness(1.08)}
+.card .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font:600 11px var(--sans);color:var(--mute)}
+.card .nav button{all:unset;cursor:pointer;padding:6px 9px;border-radius:9px;color:var(--soft)}.card .nav button:hover{background:rgba(255,255,255,.07)}
+/* hint + loader */
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;padding:16px 20px;border-radius:20px;text-align:center;font:700 18px var(--hand);color:var(--chalk);transition:opacity .6s;pointer-events:none}
+.hint small{display:block;margin-top:4px;font:500 12px var(--sans);color:var(--soft)}.hint.gone{opacity:0}
+.hint svg{width:26px;height:38px;display:block;margin:0 auto 8px}.hint svg .w{animation:wheel 1.4s var(--ease) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}100%{transform:translateY(8px);opacity:0}}
+#loader{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);transition:opacity .7s,visibility .7s}#loader.done{opacity:0;visibility:hidden}
+#loader h1{margin:0;font:700 44px var(--hand);color:var(--chalk);text-align:center}#loader p{margin:6px 0 22px;color:var(--soft);font-size:14px;text-align:center}
+#loader .tr{width:240px;height:2px;margin:0 auto;border-radius:2px;background:rgba(243,226,189,.15);overflow:hidden}#loader .tr i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .3s}
+#loader .msg{margin-top:12px;text-align:center;font-size:12px;color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:116px;transform:translateX(-50%);z-index:9;padding:9px 14px;border-radius:13px;font:600 12.5px var(--sans);color:var(--soft);opacity:0;transition:opacity .4s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:1050px){.crumb .path{display:none}.crumb{max-width:40vw}}
+@media (max-width:1100px){.pl{width:62px}.pl img{width:56px;height:32px}.pl b{font-size:11px;max-width:60px}}
+@media (max-width:900px){.pl b{display:none}.gh em{display:none}}
+@media (max-width:760px){
+  .top{padding:10px 10px;gap:8px}.brand{padding:6px 9px 6px 6px}.brand em{display:none}.brand b{font-size:12px}.crumb{display:none}
+  .scale{min-width:0;padding:8px 10px}.scale .m{font-size:19px}
+  .ctrl{right:6px;top:auto;bottom:84px;transform:none;padding:6px 4px;gap:2px}.ctrl button{width:34px;height:34px}.rail{height:120px}.rail .tick span{display:none}
+  .dock{bottom:6px;gap:2px;padding:4px 5px;border-radius:16px}.grp{padding:0 1px;gap:2px}.grp+.grp{padding-left:4px}.gh{font-size:8px;letter-spacing:.08em;padding-left:2px}.gh b{font-size:10px}.gt{gap:1px}
+  .pl{width:calc((100vw - 52px)/9);max-width:44px;padding:2px 0;border-radius:9px}.pl img{width:100%;height:auto;aspect-ratio:16/10;border-radius:7px}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .lvb{margin-top:6px;padding-top:7px;gap:6px;font-size:10px}.lvb em{display:none}.lvb span{min-width:0}
+  .card{left:8px;right:8px;top:auto;bottom:76px;width:auto;max-height:54vh;transform:translateY(24px);border-radius:22px}
+  .pin .go{font-size:13.5px;padding:6px 11px;left:20px;top:-14px;white-space:normal;width:max-content;max-width:min(46vw,188px);line-height:1.15}.pin.left .go{left:auto;right:20px}
+  .pin span{display:none}.scrim{height:84px}
+  .hint{padding:12px 16px;font-size:15px;max-width:78vw}.hint small{font-size:11px}
+}
+@media (max-height:520px) and (min-width:761px){
+  .top{padding:8px 12px;gap:10px}.brand{padding:5px 9px 5px 5px}.brand svg{width:26px;height:26px}.brand em{display:none}.brand b{font-size:12px}
+  .crumb .path{display:none}.crumb h2{font-size:17px}.scrim{height:70px}
+  .scale{min-width:0;padding:6px 10px}.scale .m{font-size:17px}.sbar{margin-top:4px}.lvb{display:none}
+  .ctrl{right:6px;padding:4px 3px;gap:0}.ctrl button{width:30px;height:30px}.rail{height:min(150px,36vh);margin:2px 0}.rail .tick span{display:none}
+  .dock{bottom:5px;padding:4px 6px;gap:2px;border-radius:14px}.gh{display:none}.grp+.grp{padding-left:5px}.pl{width:50px;padding:2px 0}.pl img{width:46px;height:26px;border-radius:6px}.pl b{display:none}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .card{top:52px;right:50px;bottom:8px;max-height:none;width:min(360px,52vw);padding:14px 16px}.card h3{font-size:21px}.card p{font-size:13px}
+  .hint{padding:10px 14px;font-size:15px}.hint svg{display:none}.toast{bottom:52px}.pin span{display:none}
+}
+@media (prefers-reduced-motion:reduce){.pin b,.pin .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Atlas zoomable de la cavité orale"></canvas>
+<div class="vig"></div><div class="grain"></div><div class="scrim"></div>
+<div id="pins"></div>
+<header class="top">
+  <div class="brand glass"><svg viewBox="0 0 32 32" fill="none"><rect x=".5" y=".5" width="31" height="31" rx="9" fill="#232830" stroke="rgba(243,226,189,.25)"/><path d="M10.2 9.2c1.8-1.4 3.9-.8 5.8-.1 1.9-.7 4-1.3 5.8.1 1.9 1.5 1.6 4.5.9 6.8-.6 2-1 4.3-1.4 6.4-.3 1.6-2.2 1.9-2.8.3-.5-1.4-.8-3-1.5-4.2-.5-.8-1.5-.8-2 0-.7 1.2-1 2.8-1.5 4.2-.6 1.6-2.5 1.3-2.8-.3-.4-2.1-.8-4.4-1.4-6.4-.7-2.3-1-5.3.9-6.8z" stroke="#ffb86b" stroke-width="1.6" stroke-linejoin="round"/><path d="M12.6 12.6h6.8" stroke="#7fd8ff" stroke-width="1.3" stroke-linecap="round"/></svg>
+    <div><b>MedArt AI Studio</b><em>Atlas zoomable · La cavité orale</em></div></div>
+  <div class="crumb"><div class="path" id="path"></div><h2 id="ltitle"></h2></div>
+  <div class="scale glass"><div class="m" id="mag">×1</div><div class="sbar"><i id="sbi"></i><span id="sbt">5 cm</span></div><div class="lvb"><div class="lt"><i id="lvf"></i></div><span>1×<em>Organe</em></span><span>100×<em>Tissu</em></span><span>10 000×<em>Cellule · Récepteur</em></span></div></div>
+</header>
+<nav class="ctrl glass" aria-label="Zoom">
+  <button id="zin" title="Zoomer (+)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="rail" id="rail" title="Profondeur"><div class="tr"></div><div class="fill" id="rfill"></div><div class="th" id="rth"></div></div>
+  <button id="zout" title="Dézoomer (−)"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <button id="reset" title="Vue d’ensemble (R)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+  <button id="fs" title="Plein écran (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+<nav class="dock glass" id="dock" aria-label="Planches"></nav>
+<aside class="card glass" id="card" aria-live="polite"></aside>
+<div class="hint glass" id="hint"><svg viewBox="0 0 26 38" fill="none"><rect x="1.5" y="1.5" width="23" height="35" rx="11.5" stroke="#f3e2bd" stroke-width="2"/><rect class="w" x="11.5" y="8" width="3" height="7" rx="1.5" fill="#ffb86b"/></svg>
+  <span id="hint1">Faites défiler pour plonger dans la cavité orale</span><small id="hint2">Molette · double-clic · boutons lumineux · ←/→ planche précédente / suivante · F plein écran</small></div>
+<div class="toast glass" id="toast"></div><div class="wait" id="wait"><i></i></div>
+<div id="loader"><div><h1>La Cavité Orale</h1><p>9 planches · 3 actes — de la bouche au bourgeon du goût, à la dent et à la glande salivaire</p><div class="tr"><i id="lb"></i></div><div class="msg" id="lmsg">Chargement des planches…</div></div></div>
+<script>window.__IMG__={"p1":"/atlas-zoom/cavite-orale/p1.webp","p1_t":"/atlas-zoom/cavite-orale/p1_t.webp","p2":"/atlas-zoom/cavite-orale/p2.webp","p2_t":"/atlas-zoom/cavite-orale/p2_t.webp","p3":"/atlas-zoom/cavite-orale/p3.webp","p3_t":"/atlas-zoom/cavite-orale/p3_t.webp","p4":"/atlas-zoom/cavite-orale/p4.webp","p4_t":"/atlas-zoom/cavite-orale/p4_t.webp","p5":"/atlas-zoom/cavite-orale/p5.webp","p5_t":"/atlas-zoom/cavite-orale/p5_t.webp","p6":"/atlas-zoom/cavite-orale/p6.webp","p6_t":"/atlas-zoom/cavite-orale/p6_t.webp","p7":"/atlas-zoom/cavite-orale/p7.webp","p7_t":"/atlas-zoom/cavite-orale/p7_t.webp","p8":"/atlas-zoom/cavite-orale/p8.webp","p8_t":"/atlas-zoom/cavite-orale/p8_t.webp","p9":"/atlas-zoom/cavite-orale/p9.webp","p9_t":"/atlas-zoom/cavite-orale/p9_t.webp"};window.__META__={"p1": {"w": 2048, "h": 1030, "bg": [30, 32, 37]}, "p2": {"w": 2048, "h": 982, "bg": [33, 34, 37]}, "p3": {"w": 2048, "h": 1021, "bg": [29, 33, 37]}, "p4": {"w": 2048, "h": 1013, "bg": [30, 32, 37]}, "p5": {"w": 2048, "h": 1020, "bg": [29, 32, 37]}, "p6": {"w": 2048, "h": 1016, "bg": [32, 36, 40]}, "p7": {"w": 2048, "h": 1030, "bg": [31, 33, 38]}, "p8": {"w": 2048, "h": 1031, "bg": [30, 33, 38]}, "p9": {"w": 2048, "h": 1019, "bg": [30, 34, 40]}};window.__TEX__="/atlas-zoom/_shared/board.webp";</script>
+<script>// Cavité orale — 9 planches en une plongée continue (3 actes × 3 planches), de la bouche entière au bourgeon
+// du goût, à l'odontoblaste et au canal strié salivaire.
+// Coordonnées normalisées dans la planche recadrée. portal : rectangle où s'emboîte la planche suivante.
+const ACTS = [
+  { name: 'Anatomie', sub: 'Organe', mag: 1 },
+  { name: 'Histologie', sub: 'Tissu', mag: 100 },
+  { name: 'Cytologie', sub: 'Cellule · Récepteur', mag: 10000 },
+];
+const PLATES = [
+// ─────────────────────────────── ACTE I — ANATOMIE ───────────────────────────────
+{ img: 'p1', act: 0, short: 'Cavité orale', scale: 'Organe', title: 'Anatomie de la cavité orale : palais, isthme du gosier et plancher buccal',
+  portal: { c: [0.47, 0.60], w: 0.3 },
+  pins: [
+  { x: .58, y: .10, t: 'Lèvres', p: 'Muscle orbiculaire de la bouche (VII) recouvert de peau et de muqueuse ; le vermillon est une zone de transition très vascularisée.', trap: 'Le cancer de la <b>lèvre inférieure</b> (UV, tabac) est surtout épidermoïde ; il draine vers les ganglions sous-mentaux et submandibulaires.', note: 'La planche écrit « Labia » (latin) : en français, les lèvres.' },
+  { x: .385, y: .30, t: 'Vestibule oral', p: 'Espace entre les lèvres et les joues en dehors, les arcades dentaires en dedans ; le canal de Sténon s’y ouvre.', trap: 'Le canal de <b>Sténon</b> (parotide) s’ouvre dans le vestibule, en regard de la <b>2e molaire supérieure</b> ; le canal de Wharton s’ouvre dans la cavité orale propre (caroncule).', note: 'La flèche « Vestibule oral » pointe le palais dur, qui appartient à la cavité orale propre.' },
+  { x: .46, y: .27, t: 'Palais dur (voûte palatine)', p: 'Processus palatins des maxillaires + lames horizontales des palatins, recouverts d’une muqueuse kératinisée adhérente (plis palatins transverses).', trap: '<b>Fente palatine</b> : défaut de fusion des processus palatins (8e–12e semaine) ; troubles de la succion, otites séromuqueuses (dysfonction tubaire).' },
+  { x: .44, y: .375, t: 'Palais mou (voile du palais)', p: 'Cloison musculo-membraneuse mobile qui ferme le rhinopharynx pendant la déglutition et la phonation.', trap: 'Tous les muscles du voile sont innervés par le <b>X</b> (plexus pharyngien) <b>sauf le tenseur du voile (V3)</b>, qui ouvre aussi la trompe d’Eustache.' },
+  { x: .495, y: .44, t: 'Luette (uvule)', p: 'Prolongement médian du voile du palais.', trap: 'Paralysie du <b>X</b> : le voile et la luette sont attirés <b>vers le côté sain</b> (« signe du rideau » de Vernet). Le phlegmon péri-amygdalien refoule la luette vers le côté opposé.' },
+  { x: .42, y: .49, t: 'Arcs palato-glosse et palato-pharyngien', p: 'Piliers antérieur (palato-glosse) et postérieur (palato-pharyngien) du voile ; la tonsille palatine est logée entre eux.', trap: 'Le muscle <b>palato-glosse</b> est le seul muscle de la langue innervé par le <b>X</b> et non par le XII.' },
+  { x: .565, y: .48, t: 'Tonsille palatine (amygdale)', p: 'Organe lymphoïde de l’anneau de Waldeyer, dans la fosse tonsillaire ; épithélium malpighien qui s’enfonce en cryptes.', trap: '<b>Phlegmon péri-amygdalien</b> : fièvre, odynophagie, <b>trismus</b>, voussure du pilier antérieur, luette déviée → drainage. Angine à streptocoque A : risque de RAA et de glomérulonéphrite.' },
+  { x: .50, y: .53, t: 'Isthme du gosier', p: 'Limite entre la cavité orale et l’oropharynx : bord libre du voile en haut, arcs <b>palato-glosses</b> latéralement, V lingual en bas.', trap: 'L’isthme est délimité par les piliers <b>antérieurs</b> (palato-glosses) ; la tonsille palatine appartient déjà à l’oropharynx.' },
+  { x: .47, y: .60, portal: 'Explorer la langue & les dents', t: 'La langue et les dents', p: 'Agrandissez la langue et une dent de l’arcade.', trap: 'Langue : 2/3 antérieurs (cavité orale) et 1/3 postérieur (oropharynx), séparés par le V lingual.' },
+  { x: .51, y: .73, t: 'Frein de la langue', p: 'Repli muqueux médian qui unit la face inférieure de la langue au plancher buccal.', trap: '<b>Ankyloglossie</b> (frein court) : gêne de la succion et de l’articulation ; frénotomie si gêne fonctionnelle.' },
+  { x: .535, y: .755, t: 'Caroncule sublinguale', p: 'Saillie de chaque côté du frein : orifice du <b>canal de Wharton</b> (submandibulaire) ; les petits canaux de la sublinguale (Rivinus) s’ouvrent le long du pli sublingual.', trap: '<b>Lithiase salivaire</b> : ≈ 80 % submandibulaire (salive plus épaisse, plus calcique, trajet ascendant du Wharton) ; « colique salivaire » au moment des repas.' },
+  { x: .465, y: .725, t: 'Plancher buccal', p: 'Muscle mylo-hyoïdien (diaphragme oral), glandes sublinguales, canal de Wharton, nerf lingual et nerf hypoglosse.', trap: '<b>Angine de Ludwig</b> (cellulite du plancher, souvent d’origine dentaire) : la langue est refoulée en haut et en arrière → risque d’asphyxie.' },
+  { x: .40, y: .66, t: 'Arcade dentaire', p: 'Denture définitive : 32 dents (par hémi-arcade : 2 incisives, 1 canine, 2 prémolaires, 3 molaires) ; denture temporaire : 20 dents, sans prémolaires.', trap: 'La première dent définitive est la <b>1re molaire (6 ans)</b>, qui pousse derrière les dents de lait sans en remplacer aucune.' },
+]},
+{ img: 'p2', act: 0, short: 'Langue & dent', scale: 'Organe', title: 'Anatomie de la langue et de l’arcade dentaire',
+  portal: { c: [0.36, 0.76], w: 0.2 },
+  pins: [
+  { x: .21, y: .19, t: 'Apex et corps (2/3 antérieurs)', p: 'Partie mobile, dans la cavité orale. Sensibilité générale : <b>nerf lingual (V3)</b> ; goût : <b>VII</b> par la corde du tympan.', trap: 'Les 2/3 antérieurs dérivent du 1er arc pharyngien, le 1/3 postérieur des 3e et 4e arcs : d’où les innervations différentes.' },
+  { x: .255, y: .31, t: 'V lingual et foramen cæcum', p: 'Le sillon terminal en V sépare les 2/3 antérieurs du 1/3 postérieur ; le foramen cæcum est à sa pointe, dirigée en arrière.', trap: 'Le foramen cæcum est le vestige du <b>canal thyréoglosse</b> : kyste du tractus thyréoglosse (masse cervicale médiane qui monte à la protraction de la langue) ; thyroïde linguale ectopique.', note: 'Sur la planche, le V et le foramen cæcum sont dessinés dans le tiers antérieur de la langue ; ils se trouvent à la jonction des 2/3 antérieurs et du 1/3 postérieur, juste en avant de la tonsille linguale.' },
+  { x: .335, y: .37, t: 'Papilles caliciformes (circumvallées)', p: '8 à 12 grosses papilles alignées <b>en avant</b> du V lingual, entourées d’un sillon riche en bourgeons du goût.', trap: 'Bien qu’en avant du V, elles sont innervées par le <b>IX</b> (glosso-pharyngien), et non par le VII.', note: 'Les papilles caliciformes sont dessinées sur les bords de la langue, près de l’apex ; elles forment normalement une rangée en V devant le sillon terminal.' },
+  { x: .31, y: .58, t: 'Papilles fongiformes et filiformes', p: 'Filiformes : les plus nombreuses, kératinisées, <b>sans bourgeons du goût</b> (rôle mécanique, tactile). Fongiformes : en champignon, rouges, avec bourgeons (VII).', trap: 'Langue noire villeuse = hypertrophie des papilles <b>filiformes</b>. Glossite de la carence en fer ou en B12 : langue lisse, dépapillée.' },
+  { x: .24, y: .50, t: 'Muscles de la langue (XII)', p: 'Muscles intrinsèques (forme) et extrinsèques (génioglosse, hyoglosse, styloglosse, palato-glosse) ; tous innervés par le <b>XII</b> sauf le palato-glosse (X).', trap: 'Lésion périphérique du XII : la langue en protraction <b>dévie du côté paralysé</b> (le génioglosse sain la pousse), avec atrophie et fasciculations de l’hémilangue.' },
+  { x: .27, y: .80, t: 'Tonsille linguale (base de la langue)', p: '1/3 postérieur, oropharyngé : follicules lymphoïdes ; sensibilité et goût par le <b>IX</b> (le X pour la région de l’épiglotte).', trap: 'Les cancers de la base de langue (oropharynx) sont de plus en plus liés à l’<b>HPV 16</b>, de meilleur pronostic que ceux liés à l’alcool et au tabac.' },
+  { x: .84, y: .175, t: 'Émail', p: 'Tissu le plus dur de l’organisme (≈ 96 % d’hydroxyapatite), <b>acellulaire</b> : les améloblastes disparaissent à l’éruption, l’émail ne se répare pas.', trap: '<b>Carie</b> : déminéralisation par les acides des bactéries (<i>Streptococcus mutans</i>) à partir des sucres ; le fluor forme la fluorapatite, plus résistante. Excès de fluor → fluorose.' },
+  { x: .82, y: .30, t: 'Dentine', p: 'Tissu minéralisé (≈ 70 %) produit toute la vie par les odontoblastes ; traversé de tubules.', trap: 'La dentine est <b>vivante et sensible</b> : une carie qui atteint la dentine fait mal au froid et au sucré.' },
+  { x: .80, y: .39, t: 'Cavité pulpaire et canal radiculaire', p: 'Pulpe : conjonctif, vaisseaux et nerfs, qui entrent par le foramen apical.', trap: '<b>Pulpite</b> : œdème dans une enceinte rigide → douleur intense, spontanée, nocturne. La nécrose pulpaire évolue vers l’abcès apical (cellulite, ostéite).' },
+  { x: .67, y: .37, t: 'Collet', p: 'Jonction entre la couronne (émail) et la racine (cément), au niveau de la gencive.', trap: 'Récession gingivale → racine et dentine du collet exposées : <b>hypersensibilité dentinaire</b> au froid.' },
+  { x: .72, y: .70, t: 'Racine', p: 'Couverte de cément, ancrée dans l’alvéole par le ligament parodontal.', trap: 'L’apex de la racine des molaires supérieures est au contact du sinus maxillaire : une infection dentaire peut donner une <b>sinusite maxillaire</b> d’origine dentaire (unilatérale, fétide).' },
+  { x: .86, y: .65, t: 'Gencive et os alvéolaire', p: 'Parodonte : gencive, ligament parodontal, cément, os alvéolaire.', trap: '<b>Parodontite</b> : destruction de l’attache et de l’os alvéolaire → mobilité dentaire. Liens avec le diabète (relation bidirectionnelle) et le tabac.' },
+  { x: .36, y: .76, portal: 'Voir les glandes salivaires & nerfs', t: 'Glandes salivaires et nerfs', p: 'La langue et les dents baignent dans la salive et dépendent de 5 nerfs crâniens : passez à la vue latérale de la face.', trap: 'Langue : V3 (sensibilité), VII et IX (goût), XII (motricité), X (palato-glosse).' },
+]},
+{ img: 'p3', act: 0, short: 'Glandes & nerfs', scale: 'Organe', title: 'Glandes salivaires principales, vascularisation et innervation',
+  portal: { c: [0.645, 0.53], w: 0.16 },
+  pins: [
+  { x: .30, y: .40, t: 'Glande parotide', p: 'La plus volumineuse, <b>purement séreuse</b>, dans la loge parotidienne. Innervation sécrétoire : <b>IX</b> (nerf petit pétreux → ganglion otique → nerf auriculo-temporal).', trap: '<b>Oreillons</b> : parotidite bilatérale (paramyxovirus), complications : orchite, méningite, pancréatite. Tumeur la plus fréquente : <b>adénome pléomorphe</b> ; tumeur de Warthin chez le fumeur.' },
+  { x: .36, y: .27, t: 'Nerf facial (VII) intraparotidien', p: 'Sorti du foramen stylo-mastoïdien, il traverse la parotide (entre lobes superficiel et profond) et se divise en 5 branches : temporale, zygomatique, buccale, marginale de la mandibule, cervicale.', trap: 'Le VII <b>traverse</b> la parotide mais ne l’innerve pas (sécrétion = IX). Tumeur parotidienne + <b>paralysie faciale</b> = forte suspicion de malignité.' },
+  { x: .355, y: .445, t: 'Canal parotidien (Sténon)', p: 'Il croise la face latérale du masséter, perfore le buccinateur et s’ouvre dans le vestibule en regard de la 2e molaire supérieure.', trap: 'Une plaie de joue sur la ligne tragus–milieu de la lèvre supérieure doit faire vérifier le canal de Sténon et la branche buccale du VII.' },
+  { x: .40, y: .71, t: 'Glande submandibulaire', p: 'Mixte à <b>prédominance séreuse</b> ; elle produit ≈ 70 % de la salive de repos. Innervation sécrétoire : <b>VII</b> (corde du tympan → ganglion submandibulaire).', trap: 'Siège de ≈ 80 % des <b>lithiases salivaires</b> : tuméfaction douloureuse au repas (hernie salivaire).' },
+  { x: .465, y: .69, t: 'Canal submandibulaire (Wharton)', p: 'Il chemine dans le plancher buccal jusqu’à la caroncule sublinguale.', trap: 'Le <b>nerf lingual</b> croise le canal de Wharton (il passe en dehors puis en dessous, et remonte en dedans) : risque de lésion lors de l’ablation d’un calcul.' },
+  { x: .575, y: .73, t: 'Glande sublinguale', p: 'La plus petite, mixte à <b>prédominance muqueuse</b>, sous la muqueuse du plancher ; nombreux petits canaux (Rivinus).', trap: '<b>Grenouillette</b> (ranula) : pseudo-kyste mucoïde du plancher buccal développé à partir de la glande sublinguale.' },
+  { x: .52, y: .47, t: 'Nerf lingual (V3) et corde du tympan', p: 'Le nerf lingual porte la sensibilité générale des 2/3 antérieurs ; il reçoit la <b>corde du tympan</b> (VII) : goût des 2/3 antérieurs et fibres sécrétoires pour les glandes submandibulaire et sublinguale.', trap: 'Paralysie faciale avec <b>agueusie</b> des 2/3 antérieurs : lésion du VII <b>en amont</b> de la naissance de la corde du tympan (intrapétreuse), pas dans la parotide.' },
+  { x: .55, y: .545, t: 'Nerf glosso-pharyngien (IX)', p: 'Goût et sensibilité du <b>1/3 postérieur</b> (et papilles caliciformes), sécrétion parotidienne, afférence du réflexe nauséeux (efférence : X).', trap: 'Le réflexe nauséeux teste le IX (afférent) et le X (efférent).', note: 'La flèche du IX aboutit sur le corps de la langue ; son territoire gustatif est le tiers postérieur.' },
+  { x: .51, y: .515, t: 'Nerf hypoglosse (XII)', p: 'Nerf moteur de tous les muscles de la langue sauf le palato-glosse ; il passe sous la glande submandibulaire puis dans le plancher.', trap: 'Le XII est purement moteur : il ne joue aucun rôle dans le goût ni dans la sensibilité.' },
+  { x: .42, y: .80, t: 'Artères linguale et faciale', p: 'Branches de la carotide externe : la linguale passe sous le muscle hyoglosse ; la faciale croise le bord inférieur de la mandibule devant le masséter (pouls facial).', trap: 'Hémorragie de la langue : ligature de l’artère linguale dans le triangle de Béclard (ou de Pirogoff).' },
+  { x: .335, y: .74, t: 'Carotide externe et veine rétromandibulaire', p: 'Elles traversent la parotide ; la carotide externe s’y termine en artères maxillaire et temporale superficielle.', trap: 'Contenu de la parotide, de dehors en dedans : nerf facial, veine rétromandibulaire, carotide externe.' },
+  { x: .55, y: .42, t: 'Innervation des dents', p: 'Dents supérieures : nerfs alvéolaires supérieurs (<b>V2</b>) ; inférieures : nerf alvéolaire inférieur (<b>V3</b>).', trap: 'Anesthésie à l’épine de Spix : elle bloque le nerf alvéolaire inférieur <b>et</b> souvent le nerf lingual voisin (hémilangue engourdie).' },
+  { x: .645, y: .53, side: 'l', portal: 'Zoomer dans les papilles (×100)', t: 'Le dos de la langue', p: 'Agrandissez la muqueuse dorsale de la langue : papilles, bourgeons du goût, glandes.', trap: 'Le dos de la langue n’a pas de sous-muqueuse : la muqueuse adhère directement au muscle.' },
+]},
+// ─────────────────────────────── ACTE II — HISTOLOGIE ───────────────────────────────
+{ img: 'p4', act: 1, short: 'Muqueuse & papilles', scale: 'Tissu', title: 'Histologie de la muqueuse buccale et des papilles linguales',
+  portal: { c: [0.22, 0.40], w: 0.16 },
+  pins: [
+  { x: .235, y: .20, t: 'Papille filiforme', p: 'Petite papille conique, <b>kératinisée</b>, sans bourgeon du goût : elle râpe les aliments et donne au dos de la langue son aspect velouté.', trap: 'Les papilles filiformes sont les <b>seules</b> papilles sans bourgeons du goût.' },
+  { x: .33, y: .30, t: 'Papille caliciforme (circumvallée)', p: 'Grosse papille enfoncée dans la muqueuse, entourée d’un sillon ; ≈ 250 bourgeons du goût sur ses parois.', trap: 'Les bourgeons sont sur la <b>paroi latérale</b> du sillon, pas sur le sommet de la papille.' },
+  { x: .40, y: .39, t: 'Sillon circumvallé (vallum)', p: 'Rigole autour de la papille où les substances dissoutes stagnent au contact des bourgeons.', trap: 'Le rinçage du sillon par les glandes de von Ebner renouvelle le stimulus gustatif.' },
+  { x: .18, y: .37, t: 'Épithélium pavimenteux stratifié', p: 'Kératinisé ou parakératinisé là où la muqueuse est masticatoire (dos de la langue, palais dur, gencive), non kératinisé ailleurs (joues, plancher, face ventrale de la langue).', trap: '<b>Leucoplasie</b> : plaque blanche <b>non détachable</b>, lésion potentiellement maligne (tabac). Muguet (<i>Candida</i>) : dépôt blanc <b>détachable</b>.' },
+  { x: .17, y: .50, t: 'Chorion (lamina propria)', p: 'Conjonctif riche en capillaires, qui forme des papilles sous l’épithélium.', trap: 'La muqueuse sublinguale, mince et très vascularisée, permet une absorption rapide (trinitrine) en évitant le <b>premier passage hépatique</b>.' },
+  { x: .42, y: .60, t: 'Glandes séreuses de von Ebner', p: 'Petites glandes salivaires séreuses dont les canaux s’ouvrent au fond du sillon ; elles sécrètent la <b>lipase linguale</b>.', trap: 'La lipase linguale est active dans l’estomac (pH acide) : rôle important chez le nouveau-né.' },
+  { x: .20, y: .74, t: 'Musculature striée linguale', p: 'Fibres striées squelettiques entrecroisées dans les 3 plans de l’espace.', trap: 'Le dos de la langue n’a <b>pas de sous-muqueuse</b> : la muqueuse adhère au muscle (les incisions y saignent beaucoup).' },
+  { x: .745, y: .45, t: 'Bourgeons du goût (calicules)', p: 'Structures claires en bulbe d’oignon, enchâssées dans l’épithélium de la paroi du sillon.', trap: 'On trouve aussi des bourgeons sur les papilles fongiformes et foliées, le palais mou, l’épiglotte et le pharynx.' },
+  { x: .785, y: .58, t: 'Sillon circumvallé (zoom)', p: 'Lumière du sillon bordée par l’épithélium et ses bourgeons.', trap: 'Les substances doivent être <b>dissoutes</b> pour être goûtées : la bouche sèche diminue le goût.' },
+  { x: .91, y: .73, t: 'Glandes de von Ebner (zoom)', p: 'Acini séreux et canaux qui débouchent au fond du sillon.', trap: 'Ce sont des glandes salivaires <b>accessoires</b>, comme les glandes labiales qu’on biopsie dans le syndrome de Gougerot-Sjögren.' },
+  { x: .22, y: .40, portal: 'Explorer la dent & le parodonte', t: 'De la muqueuse à la dent', p: 'Le même épithélium se prolonge en gencive et s’attache à la dent : passez à la dent et au parodonte.', trap: 'La gencive est une muqueuse masticatoire kératinisée, solidement attachée à l’os et à la dent.' },
+]},
+{ img: 'p5', act: 1, short: 'Dent & parodonte', scale: 'Tissu', title: 'Histologie de la dent et du parodonte',
+  portal: { c: [0.15, 0.47], w: 0.14 },
+  pins: [
+  { x: .205, y: .13, t: 'Émail', p: 'Prismes d’hydroxyapatite, <b>acellulaire</b> et avasculaire, produit par les améloblastes (ectoderme) avant l’éruption.', trap: 'L’émail, presque entièrement minéral, <b>disparaît</b> lors de la décalcification : on ne le voit pas sur une coupe histologique classique.' },
+  { x: .36, y: .20, t: 'Jonction amélo-dentinaire', p: 'Interface festonnée entre émail et dentine.', trap: 'Une carie qui atteint la jonction amélo-dentinaire s’étend <b>latéralement</b> sous l’émail sain : petite entrée, grosse cavité.' },
+  { x: .345, y: .29, t: 'Dentine et tubules', p: 'Collagène I minéralisé (≈ 70 %), traversé de tubules contenant les prolongements des odontoblastes et un fluide.', trap: 'Dentine <b>secondaire</b> (toute la vie) et <b>tertiaire</b> (réactionnelle à la carie) : la chambre pulpaire se rétrécit avec l’âge.' },
+  { x: .32, y: .37, t: 'Prédentine et odontoblastes', p: 'Odontoblastes en palissade à la périphérie de la pulpe, d’origine <b>ectomésenchymateuse</b> (crêtes neurales) ; la prédentine est la matrice non encore minéralisée.', trap: 'Améloblastes = ectoderme (émail) ; odontoblastes = ectomésenchyme (dentine) : deux origines différentes.' },
+  { x: .30, y: .43, t: 'Pulpe dentaire', p: 'Conjonctif lâche, vaisseaux et nerfs (fibres Aδ et C), dans une cavité inextensible.', trap: '<b>Pulpite réversible</b> : douleur provoquée et brève ; <b>irréversible</b> : douleur spontanée, prolongée, nocturne → traitement endodontique.' },
+  { x: .345, y: .56, t: 'Cément', p: 'Tissu minéralisé (≈ 50 %) qui recouvre la racine : acellulaire au collet, cellulaire (cémentocytes) vers l’apex ; il ancre les fibres du ligament.', trap: 'Contrairement à l’os, le cément est avasculaire et peu remanié : en orthodontie, c’est l’<b>os</b> qui se résorbe et se reconstruit, pas le cément.' },
+  { x: .34, y: .65, t: 'Ligament parodontal (desmodonte)', p: 'Fibres de collagène (≈ 0,2 mm) insérées dans le cément et l’os par les <b>fibres de Sharpey</b> ; amortisseur et mécanorécepteur.', trap: 'Orthodontie : côté compression → résorption osseuse (ostéoclastes) ; côté tension → apposition (ostéoblastes).' },
+  { x: .36, y: .82, t: 'Os alvéolaire', p: 'Os qui porte les alvéoles ; sa paroi interne (lame cribriforme) apparaît comme la « lamina dura » en radiographie.', trap: 'L’os alvéolaire n’existe que par la dent : il se <b>résorbe</b> après une extraction ou dans la parodontite.' },
+  { x: .18, y: .40, t: 'Épithélium gingival et sillon', p: 'Sillon gingival (0,5 à 3 mm) ; l’épithélium de jonction s’attache à l’émail par des hémidesmosomes.', trap: 'Profondeur de sondage > 3–4 mm = <b>poche parodontale</b> (parodontite) ; la gingivite, elle, est réversible.' },
+  { x: .70, y: .40, t: 'Couche des odontoblastes (zoom)', p: 'Cellules cylindriques alignées en palissade, noyaux au pôle pulpaire.', trap: 'Les odontoblastes sont post-mitotiques ; en cas d’agression, des cellules de la pulpe peuvent se différencier pour produire une dentine réparatrice.' },
+  { x: .79, y: .25, t: 'Dentine tubulaire (zoom)', p: 'Tubules parallèles traversant la dentine minéralisée.', trap: 'Les tubules sont plus nombreux et plus larges près de la pulpe : les caries profondes sont plus douloureuses.' },
+  { x: .83, y: .62, t: 'Desmodonte et fibres de Sharpey (zoom)', p: 'Faisceaux de collagène, fibroblastes et vaisseaux.', trap: 'Le renouvellement très rapide du collagène desmodontal le rend sensible au <b>scorbut</b> (carence en vitamine C : déchaussement, gencives qui saignent).', note: 'Dans le cercle, les flèches « Émail » et « Cément » pointent la pulpe, à gauche de la couche des odontoblastes.' },
+  { x: .15, y: .47, portal: 'Voir les glandes salivaires (×100)', t: 'La salive protège la dent', p: 'Le sillon gingival et l’émail baignent dans la salive : passez aux glandes qui la fabriquent.', trap: 'Salive : tampon (HCO₃⁻), reminéralisation (Ca²⁺, phosphates), antimicrobiens. Bouche sèche → <b>caries multiples</b>.' },
+]},
+{ img: 'p6', act: 1, short: 'Glandes (histo)', scale: 'Tissu', title: 'Histologie des glandes salivaires : acini et canaux striés',
+  portal: { c: [0.36, 0.56], w: 0.18 },
+  pins: [
+  { x: .18, y: .26, t: 'Acinus séreux', p: 'Cellules pyramidales à cytoplasme basophile (RER) et grains apicaux, noyau rond ; sécrétion riche en protéines (amylase).', trap: 'La <b>parotide</b> est purement séreuse chez l’adulte ; elle contient aussi des adipocytes, de plus en plus nombreux avec l’âge.' },
+  { x: .35, y: .20, t: 'Acinus muqueux', p: 'Cytoplasme clair, spumeux (mucines), noyau aplati refoulé à la base ; PAS+ et bleu alcian+.', trap: 'La <b>sublinguale</b> est mixte à prédominance muqueuse.' },
+  { x: .40, y: .32, t: 'Croissant séreux de Giannuzzi', p: 'Cellules séreuses coiffant un acinus muqueux, en demi-lune.', trap: 'Le croissant est en grande partie un <b>artefact de fixation</b> : les cellules séreuses, alignées avec les cellules muqueuses, sont refoulées par le gonflement du mucus. La <b>submandibulaire</b> est mixte à prédominance séreuse.' },
+  { x: .12, y: .62, t: 'Acinus mixte', p: 'Acinus muqueux coiffé d’un croissant séreux.', trap: 'Parotide = séreuse ; submandibulaire = mixte surtout séreuse ; sublinguale = mixte surtout muqueuse.' },
+  { x: .20, y: .76, t: 'Cellules myoépithéliales', p: 'Cellules étoilées « en panier » entre la lame basale et les cellules acineuses : actine et myosine, elles expulsent la salive.', trap: 'L’<b>adénome pléomorphe</b> associe une composante épithéliale, myoépithéliale et un stroma chondroïde ou myxoïde ; il récidive s’il est énucléé (capsule incomplète).' },
+  { x: .37, y: .66, t: 'Canal intercalaire (passage de Boll)', p: 'Premier segment canalaire, épithélium cubique bas ; long dans la parotide, court dans la sublinguale.', trap: 'Les canaux intercalaires sont longs dans les glandes séreuses (parotide, pancréas).' },
+  { x: .32, y: .86, t: 'Canal excréteur interlobulaire', p: 'Dans les cloisons conjonctives ; épithélium cylindrique puis pseudostratifié, et stratifié près de l’orifice.', trap: 'Les canaux excréteurs ne modifient plus beaucoup la composition de la salive.' },
+  { x: .88, y: .42, t: 'Canal strié (de Pflüger)', p: 'Cellules cylindriques éosinophiles à <b>striation basale</b> (replis membranaires et mitochondries) : réabsorbent Na⁺ et Cl⁻, sécrètent K⁺ et HCO₃⁻.', trap: 'Les canaux striés sont <b>propres aux glandes salivaires</b> : le pancréas exocrine n’en a pas, mais il a des cellules centro-acineuses.' },
+  { x: .64, y: .52, t: 'Canal intercalaire (zoom)', p: 'Petit canal à épithélium cubique bas entre l’acinus et le canal strié.', trap: 'Les canaux intercalaires contiennent des cellules progénitrices.' },
+  { x: .72, y: .24, t: 'Acinus mixte (zoom)', p: 'Cellules muqueuses claires au centre, cellules séreuses sombres en croissant.', trap: 'Une coloration PAS ou bleu alcian distingue les cellules muqueuses (positives) des séreuses.', note: 'La flèche « Croissant séreux de Giannuzzi » du cercle pointe les cellules muqueuses claires ; le croissant est la bande sombre en bordure.' },
+  { x: .87, y: .73, t: 'Tissu conjonctif interlobulaire', p: 'Cloisons qui portent vaisseaux, nerfs et canaux. Innervation : parasympathique (salive abondante et fluide), sympathique (salive rare, riche en protéines).', trap: 'Gougerot-<b>Sjögren</b> : infiltrat lymphocytaire des glandes (syndrome sec, anticorps anti-SSA/SSB) ; biopsie de glandes salivaires accessoires, score de Chisholm.' },
+  { x: .36, y: .56, portal: 'Entrer dans le bourgeon du goût (×10 000)', t: 'De la salive au goût', p: 'La salive dissout les aliments et les amène au pore gustatif : entrez dans un bourgeon du goût.', trap: 'Sans salive, pas de goût : les molécules doivent être dissoutes.' },
+]},
+// ─────────────────────────────── ACTE III — CYTOLOGIE ───────────────────────────────
+{ img: 'p7', act: 2, short: 'Bourgeon du goût', scale: 'Récepteur', title: 'Cytologie du bourgeon du goût et transduction gustative',
+  portal: { c: [0.52, 0.775], w: 0.16 },
+  pins: [
+  { x: .50, y: .18, t: 'Pore gustatif', p: 'Ouverture à la surface de l’épithélium où les microvillosités sont au contact de la salive.', trap: 'Bouche sèche (anticholinergiques, Sjögren, radiothérapie) → <b>dysgueusie</b>.' },
+  { x: .54, y: .23, t: 'Microvillosités et récepteurs', p: 'Sucré (T1R2/T1R3), umami (T1R1/T1R3), amer (T2R) : récepteurs couplés à une protéine G (<b>gustducine</b>). Salé : canal ENaC. Acide : canal à protons (OTOP1).', trap: 'Sucré, umami, amer = <b>RCPG</b> ; salé et acide = <b>canaux ioniques</b>. L’amiloride bloque ENaC et diminue la perception du salé.' },
+  { x: .86, y: .08, t: 'Transduction des récepteurs', p: 'Les récepteurs RCPG activent la PLCβ2 → IP3 → Ca²⁺ → canal TRPM5 → dépolarisation.', trap: 'Les cellules de type II (sucré, amer, umami) libèrent l’<b>ATP</b> par un canal (CALHM1), sans vésicules ni vraie synapse.', note: 'Les légendes ioniques de l’encart (« Na⁺, H⁺o, H⁺ ») sont incomplètes.' },
+  { x: .38, y: .43, t: 'Cellule sensorielle gustative', p: '50 à 150 cellules par bourgeon : type II (sucré, amer, umami) et type III (acide, vraie synapse) ; chaque cellule réagit surtout à une saveur.', trap: 'La « carte de la langue » (une saveur par zone) est un <b>mythe</b> : toutes les zones perçoivent les 5 saveurs.' },
+  { x: .36, y: .52, t: 'Cellule de soutien', p: 'Type I, de type glial : elle entoure les cellules sensorielles et élimine les neurotransmetteurs (ATPase).', trap: 'Les cellules de type I participeraient à la détection du salé.' },
+  { x: .40, y: .71, t: 'Cellule basale', p: 'Cellule progénitrice : les cellules du bourgeon vivent ≈ 10 jours et sont constamment renouvelées.', trap: 'Chimiothérapie et radiothérapie bloquent ce renouvellement → <b>agueusie</b> transitoire. Carence en <b>zinc</b> → hypogueusie.' },
+  { x: .47, y: .70, t: 'Vésicules synaptiques', p: 'Les cellules de type III forment de vraies synapses (sérotonine) avec les fibres afférentes.', trap: 'Le bourgeon du goût est un <b>récepteur secondaire</b> : la cellule sensorielle n’est pas un neurone, elle transmet à une fibre nerveuse.' },
+  { x: .57, y: .82, t: 'Fibres nerveuses afférentes', p: 'VII (2/3 antérieurs par la corde du tympan, palais par le grand pétreux), IX (1/3 postérieur), X (épiglotte) → <b>noyau du tractus solitaire</b> → thalamus (VPM) → cortex insulaire et operculaire.', trap: 'Le relais bulbaire commun du goût est le <b>noyau du faisceau solitaire</b>.' },
+  { x: .68, y: .75, t: 'Lame basale', p: 'Le bourgeon est intra-épithélial : il repose sur la lame basale, que traversent les fibres nerveuses.', trap: 'Le bourgeon a une forme de bulbe d’oignon, plus pâle que l’épithélium voisin en microscopie optique.' },
+  { x: .74, y: .32, t: 'Épithélium pavimenteux environnant', p: 'Kératinocytes stratifiés qui entourent le bourgeon.', trap: 'Le bourgeon occupe toute l’épaisseur de l’épithélium, de la lame basale au pore.' },
+  { x: .09, y: .16, t: 'Microvillosités en MET', p: 'Microvillosités apicales qui se projettent dans le pore gustatif.', trap: 'Elles portent les récepteurs et les canaux de la transduction gustative.' },
+  { x: .89, y: .78, t: 'Vésicules synaptiques en MET', p: 'Vésicules claires au contact d’une terminaison afférente.', trap: 'Seules les cellules de type III ont de telles vésicules synaptiques.' },
+  { x: .52, y: .775, side: 'l', portal: 'Zoomer sur l’odontoblaste', t: 'Une autre cellule sensible', p: 'Des fibres sensitives innervent aussi la pulpe et la dentine : passez à l’odontoblaste.', trap: 'La douleur dentaire passe par le V, le goût par les VII, IX et X.' },
+]},
+{ img: 'p8', act: 2, short: 'Odontoblaste', scale: 'Cellule', title: 'Cytologie de l’odontoblaste et formation de la dentine',
+  portal: { c: [0.28, 0.70], w: 0.2 },
+  pins: [
+  { x: .21, y: .45, t: 'Corps cellulaire (pôle pulpaire)', p: 'Cellule cylindrique polarisée, d’origine ectomésenchymateuse ; post-mitotique, elle vit autant que la dent.', trap: 'L’odontoblaste reste vivant dans la dent adulte : la dentine continue à se former toute la vie (dentine secondaire).' },
+  { x: .19, y: .60, t: 'Réticulum endoplasmique rugueux', p: 'Synthèse du <b>collagène I</b> (≈ 90 % de la matrice organique) et des protéines non collagéniques (DSPP, DMP1).', trap: 'Mutations de <b>DSPP</b> → dentinogenèse imparfaite ; ostéogenèse imparfaite (COL1A1/COL1A2) → dentine opalescente.' },
+  { x: .33, y: .52, t: 'Appareil de Golgi', p: 'Glycosylation et emballage du procollagène dans des vésicules de sécrétion.', trap: 'Hydroxylation du procollagène dans le RER : elle exige la <b>vitamine C</b> (scorbut).' },
+  { x: .39, y: .45, t: 'Vésicules de procollagène', p: 'Elles migrent vers le pôle apical et libèrent le procollagène dans la prédentine.', trap: 'Le procollagène est clivé hors de la cellule en tropocollagène, qui s’assemble en fibrilles.' },
+  { x: .25, y: .80, t: 'Noyau basal', p: 'Noyau au pôle pulpaire, à l’opposé de la dentine.', trap: 'Polarité typique d’une cellule sécrétrice de protéines : noyau et RER d’un côté, sécrétion de l’autre.' },
+  { x: .37, y: .63, t: 'Mitochondries', p: 'Elles fournissent l’énergie de la synthèse et du transport des protéines.', trap: 'La couche des odontoblastes est très active : une agression (carie, fraisage échauffant) peut la léser.' },
+  { x: .60, y: .38, t: 'Prolongement odontoblastique (fibre de Tomes)', p: 'Prolongement apical qui s’étend dans le tubule dentinaire, entouré de fluide.', trap: '<b>Théorie hydrodynamique</b> de Brännström : un stimulus (froid, air, sucre) déplace le fluide des tubules et excite les fibres nerveuses → douleur dentinaire.' },
+  { x: .55, y: .27, t: 'Prédentine', p: 'Matrice organique non minéralisée (10 à 40 µm) entre l’odontoblaste et le front de minéralisation.', trap: 'Prédentine = équivalent de l’ostéoïde de l’os.' },
+  { x: .76, y: .17, t: 'Tubule dentinaire', p: 'Canal qui traverse la dentine de la pulpe à la jonction amélo-dentinaire.', trap: 'Les tubules exposés (collet, récession) expliquent l’<b>hypersensibilité dentinaire</b> ; on la traite en les obturant.' },
+  { x: .88, y: .17, t: 'Dentine minéralisée', p: 'Cristaux d’hydroxyapatite déposés sur la trame de collagène.', trap: 'Dentine tertiaire : produite localement en réponse à une carie ou à une abrasion.' },
+  { x: .55, y: .66, t: 'Fibre nerveuse sensitive intrapulpaire', p: 'Fibres Aδ (douleur vive, brève) et C (douleur sourde, diffuse) ; plexus de Raschkow sous les odontoblastes.', trap: 'Douleur vive au froid = fibres Aδ (pulpite réversible) ; douleur sourde, spontanée, pulsatile = fibres C (pulpite irréversible).' },
+  { x: .90, y: .72, t: 'Prolongement et prédentine en MET', p: 'Prolongement odontoblastique et fibrilles de collagène de la prédentine.', trap: 'En MET, le collagène I présente une striation périodique (≈ 67 nm).' },
+  { x: .28, y: .70, portal: 'Zoomer sur la cellule acineuse & le canal strié', t: 'Une autre cellule sécrétrice', p: 'Même équipement (RER, Golgi, vésicules) chez la cellule acineuse salivaire : comparez-les.', trap: 'Odontoblaste : sécrétion de collagène ; cellule acineuse séreuse : sécrétion d’enzymes.' },
+]},
+{ img: 'p9', act: 2, short: 'Acinus & canal strié', scale: 'Cellule', title: 'Cytologie de la cellule acineuse salivaire et du canal strié',
+  pins: [
+  { x: .31, y: .19, t: 'Exocytose apicale', p: 'Fusion des grains avec la membrane apicale, dans la lumière de l’acinus.', trap: 'Parasympathique (ACh, récepteurs <b>M3</b> → Ca²⁺) : salive abondante et fluide. La <b>pilocarpine</b> (agoniste muscarinique) traite la sécheresse buccale ; l’atropine donne une bouche sèche.' },
+  { x: .22, y: .27, t: 'Grains de zymogène', p: 'Amylase salivaire (ptyaline), qui commence la digestion de l’amidon ; aussi lysozyme, lactoferrine, histatines.', trap: 'Amylase sérique élevée : pancréatite <b>ou</b> parotidite (oreillons) ; la <b>lipase</b> est spécifique du pancréas.' },
+  { x: .27, y: .36, t: 'Appareil de Golgi supranucléaire', p: 'Concentration et emballage des protéines en grains.', trap: 'Voie de sécrétion régulée : stockage en grains, puis exocytose sur signal.' },
+  { x: .25, y: .56, t: 'Noyau', p: 'Rond, nucléole net : forte synthèse protéique.', trap: 'Cellule séreuse = noyau rond ; cellule muqueuse = noyau aplati, refoulé à la base.' },
+  { x: .17, y: .72, t: 'RER basal', p: 'Citernes parallèles très abondantes : synthèse des enzymes, responsables de la basophilie basale.', trap: 'Même organisation que la cellule acineuse pancréatique.' },
+  { x: .42, y: .42, t: 'Cellule myoépithéliale', p: 'Entre la lame basale et la cellule acineuse ; filaments d’actine et de myosine.', trap: 'Les cellules myoépithéliales expriment l’actine musculaire lisse et la p63 (marqueurs utilisés en anatomopathologie).' },
+  { x: .40, y: .88, t: 'Lame basale', p: 'Elle entoure l’acinus et les cellules myoépithéliales.', trap: 'Un carcinome qui franchit la lame basale devient invasif.' },
+  { x: .07, y: .13, t: 'Grains de zymogène en MET', p: 'Grains denses, homogènes, arrondis.', trap: 'Les grains des cellules muqueuses sont pâles et confluents ; ceux des séreuses, denses et séparés.' },
+  { x: .70, y: .18, t: 'Réabsorption de Na⁺ et Cl⁻', p: 'Le Na⁺ entre par ENaC, le Cl⁻ par le CFTR ; l’<b>aldostérone</b> augmente la réabsorption de Na⁺.', trap: 'Le canal strié est <b>imperméable à l’eau</b> : il réabsorbe les ions sans l’eau → salive <b>hypotonique</b>. Plus le débit est élevé, moins la salive est hypotonique.' },
+  { x: .795, y: .18, t: 'Sécrétion de K⁺ et HCO₃⁻', p: 'La salive est plus riche en K⁺ que le plasma et riche en HCO₃⁻ (pouvoir tampon, pH ≈ 7).', trap: 'Salive finale : hypotonique, pauvre en Na⁺ et Cl⁻, riche en K⁺ et HCO₃⁻.' },
+  { x: .66, y: .62, t: 'Invaginations basales', p: 'Replis profonds de la membrane basolatérale qui multiplient la surface des pompes.', trap: 'Même dispositif que dans les tubules rénaux proximal et distal (cellules de transport ionique).' },
+  { x: .83, y: .57, t: 'Mitochondries et Na⁺/K⁺-ATPase', p: 'Mitochondries en bâtonnets alignées dans les replis : elles alimentent la Na⁺/K⁺-ATPase basolatérale.', trap: 'Ce sont elles qui donnent la <b>striation basale</b> visible au microscope optique.' },
+  { x: .93, y: .75, t: 'Involutions basales en MET', p: 'Replis membranaires parallèles et mitochondries.', trap: 'Striation basale = signe d’un épithélium de transport ionique actif.' },
+]},
+];
+</script>
+<script>// Cavité orale — atlas à zoom continu de la cavité orale, 9 planches emboîtées (Canvas 2D, zéro dépendance).
+// Chaque planche vit dans le « portail » de la précédente ; une seule caméra (cx, cy, z) traverse le monde.
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const META = window.__META__, IMG = window.__IMG__; const N = PLATES.length;
+const ROMAN = ['I', 'II', 'III'];
+const MAG = PLATES.map((p) => p.mag || ACTS[p.act].mag), REALW = MAG.map((m) => 40 / m); // plate width in cm at its home view
+
+// ───────────── world: plate k+1 sits inside plate k's portal rectangle
+const R = [{ x: 0, y: 0, w: 1, h: META[PLATES[0].img].h / META[PLATES[0].img].w }];
+for (let k = 1; k < N; k++) { const p = PLATES[k - 1].portal, par = R[k - 1], m = META[PLATES[k].img]; const w = par.w * p.w, h = w * (m.h / m.w);
+  R.push({ x: par.x + p.c[0] * par.w - w / 2, y: par.y + p.c[1] * par.h - h / 2, w, h }); }
+
+// ───────────── canvas & view
+const cv = $('#cv'), ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false, railH = 200;
+let offC = null, offX = null;
+function off() { if (!offC) { offC = document.createElement('canvas'); offX = offC.getContext('2d'); } if (offC.width !== cv.width || offC.height !== cv.height) { offC.width = cv.width; offC.height = cv.height; } return offX; }
+function layout() {
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const short = !mobile && H < 520; const top = mobile ? 62 : short ? 48 : 82, bottom = mobile ? 76 : short ? 50 : 112, left = mobile ? 2 : short ? 6 : 22, right = mobile ? 2 : short ? 48 : 92;
+  aw = (W - left - right) * 0.985; ah = (H - top - bottom) * 0.985; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
+  railH = ($('#rail').clientHeight || 200) - 12; need();
+}
+const homeZ = (k) => Math.min(aw / R[k].w, ah / R[k].h);
+const home = (k) => ({ cx: R[k].x + R[k].w / 2, cy: R[k].y + R[k].h / 2, z: homeZ(k) });
+const cam = { cx: 0.5, cy: 0.25, z: 600 };
+const sig = (k, z = cam.z) => z / homeZ(k);
+const toS = (wx, wy) => [vcx + (wx - cam.cx) * cam.z, vcy + (wy - cam.cy) * cam.z];
+const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
+function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)); a.push(A * D); } return a; }
+function dominant(z = cam.z) { const a = alphas(z); let b = 0; for (let k = 1; k < N; k++) if (a[k] > a[b]) b = k; return b; }
+
+// ───────────── images: decoded on demand; a small LRU keeps phone memory low
+const imgs = {}, thumbs = {}, lru = [];
+function thumb(key) { if (!thumbs[key]) { const i = new Image(); i.src = IMG[key + '_t']; thumbs[key] = i; } return thumbs[key]; }
+function want(key) { let e = imgs[key]; if (!e) { const i = new Image(); i.decoding = 'async'; i.src = IMG[key]; e = imgs[key] = { i, ok: false }; e.p = i.decode().then(() => { e.ok = true; need(); }).catch(() => { e.ok = !!i.naturalWidth; need(); }); }
+  const j = lru.indexOf(key); if (j >= 0) lru.splice(j, 1); lru.push(key);
+  while (lru.length > (mobile ? 5 : 9)) { const k = lru.shift(); if (imgs[k]) { imgs[k].i.src = ''; delete imgs[k]; } } return e; }
+function prefetch() { const k = dominant(); [k - 1, k + 1, k].forEach((j) => j >= 0 && j < N && want(PLATES[j].img)); }
+
+// ───────────── rendering (on demand only)
+let dirty = true, raf = 0, quality = 'high', texPat = null;
+function need() { dirty = true; if (!raf) raf = requestAnimationFrame(frame); }
+function drawPlate(c, k, alpha) {
+  const key = PLATES[k].img; const e = imgs[key]; const im = e && e.ok ? e.i : thumb(key); if (!im || !im.naturalWidth) return;
+  const r = R[k]; const [x, y] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z; const NW = im.naturalWidth, NH = im.naturalHeight;
+  const dx0 = Math.max(0, x), dy0 = Math.max(0, y), dx1 = Math.min(W, x + sw), dy1 = Math.min(H, y + sh); if (dx1 <= dx0 || dy1 <= dy0) return;
+  c.globalAlpha = alpha; c.drawImage(im, ((dx0 - x) / sw) * NW, ((dy0 - y) / sh) * NH, ((dx1 - dx0) / sw) * NW, ((dy1 - dy0) / sh) * NH, dx0 * DPR, dy0 * DPR, (dx1 - dx0) * DPR, (dy1 - dy0) * DPR); c.globalAlpha = 1;
+}
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
+  const a = alphas(); let s = 0; const bg = [0, 0, 0];
+  a.forEach((v, k) => { const b = META[PLATES[k].img].bg; s += v; for (let i = 0; i < 3; i++) bg[i] += b[i] * v; });
+  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.5; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  for (let k = 0; k < N; k++) { if (a[k] < 0.004) continue; const sg = sig(k);
+    if (k > 0 && sg < 0.97) { // the deeper plate opens through a soft radial iris centred on its portal
+      const o = off(); const r = R[k]; const [x0, y0] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z;
+      const bx = Math.max(0, Math.floor(x0 * DPR)), by = Math.max(0, Math.floor(y0 * DPR)), bw = Math.min(cv.width, Math.ceil((x0 + sw) * DPR)) - bx, bh = Math.min(cv.height, Math.ceil((y0 + sh) * DPR)) - by;
+      if (bw <= 0 || bh <= 0) continue;
+      o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(bx, by, bw, bh); o.imageSmoothingQuality = quality; drawPlate(o, k, 1);
+      const cx = (x0 + sw / 2) * DPR, cy = (y0 + sh / 2) * DPR, rr = Math.max(sw, sh) * (0.3 + 0.5 * sst(0.5, 0.97, sg)) * DPR;
+      const g = o.createRadialGradient(cx, cy, rr * 0.42, cx, cy, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(bx, by, bw, bh); o.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = a[k]; ctx.drawImage(offC, bx, by, bw, bh, bx, by, bw, bh); ctx.globalAlpha = 1;
+    } else drawPlate(ctx, k, a[k]); }
+  updateHUD(a); updatePins(a);
+}
+
+// ───────────── camera dynamics
+const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
+const zMin = () => homeZ(0) * 0.7, zMax = () => homeZ(N - 1) * 4;
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function clampCenter() { const r = R[dominant()]; const m = 0.14 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m * 0.6, r.y + r.h + m * 0.6); }
+const ratio = (k) => homeZ(k + 1) / homeZ(k);
+function steer(strength) { // while zooming in, glide toward the next portal (progress-based so short and long dives feel alike)
+  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); if (p <= 0.28) return 0;
+  const r = R[k + 1]; const kk = sst(0.28, 0.85, p) * strength; cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+function frame() {
+  raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = false;
+  if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
+    const w = Math.abs(f.z1 - f.z0) / f.z1 < 1e-3 ? e : (1 / z - 1 / f.z0) / (1 / f.z1 - 1 / f.z0); cam.z = z; cam.cx = f.c0[0] + (f.c1[0] - f.c0[0]) * w; cam.cy = f.c0[1] + (f.c1[1] - f.c0[1]) * w;
+    if (u >= 1) { flight = null; if (f.done) f.done(); } else moving = true; }
+  else {
+    if (Math.abs(pend) > 1e-4) { const step = pend * (1 - Math.exp(-dt * 16)); pend -= step; zoomAt(anchorS[0], anchorS[1], Math.exp(step)); moving = true; if (step > 0) steering = true; } else pend = 0;
+    if (Math.abs(vel[0]) + Math.abs(vel[1]) > 0.02) { cam.cx -= vel[0] / cam.z; cam.cy -= vel[1] / cam.z; const d = Math.exp(-dt * 6); vel[0] *= d; vel[1] *= d; moving = true; } else vel = [0, 0];
+    if (steering) { if (steer(1 - Math.exp(-dt * 7)) > 1e-4) moving = true; if (Math.abs(pend) < 1e-4) steering = false; }
+    clampCenter(); }
+  if (dirty || moving) { dirty = false; quality = moving || ptrs.size ? 'medium' : 'high'; render(); }
+  if (moving) raf = requestAnimationFrame(frame); else if (quality !== 'high') { clearTimeout(frame.hq); frame.hq = setTimeout(() => { if (!raf && !ptrs.size) { quality = 'high'; render(); } }, 90); }
+}
+function flyTo(cx, cy, z, dur, done) { flight = { t0: performance.now(), dur: dur ?? clamp(0.75 + Math.abs(Math.log(z / cam.z)) * 0.3, 0.75, 2.6) * 1000, c0: [cam.cx, cam.cy], c1: [cx, cy], z0: cam.z, z1: z, done }; pend = 0; vel = [0, 0]; need(); }
+function flyHome(k, done) { k = clamp(k, 0, N - 1); for (let j = Math.min(k, dominant()); j <= Math.max(k, dominant()); j++) want(PLATES[j].img); const h = home(k); flyTo(h.cx, h.cy, h.z, undefined, done); }
+function camAtDepth(t) { t = clamp(t, 0, N - 1); const k = Math.min(N - 2, Math.floor(t)); const f = t - k; const a = home(k), b = home(k + 1);
+  const z = Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * f); const w = (1 / z - 1 / a.z) / (1 / b.z - 1 / a.z); return { cx: a.cx + (b.cx - a.cx) * w, cy: a.cy + (b.cy - a.cy) * w, z }; }
+function depthOf() { const k = dominant(); if (k >= N - 1) return N - 1; return k + clamp(Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)), 0, 1); }
+
+// ───────────── HUD: magnification follows the acts (×1 → ×100 → ×10 000), scale bar follows the plates
+let hudKey = '', plateKey = -1;
+function niceLen(cmPerPx) { const target = cmPerPx * 92; const e = Math.pow(10, Math.floor(Math.log10(target))); const m = target / e; const n = (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; return [n, n / cmPerPx]; }
+function fmtLen(cm) { if (cm >= 1) return `${+cm.toPrecision(3)} cm`; if (cm >= 0.1) return `${+(cm * 10).toPrecision(3)} mm`; if (cm >= 1e-4) return `${+(cm * 1e4).toPrecision(3)} µm`; return `${+(cm * 1e7).toPrecision(3)} nm`; }
+function fmtMag(m) { if (m < 10) return '×' + m.toFixed(1).replace('.', ',').replace(',0', ''); const e = Math.pow(10, Math.floor(Math.log10(m)) - 1); return '×' + Math.round(Math.round(m / e) * e).toLocaleString('fr-FR'); }
+function magNow() { const t = depthOf(), k = Math.floor(t), f = t - k;
+  if (k >= N - 1) return MAG[N - 1] * Math.max(1, sig(N - 1)); if (k === 0 && sig(0) < 1) return MAG[0] * sig(0);
+  return Math.exp(Math.log(MAG[k]) + (Math.log(MAG[k + 1]) - Math.log(MAG[k])) * f); }
+function updateHUD(a) {
+  let sw = 0, lr = 0; for (let k = 0; k < N; k++) { if (a[k] < 0.01) continue; sw += a[k]; lr += a[k] * Math.log(REALW[k] / (R[k].w * cam.z)); }
+  const k = dominant(); const [n, px] = niceLen(Math.exp(lr / sw)); const M = magNow(); const t = depthOf();
+  const key = `${fmtMag(M)}|${k}|${Math.round(px)}|${fmtLen(n)}`;
+  if (key !== hudKey) { hudKey = key; $('#mag').innerHTML = `${fmtMag(M)}<small>${PLATES[k].scale}</small>`; $('#sbi').style.width = `${Math.round(px)}px`; $('#sbt').textContent = fmtLen(n); }
+  if (k !== plateKey) { const first = plateKey < 0; plateKey = k; const P = PLATES[k];
+    $('#ltitle').textContent = P.title; $('#path').innerHTML = `La cavité orale &nbsp;›&nbsp; Acte ${ROMAN[P.act]} · ${ACTS[P.act].name} &nbsp;›&nbsp; <b>${k + 1} / ${N}</b>`;
+    document.querySelectorAll('.pl').forEach((b, i) => b.classList.toggle('on', i === k)); document.querySelectorAll('.grp').forEach((g, i) => g.classList.toggle('on', i === P.act));
+    document.querySelectorAll('.rail .tick').forEach((el, i) => { el.classList.toggle('on', i === k); el.classList.toggle('cur', el.classList.contains('major') && PLATES[i].act === P.act); });
+    if (!first) toast(`${k + 1}. ${P.short} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}`); prefetch(); }
+  $('#rth').style.top = `${6 + (t / (N - 1)) * railH}px`; $('#rfill').style.height = `${(t / (N - 1)) * railH}px`;
+  $('#lvf').style.width = `${clamp(Math.log(M) / Math.log(10000), 0, 1) * 100}%`;
+}
+
+// ───────────── hotspots
+const pinEls = [];
+function buildPins() { const host = $('#pins');
+  PLATES.forEach((P, k) => P.pins.forEach((p, j) => { const el = document.createElement('div'); el.className = 'pin' + (p.portal ? ' portal' : '');
+    el.innerHTML = `<button aria-label="${p.t.replace(/"/g, '')}"><b></b><i></i></button>` + (p.portal ? `<button class="go">${p.portal} →</button>` : `<span>${p.t}</span>`);
+    el.querySelector('button').addEventListener('click', (ev) => { ev.stopPropagation(); openCard(k, j, true); });
+    if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
+    host.appendChild(el); pinEls.push({ el, k, j, vis: false }); })); }
+function updatePins(a) {
+  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.5 : 3.8), x = 0, y = 0;
+    if (show) { const r = R[P.k]; [x, y] = toS(r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; }
+    if (show && p.portal) { // dive button: right by default, left when preferred or when only the left fits; if neither fits, the roomier side, narrowed to fit
+      const go = P.go || (P.go = P.el.querySelector('.go')); if (!P.gw) P.gw = go.offsetWidth || 260; const off = mobile ? 20 : 24;
+      const rR = W - (mobile ? 0 : 92) - x - off - 8, rL = x - off - 8, fr = P.gw <= rR, fl = P.gw <= rL; const L = fl && fr ? p.side === 'l' : fl || fr ? fl : rL > rR;
+      if (L !== P.left) { P.left = L; P.el.classList.toggle('left', L); } const mw = fl || fr ? '' : `${Math.max(96, Math.round((L ? rL : rR) - 24))}px`; if (mw !== P.mw) { P.mw = mw; go.style.maxWidth = mw; } }
+    if (show) { P.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; if (!P.vis) { P.el.classList.add('on'); P.vis = true; } } else if (P.vis) { P.el.classList.remove('on'); P.vis = false; } } }
+
+// ───────────── study card
+let open = null; const seen = new Set();
+function openCard(k, j, fly) {
+  const P = PLATES[k]; const p = P.pins[j]; open = { k, j }; seen.add(`${k}.${j}`); const n = P.pins.length;
+  pinEls.forEach((E) => { E.el.classList.toggle('active', E.k === k && E.j === j); E.el.classList.toggle('seen', seen.has(`${E.k}.${E.j}`)); });
+  const C = $('#card'); C.classList.toggle('portal', !!p.portal);
+  C.innerHTML = `<button class="x" aria-label="Fermer">✕</button><div class="chip"><i></i>Planche ${k + 1} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}</div><h3>${p.t}</h3><p>${p.p}</p>
+    <div class="trap"><span>⚠ Piège d’EMD</span>${p.trap}</div>${p.note ? `<div class="note">Note sur la planche : ${p.note}</div>` : ''}
+    <div class="act">${p.portal ? `<button class="btn dive">${p.portal} →</button>` : ''}<button class="btn zoom">Recentrer</button></div>
+    <div class="nav"><button class="pv">← Précédent</button><span>${j + 1} / ${n} · ${[...seen].filter((s) => s.startsWith(`${k}.`)).length} vus</span><button class="nx">Suivant →</button></div>`;
+  C.querySelector('.x').onclick = closeCard; C.querySelector('.zoom').onclick = () => focusPin(k, j);
+  C.querySelector('.pv').onclick = () => openCard(k, (j - 1 + n) % n, true); C.querySelector('.nx').onclick = () => openCard(k, (j + 1) % n, true);
+  if (p.portal) C.querySelector('.dive').onclick = () => { closeCard(); flyHome(k + 1); };
+  C.classList.add('on'); if (fly) focusPin(k, j); hideHint();
+}
+function closeCard() { open = null; $('#card').classList.remove('on'); pinEls.forEach((E) => E.el.classList.remove('active')); }
+function focusPin(k, j) { const p = PLATES[k].pins[j]; const r = R[k]; const wx = r.x + p.x * r.w, wy = r.y + p.y * r.h; const z = homeZ(k) * (p.portal ? 1.35 : 1.7);
+  const fx = mobile ? vcx : Math.min(vcx, (W - (H < 520 ? 50 : 92) - Math.min(410, W * 0.54)) / 2 + 24), fy = mobile ? Math.min(vcy, H * 0.24) : vcy; flyTo(wx - (fx - vcx) / z, wy - (fy - vcy) / z, z); }
+
+// ───────────── input
+let hintGone = false; function hideHint() { if (hintGone) return; hintGone = true; $('#hint').classList.add('gone'); }
+let tt = 0; function toast(s) { const t = $('#toast'); t.textContent = s; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1700); }
+function zoomBy(f, sx = vcx, sy = vcy) { flight = null; anchorS = [sx, sy]; pend = clamp(pend + Math.log(f), -3, 3); need(); hideHint(); }
+addEventListener('wheel', (e) => { if (e.target.closest && e.target.closest('.card,.dock,.ctrl,.top')) { if (!e.target.closest('.card,.dock')) e.preventDefault(); return; }
+  e.preventDefault(); let d = e.deltaY; if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= H; zoomBy(Math.exp(-d * (e.ctrlKey ? 0.006 : 0.0016)), e.clientX, e.clientY); }, { passive: false });
+let lastPinch = 0, lastMid = null, downAt = 0, lastTap = 0, moved = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); flight = null; pend = 0; vel = [0, 0]; downAt = performance.now(); moved = 0; cv.classList.add('drag');
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a[0] - b[0], a[1] - b[1]); lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; } hideHint(); });
+cv.addEventListener('pointermove', (e) => { if (!ptrs.has(e.pointerId)) return; const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 1) { const dx = e.clientX - prev[0], dy = e.clientY - prev[1]; moved += Math.abs(dx) + Math.abs(dy); cam.cx -= dx / cam.z; cam.cy -= dy / cam.z; vel = [dx * 0.9, dy * 0.9]; clampCenter(); need(); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.cx -= (mid[0] - lastMid[0]) / cam.z; cam.cy -= (mid[1] - lastMid[1]) / cam.z; if (lastPinch) { const f = d / lastPinch; zoomAt(mid[0], mid[1], f); if (f > 1) steer(0.06); }
+    lastPinch = d; lastMid = mid; moved += 10; vel = [0, 0]; clampCenter(); need(); } });
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = 0; if (ptrs.size === 1) lastMid = [...ptrs.values()][0];
+  if (!ptrs.size) { cv.classList.remove('drag'); if (performance.now() - downAt > 80) need(); else vel = [0, 0];
+    if (moved < 6 && performance.now() - downAt < 300) { const tn = performance.now(); if (tn - lastTap < 320) { zoomBy(2.2, e.clientX, e.clientY); lastTap = 0; } else { lastTap = tn; if (open) closeCard(); } } } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; const k = e.key;
+  if (k === 'f' || k === 'F') toggleFS(); else if (k === '+' || k === '=') zoomBy(1.35); else if (k === '-' || k === '_') zoomBy(1 / 1.35);
+  else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { closeCard(); flyHome(dominant() + 1); }
+  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { closeCard(); flyHome(dominant() - 1); }
+  else if (k === 'r' || k === 'R' || k === '0' || k === 'Home') { closeCard(); flyHome(0); } else if (k === 'End') { closeCard(); flyHome(N - 1); }
+  else if (k === 'Escape') closeCard(); else if (/^[1-9]$/.test(k)) { closeCard(); flyHome(+k - 1); } else return;
+  e.preventDefault(); hideHint(); });
+function toggleFS() { const d = document, el = d.documentElement; if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); else (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); }
+$('#zin').onclick = () => zoomBy(1.6); $('#zout').onclick = () => zoomBy(1 / 1.6); $('#reset').onclick = () => { closeCard(); flyHome(0); }; $('#fs').onclick = toggleFS;
+// depth rail: one tick per plate, labels at the start of each act
+const rail = $('#rail'); PLATES.forEach((P, i) => { const t = document.createElement('div'); const major = i === 0 || PLATES[i - 1].act !== P.act; t.className = 'tick' + (major ? ' major' : '');
+  t.style.top = `calc(6px + ${(i / (N - 1)) * 100}% - ${(i / (N - 1)) * 12}px)`; t.title = `${i + 1}. ${P.short}`;
+  if (major) t.innerHTML = `<span>${ACTS[P.act].name}<em>${fmtMag(ACTS[P.act].mag)}</em></span>`;
+  t.onclick = (ev) => { ev.stopPropagation(); closeCard(); flyHome(i); }; rail.appendChild(t); });
+let railDrag = false; const railSet = (e) => { const r = rail.getBoundingClientRect(); const c = camAtDepth(clamp((e.clientY - r.top - 6) / (r.height - 12), 0, 1) * (N - 1)); flight = null; pend = 0; vel = [0, 0]; cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; prefetch(); need(); hideHint(); };
+rail.addEventListener('pointerdown', (e) => { if (e.target.closest('.tick')) return; railDrag = true; rail.setPointerCapture(e.pointerId); railSet(e); }); rail.addEventListener('pointermove', (e) => railDrag && railSet(e)); rail.addEventListener('pointerup', () => (railDrag = false));
+// plate dock, grouped by act
+ACTS.forEach((A, ai) => { const g = document.createElement('div'); g.className = 'grp'; g.innerHTML = `<div class="gh"><b>${ROMAN[ai]}</b>${A.name}<em>${fmtMag(A.mag)}</em></div><div class="gt"></div>`;
+  PLATES.forEach((P, i) => { if (P.act !== ai) return; const b = document.createElement('button'); b.className = 'pl'; b.title = `${i + 1}. ${P.title}`;
+    b.innerHTML = `<img alt="" src="${IMG[P.img + '_t']}"><i>${i + 1}</i><b>${P.short}</b>`; b.onclick = () => { closeCard(); hideHint(); flyHome(i); }; g.querySelector('.gt').appendChild(b); });
+  $('#dock').appendChild(g); });
+addEventListener('resize', () => { const t = depthOf(); layout(); if (!flight) { const c = camAtDepth(t); cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; } need(); });
+
+// ───────────── boot
+async function boot() {
+  if (matchMedia('(pointer:coarse)').matches) { $('#hint1').textContent = 'Pincez pour plonger'; $('#hint2').textContent = 'Glisser pour explorer · double-tap · touchez les points et les boutons lumineux' + (innerHeight > innerWidth ? ' · tournez le téléphone pour agrandir les planches' : ''); }
+  buildPins(); layout();
+  if (window.__TEX__) { const ti = new Image(); ti.src = window.__TEX__; ti.decode().then(() => { texPat = ctx.createPattern(ti, 'repeat'); need(); }).catch(() => {}); }
+  const h = home(0); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z * 0.9; $('#lb').style.width = '35%';
+  await want(PLATES[0].img).p; $('#lb').style.width = '100%'; prefetch(); render();
+  setTimeout(() => { $('#loader').classList.add('done'); flyTo(h.cx, h.cy, h.z, 1300); }, 120);
+  // decode the rest in the background, one at a time, so long dives never show a blurry placeholder (desktop)
+  if (!mobile) for (const P of PLATES) await want(P.img).p;
+}
+window.__atlas = { cam, flyHome, openCard, depthOf, dominant: () => dominant(), R, PLATES, alphasNow: () => alphas(), magNow };
+boot().catch((e) => { $('#lmsg').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+<script>(function(){
+var d=document,w=window,root=d.documentElement;
+['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+function q(s){return d.querySelector(s);}
+var loader=q('#loader');
+function isReady(){return !loader||loader.classList.contains('done');}
+function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;var list=A.PLATES||A.L;k=Math.floor(k);if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);var h=d.getElementById('hint');if(h)h.classList.add('gone');}catch(e){}}
+if(!root.classList.contains('az-embed')){
+  var top=q('.top');
+  if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');
+    a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Atlas Zoom</span>';
+    top.insertBefore(a,top.firstChild);}
+  var pm=/[?&]planche=(\d{1,2})(?:&|$)/.exec(location.search);
+  if(pm)whenReady(function(){setTimeout(function(){gotoPlate(+pm[1]-1);},0);});
+  return;
+}
+var target=(self.origin&&self.origin!=='null')?self.origin:'*';
+function post(type,data){try{var m={source:'medart-atlas',type:type};if(data){for(var k in data)m[k]=data[k];}w.parent.postMessage(m,target);}catch(e){}}
+w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(target!=='*'&&e.origin!==target)||!m||m.source!=='medart-hub')return;
+  if(m.type==='inset'&&typeof m.top==='number'&&m.top>=0&&m.top<400){root.style.setProperty('--az-top',Math.round(m.top)+'px');}
+  else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
+post('hello');
+w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
+function read(){
+  var level='',mag='';
+  if(mEl){var sm=mEl.querySelector('small');level=sm?sm.textContent.trim():'';
+    for(var n=mEl.firstChild;n;n=n.nextSibling){if(n!==sm)mag+=n.textContent||'';}mag=mag.trim();}
+  var k=-1,n=0;try{var A=w.__atlas;if(A){k=A.dominant();var list=A.PLATES||A.L;n=list?list.length:0;}}catch(e){}
+  return {title:tEl?tEl.textContent.trim():'',level:level,mag:mag,index:k,count:n};
+}
+function flush(){var s=read(),key=s.title+'|'+s.level+'|'+s.index;
+  if(key!==last){last=key;lastMag=s.mag;post('state',s);return;}
+  if(s.mag!==lastMag){lastMag=s.mag;post('mag',{mag:s.mag});}}
+function schedule(){if(timer)return;timer=setTimeout(function(){timer=0;flush();},120);}
+[tEl,mEl,pEl].forEach(function(el){if(el)new MutationObserver(schedule).observe(el,{childList:true,characterData:true,subtree:true});});
+whenReady(function(){post('ready');flush();});
+w.addEventListener('keydown',function(e){var k=e.key;if((k==='f'||k==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;e.stopPropagation();e.preventDefault();post('fullscreen');}},true);
+flush();
+})();</script>
+</body>
+</html>

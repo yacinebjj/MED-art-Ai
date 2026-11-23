@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#191d21">
+<title>La Rate · Atlas zoomable · MedArt AI Studio</title>
+<link rel="preload" href="/atlas-zoom/rate/p1.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<style>
+.az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
+.az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
+.az-embed .top .scale{margin-left:auto}.az-embed .scale .sbar{margin-top:0}
+.az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
+.az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
+@media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+</style>
+<meta name="description" content="La rate en 9 planches et 3 actes : de l’anatomie au sinus veineux, à l’érythrophagocytose et à l’immunité de la zone marginale, en zoom continu.">
+<style>
+@font-face{font-family:'Kalam';font-weight:400;font-display:swap;src:url(/atlas-zoom/_shared/kalam-400.woff2) format('woff2')}
+@font-face{font-family:'Kalam';font-weight:700;font-display:swap;src:url(/atlas-zoom/_shared/kalam-700.woff2) format('woff2')}
+:root{--bg:#191d21;--ink:#f6efe2;--chalk:#f3e2bd;--soft:rgba(240,233,220,.74);--mute:rgba(232,226,214,.5);--line:rgba(243,226,189,.14);--acc:#ffb86b;--acc2:#7fd8ff;
+  --hand:'Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',system-ui,sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab}#cv.drag{cursor:grabbing}
+/* slate atmosphere: vignette + chalk grain (static layers, composited once) */
+.vig{position:fixed;inset:0;pointer-events:none;z-index:1;background:radial-gradient(130% 100% at 50% 48%,transparent 52%,rgba(6,8,10,.55) 100%)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.06;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scrim{position:fixed;left:0;right:0;top:0;height:120px;z-index:2;pointer-events:none;background:linear-gradient(rgba(13,16,21,.66),rgba(13,16,21,.3) 55%,transparent)}
+/* pins */
+#pins{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pin{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
+.pin.on{opacity:1}.pin.on button{pointer-events:auto}
+.pin button{all:unset;cursor:pointer;position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.pin i{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff6e4,var(--acc) 60%,#e07a2c);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 16px 3px rgba(255,184,107,.55);transition:transform .25s var(--ease)}
+.pin b{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,184,107,.75);animation:pulse 2.2s var(--ease) infinite}
+.pin.portal i{background:radial-gradient(circle at 40% 35%,#eafaff,var(--acc2) 60%,#2f8fc0);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 20px 5px rgba(127,216,255,.6)}
+.pin.portal b{border-color:rgba(127,216,255,.85);animation-duration:1.6s}
+.pin.seen i{filter:saturate(.55) brightness(.92)}
+.pin button:hover i,.pin.active i{transform:scale(1.25)}
+.pin span{position:absolute;left:22px;top:-13px;white-space:nowrap;padding:5px 11px;border-radius:999px;font:700 15px/1.1 var(--hand);color:var(--chalk);background:rgba(20,24,28,.86);border:1px solid var(--line);opacity:0;transform:translateX(-4px);transition:.25s var(--ease);pointer-events:none}
+.pin .go{all:unset;cursor:pointer;position:absolute;left:24px;top:-16px;white-space:nowrap;padding:7px 14px 7px 13px;border-radius:999px;font:700 15.5px/1.1 var(--hand);color:#e6f8ff;background:linear-gradient(135deg,rgba(30,74,104,.9),rgba(16,40,60,.92));border:1px solid rgba(127,216,255,.55);box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 22px rgba(127,216,255,.35),0 8px 24px -8px rgba(0,0,0,.7);animation:glow 2.4s var(--ease) infinite;transition:transform .2s var(--ease),filter .2s}
+.pin.on .go{pointer-events:auto}.pin.left .go{left:auto;right:24px}.pin.left .go:hover{transform:translateX(-3px)}.pin .go:hover{transform:translateX(3px);filter:brightness(1.15)}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 18px rgba(127,216,255,.28),0 8px 24px -8px rgba(0,0,0,.7)}50%{box-shadow:0 0 0 1px rgba(127,216,255,.25),0 0 30px rgba(127,216,255,.55),0 8px 24px -8px rgba(0,0,0,.7)}}
+.pin button:hover+span,.pin.active span{opacity:1;transform:none}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.55);opacity:0}}
+/* glass */
+.glass{background:linear-gradient(160deg,rgba(40,45,52,.78),rgba(22,26,31,.86));border:1px solid rgba(243,226,189,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 30px 70px -24px rgba(0,0,0,.75)}
+@supports (backdrop-filter:blur(1px)){.glass{background:linear-gradient(160deg,rgba(40,45,52,.62),rgba(22,26,31,.74));backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%)}}
+/* header */
+.top{position:fixed;left:0;right:0;top:0;z-index:6;display:flex;align-items:flex-start;gap:18px;padding:16px 22px;pointer-events:none}
+.top>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:8px 14px 8px 9px;border-radius:16px}
+.brand svg{width:32px;height:32px;flex:none}.brand b{display:block;font-weight:700;font-size:13.5px;letter-spacing:-.01em}.brand em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:1px}
+.crumb{margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;padding-top:4px;max-width:46vw}
+.crumb .path{font:600 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:rgba(236,230,218,.66);text-shadow:0 1px 8px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.crumb .path b{color:var(--acc)}
+.crumb h2{margin:0;font:700 25px/1.15 var(--hand);color:var(--chalk);text-shadow:0 2px 18px rgba(0,0,0,.6);transition:opacity .3s}
+.scale{min-width:170px;padding:10px 14px;border-radius:16px;text-align:right}
+.scale .m{font:800 24px/1 var(--sans);letter-spacing:-.03em;color:#fff}.scale .m small{font-size:13px;color:var(--mute);font-weight:600;margin-left:6px;letter-spacing:.06em;text-transform:uppercase}
+.sbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;font:600 11.5px var(--sans);color:var(--soft)}
+.sbar i{display:block;height:6px;border:1.5px solid rgba(243,226,189,.85);border-top:0;transition:width .25s var(--ease)}
+/* side controls */
+.ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px;border-radius:22px}
+.ctrl button{all:unset;cursor:pointer;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:var(--ink);transition:background .2s}
+.ctrl button:hover{background:rgba(255,255,255,.08)}.ctrl svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rail{position:relative;width:38px;height:min(330px,40vh);margin:4px 0;cursor:pointer;touch-action:none}
+.rail .tr{position:absolute;left:18px;top:6px;bottom:6px;width:2px;border-radius:2px;background:rgba(243,226,189,.18)}
+.rail .fill{position:absolute;left:18px;top:6px;width:2px;border-radius:2px;background:linear-gradient(var(--acc),var(--acc2))}
+.rail .tick{position:absolute;left:13px;width:12px;height:2px;margin-top:-1px;background:rgba(243,226,189,.28);border-radius:2px}.rail .tick.major{left:8px;width:22px;background:rgba(243,226,189,.45)}.rail .tick::before{content:"";position:absolute;left:-6px;right:-6px;top:-7px;bottom:-7px}
+.rail .tick{cursor:pointer}.rail .tick span{position:absolute;right:32px;top:-14px;padding:4px 8px 3px;border-radius:9px;background:rgba(18,22,27,.72);border:1px solid rgba(243,226,189,.08);font:700 13.5px/1 var(--hand);color:var(--mute);white-space:nowrap;text-align:right;cursor:pointer}.rail .tick em{display:block;font:600 9.5px var(--sans);letter-spacing:.08em;font-style:normal;margin-top:1px}
+.rail .tick span{opacity:0;transition:opacity .3s}.ctrl:hover .rail .tick span{opacity:1}.rail .tick.cur span{color:var(--chalk)}.rail .tick.on{background:var(--acc)}
+.rail .th{position:absolute;left:7px;width:24px;height:24px;margin-top:-12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#ffd9a8);box-shadow:0 0 0 4px rgba(255,184,107,.22),0 4px 14px rgba(0,0,0,.5)}
+/* plate dock, grouped by act */
+.dock{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:6px 8px 7px;border-radius:22px;max-width:calc(100vw - 16px)}
+.grp{display:flex;flex-direction:column;gap:4px;padding:0 4px}.grp+.grp{border-left:1px solid rgba(243,226,189,.1);padding-left:10px}
+.gh{display:flex;align-items:baseline;gap:6px;padding-left:4px;font:700 10px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);transition:color .3s}
+.gh b{font:700 12px var(--hand);letter-spacing:0;color:var(--acc);opacity:.6}.gh em{font-style:normal;font-weight:600;letter-spacing:.04em;text-transform:none;opacity:.8}
+.grp.on .gh{color:var(--soft)}.grp.on .gh b{opacity:1}
+.gt{display:flex;gap:3px}
+.pl{all:unset;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:78px;padding:3px 0 2px;border-radius:13px;transition:background .3s var(--ease)}
+.pl img{width:70px;height:39px;object-fit:cover;border-radius:9px;display:block;border:1px solid rgba(243,226,189,.16);filter:saturate(.7) brightness(.75);transition:.3s var(--ease)}
+.pl i{position:absolute;left:6px;top:6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;display:grid;place-items:center;font:800 9.5px var(--sans);font-style:normal;color:#1a1d21;background:rgba(243,226,189,.85)}
+.pl b{font:700 12px/1.05 var(--hand);color:var(--mute);transition:color .3s;max-width:76px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl:hover{background:rgba(255,255,255,.05)}.pl:hover img{filter:saturate(.9) brightness(.95)}
+.pl.on{background:rgba(255,184,107,.12)}.pl.on img{filter:none;border-color:var(--acc);box-shadow:0 0 16px rgba(255,184,107,.38)}.pl.on b{color:var(--chalk)}.pl.on i{background:var(--acc)}
+/* scale track (1× → 100× → 10 000×) */
+.lvb{position:relative;display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;font:700 11px/1.1 var(--sans);color:var(--soft);text-align:center}
+.lvb span{display:flex;flex-direction:column;align-items:center;min-width:40px}.lvb span:first-of-type{align-items:flex-start}.lvb span:last-of-type{align-items:flex-end}
+.lvb em{font:600 9px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-style:normal;margin-top:2px}
+.lvb .lt{position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:rgba(243,226,189,.14);overflow:hidden}.lvb .lt i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.wait{position:fixed;left:50%;top:50%;z-index:7;width:34px;height:34px;margin:-17px;opacity:0;transition:opacity .2s;pointer-events:none}.wait.on{opacity:1}
+.wait i{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(243,226,189,.2);border-top-color:var(--acc);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+/* study card */
+.card{position:fixed;z-index:8;right:84px;top:150px;width:min(390px,calc(100vw - 32px));max-height:calc(100vh - 262px);overflow:auto;padding:20px 22px 18px;border-radius:24px;opacity:0;transform:translateX(18px) scale(.98);pointer-events:none;transition:opacity .35s var(--ease),transform .45s var(--ease);scrollbar-width:none}
+.card::-webkit-scrollbar{display:none}.card.on{opacity:1;transform:none;pointer-events:auto}
+.card .chip{display:inline-flex;align-items:center;gap:7px;font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}.card .chip i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.card.portal .chip i{background:var(--acc2);box-shadow:0 0 10px var(--acc2)}
+.card h3{margin:8px 34px 10px 0;font:700 26px/1.12 var(--hand);color:var(--chalk)}
+.card p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--soft)}.card p b{color:#fff;font-weight:650}
+.trap{position:relative;margin:12px 0 4px;padding:12px 14px 12px 16px;border-radius:16px;background:linear-gradient(135deg,rgba(255,120,90,.15),rgba(255,120,90,.04));border:1px solid rgba(255,140,110,.3);font-size:13.2px;line-height:1.55;color:#f6e3dc}
+.trap span{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:800 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#ff9a7e}
+.note{margin-top:10px;font-size:12px;line-height:1.5;color:var(--mute);border-left:2px solid rgba(243,226,189,.25);padding-left:10px}
+.card .x{all:unset;cursor:pointer;position:absolute;right:14px;top:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:var(--soft)}.card .x:hover{background:rgba(255,255,255,.08)}
+.card .act{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:13px;font:700 13px var(--sans);background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--ink);transition:.2s}
+.btn:hover{background:rgba(255,255,255,.12)}.btn.dive{background:linear-gradient(135deg,#7fd8ff,#4aa9e0);color:#06202e;border:0}.btn.dive:hover{filter:brightness(1.08)}
+.card .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font:600 11px var(--sans);color:var(--mute)}
+.card .nav button{all:unset;cursor:pointer;padding:6px 9px;border-radius:9px;color:var(--soft)}.card .nav button:hover{background:rgba(255,255,255,.07)}
+/* hint + loader */
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;padding:16px 20px;border-radius:20px;text-align:center;font:700 18px var(--hand);color:var(--chalk);transition:opacity .6s;pointer-events:none}
+.hint small{display:block;margin-top:4px;font:500 12px var(--sans);color:var(--soft)}.hint.gone{opacity:0}
+.hint svg{width:26px;height:38px;display:block;margin:0 auto 8px}.hint svg .w{animation:wheel 1.4s var(--ease) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}100%{transform:translateY(8px);opacity:0}}
+#loader{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);transition:opacity .7s,visibility .7s}#loader.done{opacity:0;visibility:hidden}
+#loader h1{margin:0;font:700 44px var(--hand);color:var(--chalk);text-align:center}#loader p{margin:6px 0 22px;color:var(--soft);font-size:14px;text-align:center}
+#loader .tr{width:240px;height:2px;margin:0 auto;border-radius:2px;background:rgba(243,226,189,.15);overflow:hidden}#loader .tr i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .3s}
+#loader .msg{margin-top:12px;text-align:center;font-size:12px;color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:116px;transform:translateX(-50%);z-index:9;padding:9px 14px;border-radius:13px;font:600 12.5px var(--sans);color:var(--soft);opacity:0;transition:opacity .4s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:1050px){.crumb .path{display:none}.crumb{max-width:40vw}}
+@media (max-width:1100px){.pl{width:62px}.pl img{width:56px;height:32px}.pl b{font-size:11px;max-width:60px}}
+@media (max-width:900px){.pl b{display:none}.gh em{display:none}}
+@media (max-width:760px){
+  .top{padding:10px 10px;gap:8px}.brand{padding:6px 9px 6px 6px}.brand em{display:none}.brand b{font-size:12px}.crumb{display:none}
+  .scale{min-width:0;padding:8px 10px}.scale .m{font-size:19px}
+  .ctrl{right:6px;top:auto;bottom:84px;transform:none;padding:6px 4px;gap:2px}.ctrl button{width:34px;height:34px}.rail{height:120px}.rail .tick span{display:none}
+  .dock{bottom:6px;gap:2px;padding:4px 5px;border-radius:16px}.grp{padding:0 1px;gap:2px}.grp+.grp{padding-left:4px}.gh{font-size:8px;letter-spacing:.08em;padding-left:2px}.gh b{font-size:10px}.gt{gap:1px}
+  .pl{width:calc((100vw - 52px)/9);max-width:44px;padding:2px 0;border-radius:9px}.pl img{width:100%;height:auto;aspect-ratio:16/10;border-radius:7px}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .lvb{margin-top:6px;padding-top:7px;gap:6px;font-size:10px}.lvb em{display:none}.lvb span{min-width:0}
+  .card{left:8px;right:8px;top:auto;bottom:76px;width:auto;max-height:54vh;transform:translateY(24px);border-radius:22px}
+  .pin .go{font-size:13.5px;padding:6px 11px;left:20px;top:-14px;white-space:normal;width:max-content;max-width:min(46vw,188px);line-height:1.15}.pin.left .go{left:auto;right:20px}
+  .pin span{display:none}.scrim{height:84px}
+  .hint{padding:12px 16px;font-size:15px;max-width:78vw}.hint small{font-size:11px}
+}
+@media (max-height:520px) and (min-width:761px){
+  .top{padding:8px 12px;gap:10px}.brand{padding:5px 9px 5px 5px}.brand svg{width:26px;height:26px}.brand em{display:none}.brand b{font-size:12px}
+  .crumb .path{display:none}.crumb h2{font-size:17px}.scrim{height:70px}
+  .scale{min-width:0;padding:6px 10px}.scale .m{font-size:17px}.sbar{margin-top:4px}.lvb{display:none}
+  .ctrl{right:6px;padding:4px 3px;gap:0}.ctrl button{width:30px;height:30px}.rail{height:min(150px,36vh);margin:2px 0}.rail .tick span{display:none}
+  .dock{bottom:5px;padding:4px 6px;gap:2px;border-radius:14px}.gh{display:none}.grp+.grp{padding-left:5px}.pl{width:50px;padding:2px 0}.pl img{width:46px;height:26px;border-radius:6px}.pl b{display:none}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .card{top:52px;right:50px;bottom:8px;max-height:none;width:min(360px,52vw);padding:14px 16px}.card h3{font-size:21px}.card p{font-size:13px}
+  .hint{padding:10px 14px;font-size:15px}.hint svg{display:none}.toast{bottom:52px}.pin span{display:none}
+}
+@media (prefers-reduced-motion:reduce){.pin b,.pin .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Atlas zoomable de la rate"></canvas>
+<div class="vig"></div><div class="grain"></div><div class="scrim"></div>
+<div id="pins"></div>
+<header class="top">
+  <div class="brand glass"><svg viewBox="0 0 32 32" fill="none"><rect x=".5" y=".5" width="31" height="31" rx="9" fill="#232830" stroke="rgba(243,226,189,.25)"/><path d="M10.5 9.2c3.6-2.4 9.8-2.3 12.6.8 2.3 2.6 1.7 7.2-.6 10.4-2.1 2.9-5.4 4.6-8.4 3.6-1.2-.4-1.4-1.8-.6-2.8.9-1.2.8-2.6-.3-3.4-1.7-1.2-4.2-.6-5.2-2.4-1-1.8.5-4.6 2.5-6.2z" stroke="#ffb86b" stroke-width="1.6" stroke-linejoin="round"/><path d="M16.8 13.2c-1.2 1.1-1.6 2.6-1.2 4.1M18.6 14.4c-.5.9-.6 1.9-.3 2.9" stroke="#7fd8ff" stroke-width="1.3" stroke-linecap="round"/></svg>
+    <div><b>MedArt AI Studio</b><em>Atlas zoomable · La rate</em></div></div>
+  <div class="crumb"><div class="path" id="path"></div><h2 id="ltitle"></h2></div>
+  <div class="scale glass"><div class="m" id="mag">×1</div><div class="sbar"><i id="sbi"></i><span id="sbt">5 cm</span></div><div class="lvb"><div class="lt"><i id="lvf"></i></div><span>1×<em>Organe</em></span><span>100×<em>Tissu</em></span><span>10 000×<em>Cellule · Sinus</em></span></div></div>
+</header>
+<nav class="ctrl glass" aria-label="Zoom">
+  <button id="zin" title="Zoomer (+)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="rail" id="rail" title="Profondeur"><div class="tr"></div><div class="fill" id="rfill"></div><div class="th" id="rth"></div></div>
+  <button id="zout" title="Dézoomer (−)"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <button id="reset" title="Vue d’ensemble (R)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+  <button id="fs" title="Plein écran (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+<nav class="dock glass" id="dock" aria-label="Planches"></nav>
+<aside class="card glass" id="card" aria-live="polite"></aside>
+<div class="hint glass" id="hint"><svg viewBox="0 0 26 38" fill="none"><rect x="1.5" y="1.5" width="23" height="35" rx="11.5" stroke="#f3e2bd" stroke-width="2"/><rect class="w" x="11.5" y="8" width="3" height="7" rx="1.5" fill="#ffb86b"/></svg>
+  <span id="hint1">Faites défiler pour plonger dans la rate</span><small id="hint2">Molette · double-clic · boutons lumineux · ←/→ planche précédente / suivante · F plein écran</small></div>
+<div class="toast glass" id="toast"></div><div class="wait" id="wait"><i></i></div>
+<div id="loader"><div><h1>La Rate</h1><p>9 planches · 3 actes — de l’organe au sinus veineux et à la zone marginale</p><div class="tr"><i id="lb"></i></div><div class="msg" id="lmsg">Chargement des planches…</div></div></div>
+<script>window.__IMG__={"p1":"/atlas-zoom/rate/p1.webp","p1_t":"/atlas-zoom/rate/p1_t.webp","p2":"/atlas-zoom/rate/p2.webp","p2_t":"/atlas-zoom/rate/p2_t.webp","p3":"/atlas-zoom/rate/p3.webp","p3_t":"/atlas-zoom/rate/p3_t.webp","p4":"/atlas-zoom/rate/p4.webp","p4_t":"/atlas-zoom/rate/p4_t.webp","p5":"/atlas-zoom/rate/p5.webp","p5_t":"/atlas-zoom/rate/p5_t.webp","p6":"/atlas-zoom/rate/p6.webp","p6_t":"/atlas-zoom/rate/p6_t.webp","p7":"/atlas-zoom/rate/p7.webp","p7_t":"/atlas-zoom/rate/p7_t.webp","p8":"/atlas-zoom/rate/p8.webp","p8_t":"/atlas-zoom/rate/p8_t.webp","p9":"/atlas-zoom/rate/p9.webp","p9_t":"/atlas-zoom/rate/p9_t.webp"};window.__META__={"p1": {"w": 2048, "h": 1001, "bg": [28, 32, 37]}, "p2": {"w": 2048, "h": 1001, "bg": [31, 34, 38]}, "p3": {"w": 2048, "h": 996, "bg": [28, 33, 37]}, "p4": {"w": 2048, "h": 1017, "bg": [31, 35, 38]}, "p5": {"w": 2048, "h": 1009, "bg": [29, 34, 38]}, "p6": {"w": 2048, "h": 1017, "bg": [32, 34, 38]}, "p7": {"w": 2048, "h": 1029, "bg": [32, 34, 39]}, "p8": {"w": 2048, "h": 1024, "bg": [32, 34, 38]}, "p9": {"w": 2048, "h": 1037, "bg": [29, 31, 36]}};window.__TEX__="/atlas-zoom/_shared/board.webp";</script>
+<script>// Rate — 9 planches en une plongée continue (3 actes × 3 planches), de la rate entière au sinus veineux,
+// à l'érythrophagocytose et à l'immunité de la zone marginale.
+// Coordonnées normalisées dans la planche recadrée. portal : rectangle où s'emboîte la planche suivante.
+const ACTS = [
+  { name: 'Anatomie', sub: 'Organe', mag: 1 },
+  { name: 'Histologie', sub: 'Tissu', mag: 100 },
+  { name: 'Cytologie', sub: 'Cellule · Sinus', mag: 10000 },
+];
+const PLATES = [
+// ─────────────────────────────── ACTE I — ANATOMIE ───────────────────────────────
+{ img: 'p1', act: 0, short: 'Rate', scale: 'Organe', title: 'Anatomie externe de la rate : faces diaphragmatique et viscérale',
+  portal: { c: [0.755, 0.50], w: 0.4 },
+  pins: [
+  { x: .22, y: .40, t: 'Face diaphragmatique', p: 'Convexe et lisse, moulée sur la coupole gauche ; elle répond aux côtes 9 à 11 par l’intermédiaire du diaphragme et du cul-de-sac pleural.', trap: 'Une fracture des côtes basses gauches doit faire chercher une <b>rupture de rate</b> : la plus fréquente des lésions viscérales des traumatismes fermés de l’abdomen.' },
+  { x: .33, y: .22, t: 'Bord supérieur crénelé', p: 'Le bord antéro-supérieur présente des <b>incisures</b>, vestiges de la fusion des lobules spléniques embryonnaires.', trap: 'À la palpation d’une <b>splénomégalie</b>, ces crénelures et le contact lombaire absent distinguent la rate du rein gauche : la rate déborde sous le rebord costal et descend vers la fosse iliaque droite.' },
+  { x: .26, y: .62, t: 'Bord inférieur', p: 'Mousse, il répond au rein gauche et à l’angle colique gauche.', trap: 'Rate normale : ≈ 12 × 7 × 3 cm, 150–200 g, <b>non palpable</b>. Une rate palpable est déjà augmentée (≈ 2 à 3 fois).' },
+  { x: .425, y: .62, t: 'Pôles de la rate', p: 'Pôle supérieur (postérieur) près de la colonne, pôle inférieur (antérieur) qui atteint la ligne axillaire moyenne.', trap: 'Le grand axe de la rate suit la <b>10e côte</b> : une rate normale ne dépasse pas la ligne axillaire moyenne en avant.', note: 'La flèche unique ne désigne qu’un pôle (l’angle inférieur droit du dessin).' },
+  { x: .69, y: .29, t: 'Empreinte gastrique', p: 'Concave, antéro-supérieure : la plus vaste, au contact de la grande courbure et du fundus.', trap: 'Les vaisseaux gastriques courts unissent ces deux organes : une hypertension portale segmentaire (thrombose de la veine splénique) donne des <b>varices gastriques isolées</b>.' },
+  { x: .82, y: .37, t: 'Empreinte rénale gauche', p: 'Postéro-inférieure, au contact du rein et de la surrénale gauches.', trap: 'Le ligament spléno-rénal (pancréatico-splénique) porte le pédicule : on le sectionne pour mobiliser la rate.' },
+  { x: .765, y: .56, t: 'Hile splénique', p: 'Fente de la face viscérale où entrent les branches de l’artère splénique et d’où sortent les veines ; elle reçoit aussi la queue du pancréas.', trap: 'La rate n’a <b>pas de lymphatiques afférents</b> : elle filtre le sang, pas la lymphe (contrairement au ganglion).' },
+  { x: .69, y: .68, t: 'Empreinte colique', p: 'Antéro-inférieure, au contact de l’angle colique gauche.', trap: 'Le ligament phrénico-colique gauche, au-dessous, soutient le pôle inférieur (sustentaculum lienis).' },
+  { x: .855, y: .62, t: 'Loge splénique', p: 'Hypochondre gauche, sous la coupole diaphragmatique, en regard des <b>côtes 9 à 11</b>, entre estomac, rein gauche et angle colique gauche.', trap: '<b>Rates accessoires</b> (≈ 10 à 30 % des sujets), surtout près du hile : il faut les retirer lors d’une splénectomie pour purpura thrombopénique immunologique, sinon récidive.' },
+  { x: .745, y: .44, side: 'l', portal: 'Explorer le hile & les ligaments', t: 'Hile, pédicule et ligaments', p: 'Ouvrez le hile : pédicule splénique, queue du pancréas et replis péritonéaux.', trap: 'La rate est entièrement péritonisée sauf au hile.' },
+]},
+{ img: 'p2', act: 0, short: 'Hile & ligaments', scale: 'Organe', title: 'Hile splénique, pédicule et ligaments péritonéaux',
+  portal: { c: [0.55, 0.45], w: 0.4 },
+  pins: [
+  { x: .725, y: .28, t: 'Hile splénique', p: 'L’artère splénique se divise avant le hile en 2 ou 3 branches (terminaison en <b>bouquet</b> ou en tronc).', trap: 'Le contrôle du pédicule au hile se fait au plus près de la rate pour épargner la queue du pancréas.' },
+  { x: .36, y: .33, t: 'Ligament gastro-splénique', p: 'Repli péritonéal entre la grande courbure et le hile ; il contient les <b>vaisseaux gastriques courts</b> et l’origine des vaisseaux gastro-épiploïques gauches.', trap: 'Splénectomie : les vaisseaux gastriques courts, très courts, sont sources de saignement et de lésion du fundus.' },
+  { x: .56, y: .41, t: 'Artère splénique', p: 'Branche du <b>tronc cœliaque</b>, la plus grosse ; très <b>flexueuse</b>, elle longe le bord supérieur du pancréas.', trap: 'L’anévrisme de l’artère splénique est le plus fréquent des anévrismes viscéraux ; il se rompt surtout pendant la <b>grossesse</b>.' },
+  { x: .42, y: .53, t: 'Veine splénique', p: 'Elle reçoit la veine mésentérique inférieure (souvent) et s’unit à la veine mésentérique supérieure derrière l’isthme du pancréas pour former la veine porte.', trap: 'Thrombose de la veine splénique (pancréatite, cancer) → hypertension portale gauche « segmentaire » avec varices gastriques et foie normal.', note: 'La veine splénique chemine à la face <b>postérieure</b> du pancréas ; elle est dessinée par-dessus la glande.' },
+  { x: .66, y: .42, t: 'Ligament pancréatico-splénique', p: 'Repli (spléno-rénal) qui contient les vaisseaux spléniques et la queue du pancréas.', trap: 'Le sectionner libère la rate et le pancréas caudal : c’est le premier temps de la splénopancréatectomie gauche.' },
+  { x: .62, y: .60, t: 'Queue du pancréas', p: 'Elle atteint le hile splénique dans ≈ 30 % des cas.', trap: 'Une lésion de la queue du pancréas pendant la splénectomie donne une <b>fistule pancréatique</b> ou une pancréatite postopératoire.' },
+  { x: .24, y: .69, t: 'Artère gastro-épiploïque gauche', p: 'Née de l’artère splénique, elle longe la grande courbure et s’anastomose avec la gastro-épiploïque droite.', trap: 'L’arcade de la grande courbure est utilisée pour vasculariser les plasties gastriques (œsophagectomie).' },
+  { x: .785, y: .62, t: 'Ganglions hilaires', p: 'Ganglions du hile, drainés vers les ganglions cœliaques.', trap: 'La rate n’a que des lymphatiques <b>efférents</b> (capsule, trabécules), pas d’afférents.' },
+  { x: .71, y: .86, t: 'Ligament phrénico-colique gauche', p: 'Tendu du diaphragme à l’angle colique gauche, il forme le plancher de la loge splénique (sustentaculum lienis).', trap: 'Une rate ectopique (« baladeuse ») par laxité ligamentaire peut se tordre sur son pédicule.' },
+  { x: .50, y: .50, portal: 'Voir la vascularisation segmentaire', t: 'Vascularisation segmentaire', p: 'Suivez l’artère et la veine spléniques jusqu’aux segments de la rate.', trap: 'Artère splénique : tronc cœliaque ; veine splénique : système porte.' },
+]},
+{ img: 'p3', act: 0, short: 'Vascularisation', scale: 'Organe', title: 'Vascularisation segmentaire et circulation splénique',
+  portal: { c: [0.72, 0.62], w: 0.16 },
+  pins: [
+  { x: .235, y: .47, t: 'Tronc cœliaque', p: 'Né de l’aorte en regard de T12–L1 ; trois branches : gastrique gauche, hépatique commune, <b>splénique</b>.', trap: 'Trépied cœliaque : la splénique est la plus volumineuse et la plus flexueuse des trois branches.', note: 'Les deux étiquettes « Tronc coeliaque » pointent le gros vaisseau vertical, qui est l’aorte ; le tronc cœliaque est le court tronc d’où part l’artère splénique.' },
+  { x: .20, y: .62, t: 'Aorte abdominale', p: 'Le vaisseau vertical est l’aorte, d’où naissent le tronc cœliaque puis l’artère mésentérique supérieure.', trap: 'Le ligament arqué médian peut comprimer le tronc cœliaque (syndrome de Dunbar).' },
+  { x: .40, y: .46, t: 'Artère splénique', p: 'Trajet flexueux le long du bord supérieur du pancréas ; branches pancréatiques, gastriques courtes, gastro-épiploïque gauche.', trap: 'Ses flexuosités permettent à la rate de suivre les mouvements respiratoires et la distension gastrique.' },
+  { x: .47, y: .60, t: 'Veine splénique', p: 'Elle draine la rate, une partie de l’estomac et du pancréas vers la veine porte.', trap: 'Hypertension portale → <b>splénomégalie congestive</b> et hypersplénisme (thrombopénie, leucopénie).' },
+  { x: .32, y: .64, t: 'Veine mésentérique inférieure', p: 'Elle se jette dans la veine splénique (≈ 1 cas sur 3), dans la mésentérique supérieure ou dans leur confluent.', trap: 'Veine porte = mésentérique supérieure + tronc spléno-mésaraïque (splénique + mésentérique inférieure), en anatomie française.' },
+  { x: .555, y: .31, t: 'Branche polaire supérieure', p: 'Branche qui gagne directement le pôle supérieur, parfois née très tôt de l’artère splénique.', trap: 'Une artère polaire méconnue peut saigner après la ligature du pédicule principal.' },
+  { x: .655, y: .34, t: 'Artères segmentaires', p: 'Chaque branche irrigue un <b>segment</b> transversal de la rate : vascularisation <b>terminale</b>, sans anastomose.', trap: 'Occlusion d’une artère segmentaire = <b>infarctus splénique</b> triangulaire à base capsulaire (endocardite, fibrillation atriale, drépanocytose).' },
+  { x: .69, y: .47, t: 'Plans avasculaires intersegmentaires', p: 'Les segments sont séparés par des plans peu vascularisés, transversaux.', trap: 'Ils permettent la <b>splénectomie partielle</b> et la conservation de la rate en traumatologie, pour éviter l’asplénie.' },
+  { x: .77, y: .44, t: 'Artères trabéculaires', p: 'Les branches segmentaires pénètrent dans les trabécules conjonctives, puis deviennent les artères centrales de la pulpe blanche.', trap: 'Artère trabéculaire → artère centrale (pulpe blanche) → artérioles pénicillées (pulpe rouge) → capillaires à housse.' },
+  { x: .615, y: .70, t: 'Branche polaire inférieure', p: 'Branche du pôle inférieur, souvent issue de l’artère gastro-épiploïque gauche.', trap: 'Drépanocytose : infarctus spléniques répétés → <b>autosplénectomie</b> (petite rate fibreuse) dès l’enfance.' },
+  { x: .73, y: .64, portal: 'Zoomer dans les pulpes (×100)', t: 'Le parenchyme splénique', p: 'Entrez dans le parenchyme : pulpe blanche et pulpe rouge.', trap: 'Pulpe blanche = immunité ; pulpe rouge = filtration du sang.' },
+]},
+// ─────────────────────────────── ACTE II — HISTOLOGIE ───────────────────────────────
+{ img: 'p4', act: 1, short: 'Pulpes', scale: 'Tissu', title: 'Histologie générale de la rate : pulpe blanche et pulpe rouge',
+  portal: { c: [0.72, 0.45], w: 0.28 },
+  pins: [
+  { x: .27, y: .16, t: 'Capsule conjonctivo-élastique', p: 'Conjonctif dense avec fibres élastiques et quelques cellules musculaires lisses, recouvert par le péritoine.', trap: 'Chez l’homme, la capsule est <b>peu contractile</b> (contrairement au chien ou au cheval) : la rate n’est pas un vrai réservoir de sang.', note: 'Les libellés « Capsule fibreuse » et « Capsule » désignent la même structure.' },
+  { x: .255, y: .29, t: 'Trabécules spléniques', p: 'Travées conjonctives issues de la capsule ; elles portent les artères et veines trabéculaires.', trap: 'La rate a une charpente de capsule + trabécules + réseau réticulaire, comme les ganglions.' },
+  { x: .19, y: .52, t: 'Pulpe blanche', p: 'Tissu lymphoïde centré sur les artères centrales : PALS (manchon T) et corpuscules de Malpighi (follicules B).', trap: 'Environ 20 % du parenchyme ; elle augmente dans les infections et les lymphomes.' },
+  { x: .24, y: .60, t: 'Artériole centrale', p: 'Branche de l’artère trabéculaire entourée de tissu lymphoïde ; elle est <b>excentrée</b> dans le follicule.', trap: 'Artère « centrale » mais excentrée dans le follicule : piège de lecture classique.' },
+  { x: .34, y: .78, t: 'Pulpe rouge', p: 'Environ 75 % du parenchyme : cordons de Billroth et sinus veineux ; elle filtre les hématies.', trap: 'Splénomégalie des anémies hémolytiques et du paludisme : hyperplasie de la <b>pulpe rouge</b>.' },
+  { x: .20, y: .92, t: 'Absence de cortex et de médulla', p: 'Pulpe blanche et pulpe rouge sont réparties dans tout l’organe, sans organisation en cortex et médulla.', trap: 'Rate vs ganglion : <b>pas de cortex/médulla</b>, <b>pas de lymphatiques afférents</b>, pas de sinus sous-capsulaire ; la rate filtre le sang.' },
+  { x: .715, y: .42, t: 'Artériole centrale (zoom)', p: 'Petite artère à paroi musculaire au centre du manchon lymphoïde.', trap: 'Dans la maladie lupique, les artères centrales prennent un aspect « en bulbe d’oignon » (fibrose périartérielle).' },
+  { x: .79, y: .30, t: 'PALS', p: '<b>Manchon lymphoïde périartériel</b> : lymphocytes T (surtout CD4) autour de l’artère centrale.', trap: 'PALS = zone <b>T</b> ; follicule = zone <b>B</b>. Dans le DiGeorge (aplasie thymique), les PALS sont déplétés.' },
+  { x: .79, y: .44, t: 'Corpuscule de Malpighi', p: 'Follicule lymphoïde B accolé au PALS ; secondaire (centre germinatif) après stimulation antigénique.', trap: 'Malpighi décrit aussi le corpuscule <b>rénal</b> : précisez toujours « splénique ».' },
+  { x: .835, y: .53, t: 'Zone marginale', p: 'Couronne autour de la pulpe blanche : macrophages et lymphocytes B de la zone marginale, au contact du sang.', trap: 'Le <b>lymphome de la zone marginale splénique</b> donne une splénomégalie avec lymphocytes villeux.' },
+  { x: .80, y: .69, t: 'Cordons de Billroth', p: 'Cordons de pulpe rouge entre les sinus : réseau réticulaire riche en macrophages.', trap: 'Les hématies rigides (sphérocytes, falciformes) restent bloquées dans les cordons et y sont détruites.' },
+  { x: .81, y: .78, t: 'Sinus spléniques', p: 'Capillaires veineux larges bordés d’un endothélium discontinu.', trap: 'Ce sont des <b>sinusoïdes veineux</b>, pas des sinus lymphatiques.' },
+  { x: .665, y: .48, side: 'l', portal: 'Zoomer sur la pulpe blanche', t: 'La pulpe blanche', p: 'Agrandissez la pulpe blanche : PALS, follicule et zone marginale.', trap: 'Zone T autour de l’artère, zone B dans le follicule.' },
+]},
+{ img: 'p5', act: 1, short: 'Pulpe blanche', scale: 'Tissu', title: 'Histologie de la pulpe blanche : PALS, follicule et zone marginale',
+  portal: { c: [0.30, 0.80], w: 0.22 },
+  pins: [
+  { x: .18, y: .52, t: 'Artériole centrale', p: 'Elle donne des branches qui irriguent le follicule et se terminent dans la zone marginale.', trap: 'Le sang artériel arrive dans la zone marginale : c’est là que les antigènes sanguins sont captés en premier.' },
+  { x: .11, y: .58, t: 'PALS (zone T-dépendante)', p: 'Lymphocytes T et cellules dendritiques interdigitées, présentatrices aux T.', trap: 'Cellule dendritique <b>interdigitée</b> (zone T, présente aux T) ≠ cellule dendritique <b>folliculaire</b> (zone B, retient les complexes immuns).' },
+  { x: .36, y: .36, t: 'Follicule de Malpighi (zone B)', p: 'Follicule primaire (B naïfs) ou secondaire (centre germinatif + couronne) après rencontre de l’antigène.', trap: 'Dans le centre germinatif : hypermutation somatique et <b>commutation isotypique</b>, avec l’aide des T folliculaires.' },
+  { x: .42, y: .63, t: 'Zone marginale', p: 'Entre pulpe blanche et pulpe rouge : macrophages, B de la zone marginale, sang venu des artérioles terminales.', trap: 'Zone de capture des <b>bactéries encapsulées</b> : son absence explique le risque infectieux de l’asplénie.' },
+  { x: .38, y: .80, t: 'Pulpe rouge environnante', p: 'Cordons et sinus entourant la pulpe blanche.', trap: 'La rate contient ≈ 1/3 des plaquettes de l’organisme : une splénomégalie les séquestre (thrombopénie de l’hypersplénisme).' },
+  { x: .70, y: .33, t: 'Centre germinatif clair', p: 'Centroblastes et centrocytes, macrophages à corps tingibles, cellules dendritiques folliculaires.', trap: 'Le centre germinatif est le site d’origine du <b>lymphome folliculaire</b> (t(14;18), BCL2).' },
+  { x: .775, y: .36, t: 'Couronne (zone du manteau)', p: 'Petits lymphocytes B naïfs refoulés autour du centre germinatif.', trap: 'Zone du manteau → lymphome du manteau (t(11;14), cycline D1).' },
+  { x: .83, y: .48, t: 'Zone marginale (zoom)', p: 'B à cytoplasme plus abondant et macrophages, en bordure du sinus marginal.', trap: 'Les B de la zone marginale répondent vite aux antigènes <b>polysaccharidiques</b> (IgM T-indépendantes).' },
+  { x: .84, y: .66, t: 'Sinus marginal', p: 'Sinus vasculaire qui sépare la pulpe blanche de la zone marginale ; les cellules sanguines y entrent dans la pulpe.', trap: 'Les lymphocytes circulants entrent dans la pulpe blanche par la zone marginale (pas de veinules à endothélium épais dans la rate).' },
+  { x: .83, y: .78, t: 'Pulpe rouge (zoom)', p: 'Hématies abondantes dans les cordons et les sinus.', trap: 'Hématopoïèse extramédullaire de la pulpe rouge dans les myélofibroses : splénomégalie majeure.' },
+  { x: .28, y: .80, side: 'l', portal: 'Explorer les cordons de Billroth', t: 'La pulpe rouge', p: 'Descendez dans la pulpe rouge : cordons de Billroth et sinus veineux.', trap: 'La pulpe rouge est le filtre des hématies.' },
+]},
+{ img: 'p6', act: 1, short: 'Pulpe rouge', scale: 'Tissu', title: 'Histologie de la pulpe rouge : cordons de Billroth et sinus veineux',
+  portal: { c: [0.80, 0.62], w: 0.2 },
+  pins: [
+  { x: .22, y: .26, t: 'Artérioles pénicillées', p: 'Branches terminales de l’artère centrale en pinceau, dans la pulpe rouge.', trap: 'Artère centrale → artérioles pénicillées → capillaires à housse → cordons (ouverte) ou sinus (fermée).' },
+  { x: .19, y: .38, t: 'Capillaires à housse (ellipsoïdes)', p: 'Capillaires entourés d’un manchon de macrophages et de cellules réticulaires (gaine de Schweigger-Seidel).', trap: 'Ils filtrent le sang artériel avant son arrivée dans les cordons.' },
+  { x: .16, y: .62, t: 'Cordons de Billroth', p: 'Réseau réticulaire riche en macrophages ; le sang s’y écoule lentement avant de rejoindre les sinus.', trap: '<b>Sphérocytose héréditaire</b> : les sphérocytes, rigides, sont piégés dans les cordons → hémolyse → splénectomie efficace.' },
+  { x: .43, y: .60, t: 'Sinus veineux spléniques', p: 'Sinusoïdes larges (≈ 30–40 µm) bordés de cellules endothéliales allongées, entourés d’anneaux de lame basale.', trap: 'Ils se drainent dans les veines de la pulpe, trabéculaires puis splénique.' },
+  { x: .37, y: .77, t: 'Circulation ouverte', p: 'Chez l’homme, l’essentiel du sang des capillaires se déverse dans les cordons (circulation <b>ouverte</b>) puis traverse la paroi des sinus ; une petite part passe directement dans les sinus (circulation fermée).', trap: 'La circulation ouverte, lente, est ce qui permet le contrôle de chaque hématie : c’est la base du rôle de <b>filtre</b>.' },
+  { x: .71, y: .27, t: 'Macrophages spléniques', p: 'Ils phagocytent hématies âgées, débris et micro-organismes.', trap: 'Paludisme : les macrophages se chargent de pigment malarique (hémozoïne) → splénomégalie.' },
+  { x: .83, y: .27, t: 'Hématies et plaquettes en transit', p: 'Hématies et plaquettes traversent les cordons avant de rejoindre les sinus.', trap: '<b>Séquestration splénique</b> aiguë (drépanocytose de l’enfant) : anémie brutale et grosse rate, urgence vitale.' },
+  { x: .66, y: .72, t: 'Endothélium en douves de tonneau', p: 'Cellules endothéliales longitudinales séparées par des fentes ; les hématies les traversent en se déformant.', trap: 'Une hématie doit se déformer pour passer une fente de 1–3 µm : la rigidité (sphérocyte, drépanocyte, hématie âgée) la condamne.' },
+  { x: .89, y: .72, t: 'Fibres de réticuline', p: 'Collagène III de la trame réticulaire et anneaux de lame basale autour des sinus (imprégnation argentique).', trap: 'Les anneaux de lame basale sont <b>discontinus</b> : ils cerclent le sinus comme les cercles d’un tonneau.' },
+  { x: .80, y: .62, portal: 'Entrer dans le sinus veineux (×10 000)', t: 'Le sinus veineux', p: 'Passez en microscopie électronique : la paroi du sinus et ses fentes filtrantes.', trap: 'Le sinus est le « tamis » final des hématies.' },
+]},
+// ─────────────────────────────── ACTE III — CYTOLOGIE ───────────────────────────────
+{ img: 'p7', act: 2, short: 'Sinus veineux', scale: 'Sinus', title: 'Ultrastructure du sinus veineux splénique (filtration des hématies)',
+  portal: { c: [0.74, 0.76], w: 0.22 },
+  pins: [
+  { x: .37, y: .33, t: 'Lumière du sinus veineux', p: 'Les hématies qui ont franchi la paroi y rejoignent la circulation veineuse.', trap: 'Le sinus est la porte de sortie : seules les hématies assez déformables y parviennent.' },
+  { x: .26, y: .40, t: 'Cellules en douves de tonneau', p: 'Cellules endothéliales longues et étroites, parallèles à l’axe du sinus, riches en filaments.', trap: 'Cet endothélium discontinu, propre à la rate, ne doit pas être confondu avec l’endothélium fenêtré du foie.' },
+  { x: .245, y: .59, t: 'Fentes intercellulaires (1–3 µm)', p: 'Les hématies (≈ 7,5 µm) doivent se déformer pour les franchir.', trap: 'Test de filtration : une hématie normale passe, un sphérocyte ou une hématie falciforme reste bloqué(e).' },
+  { x: .32, y: .84, t: 'Lame basale en cercles', p: 'Lame basale discontinue, en anneaux transversaux autour des cellules endothéliales.', trap: 'Douves longitudinales + cercles transversaux = image du tonneau, à retenir pour la rate.', note: 'Le libellé « Lame basale discontinue en cercles » figure deux fois.' },
+  { x: .69, y: .38, t: 'Fibres de stress (actine)', p: 'Faisceaux d’actine et de myosine basaux qui règlent l’ouverture des fentes.', trap: 'La contraction de ces fibres peut élargir ou resserrer les fentes, donc moduler la filtration.', note: 'La planche écrit « ferneas » pour « fentes ».' },
+  { x: .465, y: .58, t: 'Hématie jeune déformable', p: 'Elle traverse la fente en sablier grâce à son cytosquelette (spectrine, ankyrine) et à son rapport surface/volume.', trap: 'Le <b>pitting</b> : en traversant, l’hématie perd ses inclusions (corps de Howell-Jolly, Heinz, parasites). Après splénectomie apparaissent les <b>corps de Howell-Jolly</b>.', note: 'Le mot « (dice) » ne veut rien dire : il s’agit vraisemblablement de diapédèse.' },
+  { x: .765, y: .50, t: 'Hématie sénescente ou rigide', p: 'Hématie âgée (≈ 120 jours) ou anormale, retenue dans le cordon.', trap: 'Hématies retenues : sénescentes, sphérocytes, drépanocytes, hématies opsonisées par des IgG (anémie hémolytique auto-immune).' },
+  { x: .79, y: .74, t: 'Macrophage périsinusoïdal', p: 'Il guette les hématies retenues contre la paroi et les phagocyte.', trap: 'Hémolyse <b>extravasculaire</b> (rate, foie) → bilirubine libre ↑, sans hémoglobinurie.' },
+  { x: .65, y: .20, t: 'Cellule endothéliale (organites)', p: 'Noyau saillant dans la lumière, mitochondries, réticulum ; la cellule est très allongée.', trap: 'Ces cellules expriment des marqueurs particuliers (CD8α chez l’homme), propres aux cellules littorales.' },
+  { x: .09, y: .16, t: 'Hématie traversant une fente (MET)', p: 'Hématie étranglée en sablier entre deux cellules endothéliales.', trap: 'Splénectomie : corps de Howell-Jolly, cibles, thrombocytose transitoire sur le frottis.' },
+  { x: .90, y: .16, t: 'Fibres de la paroi en MET', p: 'Coupes des cellules endothéliales et de leurs faisceaux de filaments.', trap: 'La paroi des sinus est faite pour le tri des hématies, pas pour l’étanchéité.' },
+  { x: .71, y: .72, side: 'l', portal: 'Voir l’érythrophagocytose', t: 'Le macrophage', p: 'Entrez dans le macrophage qui digère les hématies retenues.', trap: 'Environ 1 % des hématies sont détruites chaque jour, en grande partie dans la rate.' },
+]},
+{ img: 'p8', act: 2, short: 'Macrophage', scale: 'Cellule', title: 'Cytologie du macrophage splénique et érythrophagocytose',
+  portal: { c: [0.52, 0.62], w: 0.22 },
+  pins: [
+  { x: .165, y: .30, t: 'Pseudopodes', p: 'Expansions cytoplasmiques qui enveloppent l’hématie (phagocytose).', trap: 'Les hématies âgées exposent la phosphatidylsérine et perdent le CD47 (« ne me mange pas ») : signaux de phagocytose.', note: 'Le libellé « Pseudopodes capturant une hématie vieillie » figure deux fois ; le libellé du haut pointe un granule dans le cytoplasme.' },
+  { x: .26, y: .44, t: 'Hématie vieillie', p: 'Hématie sénescente ou rigide, retenue dans le cordon puis phagocytée.', trap: 'Durée de vie des hématies ≈ <b>120 jours</b> ; elle est raccourcie dans les hémolyses.' },
+  { x: .40, y: .47, t: 'Phagosome et phagolysosome', p: 'Le phagosome fusionne avec les lysosomes ; l’hémoglobine y est dégradée en globine (acides aminés) et hème.', trap: 'Les hydrolases lysosomales agissent à <b>pH acide</b> (pompe H⁺-ATPase vacuolaire).', note: 'Le libellé « Phagosome et phagolysosome » figure deux fois.' },
+  { x: .41, y: .74, t: 'Lysosomes, RER, Golgi, mitochondries', p: 'RER et Golgi fabriquent les enzymes lysosomales ; les mitochondries fournissent l’énergie de la phagocytose.', trap: 'Maladie de <b>Gaucher</b> (déficit en glucocérébrosidase) : macrophages surchargés → splénomégalie géante.' },
+  { x: .55, y: .20, t: 'Dégradation de l’hème', p: '<b>Hème oxygénase</b> : hème → biliverdine + Fe²⁺ + CO ; biliverdine réductase : biliverdine → <b>bilirubine libre</b> (non conjuguée).', trap: 'La bilirubine libre, liée à l’albumine, gagne le foie pour y être conjuguée (UGT1A1). Hémolyse = bilirubine <b>libre</b> ↑, sans bilirubinurie.' },
+  { x: .63, y: .47, t: 'Noyau réniforme', p: 'Noyau en haricot, chromatine fine, typique de la lignée monocyte-macrophage.', trap: 'Les macrophages spléniques dérivent des monocytes et de précurseurs embryonnaires.' },
+  { x: .725, y: .52, t: 'Recyclage du fer', p: 'Le fer est stocké (ferritine, hémosidérine) ou exporté par la <b>ferroportine</b>, oxydé en Fe³⁺ (céruloplasmine) puis fixé à la transferrine.', trap: 'L’<b>hepcidine</b> bloque la ferroportine : dans l’inflammation, le fer reste dans les macrophages (anémie inflammatoire, ferritine haute).' },
+  { x: .66, y: .85, t: 'Macrophage des cordons de Billroth', p: 'Il vit dans les cordons, au contact des sinus, et recycle chaque jour l’essentiel du fer des hématies détruites.', trap: 'Le recyclage macrophagique fournit ≈ 20–25 mg de fer par jour, bien plus que l’absorption intestinale (1–2 mg).' },
+  { x: .09, y: .13, t: 'Érythrophagocytose en MET', p: 'Hématie englobée par les pseudopodes du macrophage.', trap: 'Un excès d’érythrophagocytose avec cytopénies et fièvre évoque un <b>syndrome d’activation macrophagique</b>.' },
+  { x: .52, y: .62, portal: 'Voir l’immunité de la zone marginale', t: 'Immunité splénique', p: 'Les macrophages ne recyclent pas que les hématies : dans la zone marginale, ils captent les bactéries du sang.', trap: 'Filtre mécanique (hématies) + filtre immunologique (bactéries encapsulées).' },
+]},
+{ img: 'p9', act: 2, short: 'Zone marginale', scale: 'Cellule', title: 'Cytologie de la zone marginale et réponse immunitaire splénique',
+  pins: [
+  { x: .50, y: .10, t: 'Bactéries encapsulées', p: '<b>Pneumocoque</b>, <b>méningocoque</b>, <b>Haemophilus influenzae b</b> : leur capsule polysaccharidique gêne la phagocytose sans opsonisation.', trap: '<b>OPSI</b> (infection fulminante post-splénectomie) : sepsis foudroyant, surtout à pneumocoque. Vaccins pneumo, méningo, Hib ≥ 2 semaines avant une splénectomie programmée (ou ≥ 2 semaines après en urgence), grippe annuelle, pénicilline V ≥ 2 ans.' },
+  { x: .30, y: .36, t: 'Macrophage de la zone marginale', p: 'Il capte les antigènes et bactéries du sang qui arrive dans la zone marginale (récepteurs « scavenger » comme MARCO).', trap: 'L’asplénie fonctionnelle (drépanocytose, autosplénectomie) expose au même risque que la splénectomie.' },
+  { x: .585, y: .40, t: 'Lymphocyte B de la zone marginale', p: 'Il répond vite, sans aide T, aux antigènes polysaccharidiques : production d’IgM.', trap: 'Les B de la zone marginale sont immatures avant <b>2 ans</b> : les vaccins polysaccharidiques purs sont inefficaces chez le nourrisson, d’où les vaccins <b>conjugués</b>.' },
+  { x: .69, y: .66, t: 'Lymphocyte T CD4⁺', p: 'Il coopère avec le B (CD40L–CD40, cytokines) pour la commutation de classe et la mémoire.', trap: 'Le vaccin conjugué fixe le polysaccharide à une protéine porteuse : il recrute l’aide T et la mémoire.' },
+  { x: .49, y: .66, t: 'Cellule dendritique folliculaire', p: 'Elle retient à sa surface des complexes immuns (récepteurs du complément et Fc) et les présente <b>sous forme native</b> aux B.', trap: 'Elle <b>ne présente pas</b> de peptides via le CMH aux T et n’est pas d’origine hématopoïétique (cellule stromale).', note: 'La légende « présentation d’antigène » est trompeuse : il s’agit de rétention d’antigène natif pour les lymphocytes B.' },
+  { x: .20, y: .68, t: 'Plasmocyte sécrétant des IgM', p: 'Noyau en roue de charrette, RER très développé, Golgi en arc (zone claire).', trap: 'Les IgM n’opsonisent pas directement (pas de récepteur Fc des phagocytes pour IgM) : elles <b>activent le complément</b>, et c’est le C3b qui opsonise.' },
+  { x: .34, y: .68, t: 'IgM et complément', p: 'IgM pentamériques : très efficaces pour agglutiner et activer le complément.', trap: 'Les IgM sont la première classe produite ; les IgG viennent ensuite, après commutation dans le centre germinatif.' },
+  { x: .15, y: .82, t: 'RER du plasmocyte', p: 'Citernes parallèles qui synthétisent les immunoglobulines.', trap: 'Plasmocyte = cellule sécrétrice protéique : RER abondant, noyau excentré, Golgi juxtanucléaire.' },
+  { x: .84, y: .27, t: 'Sinus marginal', p: 'Le sang artériel s’y déverse et passe au contact des macrophages et des B de la zone marginale.', trap: 'C’est cette circulation lente au contact des cellules immunitaires qui fait de la rate le filtre des bactéries du sang.' },
+  { x: .75, y: .33, t: 'Réseau réticulaire', p: 'Cellules réticulaires et fibres qui ralentissent le sang dans la zone marginale.', trap: 'Le réseau réticulaire guide aussi la migration des lymphocytes vers la pulpe blanche.' },
+  { x: .08, y: .14, t: 'Bactéries phagocytées (MET)', p: 'Diplocoques dans un phagosome de macrophage.', trap: 'Les diplocoques en flamme de bougie (pneumocoque) ou en grain de café (méningocoque) sont des diagnostics de Gram classiques.' },
+  { x: .90, y: .76, t: 'RER du plasmocyte en MET', p: 'Citernes de RER parallèles et serrées.', trap: 'Le myélome multiple est une prolifération plasmocytaire : pic monoclonal, lésions osseuses, insuffisance rénale.' },
+]},
+];
+</script>
+<script>// Rate — atlas à zoom continu de la rate, 9 planches emboîtées (Canvas 2D, zéro dépendance).
+// Chaque planche vit dans le « portail » de la précédente ; une seule caméra (cx, cy, z) traverse le monde.
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const META = window.__META__, IMG = window.__IMG__; const N = PLATES.length;
+const ROMAN = ['I', 'II', 'III'];
+const MAG = PLATES.map((p) => p.mag || ACTS[p.act].mag), REALW = MAG.map((m) => 40 / m); // plate width in cm at its home view
+
+// ───────────── world: plate k+1 sits inside plate k's portal rectangle
+const R = [{ x: 0, y: 0, w: 1, h: META[PLATES[0].img].h / META[PLATES[0].img].w }];
+for (let k = 1; k < N; k++) { const p = PLATES[k - 1].portal, par = R[k - 1], m = META[PLATES[k].img]; const w = par.w * p.w, h = w * (m.h / m.w);
+  R.push({ x: par.x + p.c[0] * par.w - w / 2, y: par.y + p.c[1] * par.h - h / 2, w, h }); }
+
+// ───────────── canvas & view
+const cv = $('#cv'), ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false, railH = 200;
+let offC = null, offX = null;
+function off() { if (!offC) { offC = document.createElement('canvas'); offX = offC.getContext('2d'); } if (offC.width !== cv.width || offC.height !== cv.height) { offC.width = cv.width; offC.height = cv.height; } return offX; }
+function layout() {
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const short = !mobile && H < 520; const top = mobile ? 62 : short ? 48 : 82, bottom = mobile ? 76 : short ? 50 : 112, left = mobile ? 2 : short ? 6 : 22, right = mobile ? 2 : short ? 48 : 92;
+  aw = (W - left - right) * 0.985; ah = (H - top - bottom) * 0.985; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
+  railH = ($('#rail').clientHeight || 200) - 12; need();
+}
+const homeZ = (k) => Math.min(aw / R[k].w, ah / R[k].h);
+const home = (k) => ({ cx: R[k].x + R[k].w / 2, cy: R[k].y + R[k].h / 2, z: homeZ(k) });
+const cam = { cx: 0.5, cy: 0.25, z: 600 };
+const sig = (k, z = cam.z) => z / homeZ(k);
+const toS = (wx, wy) => [vcx + (wx - cam.cx) * cam.z, vcy + (wy - cam.cy) * cam.z];
+const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
+function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)); a.push(A * D); } return a; }
+function dominant(z = cam.z) { const a = alphas(z); let b = 0; for (let k = 1; k < N; k++) if (a[k] > a[b]) b = k; return b; }
+
+// ───────────── images: decoded on demand; a small LRU keeps phone memory low
+const imgs = {}, thumbs = {}, lru = [];
+function thumb(key) { if (!thumbs[key]) { const i = new Image(); i.src = IMG[key + '_t']; thumbs[key] = i; } return thumbs[key]; }
+function want(key) { let e = imgs[key]; if (!e) { const i = new Image(); i.decoding = 'async'; i.src = IMG[key]; e = imgs[key] = { i, ok: false }; e.p = i.decode().then(() => { e.ok = true; need(); }).catch(() => { e.ok = !!i.naturalWidth; need(); }); }
+  const j = lru.indexOf(key); if (j >= 0) lru.splice(j, 1); lru.push(key);
+  while (lru.length > (mobile ? 5 : 9)) { const k = lru.shift(); if (imgs[k]) { imgs[k].i.src = ''; delete imgs[k]; } } return e; }
+function prefetch() { const k = dominant(); [k - 1, k + 1, k].forEach((j) => j >= 0 && j < N && want(PLATES[j].img)); }
+
+// ───────────── rendering (on demand only)
+let dirty = true, raf = 0, quality = 'high', texPat = null;
+function need() { dirty = true; if (!raf) raf = requestAnimationFrame(frame); }
+function drawPlate(c, k, alpha) {
+  const key = PLATES[k].img; const e = imgs[key]; const im = e && e.ok ? e.i : thumb(key); if (!im || !im.naturalWidth) return;
+  const r = R[k]; const [x, y] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z; const NW = im.naturalWidth, NH = im.naturalHeight;
+  const dx0 = Math.max(0, x), dy0 = Math.max(0, y), dx1 = Math.min(W, x + sw), dy1 = Math.min(H, y + sh); if (dx1 <= dx0 || dy1 <= dy0) return;
+  c.globalAlpha = alpha; c.drawImage(im, ((dx0 - x) / sw) * NW, ((dy0 - y) / sh) * NH, ((dx1 - dx0) / sw) * NW, ((dy1 - dy0) / sh) * NH, dx0 * DPR, dy0 * DPR, (dx1 - dx0) * DPR, (dy1 - dy0) * DPR); c.globalAlpha = 1;
+}
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
+  const a = alphas(); let s = 0; const bg = [0, 0, 0];
+  a.forEach((v, k) => { const b = META[PLATES[k].img].bg; s += v; for (let i = 0; i < 3; i++) bg[i] += b[i] * v; });
+  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.5; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  for (let k = 0; k < N; k++) { if (a[k] < 0.004) continue; const sg = sig(k);
+    if (k > 0 && sg < 0.97) { // the deeper plate opens through a soft radial iris centred on its portal
+      const o = off(); const r = R[k]; const [x0, y0] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z;
+      const bx = Math.max(0, Math.floor(x0 * DPR)), by = Math.max(0, Math.floor(y0 * DPR)), bw = Math.min(cv.width, Math.ceil((x0 + sw) * DPR)) - bx, bh = Math.min(cv.height, Math.ceil((y0 + sh) * DPR)) - by;
+      if (bw <= 0 || bh <= 0) continue;
+      o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(bx, by, bw, bh); o.imageSmoothingQuality = quality; drawPlate(o, k, 1);
+      const cx = (x0 + sw / 2) * DPR, cy = (y0 + sh / 2) * DPR, rr = Math.max(sw, sh) * (0.3 + 0.5 * sst(0.5, 0.97, sg)) * DPR;
+      const g = o.createRadialGradient(cx, cy, rr * 0.42, cx, cy, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(bx, by, bw, bh); o.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = a[k]; ctx.drawImage(offC, bx, by, bw, bh, bx, by, bw, bh); ctx.globalAlpha = 1;
+    } else drawPlate(ctx, k, a[k]); }
+  updateHUD(a); updatePins(a);
+}
+
+// ───────────── camera dynamics
+const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
+const zMin = () => homeZ(0) * 0.7, zMax = () => homeZ(N - 1) * 4;
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function clampCenter() { const r = R[dominant()]; const m = 0.14 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m * 0.6, r.y + r.h + m * 0.6); }
+const ratio = (k) => homeZ(k + 1) / homeZ(k);
+function steer(strength) { // while zooming in, glide toward the next portal (progress-based so short and long dives feel alike)
+  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); if (p <= 0.28) return 0;
+  const r = R[k + 1]; const kk = sst(0.28, 0.85, p) * strength; cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+function frame() {
+  raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = false;
+  if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
+    const w = Math.abs(f.z1 - f.z0) / f.z1 < 1e-3 ? e : (1 / z - 1 / f.z0) / (1 / f.z1 - 1 / f.z0); cam.z = z; cam.cx = f.c0[0] + (f.c1[0] - f.c0[0]) * w; cam.cy = f.c0[1] + (f.c1[1] - f.c0[1]) * w;
+    if (u >= 1) { flight = null; if (f.done) f.done(); } else moving = true; }
+  else {
+    if (Math.abs(pend) > 1e-4) { const step = pend * (1 - Math.exp(-dt * 16)); pend -= step; zoomAt(anchorS[0], anchorS[1], Math.exp(step)); moving = true; if (step > 0) steering = true; } else pend = 0;
+    if (Math.abs(vel[0]) + Math.abs(vel[1]) > 0.02) { cam.cx -= vel[0] / cam.z; cam.cy -= vel[1] / cam.z; const d = Math.exp(-dt * 6); vel[0] *= d; vel[1] *= d; moving = true; } else vel = [0, 0];
+    if (steering) { if (steer(1 - Math.exp(-dt * 7)) > 1e-4) moving = true; if (Math.abs(pend) < 1e-4) steering = false; }
+    clampCenter(); }
+  if (dirty || moving) { dirty = false; quality = moving || ptrs.size ? 'medium' : 'high'; render(); }
+  if (moving) raf = requestAnimationFrame(frame); else if (quality !== 'high') { clearTimeout(frame.hq); frame.hq = setTimeout(() => { if (!raf && !ptrs.size) { quality = 'high'; render(); } }, 90); }
+}
+function flyTo(cx, cy, z, dur, done) { flight = { t0: performance.now(), dur: dur ?? clamp(0.75 + Math.abs(Math.log(z / cam.z)) * 0.3, 0.75, 2.6) * 1000, c0: [cam.cx, cam.cy], c1: [cx, cy], z0: cam.z, z1: z, done }; pend = 0; vel = [0, 0]; need(); }
+function flyHome(k, done) { k = clamp(k, 0, N - 1); for (let j = Math.min(k, dominant()); j <= Math.max(k, dominant()); j++) want(PLATES[j].img); const h = home(k); flyTo(h.cx, h.cy, h.z, undefined, done); }
+function camAtDepth(t) { t = clamp(t, 0, N - 1); const k = Math.min(N - 2, Math.floor(t)); const f = t - k; const a = home(k), b = home(k + 1);
+  const z = Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * f); const w = (1 / z - 1 / a.z) / (1 / b.z - 1 / a.z); return { cx: a.cx + (b.cx - a.cx) * w, cy: a.cy + (b.cy - a.cy) * w, z }; }
+function depthOf() { const k = dominant(); if (k >= N - 1) return N - 1; return k + clamp(Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)), 0, 1); }
+
+// ───────────── HUD: magnification follows the acts (×1 → ×100 → ×10 000), scale bar follows the plates
+let hudKey = '', plateKey = -1;
+function niceLen(cmPerPx) { const target = cmPerPx * 92; const e = Math.pow(10, Math.floor(Math.log10(target))); const m = target / e; const n = (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; return [n, n / cmPerPx]; }
+function fmtLen(cm) { if (cm >= 1) return `${+cm.toPrecision(3)} cm`; if (cm >= 0.1) return `${+(cm * 10).toPrecision(3)} mm`; if (cm >= 1e-4) return `${+(cm * 1e4).toPrecision(3)} µm`; return `${+(cm * 1e7).toPrecision(3)} nm`; }
+function fmtMag(m) { if (m < 10) return '×' + m.toFixed(1).replace('.', ',').replace(',0', ''); const e = Math.pow(10, Math.floor(Math.log10(m)) - 1); return '×' + Math.round(Math.round(m / e) * e).toLocaleString('fr-FR'); }
+function magNow() { const t = depthOf(), k = Math.floor(t), f = t - k;
+  if (k >= N - 1) return MAG[N - 1] * Math.max(1, sig(N - 1)); if (k === 0 && sig(0) < 1) return MAG[0] * sig(0);
+  return Math.exp(Math.log(MAG[k]) + (Math.log(MAG[k + 1]) - Math.log(MAG[k])) * f); }
+function updateHUD(a) {
+  let sw = 0, lr = 0; for (let k = 0; k < N; k++) { if (a[k] < 0.01) continue; sw += a[k]; lr += a[k] * Math.log(REALW[k] / (R[k].w * cam.z)); }
+  const k = dominant(); const [n, px] = niceLen(Math.exp(lr / sw)); const M = magNow(); const t = depthOf();
+  const key = `${fmtMag(M)}|${k}|${Math.round(px)}|${fmtLen(n)}`;
+  if (key !== hudKey) { hudKey = key; $('#mag').innerHTML = `${fmtMag(M)}<small>${PLATES[k].scale}</small>`; $('#sbi').style.width = `${Math.round(px)}px`; $('#sbt').textContent = fmtLen(n); }
+  if (k !== plateKey) { const first = plateKey < 0; plateKey = k; const P = PLATES[k];
+    $('#ltitle').textContent = P.title; $('#path').innerHTML = `La rate &nbsp;›&nbsp; Acte ${ROMAN[P.act]} · ${ACTS[P.act].name} &nbsp;›&nbsp; <b>${k + 1} / ${N}</b>`;
+    document.querySelectorAll('.pl').forEach((b, i) => b.classList.toggle('on', i === k)); document.querySelectorAll('.grp').forEach((g, i) => g.classList.toggle('on', i === P.act));
+    document.querySelectorAll('.rail .tick').forEach((el, i) => { el.classList.toggle('on', i === k); el.classList.toggle('cur', el.classList.contains('major') && PLATES[i].act === P.act); });
+    if (!first) toast(`${k + 1}. ${P.short} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}`); prefetch(); }
+  $('#rth').style.top = `${6 + (t / (N - 1)) * railH}px`; $('#rfill').style.height = `${(t / (N - 1)) * railH}px`;
+  $('#lvf').style.width = `${clamp(Math.log(M) / Math.log(10000), 0, 1) * 100}%`;
+}
+
+// ───────────── hotspots
+const pinEls = [];
+function buildPins() { const host = $('#pins');
+  PLATES.forEach((P, k) => P.pins.forEach((p, j) => { const el = document.createElement('div'); el.className = 'pin' + (p.portal ? ' portal' : '');
+    el.innerHTML = `<button aria-label="${p.t.replace(/"/g, '')}"><b></b><i></i></button>` + (p.portal ? `<button class="go">${p.portal} →</button>` : `<span>${p.t}</span>`);
+    el.querySelector('button').addEventListener('click', (ev) => { ev.stopPropagation(); openCard(k, j, true); });
+    if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
+    host.appendChild(el); pinEls.push({ el, k, j, vis: false }); })); }
+function updatePins(a) {
+  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.5 : 3.8), x = 0, y = 0;
+    if (show) { const r = R[P.k]; [x, y] = toS(r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; }
+    if (show && p.portal) { // dive button: right by default, left when preferred or when only the left fits; if neither fits, the roomier side, narrowed to fit
+      const go = P.go || (P.go = P.el.querySelector('.go')); if (!P.gw) P.gw = go.offsetWidth || 260; const off = mobile ? 20 : 24;
+      const rR = W - (mobile ? 0 : 92) - x - off - 8, rL = x - off - 8, fr = P.gw <= rR, fl = P.gw <= rL; const L = fl && fr ? p.side === 'l' : fl || fr ? fl : rL > rR;
+      if (L !== P.left) { P.left = L; P.el.classList.toggle('left', L); } const mw = fl || fr ? '' : `${Math.max(96, Math.round((L ? rL : rR) - 24))}px`; if (mw !== P.mw) { P.mw = mw; go.style.maxWidth = mw; } }
+    if (show) { P.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; if (!P.vis) { P.el.classList.add('on'); P.vis = true; } } else if (P.vis) { P.el.classList.remove('on'); P.vis = false; } } }
+
+// ───────────── study card
+let open = null; const seen = new Set();
+function openCard(k, j, fly) {
+  const P = PLATES[k]; const p = P.pins[j]; open = { k, j }; seen.add(`${k}.${j}`); const n = P.pins.length;
+  pinEls.forEach((E) => { E.el.classList.toggle('active', E.k === k && E.j === j); E.el.classList.toggle('seen', seen.has(`${E.k}.${E.j}`)); });
+  const C = $('#card'); C.classList.toggle('portal', !!p.portal);
+  C.innerHTML = `<button class="x" aria-label="Fermer">✕</button><div class="chip"><i></i>Planche ${k + 1} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}</div><h3>${p.t}</h3><p>${p.p}</p>
+    <div class="trap"><span>⚠ Piège d’EMD</span>${p.trap}</div>${p.note ? `<div class="note">Note sur la planche : ${p.note}</div>` : ''}
+    <div class="act">${p.portal ? `<button class="btn dive">${p.portal} →</button>` : ''}<button class="btn zoom">Recentrer</button></div>
+    <div class="nav"><button class="pv">← Précédent</button><span>${j + 1} / ${n} · ${[...seen].filter((s) => s.startsWith(`${k}.`)).length} vus</span><button class="nx">Suivant →</button></div>`;
+  C.querySelector('.x').onclick = closeCard; C.querySelector('.zoom').onclick = () => focusPin(k, j);
+  C.querySelector('.pv').onclick = () => openCard(k, (j - 1 + n) % n, true); C.querySelector('.nx').onclick = () => openCard(k, (j + 1) % n, true);
+  if (p.portal) C.querySelector('.dive').onclick = () => { closeCard(); flyHome(k + 1); };
+  C.classList.add('on'); if (fly) focusPin(k, j); hideHint();
+}
+function closeCard() { open = null; $('#card').classList.remove('on'); pinEls.forEach((E) => E.el.classList.remove('active')); }
+function focusPin(k, j) { const p = PLATES[k].pins[j]; const r = R[k]; const wx = r.x + p.x * r.w, wy = r.y + p.y * r.h; const z = homeZ(k) * (p.portal ? 1.35 : 1.7);
+  const fx = mobile ? vcx : Math.min(vcx, (W - (H < 520 ? 50 : 92) - Math.min(410, W * 0.54)) / 2 + 24), fy = mobile ? Math.min(vcy, H * 0.24) : vcy; flyTo(wx - (fx - vcx) / z, wy - (fy - vcy) / z, z); }
+
+// ───────────── input
+let hintGone = false; function hideHint() { if (hintGone) return; hintGone = true; $('#hint').classList.add('gone'); }
+let tt = 0; function toast(s) { const t = $('#toast'); t.textContent = s; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1700); }
+function zoomBy(f, sx = vcx, sy = vcy) { flight = null; anchorS = [sx, sy]; pend = clamp(pend + Math.log(f), -3, 3); need(); hideHint(); }
+addEventListener('wheel', (e) => { if (e.target.closest && e.target.closest('.card,.dock,.ctrl,.top')) { if (!e.target.closest('.card,.dock')) e.preventDefault(); return; }
+  e.preventDefault(); let d = e.deltaY; if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= H; zoomBy(Math.exp(-d * (e.ctrlKey ? 0.006 : 0.0016)), e.clientX, e.clientY); }, { passive: false });
+let lastPinch = 0, lastMid = null, downAt = 0, lastTap = 0, moved = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); flight = null; pend = 0; vel = [0, 0]; downAt = performance.now(); moved = 0; cv.classList.add('drag');
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a[0] - b[0], a[1] - b[1]); lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; } hideHint(); });
+cv.addEventListener('pointermove', (e) => { if (!ptrs.has(e.pointerId)) return; const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 1) { const dx = e.clientX - prev[0], dy = e.clientY - prev[1]; moved += Math.abs(dx) + Math.abs(dy); cam.cx -= dx / cam.z; cam.cy -= dy / cam.z; vel = [dx * 0.9, dy * 0.9]; clampCenter(); need(); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.cx -= (mid[0] - lastMid[0]) / cam.z; cam.cy -= (mid[1] - lastMid[1]) / cam.z; if (lastPinch) { const f = d / lastPinch; zoomAt(mid[0], mid[1], f); if (f > 1) steer(0.06); }
+    lastPinch = d; lastMid = mid; moved += 10; vel = [0, 0]; clampCenter(); need(); } });
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = 0; if (ptrs.size === 1) lastMid = [...ptrs.values()][0];
+  if (!ptrs.size) { cv.classList.remove('drag'); if (performance.now() - downAt > 80) need(); else vel = [0, 0];
+    if (moved < 6 && performance.now() - downAt < 300) { const tn = performance.now(); if (tn - lastTap < 320) { zoomBy(2.2, e.clientX, e.clientY); lastTap = 0; } else { lastTap = tn; if (open) closeCard(); } } } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; const k = e.key;
+  if (k === 'f' || k === 'F') toggleFS(); else if (k === '+' || k === '=') zoomBy(1.35); else if (k === '-' || k === '_') zoomBy(1 / 1.35);
+  else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { closeCard(); flyHome(dominant() + 1); }
+  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { closeCard(); flyHome(dominant() - 1); }
+  else if (k === 'r' || k === 'R' || k === '0' || k === 'Home') { closeCard(); flyHome(0); } else if (k === 'End') { closeCard(); flyHome(N - 1); }
+  else if (k === 'Escape') closeCard(); else if (/^[1-9]$/.test(k)) { closeCard(); flyHome(+k - 1); } else return;
+  e.preventDefault(); hideHint(); });
+function toggleFS() { const d = document, el = d.documentElement; if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); else (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); }
+$('#zin').onclick = () => zoomBy(1.6); $('#zout').onclick = () => zoomBy(1 / 1.6); $('#reset').onclick = () => { closeCard(); flyHome(0); }; $('#fs').onclick = toggleFS;
+// depth rail: one tick per plate, labels at the start of each act
+const rail = $('#rail'); PLATES.forEach((P, i) => { const t = document.createElement('div'); const major = i === 0 || PLATES[i - 1].act !== P.act; t.className = 'tick' + (major ? ' major' : '');
+  t.style.top = `calc(6px + ${(i / (N - 1)) * 100}% - ${(i / (N - 1)) * 12}px)`; t.title = `${i + 1}. ${P.short}`;
+  if (major) t.innerHTML = `<span>${ACTS[P.act].name}<em>${fmtMag(ACTS[P.act].mag)}</em></span>`;
+  t.onclick = (ev) => { ev.stopPropagation(); closeCard(); flyHome(i); }; rail.appendChild(t); });
+let railDrag = false; const railSet = (e) => { const r = rail.getBoundingClientRect(); const c = camAtDepth(clamp((e.clientY - r.top - 6) / (r.height - 12), 0, 1) * (N - 1)); flight = null; pend = 0; vel = [0, 0]; cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; prefetch(); need(); hideHint(); };
+rail.addEventListener('pointerdown', (e) => { if (e.target.closest('.tick')) return; railDrag = true; rail.setPointerCapture(e.pointerId); railSet(e); }); rail.addEventListener('pointermove', (e) => railDrag && railSet(e)); rail.addEventListener('pointerup', () => (railDrag = false));
+// plate dock, grouped by act
+ACTS.forEach((A, ai) => { const g = document.createElement('div'); g.className = 'grp'; g.innerHTML = `<div class="gh"><b>${ROMAN[ai]}</b>${A.name}<em>${fmtMag(A.mag)}</em></div><div class="gt"></div>`;
+  PLATES.forEach((P, i) => { if (P.act !== ai) return; const b = document.createElement('button'); b.className = 'pl'; b.title = `${i + 1}. ${P.title}`;
+    b.innerHTML = `<img alt="" src="${IMG[P.img + '_t']}"><i>${i + 1}</i><b>${P.short}</b>`; b.onclick = () => { closeCard(); hideHint(); flyHome(i); }; g.querySelector('.gt').appendChild(b); });
+  $('#dock').appendChild(g); });
+addEventListener('resize', () => { const t = depthOf(); layout(); if (!flight) { const c = camAtDepth(t); cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; } need(); });
+
+// ───────────── boot
+async function boot() {
+  if (matchMedia('(pointer:coarse)').matches) { $('#hint1').textContent = 'Pincez pour plonger'; $('#hint2').textContent = 'Glisser pour explorer · double-tap · touchez les points et les boutons lumineux' + (innerHeight > innerWidth ? ' · tournez le téléphone pour agrandir les planches' : ''); }
+  buildPins(); layout();
+  if (window.__TEX__) { const ti = new Image(); ti.src = window.__TEX__; ti.decode().then(() => { texPat = ctx.createPattern(ti, 'repeat'); need(); }).catch(() => {}); }
+  const h = home(0); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z * 0.9; $('#lb').style.width = '35%';
+  await want(PLATES[0].img).p; $('#lb').style.width = '100%'; prefetch(); render();
+  setTimeout(() => { $('#loader').classList.add('done'); flyTo(h.cx, h.cy, h.z, 1300); }, 120);
+  // decode the rest in the background, one at a time, so long dives never show a blurry placeholder (desktop)
+  if (!mobile) for (const P of PLATES) await want(P.img).p;
+}
+window.__atlas = { cam, flyHome, openCard, depthOf, dominant: () => dominant(), R, PLATES, alphasNow: () => alphas(), magNow };
+boot().catch((e) => { $('#lmsg').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+<script>(function(){
+var d=document,w=window,root=d.documentElement;
+['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+function q(s){return d.querySelector(s);}
+var loader=q('#loader');
+function isReady(){return !loader||loader.classList.contains('done');}
+function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;var list=A.PLATES||A.L;k=Math.floor(k);if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);var h=d.getElementById('hint');if(h)h.classList.add('gone');}catch(e){}}
+if(!root.classList.contains('az-embed')){
+  var top=q('.top');
+  if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');
+    a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Atlas Zoom</span>';
+    top.insertBefore(a,top.firstChild);}
+  var pm=/[?&]planche=(\d{1,2})(?:&|$)/.exec(location.search);
+  if(pm)whenReady(function(){setTimeout(function(){gotoPlate(+pm[1]-1);},0);});
+  return;
+}
+var target=(self.origin&&self.origin!=='null')?self.origin:'*';
+function post(type,data){try{var m={source:'medart-atlas',type:type};if(data){for(var k in data)m[k]=data[k];}w.parent.postMessage(m,target);}catch(e){}}
+w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(target!=='*'&&e.origin!==target)||!m||m.source!=='medart-hub')return;
+  if(m.type==='inset'&&typeof m.top==='number'&&m.top>=0&&m.top<400){root.style.setProperty('--az-top',Math.round(m.top)+'px');}
+  else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
+post('hello');
+w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
+function read(){
+  var level='',mag='';
+  if(mEl){var sm=mEl.querySelector('small');level=sm?sm.textContent.trim():'';
+    for(var n=mEl.firstChild;n;n=n.nextSibling){if(n!==sm)mag+=n.textContent||'';}mag=mag.trim();}
+  var k=-1,n=0;try{var A=w.__atlas;if(A){k=A.dominant();var list=A.PLATES||A.L;n=list?list.length:0;}}catch(e){}
+  return {title:tEl?tEl.textContent.trim():'',level:level,mag:mag,index:k,count:n};
+}
+function flush(){var s=read(),key=s.title+'|'+s.level+'|'+s.index;
+  if(key!==last){last=key;lastMag=s.mag;post('state',s);return;}
+  if(s.mag!==lastMag){lastMag=s.mag;post('mag',{mag:s.mag});}}
+function schedule(){if(timer)return;timer=setTimeout(function(){timer=0;flush();},120);}
+[tEl,mEl,pEl].forEach(function(el){if(el)new MutationObserver(schedule).observe(el,{childList:true,characterData:true,subtree:true});});
+whenReady(function(){post('ready');flush();});
+w.addEventListener('keydown',function(e){var k=e.key;if((k==='f'||k==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;e.stopPropagation();e.preventDefault();post('fullscreen');}},true);
+flush();
+})();</script>
+</body>
+</html>

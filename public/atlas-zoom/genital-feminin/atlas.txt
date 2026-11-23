@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#191d21">
+<title>Appareil Génital Féminin · Atlas zoomable · MedArt AI Studio</title>
+<link rel="preload" href="/atlas-zoom/genital-feminin/p1.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<style>
+.az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
+.az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
+.az-embed .top .scale{margin-left:auto}.az-embed .scale .sbar{margin-top:0}
+.az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
+.az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
+@media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+</style>
+<meta name="description" content="L’appareil génital féminin en 9 planches et 3 actes : de la coupe sagittale à l’ovocyte II, à la cellule lutéale et aux pinopodes, en zoom continu.">
+<style>
+@font-face{font-family:'Kalam';font-weight:400;font-display:swap;src:url(/atlas-zoom/_shared/kalam-400.woff2) format('woff2')}
+@font-face{font-family:'Kalam';font-weight:700;font-display:swap;src:url(/atlas-zoom/_shared/kalam-700.woff2) format('woff2')}
+:root{--bg:#191d21;--ink:#f6efe2;--chalk:#f3e2bd;--soft:rgba(240,233,220,.74);--mute:rgba(232,226,214,.5);--line:rgba(243,226,189,.14);--acc:#ffb86b;--acc2:#7fd8ff;
+  --hand:'Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',system-ui,sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab}#cv.drag{cursor:grabbing}
+/* slate atmosphere: vignette + chalk grain (static layers, composited once) */
+.vig{position:fixed;inset:0;pointer-events:none;z-index:1;background:radial-gradient(130% 100% at 50% 48%,transparent 52%,rgba(6,8,10,.55) 100%)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.06;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scrim{position:fixed;left:0;right:0;top:0;height:120px;z-index:2;pointer-events:none;background:linear-gradient(rgba(13,16,21,.66),rgba(13,16,21,.3) 55%,transparent)}
+.pin b{pointer-events:none}.pin i{pointer-events:none}
+.lig{letter-spacing:-.17em;font-style:normal;font-weight:inherit;display:inline;position:static;opacity:1;color:inherit}
+/* pins */
+#pins{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pin{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
+.pin.on{opacity:1}.pin.on button{pointer-events:auto}
+.pin button{all:unset;cursor:pointer;position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.pin i{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff6e4,var(--acc) 60%,#e07a2c);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 16px 3px rgba(255,184,107,.55);transition:transform .25s var(--ease)}
+.pin b{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,184,107,.75);animation:pulse 2.2s var(--ease) infinite}
+.pin.portal i{background:radial-gradient(circle at 40% 35%,#eafaff,var(--acc2) 60%,#2f8fc0);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 20px 5px rgba(127,216,255,.6)}
+.pin.portal b{border-color:rgba(127,216,255,.85);animation-duration:1.6s}
+.pin.seen i{filter:saturate(.55) brightness(.92)}
+.pin button:hover i,.pin.active i{transform:scale(1.25)}
+.pin span{position:absolute;left:22px;top:-13px;white-space:nowrap;padding:5px 11px;border-radius:999px;font:700 15px/1.1 var(--hand);color:var(--chalk);background:rgba(20,24,28,.86);border:1px solid var(--line);opacity:0;transform:translateX(-4px);transition:.25s var(--ease);pointer-events:none}
+.pin .go{all:unset;cursor:pointer;position:absolute;left:24px;top:-16px;white-space:nowrap;padding:7px 14px 7px 13px;border-radius:999px;font:700 15.5px/1.1 var(--hand);color:#e6f8ff;background:linear-gradient(135deg,rgba(30,74,104,.9),rgba(16,40,60,.92));border:1px solid rgba(127,216,255,.55);box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 22px rgba(127,216,255,.35),0 8px 24px -8px rgba(0,0,0,.7);animation:glow 2.4s var(--ease) infinite;transition:transform .2s var(--ease),filter .2s}
+.pin.on .go{pointer-events:auto}.pin.left .go{left:auto;right:24px}.pin.left .go:hover{transform:translateX(-3px)}.pin .go:hover{transform:translateX(3px);filter:brightness(1.15)}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 18px rgba(127,216,255,.28),0 8px 24px -8px rgba(0,0,0,.7)}50%{box-shadow:0 0 0 1px rgba(127,216,255,.25),0 0 30px rgba(127,216,255,.55),0 8px 24px -8px rgba(0,0,0,.7)}}
+.pin button:hover+span,.pin.active span{opacity:1;transform:none}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.55);opacity:0}}
+/* glass */
+.glass{background:linear-gradient(160deg,rgba(40,45,52,.78),rgba(22,26,31,.86));border:1px solid rgba(243,226,189,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 30px 70px -24px rgba(0,0,0,.75)}
+@supports (backdrop-filter:blur(1px)){.glass{background:linear-gradient(160deg,rgba(40,45,52,.62),rgba(22,26,31,.74));backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%)}}
+/* header */
+.top{position:fixed;left:0;right:0;top:0;z-index:6;display:flex;align-items:flex-start;gap:18px;padding:16px 22px;pointer-events:none}
+.top>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:8px 14px 8px 9px;border-radius:16px}
+.brand svg{width:32px;height:32px;flex:none}.brand b{display:block;font-weight:700;font-size:13.5px;letter-spacing:-.01em}.brand em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:1px}
+.crumb{margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;padding-top:4px;max-width:46vw}
+.crumb .path{font:600 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:rgba(236,230,218,.66);text-shadow:0 1px 8px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.crumb .path b{color:var(--acc)}
+.crumb h2{margin:0;font:700 25px/1.15 var(--hand);color:var(--chalk);text-shadow:0 2px 18px rgba(0,0,0,.6);transition:opacity .3s}
+.scale{min-width:170px;padding:10px 14px;border-radius:16px;text-align:right}
+.scale .m{font:800 24px/1 var(--sans);letter-spacing:-.03em;color:#fff}.scale .m small{font-size:13px;color:var(--mute);font-weight:600;margin-left:6px;letter-spacing:.06em;text-transform:uppercase}
+.sbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;font:600 11.5px var(--sans);color:var(--soft)}
+.sbar i{display:block;height:6px;border:1.5px solid rgba(243,226,189,.85);border-top:0;transition:width .25s var(--ease)}
+/* side controls */
+.ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px;border-radius:22px}
+.ctrl button{all:unset;cursor:pointer;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:var(--ink);transition:background .2s}
+.ctrl button:hover{background:rgba(255,255,255,.08)}.ctrl svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rail{position:relative;width:38px;height:min(330px,40vh);margin:4px 0;cursor:pointer;touch-action:none}
+.rail .tr{position:absolute;left:18px;top:6px;bottom:6px;width:2px;border-radius:2px;background:rgba(243,226,189,.18)}
+.rail .fill{position:absolute;left:18px;top:6px;width:2px;border-radius:2px;background:linear-gradient(var(--acc),var(--acc2))}
+.rail .tick{position:absolute;left:13px;width:12px;height:2px;margin-top:-1px;background:rgba(243,226,189,.28);border-radius:2px}.rail .tick.major{left:8px;width:22px;background:rgba(243,226,189,.45)}.rail .tick::before{content:"";position:absolute;left:-6px;right:-6px;top:-7px;bottom:-7px}
+.rail .tick{cursor:pointer}.rail .tick span{position:absolute;right:32px;top:-14px;padding:4px 8px 3px;border-radius:9px;background:rgba(18,22,27,.72);border:1px solid rgba(243,226,189,.08);font:700 13.5px/1 var(--hand);color:var(--mute);white-space:nowrap;text-align:right;cursor:pointer}.rail .tick em{display:block;font:600 9.5px var(--sans);letter-spacing:.08em;font-style:normal;margin-top:1px}
+.rail .tick span{opacity:0;transition:opacity .3s}.ctrl:hover .rail .tick span{opacity:1}.rail .tick.cur span{color:var(--chalk)}.rail .tick.on{background:var(--acc)}
+.rail .th{position:absolute;left:7px;width:24px;height:24px;margin-top:-12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#ffd9a8);box-shadow:0 0 0 4px rgba(255,184,107,.22),0 4px 14px rgba(0,0,0,.5)}
+/* plate dock, grouped by act */
+.dock{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:6px 8px 7px;border-radius:22px;max-width:calc(100vw - 16px)}
+.grp{display:flex;flex-direction:column;gap:4px;padding:0 4px}.grp+.grp{border-left:1px solid rgba(243,226,189,.1);padding-left:10px}
+.gh{display:flex;align-items:baseline;gap:6px;padding-left:4px;font:700 10px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);transition:color .3s}
+.gh b{font:700 12px var(--hand);letter-spacing:0;color:var(--acc);opacity:.6}.gh em{font-style:normal;font-weight:600;letter-spacing:.04em;text-transform:none;opacity:.8}
+.grp.on .gh{color:var(--soft)}.grp.on .gh b{opacity:1}
+.gt{display:flex;gap:3px}
+.pl{all:unset;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:78px;padding:3px 0 2px;border-radius:13px;transition:background .3s var(--ease)}
+.pl img{width:70px;height:39px;object-fit:cover;border-radius:9px;display:block;border:1px solid rgba(243,226,189,.16);filter:saturate(.7) brightness(.75);transition:.3s var(--ease)}
+.pl i{position:absolute;left:6px;top:6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;display:grid;place-items:center;font:800 9.5px var(--sans);font-style:normal;color:#1a1d21;background:rgba(243,226,189,.85)}
+.pl b{font:700 12px/1.05 var(--hand);color:var(--mute);transition:color .3s;max-width:76px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl:hover{background:rgba(255,255,255,.05)}.pl:hover img{filter:saturate(.9) brightness(.95)}
+.pl.on{background:rgba(255,184,107,.12)}.pl.on img{filter:none;border-color:var(--acc);box-shadow:0 0 16px rgba(255,184,107,.38)}.pl.on b{color:var(--chalk)}.pl.on i{background:var(--acc)}
+/* scale track (1× → 100× → 10 000×) */
+.lvb{position:relative;display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;font:700 11px/1.1 var(--sans);color:var(--soft);text-align:center}
+.lvb span{display:flex;flex-direction:column;align-items:center;min-width:40px}.lvb span:first-of-type{align-items:flex-start}.lvb span:last-of-type{align-items:flex-end}
+.lvb em{font:600 9px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-style:normal;margin-top:2px}
+.lvb .lt{position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:rgba(243,226,189,.14);overflow:hidden}.lvb .lt i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.wait{position:fixed;left:50%;top:50%;z-index:7;width:34px;height:34px;margin:-17px;opacity:0;transition:opacity .2s;pointer-events:none}.wait.on{opacity:1}
+.wait i{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(243,226,189,.2);border-top-color:var(--acc);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+/* study card */
+.card{position:fixed;z-index:8;right:84px;top:150px;width:min(390px,calc(100vw - 32px));max-height:calc(100vh - 262px);overflow:auto;padding:20px 22px 18px;border-radius:24px;opacity:0;transform:translateX(18px) scale(.98);pointer-events:none;transition:opacity .35s var(--ease),transform .45s var(--ease);scrollbar-width:none}
+.card::-webkit-scrollbar{display:none}.card.on{opacity:1;transform:none;pointer-events:auto}
+.card .chip{display:inline-flex;align-items:center;gap:7px;font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}.card .chip i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.card.portal .chip i{background:var(--acc2);box-shadow:0 0 10px var(--acc2)}
+.card h3{margin:8px 34px 10px 0;font:700 26px/1.12 var(--hand);color:var(--chalk)}
+.card p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--soft)}.card p b{color:#fff;font-weight:650}
+.trap{position:relative;margin:12px 0 4px;padding:12px 14px 12px 16px;border-radius:16px;background:linear-gradient(135deg,rgba(255,120,90,.15),rgba(255,120,90,.04));border:1px solid rgba(255,140,110,.3);font-size:13.2px;line-height:1.55;color:#f6e3dc}
+.trap span{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:800 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#ff9a7e}
+.note{margin-top:10px;font-size:12px;line-height:1.5;color:var(--mute);border-left:2px solid rgba(243,226,189,.25);padding-left:10px}
+.card .x{all:unset;cursor:pointer;position:absolute;right:14px;top:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:var(--soft)}.card .x:hover{background:rgba(255,255,255,.08)}
+.card .act{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:13px;font:700 13px var(--sans);background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--ink);transition:.2s}
+.btn:hover{background:rgba(255,255,255,.12)}.btn.dive{background:linear-gradient(135deg,#7fd8ff,#4aa9e0);color:#06202e;border:0}.btn.dive:hover{filter:brightness(1.08)}
+.card .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font:600 11px var(--sans);color:var(--mute)}
+.card .nav button{all:unset;cursor:pointer;padding:6px 9px;border-radius:9px;color:var(--soft)}.card .nav button:hover{background:rgba(255,255,255,.07)}
+/* hint + loader */
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;padding:16px 20px;border-radius:20px;text-align:center;font:700 18px var(--hand);color:var(--chalk);transition:opacity .6s;pointer-events:none}
+.hint small{display:block;margin-top:4px;font:500 12px var(--sans);color:var(--soft)}.hint.gone{opacity:0}
+.hint svg{width:26px;height:38px;display:block;margin:0 auto 8px}.hint svg .w{animation:wheel 1.4s var(--ease) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}100%{transform:translateY(8px);opacity:0}}
+#loader{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);transition:opacity .7s,visibility .7s}#loader.done{opacity:0;visibility:hidden}
+#loader h1{margin:0;font:700 44px var(--hand);color:var(--chalk);text-align:center}#loader p{margin:6px 0 22px;color:var(--soft);font-size:14px;text-align:center}
+#loader .tr{width:240px;height:2px;margin:0 auto;border-radius:2px;background:rgba(243,226,189,.15);overflow:hidden}#loader .tr i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .3s}
+#loader .msg{margin-top:12px;text-align:center;font-size:12px;color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:116px;transform:translateX(-50%);z-index:9;padding:9px 14px;border-radius:13px;font:600 12.5px var(--sans);color:var(--soft);opacity:0;transition:opacity .4s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:1050px){.crumb .path{display:none}.crumb{max-width:40vw}}
+@media (max-width:1100px){.pl{width:62px}.pl img{width:56px;height:32px}.pl b{font-size:11px;max-width:60px}}
+@media (max-width:900px){.pl b{display:none}.gh em{display:none}}
+@media (max-width:760px){
+  .top{padding:10px 10px;gap:8px}.brand{padding:6px 9px 6px 6px}.brand em{display:none}.brand b{font-size:12px}.crumb{display:none}
+  .scale{min-width:0;padding:8px 10px}.scale .m{font-size:19px}
+  .ctrl{right:6px;top:auto;bottom:84px;transform:none;padding:6px 4px;gap:2px}.ctrl button{width:34px;height:34px}.rail{height:120px}.rail .tick span{display:none}
+  .dock{bottom:6px;gap:2px;padding:4px 5px;border-radius:16px}.grp{padding:0 1px;gap:2px}.grp+.grp{padding-left:4px}.gh{font-size:8px;letter-spacing:.08em;padding-left:2px}.gh b{font-size:10px}.gt{gap:1px}
+  .pl{width:calc((100vw - 52px)/9);max-width:44px;padding:2px 0;border-radius:9px}.pl img{width:100%;height:auto;aspect-ratio:16/10;border-radius:7px}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .lvb{margin-top:6px;padding-top:7px;gap:6px;font-size:10px}.lvb em{display:none}.lvb span{min-width:0}
+  .card{left:8px;right:8px;top:auto;bottom:76px;width:auto;max-height:54vh;transform:translateY(24px);border-radius:22px}
+  .pin .go{font-size:13.5px;padding:6px 11px;left:20px;top:-14px;white-space:normal;width:max-content;max-width:min(46vw,188px);line-height:1.15}.pin.left .go{left:auto;right:20px}
+  .pin span{display:none}.scrim{height:84px}
+  .pin>button:first-child{left:-12px;top:-12px;width:24px;height:24px}.pin i{inset:6px}
+  .hint{padding:12px 16px;font-size:15px;max-width:78vw}.hint small{font-size:11px}
+}
+@media (max-height:520px) and (min-width:761px){
+  .top{padding:8px 12px;gap:10px}.brand{padding:5px 9px 5px 5px}.brand svg{width:26px;height:26px}.brand em{display:none}.brand b{font-size:12px}
+  .crumb .path{display:none}.crumb h2{font-size:17px}.scrim{height:70px}
+  .scale{min-width:0;padding:6px 10px}.scale .m{font-size:17px}.sbar{margin-top:4px}.lvb{display:none}
+  .ctrl{right:6px;padding:4px 3px;gap:0}.ctrl button{width:30px;height:30px}.rail{height:min(150px,36vh);margin:2px 0}.rail .tick span{display:none}
+  .dock{bottom:5px;padding:4px 6px;gap:2px;border-radius:14px}.gh{display:none}.grp+.grp{padding-left:5px}.pl{width:50px;padding:2px 0}.pl img{width:46px;height:26px;border-radius:6px}.pl b{display:none}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .card{top:52px;right:50px;bottom:8px;max-height:none;width:min(360px,52vw);padding:14px 16px}.card h3{font-size:21px}.card p{font-size:13px}
+  .hint{padding:10px 14px;font-size:15px}.hint svg{display:none}.toast{bottom:52px}.pin span{display:none}
+}
+@media (prefers-reduced-motion:reduce){.pin b,.pin .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Atlas zoomable de l’appareil génital féminin"></canvas>
+<div class="vig"></div><div class="grain"></div><div class="scrim"></div>
+<div id="pins"></div>
+<header class="top">
+  <div class="brand glass"><svg viewBox="0 0 32 32" fill="none"><rect x=".5" y=".5" width="31" height="31" rx="9" fill="#232830" stroke="rgba(243,226,189,.25)"/><path d="M12.2 11.5h7.6c.6 3-.4 6-2 7.6v4.4h-3.6v-4.4c-1.6-1.6-2.6-4.6-2-7.6z" stroke="#ffb86b" stroke-width="1.5" stroke-linejoin="round"/><path d="M12.2 11.5c-1.6-.4-3-.2-4 1-1 1.3-.6 3.1 1 3.4M19.8 11.5c1.6-.4 3-.2 4 1 1 1.3.6 3.1-1 3.4" stroke="#7fd8ff" stroke-width="1.3" stroke-linecap="round"/><circle cx="8.6" cy="17" r="1.4" stroke="#7fd8ff" stroke-width="1.2"/><circle cx="23.4" cy="17" r="1.4" stroke="#7fd8ff" stroke-width="1.2"/></svg>
+    <div><b>MedArt AI Studio</b><em>Atlas zoomable · Appareil génital féminin</em></div></div>
+  <div class="crumb"><div class="path" id="path"></div><h2 id="ltitle"></h2></div>
+  <div class="scale glass"><div class="m" id="mag">×1</div><div class="sbar"><i id="sbi"></i><span id="sbt">5 cm</span></div><div class="lvb"><div class="lt"><i id="lvf"></i></div><span>1×<em>Organe</em></span><span>100×<em>Tissu</em></span><span>10 000×<em>Cellule · Gamète</em></span></div></div>
+</header>
+<nav class="ctrl glass" aria-label="Zoom">
+  <button id="zin" title="Zoomer (+)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="rail" id="rail" title="Profondeur"><div class="tr"></div><div class="fill" id="rfill"></div><div class="th" id="rth"></div></div>
+  <button id="zout" title="Dézoomer (−)"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <button id="reset" title="Vue d’ensemble (R)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+  <button id="fs" title="Plein écran (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+<nav class="dock glass" id="dock" aria-label="Planches"></nav>
+<aside class="card glass" id="card" aria-live="polite"></aside>
+<div class="hint glass" id="hint"><svg viewBox="0 0 26 38" fill="none"><rect x="1.5" y="1.5" width="23" height="35" rx="11.5" stroke="#f3e2bd" stroke-width="2"/><rect class="w" x="11.5" y="8" width="3" height="7" rx="1.5" fill="#ffb86b"/></svg>
+  <span id="hint1">Faites défiler pour plonger dans l’appareil génital féminin</span><small id="hint2">Molette · double-clic · boutons lumineux · ←/→ planche précédente / suivante · F plein écran</small></div>
+<div class="toast glass" id="toast"></div><div class="wait" id="wait"><i></i></div>
+<div id="loader"><div><h1>Appareil Génital Féminin</h1><p>9 planches · 3 actes — de l’organe à l’ovocyte II et aux pinopodes</p><div class="tr"><i id="lb"></i></div><div class="msg" id="lmsg">Chargement des planches…</div></div></div>
+<script>window.__IMG__={"p1":"/atlas-zoom/genital-feminin/p1.webp","p1_t":"/atlas-zoom/genital-feminin/p1_t.webp","p2":"/atlas-zoom/genital-feminin/p2.webp","p2_t":"/atlas-zoom/genital-feminin/p2_t.webp","p3":"/atlas-zoom/genital-feminin/p3.webp","p3_t":"/atlas-zoom/genital-feminin/p3_t.webp","p4":"/atlas-zoom/genital-feminin/p4.webp","p4_t":"/atlas-zoom/genital-feminin/p4_t.webp","p5":"/atlas-zoom/genital-feminin/p5.webp","p5_t":"/atlas-zoom/genital-feminin/p5_t.webp","p6":"/atlas-zoom/genital-feminin/p6.webp","p6_t":"/atlas-zoom/genital-feminin/p6_t.webp","p7":"/atlas-zoom/genital-feminin/p7.webp","p7_t":"/atlas-zoom/genital-feminin/p7_t.webp","p8":"/atlas-zoom/genital-feminin/p8.webp","p8_t":"/atlas-zoom/genital-feminin/p8_t.webp","p9":"/atlas-zoom/genital-feminin/p9.webp","p9_t":"/atlas-zoom/genital-feminin/p9_t.webp"};window.__META__={"p1": {"w": 2048, "h": 1024, "bg": [29, 33, 37]}, "p2": {"w": 2048, "h": 1022, "bg": [30, 33, 37]}, "p3": {"w": 2048, "h": 1026, "bg": [29, 32, 37]}, "p4": {"w": 2048, "h": 1017, "bg": [32, 34, 39]}, "p5": {"w": 2048, "h": 993, "bg": [28, 33, 37]}, "p6": {"w": 2048, "h": 1013, "bg": [28, 32, 36]}, "p7": {"w": 2048, "h": 1030, "bg": [29, 32, 36]}, "p8": {"w": 2048, "h": 1034, "bg": [30, 32, 37]}, "p9": {"w": 2048, "h": 1017, "bg": [31, 33, 35]}};window.__TEX__="/atlas-zoom/_shared/board.webp";</script>
+<script>// Appareil génital féminin — 9 planches en une plongée continue (3 actes × 3 planches), de la coupe sagittale
+// à l’ovocyte II, à la cellule lutéale et aux pinopodes de l’endomètre.
+// Les positions sont données en pixels de la planche d’origine (1998 × 1116) puis converties selon le recadrage
+// de chaque planche (voir CROP en bas). portal.o : centre du rectangle où s’emboîte la planche suivante.
+// (Fichiers bruts dans l’ordre d’envoi : p4 = utérus, p5 = ovaire.)
+const ACTS = [
+  { name: 'Anatomie', sub: 'Organe', mag: 1 },
+  { name: 'Histologie', sub: 'Tissu', mag: 100 },
+  { name: 'Cytologie', sub: 'Cellule · Gamète', mag: 10000 },
+];
+const PLATES = [
+// ─────────────────────────────── ACTE I — ANATOMIE ───────────────────────────────
+{ img: 'p1', act: 0, short: 'Coupe sagittale', scale: 'Organe', title: 'Anatomie de l’appareil génital féminin (coupe sagittale)',
+  portal: { o: [1010, 410], w: 0.2 },
+  pins: [
+  { o: [860, 330], t: 'Utérus antéversé et antéfléchi', p: 'Position habituelle : <b>antéversion</b> (axe du col incliné en avant par rapport au vagin) et <b>antéflexion</b> (corps fléchi en avant sur le col) ; l’utérus repose sur la vessie.', trap: 'Un utérus <b>rétroversé</b> (≈ 15–20 % des femmes) est le plus souvent une variante normale. L’hystérométrie et la pose de DIU doivent tenir compte de l’orientation (risque de perforation).' },
+  { o: [1120, 570], t: 'Col utérin', p: 'Partie inférieure étroite de l’utérus ; sa portion vaginale (exocol) fait saillie dans le fond du vagin.', trap: 'Le <b>frottis cervico-utérin</b> (dépistage HPV) prélève la zone de jonction : à partir de 25 ans (cytologie 25–29 ans, test HPV de 30 à 65 ans).' },
+  { o: [1260, 290], t: 'Trompe de Fallope', p: 'Conduit de ≈ 10–12 cm entre la corne utérine et l’ovaire : pavillon, ampoule (site de la fécondation), isthme, portion interstitielle.', trap: 'La <b>grossesse extra-utérine</b> siège dans la trompe dans ≈ 95 % des cas (ampoule surtout). Facteurs : salpingite à <i>Chlamydia</i>, antécédent de GEU, chirurgie tubaire, tabac.' },
+  { o: [1195, 390], t: 'Ovaire', p: 'Glande paire intrapéritonéale, dans la fossette ovarienne, sans péritoine à sa surface (épithélium ovarien).', trap: 'La <b>torsion d’annexe</b> (souvent sur kyste ou ovaire hypertrophié) : douleur brutale, vomissements → cœlioscopie en urgence pour détorsion.' },
+  { o: [1260, 470], t: 'Cul-de-sac recto-utérin (Douglas)', p: 'Point le plus déclive de la cavité péritonéale chez la femme debout, entre utérus et rectum ; il répond au cul-de-sac vaginal postérieur.', trap: 'Le sang (GEU rompue, kyste hémorragique) et le pus s’y collectent : <b>douleur au toucher vaginal</b> (« cri du Douglas »), épanchement à l’échographie ; ponction possible par le cul-de-sac postérieur.' },
+  { o: [1100, 730], t: 'Vagin', p: 'Conduit fibromusculaire de 7–10 cm, entre vessie et urètre en avant, rectum en arrière ; ses culs-de-sac (fornix) entourent le col.', trap: 'Épithélium malpighien non kératinisé riche en glycogène → lactobacilles (bacilles de Döderlein) → <b>pH acide (≈ 4)</b>. Vaginose bactérienne : pH > 4,5, odeur de poisson, clue cells.' },
+  { o: [850, 640], t: 'Vessie', p: 'En avant de l’utérus, séparée de lui par le cul-de-sac vésico-utérin.', trap: 'Fistule vésico-vaginale (accouchement prolongé, chirurgie, radiothérapie) : fuite d’urine permanente par le vagin.' },
+  { o: [905, 830], t: 'Urètre féminin', p: 'Court (≈ 4 cm), il s’ouvre au méat urétral dans le vestibule, au-dessus de l’orifice vaginal.', trap: 'Urètre court + proximité anale → <b>cystites</b> bien plus fréquentes chez la femme (<i>E. coli</i> surtout).' },
+  { o: [705, 670], t: 'Symphyse pubienne', p: 'Articulation médiane du bassin, en avant de la vessie.', trap: 'Hauteur utérine : mesurée du bord supérieur de la symphyse au fond utérin, ≈ 32 cm à terme ; une HU trop grande ou trop petite pour le terme fait rechercher hydramnios, macrosomie ou retard de croissance.' },
+  { o: [765, 860], t: 'Clitoris', p: 'Organe érectile (corps caverneux, gland), homologue du pénis ; innervé par le nerf dorsal du clitoris (pudendal).', trap: 'Le tubercule génital donne le clitoris chez la femme, le pénis (gland) chez l’homme. <b>Clitoromégalie</b> = signe de virilisation (hyperandrogénie).' },
+  { o: [870, 955], t: 'Grandes et petites lèvres', p: 'Grandes lèvres : replis cutanés adipeux (homologues du scrotum). Petites lèvres : replis muqueux sans poils, qui limitent le vestibule.', trap: 'Bourrelets génitaux → grandes lèvres / scrotum ; plis urogénitaux → petites lèvres / urètre spongieux.', note: 'Le libellé commun « Petites lèvres et Grandes lèvres » a deux flèches qui ne précisent pas laquelle est laquelle.' },
+  { o: [1000, 895], t: 'Vestibule', p: 'Espace entre les petites lèvres où s’ouvrent l’urètre, le vagin et les glandes vestibulaires.', trap: 'L’hymen marque la limite entre vestibule et vagin ; un hymen imperforé donne un <b>hématocolpos</b> (douleurs cycliques sans règles).' },
+  { o: [1320, 720], t: 'Rectum', p: 'En arrière du vagin, séparé par la cloison recto-vaginale.', trap: 'L’<b>endométriose</b> profonde touche souvent la cloison recto-vaginale et les ligaments utéro-sacrés : dyschésie, dyspareunie profonde.' },
+  { o: [1150, 905], t: 'Noyau fibreux central du périnée', p: 'Point d’ancrage des muscles du périnée, entre vagin et canal anal.', trap: 'Les déchirures périnéales du 3e et 4e degré (sphincter anal, muqueuse rectale) doivent être reconnues et réparées pour éviter l’incontinence anale.' },
+  { o: [1010, 410], side: 'l', portal: 'Voir la coupe frontale & les ligaments', t: 'L’utérus de face', p: 'Passez à la coupe frontale : cavité utérine, trompes, ovaires et ligaments.', trap: 'Moyens de fixité : ligaments utéro-sacrés et paramètres (les plus solides), ligaments ronds et larges (orientation).' },
+]},
+{ img: 'p2', act: 0, short: 'Coupe frontale', scale: 'Organe', title: 'Utérus, trompes de Fallope, ovaires et ligaments (coupe frontale)',
+  portal: { o: [1015, 1020], w: 0.14 },
+  pins: [
+  { o: [930, 285], t: 'Fundus', p: 'Partie supérieure arrondie de l’utérus, au-dessus des cornes utérines.', trap: 'L’insertion du placenta au fundus est la plus habituelle ; une insertion basse (placenta prævia) donne des métrorragies du 3e trimestre — <b>pas de toucher vaginal</b>.' },
+  { o: [868, 430], t: 'Corps utérin : endomètre, myomètre, périmètre', p: 'Muqueuse (endomètre), muscle lisse épais (myomètre), séreuse péritonéale (périmètre).', trap: 'Les <b>fibromes</b> (léiomyomes) naissent du myomètre : sous-séreux, interstitiels ou sous-muqueux (ces derniers donnent ménorragies et infertilité).' },
+  { o: [990, 420], t: 'Cavité utérine', p: 'Cavité triangulaire, aplatie d’avant en arrière, avec un ostium tubaire à chaque corne.', trap: 'Une cavité cloisonnée (utérus cloisonné) ou bicorne résulte d’un défaut de fusion ou de résorption des canaux de Müller.' },
+  { o: [960, 640], t: 'Isthme utérin', p: 'Zone rétrécie entre corps et col ; elle forme le <b>segment inférieur</b> pendant la grossesse.', trap: 'La césarienne est faite en général par incision transversale du segment inférieur (moindre risque de rupture lors d’une grossesse suivante).', note: 'Des trois flèches de « Isthme et Col utérin », la plus haute aboutit sur le corps utérin.' },
+  { o: [1005, 705], t: 'Col : endocol et exocol', p: 'Endocol (canal cervical, épithélium cylindrique) et exocol (portion vaginale, épithélium malpighien).', trap: 'Le col se modifie au cours du cycle : glaire abondante et filante en période ovulatoire (œstrogènes), épaisse en phase lutéale (progestérone).' },
+  { o: [1240, 285], t: 'Isthme tubaire', p: 'Portion étroite et musclée de la trompe, près de l’utérus.', trap: 'Une GEU isthmique ou interstitielle se rompt plus tôt et saigne davantage qu’une GEU ampullaire.' },
+  { o: [1420, 300], t: 'Ampoule tubaire', p: 'Partie la plus longue et la plus large : lieu habituel de la <b>fécondation</b>.', trap: 'La fécondation a lieu dans l’ampoule, pas dans l’utérus ; l’embryon arrive dans la cavité vers J4–J5 et s’implante vers J6–J7.' },
+  { o: [1530, 400], t: 'Pavillon et franges', p: 'Extrémité évasée de la trompe, frangée, qui coiffe l’ovaire et capte l’ovocyte (frange ovarique de Richard).', trap: 'Une salpingite peut agglutiner les franges : <b>hydrosalpinx</b>, infertilité tubaire.' },
+  { o: [1350, 470], t: 'Ovaire', p: 'Fixé par le mésovarium au ligament large, par le ligament utéro-ovarien à l’utérus et par le ligament suspenseur à la paroi pelvienne.', trap: 'Syndrome des ovaires polykystiques : ≥ 20 follicules par ovaire ou volume > 10 mL (critères de Rotterdam avec dysovulation et hyperandrogénie).' },
+  { o: [1240, 460], t: 'Ligament utéro-ovarien (propre de l’ovaire)', p: 'Cordon qui relie le pôle inférieur de l’ovaire à la corne utérine, sous la trompe.', trap: 'Le ligament utéro-ovarien contient une branche de l’artère <b>utérine</b> ; le ligament suspenseur contient les vaisseaux <b>ovariens</b>.' },
+  { o: [1420, 655], t: 'Ligament suspenseur de l’ovaire (lombo-ovarien)', p: 'Pli péritonéal qui contient l’artère et la veine ovariennes, de la paroi pelvienne au pôle supérieur de l’ovaire.', trap: 'Lors d’une annexectomie, on lie les vaisseaux dans le ligament lombo-ovarien, au contact de l’<b>uretère</b> qui croise les vaisseaux iliaques juste en dessous.' },
+  { o: [1250, 800], t: 'Ligament rond', p: 'De la corne utérine au canal inguinal jusqu’aux grandes lèvres (vestige du gubernaculum).', trap: 'Le ligament rond (homologue du gubernaculum testis) explique les douleurs inguinales de la grossesse et les rares hernies ou kystes du canal de Nuck.' },
+  { o: [1200, 610], t: 'Ligament large', p: 'Double feuillet péritonéal : mésomètre (utérus), mésosalpinx (trompe), mésovarium (ovaire) ; il contient l’artère utérine et l’uretère à sa base.', trap: 'Base du ligament large = <b>paramètre</b> : l’artère utérine y croise l’uretère. Le cancer du col s’étend aux paramètres (stade FIGO IIB).' },
+  { o: [820, 700], t: 'Artère utérine', p: 'Branche de l’artère iliaque interne ; elle remonte en spirale le long du bord latéral de l’utérus.', trap: '<b>« L’eau passe sous le pont »</b> : l’uretère passe sous l’artère utérine à ≈ 1,5–2 cm du col → risque de ligature ou de section de l’uretère lors d’une hystérectomie.' },
+  { o: [1050, 780], t: 'Fornix vaginal', p: 'Culs-de-sac vaginaux autour du col : antérieur, latéraux, postérieur (le plus profond).', trap: 'Le cul-de-sac vaginal postérieur est au contact du Douglas : voie d’abord pour la ponction ovocytaire et la culdocentèse.' },
+  { o: [1010, 880], t: 'Vagin', p: 'Muqueuse plissée transversalement (rides), sans glandes ; lubrification par transsudation.', trap: 'Le vagin n’a pas de glandes : la lubrification vient d’un transsudat vasculaire et de la glaire cervicale.' },
+  { o: [1015, 1020], side: 'l', portal: 'Explorer la vulve & l’artère utérine', t: 'Organes externes et vascularisation', p: 'Descendez le vagin jusqu’à la vulve, puis voyez la vascularisation pelvienne.', trap: 'Vulve = organes génitaux externes ; vascularisation par les artères pudendales.' },
+]},
+{ img: 'p3', act: 0, short: 'Vulve & vaisseaux', scale: 'Organe', title: 'Anatomie de la vulve (organes externes) et vascularisation pelvienne',
+  portal: { o: [1768, 500], w: 0.1 },
+  pins: [
+  { o: [420, 255], t: 'Mont du pubis', p: 'Saillie adipeuse et pileuse en avant de la symphyse pubienne.', trap: 'La pilosité pubienne est le repère du stade de Tanner (P1 à P5).' },
+  { o: [375, 450], t: 'Grandes lèvres', p: 'Replis cutanéo-adipeux, homologues du scrotum ; ils reçoivent l’extrémité du ligament rond.', trap: 'Le drainage lymphatique de la vulve va aux ganglions <b>inguinaux</b> superficiels.' },
+  { o: [515, 385], t: 'Gland du clitoris et capuchon', p: 'Le capuchon (prépuce) recouvre le gland, très riche en terminaisons sensitives.', trap: '<b>Mutilations génitales féminines</b> : excision du clitoris et des petites lèvres, infibulation ; complications obstétricales et urinaires, à connaître et signaler.' },
+  { o: [515, 540], t: 'Méat urétral', p: 'Entre le clitoris et l’orifice vaginal, flanqué des glandes para-urétrales (de Skene).', trap: 'Les glandes de <b>Skene</b> sont les homologues de la prostate.' },
+  { o: [440, 600], t: 'Petites lèvres', p: 'Replis muqueux sans graisse ni poils ; ils forment le capuchon en avant et la fourchette en arrière.', trap: 'Le <b>lichen scléreux</b> efface les petites lèvres (atrophie, prurit) : risque de carcinome épidermoïde vulvaire.' },
+  { o: [500, 680], t: 'Orifice vaginal et vestibule', p: 'Orifice vaginal au fond du vestibule, entouré de l’hymen ou de ses vestiges (caroncules hyménéales).', trap: 'Le vestibule est d’origine endodermique (sinus urogénital) : son épithélium diffère de celui des lèvres.' },
+  { o: [615, 775], t: 'Glandes de Bartholin', p: 'Glandes vestibulaires majeures, à 4 h et 8 h, dont le canal s’ouvre dans le sillon entre hymen et petites lèvres ; mucus lubrifiant.', trap: '<b>Bartholinite</b> : abcès douloureux de la partie postérieure de la grande lèvre (gonocoque, chlamydia, flore mixte) → drainage, marsupialisation. Homologues des glandes de Cowper.' },
+  { o: [1510, 280], t: 'Aorte et veine cave', p: 'Les artères ovariennes naissent directement de l’aorte abdominale, sous les artères rénales.', trap: 'Veine ovarienne <b>droite</b> → veine cave inférieure ; veine ovarienne <b>gauche</b> → veine rénale gauche (comme les veines testiculaires).' },
+  { o: [1625, 375], t: 'Artère ovarienne', p: 'Elle descend dans le ligament suspenseur et s’anastomose avec la branche ovarienne de l’artère utérine.', trap: 'Le syndrome de congestion pelvienne (varices ovariennes, surtout à gauche) donne des douleurs pelviennes chroniques.', note: 'Le libellé « Artère ovarienne (branche de l’aorte) » figure deux fois : la flèche de droite du haut aboutit sur l’uretère (cordon jaune) et le libellé du bas pointe des branches latéro-utérines, territoire de l’artère utérine.' },
+  { o: [1370, 610], t: 'Artère utérine et branches', p: 'Elle donne des artères arquées, radiales puis spiralées pour l’endomètre, et des branches cervico-vaginales.', trap: '<b>Embolisation des artères utérines</b> : traitement des fibromes et des hémorragies du post-partum réfractaires.', note: 'La flèche « Artère utérine » aboutit sur la corne utérine ; l’artère chemine sur le bord latéral de l’utérus, où sont dessinées ses branches.' },
+  { o: [1440, 695], t: 'Croisement artère utérine / uretère', p: 'Dans le paramètre, à ≈ 1,5–2 cm du col, l’artère utérine passe <b>au-dessus</b> et en avant de l’uretère.', trap: '<b>« L’eau passe sous le pont »</b> (eau = urine, pont = artère). Lésion urétérale = complication classique de l’hystérectomie.' },
+  { o: [1630, 600], t: 'Uretère', p: 'Il croise les vaisseaux iliaques, longe la paroi pelvienne puis passe sous l’artère utérine pour gagner la vessie.', trap: 'Un uretère dilaté (hydronéphrose) sur cancer du col classe la tumeur au stade <b>FIGO IIIB</b>.', note: 'La flèche « Uretère » aboutit sur l’ovaire droit ; les uretères sont les cordons jaunes qui descendent de part et d’autre de l’utérus.' },
+  { o: [1515, 470], t: 'Utérus', p: 'Organe médian, vascularisé par les artères utérines et, en partie, ovariennes.', trap: 'L’utérus gravide passe de ≈ 70 g à ≈ 1 kg : hypertrophie des cellules musculaires lisses.', note: 'La flèche « Utérus » aboutit sur le vagin ; celle de « Ovaire et trompe de Fallope » aboutit sur le corps utérin.' },
+  { o: [1440, 790], t: 'Artère vaginale et plexus veineux', p: 'Artère vaginale (iliaque interne) et riche plexus veineux autour du vagin.', trap: 'Le riche plexus veineux paravaginal explique les hématomes du post-partum (thrombus vaginal).' },
+  { o: [1845, 445], t: 'Trompe et pavillon', p: 'La trompe coiffe l’ovaire par son pavillon.', trap: 'Salpingectomie bilatérale opportuniste lors d’une hystérectomie : elle réduit le risque de cancer séreux de haut grade, dont une partie naît de la trompe.' },
+  { o: [1768, 545], portal: 'Zoomer dans l’ovaire (×100)', t: 'Ovaire', p: 'Agrandissez l’ovaire : follicules à tous les stades et corps jaune.', trap: 'Le stock folliculaire est constitué <b>avant la naissance</b> (≈ 7 millions à 20 semaines, ≈ 1–2 millions à la naissance, ≈ 400 000 à la puberté).' },
+]},
+// ─────────────────────────────── ACTE II — HISTOLOGIE ───────────────────────────────
+{ img: 'p5', act: 1, short: 'Ovaire', scale: 'Tissu', title: 'Histologie de l’ovaire : folliculogenèse et corps jaune',
+  portal: { o: [650, 610], w: 0.1 },
+  pins: [
+  { o: [370, 395], t: 'Épithélium ovarien et albuginée', p: 'Épithélium cubique simple (ex-« épithélium germinatif ») sur une albuginée conjonctive.', trap: 'L’« épithélium germinatif » ne produit pas les ovocytes : c’est un mésothélium modifié ; une partie des cancers épithéliaux de l’ovaire en dérive.' },
+  { o: [400, 420], t: 'Follicules primordiaux', p: 'Ovocyte I bloqué en <b>prophase I</b> (diplotène) entouré d’une couche de cellules folliculaires aplaties.', trap: 'Les ovocytes restent bloqués en prophase I de la vie fœtale jusqu’à l’ovulation (jusqu’à 50 ans) : risque accru de non-disjonction avec l’âge (<b>trisomie 21</b>).' },
+  { o: [525, 410], t: 'Follicules primaires', p: 'Cellules folliculaires cubiques, apparition de la zone pellucide.', trap: 'La croissance initiale (primordial → pré-antral) est indépendante de la FSH ; elle dure plusieurs mois.' },
+  { o: [640, 460], t: 'Follicule secondaire (pré-antral)', p: 'Granulosa pluristratifiée, thèques en cours de différenciation.', trap: 'L’<b>AMH</b>, sécrétée par la granulosa des petits follicules, reflète la réserve ovarienne.' },
+  { o: [860, 470], t: 'Follicule de De Graaf', p: 'Follicule mûr (≈ 20 mm) : antrum, cumulus oophorus, granulosa, thèques interne et externe.', trap: 'Le pic de <b>LH</b> déclenche l’ovulation ≈ 36 h plus tard et la reprise de la méiose (ovocyte I → ovocyte II bloqué en métaphase II).' },
+  { o: [875, 555], t: 'Ovocyte II et zone pellucide', p: 'Après le pic de LH, l’ovocyte achève la méiose I (1er globule polaire) et se bloque en métaphase II.', trap: 'L’ovocyte ovulé est un <b>ovocyte II</b> en métaphase II ; la méiose II ne s’achève qu’en cas de fécondation.' },
+  { o: [880, 690], t: 'Cumulus oophorus et granulosa', p: 'Granulosa : récepteurs FSH, <b>aromatase</b> qui transforme les androgènes de la thèque en œstradiol.', trap: 'Théorie <b>2 cellules – 2 gonadotrophines</b> : LH → thèque interne → androgènes ; FSH → granulosa → aromatase → œstradiol.' },
+  { o: [520, 505], t: 'Corps jaune', p: 'Formé après l’ovulation à partir de la granulosa et de la thèque interne lutéinisées : <b>progestérone</b> et œstradiol.', trap: 'Sans grossesse, il régresse en ≈ 14 jours (corps blanc) ; avec grossesse, l’<b>hCG</b> le maintient jusqu’au relais placentaire (≈ 8–10 SA).' },
+  { o: [740, 600], t: 'Zone médullaire', p: 'Tissu conjonctif lâche, vaisseaux et nerfs, au centre de l’ovaire.', trap: 'Les cellules hilaires (homologues des cellules de Leydig) peuvent donner des tumeurs virilisantes.' },
+  { o: [1700, 560], t: 'Antrum', p: 'Cavité remplie de liquide folliculaire (œstradiol, AMH, inhibine).', trap: 'Le liquide folliculaire est aspiré lors de la ponction ovocytaire en FIV.' },
+  { o: [1640, 600], t: 'Corona radiata', p: 'Cellules du cumulus au contact de la zone pellucide : elles accompagnent l’ovocyte à l’ovulation.', trap: 'Le spermatozoïde traverse la corona (hyaluronidase) puis la zone pellucide (réaction acrosomique).' },
+  { o: [1340, 700], t: 'Granulosa (zoom)', p: 'Cellules folliculaires pluristratifiées, avasculaires (pas de capillaires avant l’ovulation).', trap: 'Tumeur de la granulosa : sécrétion d’œstrogènes → puberté précoce, métrorragies post-ménopausiques, hyperplasie de l’endomètre.' },
+  { o: [1530, 915], t: 'Thèque interne', p: 'Cellules stéroïdogènes vascularisées, récepteurs de la <b>LH</b> : androgènes (androstènedione).', trap: 'Hyperthécose et SOPK : excès d’androgènes thécaux (LH élevée, insulinorésistance).', note: 'Les deux légendes de thèque se chevauchent : « Thèque interne (androgènes) » et « Thèque interne et Thèque externe » ; une des flèches de cette dernière aboutit dans la granulosa.' },
+  { o: [1650, 985], t: 'Thèque externe', p: 'Couche conjonctive et contractile à la périphérie du follicule.', trap: 'La thèque externe n’est pas stéroïdogène : elle participe à la rupture folliculaire.' },
+  { o: [650, 610], side: 'l', portal: 'Explorer l’endomètre', t: 'Du corps jaune à l’endomètre', p: 'La progestérone du corps jaune transforme l’endomètre : passez à l’utérus.', trap: 'Phase lutéale ≈ 14 jours, constante ; c’est la phase folliculaire qui varie en durée.' },
+]},
+{ img: 'p4', act: 1, short: 'Endomètre', scale: 'Tissu', title: 'Histologie de l’utérus : endomètre (cycle) et myomètre',
+  portal: { o: [520, 330], w: 0.1 },
+  pins: [
+  { o: [420, 335], t: 'Épithélium cylindrique simple', p: 'Cellules ciliées et sécrétoires à la surface de l’endomètre.', trap: 'Un épithélium malpighien dans la cavité utérine est anormal (métaplasie).' },
+  { o: [440, 520], t: 'Phase proliférative : glandes droites', p: 'Sous l’effet des <b>œstrogènes</b> (J5–J14) : glandes droites et étroites, mitoses, stroma dense.', trap: 'Œstrogènes sans progestérone (anovulation, SOPK, obésité, tamoxifène) → <b>hyperplasie</b> puis adénocarcinome de l’endomètre (type 1).', note: 'Le libellé « Couche fonctionnelle de l’endomètre droites » fusionne deux légendes (couche fonctionnelle / glandes droites).' },
+  { o: [650, 500], t: 'Phase sécrétoire : glandes tortueuses', p: 'Sous l’effet de la <b>progestérone</b> (J15–J28) : glandes tortueuses en dents de scie, sécrétion de glycogène, œdème du stroma.', trap: 'La 1re manifestation histologique de l’ovulation : <b>vacuoles sous-nucléaires de glycogène</b> (J16–J17). Datation de l’endomètre (critères de Noyes).', note: 'Le bloc juxtapose des glandes droites (proliférative) et tortueuses (sécrétoire) : deux phases différentes réunies pour la comparaison.' },
+  { o: [900, 565], t: 'Artères spiralées', p: 'Artérioles hélicoïdales de la couche fonctionnelle, très sensibles aux hormones.', trap: 'Chute de la progestérone → vasoconstriction des artères spiralées (prostaglandines) → ischémie et desquamation de la couche fonctionnelle : <b>règles</b>.' },
+  { o: [620, 690], t: 'Couche basale', p: 'Couche profonde, non éliminée lors des règles, vascularisée par des artères droites : elle régénère la couche fonctionnelle.', trap: 'Destruction de la basale (curetages agressifs, infection) → synéchies utérines : <b>syndrome d’Asherman</b> (aménorrhée, infertilité).' },
+  { o: [600, 830], t: 'Myomètre', p: 'Muscle lisse épais en 3 couches (la moyenne, plexiforme et très vascularisée, forme les « ligatures vivantes »).', trap: 'Après la délivrance, la contraction du myomètre comprime les vaisseaux : l’<b>atonie utérine</b> est la 1re cause d’hémorragie du post-partum (ocytocine, massage utérin).', note: 'Le libellé de gauche « Myomètre (muscle lisse épais enis) » est corrompu et répète celui de droite.' },
+  { o: [750, 1005], t: 'Périmètre (séreuse)', p: 'Péritoine viscéral qui recouvre le corps utérin.', trap: 'L’<b>adénomyose</b> : glandes et stroma endométriaux dans le myomètre (utérus augmenté, douloureux, ménorragies).' },
+  { o: [1560, 460], t: 'Glandes en dentelle (zoom)', p: 'Glandes tortueuses à sécrétion apicale, lumière contenant des sécrétions.', trap: 'Une biopsie d’endomètre en phase sécrétoire confirme qu’il y a eu une ovulation.' },
+  { o: [1370, 580], t: 'Artère spiralée (zoom)', p: 'Coupe d’une artère spiralée enroulée dans le stroma.', trap: 'Pendant la grossesse, le trophoblaste envahit les artères spiralées ; un défaut de ce remodelage est à l’origine de la <b>prééclampsie</b>.' },
+  { o: [1650, 720], t: 'Stroma endométrial (zoom)', p: 'Cellules stromales qui, sous progestérone, deviennent des cellules <b>déciduales</b> (grossesse).', trap: 'La décidualisation commence en fin de phase sécrétoire même sans grossesse (pré-décidualisation).' },
+  { o: [520, 330], portal: 'Explorer le col & la trompe', t: 'Les deux extrémités de l’utérus', p: 'L’endomètre se continue en bas par l’endocol et en haut par la muqueuse tubaire.', trap: 'Col et trompe ont des épithéliums différents : zone de jonction au col, cils et cellules sécrétoires dans la trompe.' },
+]},
+{ img: 'p6', act: 1, short: 'Col & trompe', scale: 'Tissu', title: 'Histologie du col utérin (zone de jonction) et de la trompe de Fallope',
+  portal: { o: [1490, 500], w: 0.1 },
+  pins: [
+  { o: [420, 400], t: 'Exocol : épithélium malpighien', p: 'Pavimenteux stratifié non kératinisé, riche en <b>glycogène</b>.', trap: 'Test au <b>Lugol</b> (colposcopie) : l’épithélium normal, riche en glycogène, se colore en brun ; les zones dysplasiques restent iodo-négatives.' },
+  { o: [480, 555], t: 'Zone de jonction squamo-cylindrique', p: 'Limite entre l’épithélium malpighien de l’exocol et l’épithélium cylindrique de l’endocol ; sa position varie avec l’âge et les hormones.', trap: 'La <b>zone de transformation</b> (métaplasie malpighienne) est la cible de l’<b>HPV</b> (16, 18) : CIN puis carcinome épidermoïde ; vaccination HPV de 11 à 14 ans.', note: 'La même zone porte deux légendes : « Zone de jonction squamo-cylindrique » et « Zone de squamo-cylindrique ».' },
+  { o: [330, 700], t: 'Endocol : épithélium cylindrique mucosécrétant', p: 'Cellules cylindriques à mucus ; la glaire varie au cours du cycle.', trap: 'L’<b>adénocarcinome</b> du col naît de l’endocol ; il est moins bien dépisté par la cytologie que le carcinome épidermoïde.' },
+  { o: [790, 560], t: 'Glandes (cryptes) endocervicales', p: 'Invaginations ramifiées de l’épithélium endocervical dans le stroma.', trap: 'Ces cryptes peuvent être recouvertes par la métaplasie malpighienne et se transformer en kystes.' },
+  { o: [540, 880], t: 'Kyste (œuf) de Naboth', p: 'Kyste par rétention de mucus dans une crypte endocervicale obstruée par la métaplasie.', trap: 'Les œufs de Naboth sont <b>bénins</b> et fréquents ; ils témoignent d’une zone de transformation.' },
+  { o: [1400, 500], t: 'Plis muqueux ramifiés', p: 'Très nombreux et complexes dans l’ampoule, moins nombreux dans l’isthme.', trap: 'Les plis piègent l’ovocyte et favorisent la rencontre des gamètes ; leur agglutination après salpingite favorise la GEU.' },
+  { o: [1640, 440], t: 'Cellules ciliées', p: 'Cils 9+2 battant vers l’utérus ; leur nombre augmente sous les œstrogènes.', trap: 'Le transport de l’œuf dépend des cils <b>et</b> des contractions de la musculeuse ; la dyskinésie ciliaire primitive diminue la fertilité.' },
+  { o: [1300, 690], t: 'Cellules sécrétoires (intercalaires)', p: 'Cellules non ciliées qui sécrètent un fluide nutritif pour les gamètes et l’embryon précoce.', trap: 'Les lésions précurseurs (STIC) des carcinomes séreux de haut grade naissent des cellules sécrétoires tubaires.' },
+  { o: [1760, 800], t: 'Musculeuse tubaire', p: 'Muscle lisse circulaire interne et longitudinal externe ; péristaltisme vers l’utérus.', trap: 'Une GEU se rompt en distendant la paroi tubaire : hémopéritoine, choc.' },
+  { o: [1490, 500], portal: 'Entrer dans l’ovocyte II (×10 000)', t: 'L’ovocyte dans la trompe', p: 'La lumière tubaire accueille l’ovocyte II après l’ovulation : entrez dans le gamète.', trap: 'L’ovocyte reste fécondable ≈ 12–24 h ; les spermatozoïdes survivent ≈ 3 à 5 jours.' },
+]},
+// ─────────────────────────────── ACTE III — CYTOLOGIE ───────────────────────────────
+{ img: 'p7', act: 2, short: 'Ovocyte II', scale: 'Gamète', title: 'Cytologie de l’ovocyte II mature et de la zone pellucide',
+  portal: { o: [1360, 860], w: 0.1 },
+  pins: [
+  { o: [850, 495], t: 'Fuseau de métaphase II', p: 'Ovocyte II bloqué en <b>métaphase II</b> (n = 23 chromosomes à 2 chromatides) jusqu’à la fécondation.', trap: 'Le blocage en métaphase II est maintenu par le CSF (MPF élevé) ; l’entrée du spermatozoïde déclenche des vagues de Ca²⁺ qui lèvent le blocage et achèvent la méiose II (2e globule polaire).', note: 'Le libellé « Fuseau mitotique bloqué (réaction corticale anti-polyspermie) » mélange deux notions : le fuseau est méiotique (métaphase II), la réaction corticale concerne les granules corticaux.' },
+  { o: [1265, 455], t: '1er globule polaire', p: 'Petite cellule issue de la méiose I, dans l’espace périvitellin, qui emporte la moitié des chromosomes.', trap: 'Le diagnostic préimplantatoire peut analyser le globule polaire ; une méiose produit un seul ovocyte et 2 à 3 globules polaires.' },
+  { o: [1180, 400], t: 'Espace périvitellin', p: 'Espace entre l’oolemme et la zone pellucide.', trap: 'L’espace périvitellin s’agrandit après la réaction corticale (gonflement de la zone pellucide).' },
+  { o: [1390, 600], t: 'Zone pellucide (ZP1, ZP2, ZP3)', p: 'Enveloppe glycoprotéique sécrétée par l’ovocyte (et la granulosa).', trap: 'Chez la souris, <b>ZP3</b> fixe le spermatozoïde et déclenche la réaction acrosomique ; chez l’humain, <b>ZP2</b> joue un rôle majeur dans la liaison. La réaction corticale modifie ZP2 : blocage de la polyspermie.' },
+  { o: [710, 570], t: 'Granules corticaux', p: 'Vésicules sous l’oolemme, d’origine golgienne, qui contiennent des enzymes (ovastacine).', trap: '<b>Réaction corticale</b> : exocytose des granules après la fécondation → durcissement de la zone pellucide → <b>blocage lent de la polyspermie</b>.', note: 'La flèche « Fuseau mitotique bloqué en Métaphase II (n=23) » aboutit sur le cortex de l’ovocyte (granules corticaux), pas sur le fuseau.' },
+  { o: [855, 735], t: 'Mitochondries et réticulum', p: 'Très nombreuses mitochondries (de l’ordre de 100 000 ou plus) : ce seront les seules de l’embryon.', trap: 'L’ADN mitochondrial est transmis par la <b>mère</b> : maladies mitochondriales à transmission maternelle.' },
+  { o: [1180, 790], t: 'Oolemme et microvillosités', p: 'Membrane plasmique de l’ovocyte, hérissée de microvillosités ; elle fusionne avec la membrane du spermatozoïde (Juno–Izumo1).', trap: 'Après la fusion, Juno disparaît de l’oolemme : blocage membranaire de la polyspermie.', note: 'La flèche « Membrane plasmique (oolemme) et microvillosités » aboutit sur une cellule de la corona, à l’extérieur de la zone pellucide.' },
+  { o: [1445, 700], t: 'Cellules de la corona radiata', p: 'Cellules du cumulus dont les prolongements traversent la zone pellucide jusqu’à l’oolemme (jonctions communicantes).', trap: 'Ces jonctions apportent à l’ovocyte des facteurs (AMPc, GMPc) qui le maintiennent bloqué en prophase I jusqu’au pic de LH.' },
+  { o: [190, 290], t: 'Granules corticaux en MET', p: 'Granules denses sous la membrane de l’ovocyte.', trap: 'Absence de réaction corticale → polyspermie → triploïdie (môle partielle).' },
+  { o: [1790, 900], t: 'Zone pellucide en MET', p: 'Matrice fibrillaire traversée par les prolongements des cellules folliculaires.', trap: 'L’éclosion (« hatching ») hors de la zone pellucide vers J5–J6 précède l’implantation.' },
+  { o: [1360, 860], side: 'l', portal: 'Voir la cellule lutéale', t: 'Que deviennent les cellules folliculaires ?', p: 'Après l’ovulation, les cellules de la granulosa et de la thèque restées dans l’ovaire se transforment en cellules lutéales.', trap: 'Lutéinisation : la granulosa acquiert des récepteurs LH et synthétise de la progestérone.' },
+]},
+{ img: 'p8', act: 2, short: 'Cellule lutéale', scale: 'Cellule', title: 'Cytologie de la cellule lutéale (corps jaune) et stéroïdogenèse',
+  portal: { o: [610, 960], w: 0.1 },
+  pins: [
+  { o: [960, 420], t: 'Noyau sphérique central', p: 'Noyau rond, nucléole net ; grosse cellule polyédrique (cellule granulosa-lutéale).', trap: 'Deux types : cellules <b>granulosa-lutéales</b> (grandes, progestérone, aromatase) et <b>thèque-lutéales</b> (petites, androgènes).' },
+  { o: [1170, 520], t: 'Réticulum endoplasmique lisse', p: 'Très développé : enzymes de la stéroïdogenèse (3β-HSD).', trap: 'Cellule stéroïdogène = <b>REL</b> + mitochondries à crêtes tubulaires + gouttelettes lipidiques (comme la cellule de Leydig et la corticosurrénale).', note: 'Le libellé « REL très développé » figure deux fois ; la flèche de gauche aboutit sur une mitochondrie.' },
+  { o: [1470, 360], t: 'Mitochondries à crêtes tubulaires', p: 'Siège de la première étape : cholestérol → prégnénolone (CYP11A1), après transport du cholestérol par <b>StAR</b>.', trap: 'La progestérone est produite directement à partir de la prégnénolone (3β-HSD) : c’est l’hormone majeure du corps jaune.', note: 'Le libellé du bas « Mitochondries à crêtes tubulaires » a des flèches qui aboutissent sur les récepteurs membranaires.' },
+  { o: [1430, 620], t: 'Gouttelettes lipidiques', p: 'Réserve de cholestérol estérifié, surtout issu des LDL.', trap: 'Le cholestérol des LDL est capté par les récepteurs LDL ; le corps jaune est l’un des tissus les plus consommateurs de cholestérol.' },
+  { o: [1510, 520], t: 'Pigment lutéine', p: 'Pigment caroténoïde qui donne au corps jaune sa couleur jaune.', trap: 'Le corps jaune régressé devient le <b>corps blanc</b> (albicans), cicatrice fibreuse.' },
+  { o: [1560, 690], t: 'Récepteurs LH / hCG', p: 'Même récepteur pour la LH et l’hCG (RCPG, AMPc).', trap: 'L’<b>hCG</b> du trophoblaste « sauve » le corps jaune en début de grossesse. Les kystes lutéiniques (môle, grossesse multiple) viennent d’un excès d’hCG.' },
+  { o: [460, 600], t: 'Lame basale', p: 'Elle sépare les cellules lutéales des capillaires.', trap: 'Après l’ovulation, la lame basale folliculaire se rompt et les capillaires envahissent la granulosa (angiogenèse, VEGF).' },
+  { o: [380, 780], t: 'Capillaire fenêtré', p: 'Corps jaune très vascularisé : la progestérone passe dans le sang.', trap: 'Le corps jaune hémorragique peut se rompre : hémopéritoine, à distinguer d’une GEU (β-hCG).' },
+  { o: [1800, 880], t: 'Crêtes tubulaires en MET', p: 'Mitochondrie à crêtes tubulaires des cellules stéroïdogènes.', trap: 'Crêtes tubulaires (stéroïdes) ≠ crêtes lamellaires (la plupart des cellules).' },
+  { o: [180, 240], t: 'Gouttelettes et REL en MET', p: 'Gouttelettes lipidiques claires et tubules de REL.', trap: 'Le corps jaune de la grossesse produit aussi de la <b>relaxine</b> et de l’inhibine A.' },
+  { o: [610, 960], portal: 'Voir les pinopodes de l’endomètre', t: 'La progestérone prépare l’implantation', p: 'La progestérone du corps jaune rend l’endomètre réceptif : passez à l’épithélium endométrial et tubaire.', trap: 'Fenêtre d’implantation ≈ J20–J24 d’un cycle de 28 jours (≈ LH + 7 à LH + 10).' },
+]},
+{ img: 'p9', act: 2, short: 'Cils & pinopodes', scale: 'Cellule', title: 'Cytologie de l’épithélium tubaire et endométrial (cils et pinopodes)',
+  pins: [
+  { o: [430, 320], t: 'Cils 9+2 (cellule tubaire ciliée)', p: 'Cils mobiles (axonème 9+2, dynéine) qui battent vers l’utérus.', trap: 'Une altération ciliaire (salpingite, tabac) ralentit le transport de l’œuf : facteur de <b>grossesse extra-utérine</b>.' },
+  { o: [430, 505], t: 'Corps basaux', p: 'Centrioles modifiés à la base de chaque cil (9 triplets).', trap: 'Les œstrogènes augmentent la ciliogenèse ; la progestérone diminue le battement.' },
+  { o: [860, 400], t: 'Cellule sécrétoire tubaire', p: 'Grains sécrétoires apicaux : fluide nutritif riche en glycoprotéines.', trap: 'La sécrétion tubaire est maximale en phase péri-ovulatoire.' },
+  { o: [1000, 525], t: 'Jonctions serrées apicales', p: 'Elles séparent les domaines apical et basolatéral et scellent l’épithélium.', trap: 'Au moment de l’implantation, l’épithélium endométrial modifie ses jonctions pour laisser passer le trophoblaste.' },
+  { o: [1415, 320], t: 'Pinopodes', p: 'Protrusions apicales lisses de la cellule endométriale, présentes 1 à 2 jours pendant la fenêtre d’implantation.', trap: 'Fenêtre d’implantation ≈ <b>J20–J24</b> : les pinopodes sont un marqueur morphologique (controversé) de la réceptivité ; une progestérone insuffisante (insuffisance lutéale) la compromet.' },
+  { o: [1500, 470], t: 'Vacuoles de glycogène', p: 'Le glycogène nourrit l’embryon avant l’établissement de la circulation placentaire (nutrition histotrophe).', trap: 'Vacuoles <b>sous</b>-nucléaires (J16–J17) puis <b>supra</b>-nucléaires et sécrétion dans la lumière (J19–J21).' },
+  { o: [1300, 820], t: 'Mitochondries', p: 'Abondantes dans la cellule endométriale réceptive, très active.', trap: 'La progestérone (via son récepteur nucléaire) commande l’expression des molécules d’adhésion (intégrine αvβ3, LIF).' },
+  { o: [1300, 620], t: 'Cellule endométriale réceptive', p: 'Cellule de surface en phase sécrétoire moyenne, prête à accueillir le blastocyste.', trap: 'Les modulateurs du récepteur de la progestérone bloquent la réceptivité et l’implantation : <b>mifépristone</b> (IVG médicamenteuse), <b>ulipristal</b> (contraception d’urgence).' },
+  { o: [700, 915], t: 'Lame basale', p: 'Elle sous-tend l’épithélium tubaire et endométrial.', trap: 'Le trophoblaste franchit la lame basale lors de l’implantation (implantation interstitielle chez l’humain).' },
+  { o: [75, 385], t: 'Axonème en MET', p: 'Coupe transversale d’un cil : 9 doublets périphériques et 2 microtubules centraux.', trap: 'Kartagener (dyskinésie ciliaire primitive) : bronchectasies, sinusite, situs inversus, infertilité des deux sexes.' },
+  { o: [1820, 940], t: 'Mitochondrie en MET', p: 'Mitochondrie à crêtes lamellaires de la cellule endométriale.', trap: 'Comparer : crêtes <b>lamellaires</b> ici, crêtes <b>tubulaires</b> dans la cellule lutéale stéroïdogène.' },
+]},
+];
+// recadrage de chaque planche : [haut, côtés, bas] (fractions de l’original) → conversion des positions
+const CROP = { p1: [0.111, 0.008, 0.008], p2: [0.113, 0.008, 0.008], p3: [0.109, 0.008, 0.008], p4: [0.119, 0.012, 0.012], p5: [0.137, 0.008, 0.008],
+  p6: [0.123, 0.012, 0.012], p7: [0.101, 0.003, 0.004], p8: [0.106, 0.008, 0.004], p9: [0.112, 0.003, 0.004] };
+PLATES.forEach((P) => { const [t, s, b] = CROP[P.img]; const cv = (o) => [(o[0] / 1998 - s) / (1 - 2 * s), (o[1] / 1116 - t) / (1 - t - b)];
+  P.pins.forEach((p) => { if (p.o) [p.x, p.y] = cv(p.o); }); if (P.portal && P.portal.o) P.portal.c = cv(P.portal.o); });
+</script>
+<script>// Appareil génital féminin — atlas à zoom continu, 9 planches emboîtées (Canvas 2D, zéro dépendance).
+// Chaque planche vit dans le « portail » de la précédente ; une seule caméra (cx, cy, z) traverse le monde.
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const META = window.__META__, IMG = window.__IMG__; const N = PLATES.length;
+const ROMAN = ['I', 'II', 'III'];
+const lig = (s) => s.replace(/(œ|Œ)/g, '<em class="lig">$1</em>'); // Kalam’s œ glyph is very wide: tighten it in handwritten text
+const MAG = PLATES.map((p) => p.mag || ACTS[p.act].mag), REALW = MAG.map((m) => 40 / m); // plate width in cm at its home view
+
+// ───────────── world: plate k+1 sits inside plate k's portal rectangle
+const R = [{ x: 0, y: 0, w: 1, h: META[PLATES[0].img].h / META[PLATES[0].img].w }];
+for (let k = 1; k < N; k++) { const p = PLATES[k - 1].portal, par = R[k - 1], m = META[PLATES[k].img]; const w = par.w * p.w, h = w * (m.h / m.w);
+  R.push({ x: par.x + p.c[0] * par.w - w / 2, y: par.y + p.c[1] * par.h - h / 2, w, h }); }
+
+// ───────────── canvas & view
+const cv = $('#cv'), ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false, railH = 200;
+let offC = null, offX = null;
+function off() { if (!offC) { offC = document.createElement('canvas'); offX = offC.getContext('2d'); } if (offC.width !== cv.width || offC.height !== cv.height) { offC.width = cv.width; offC.height = cv.height; } return offX; }
+function layout() {
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const short = !mobile && H < 520; const top = mobile ? 62 : short ? 48 : 82, bottom = mobile ? 76 : short ? 50 : 112, left = mobile ? 2 : short ? 6 : 22, right = mobile ? 2 : short ? 48 : 92;
+  aw = (W - left - right) * 0.985; ah = (H - top - bottom) * 0.985; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
+  railH = ($('#rail').clientHeight || 200) - 12; need();
+}
+const homeZ = (k) => Math.min(aw / R[k].w, ah / R[k].h);
+const home = (k) => ({ cx: R[k].x + R[k].w / 2, cy: R[k].y + R[k].h / 2, z: homeZ(k) });
+const cam = { cx: 0.5, cy: 0.25, z: 600 };
+const sig = (k, z = cam.z) => z / homeZ(k);
+const toS = (wx, wy) => [vcx + (wx - cam.cx) * cam.z, vcy + (wy - cam.cy) * cam.z];
+const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
+function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)); a.push(A * D); } return a; }
+function dominant(z = cam.z) { const a = alphas(z); let b = 0; for (let k = 1; k < N; k++) if (a[k] > a[b]) b = k; return b; }
+
+// ───────────── images: decoded on demand; a small LRU keeps phone memory low
+const imgs = {}, thumbs = {}, lru = [];
+function thumb(key) { if (!thumbs[key]) { const i = new Image(); i.src = IMG[key + '_t']; thumbs[key] = i; } return thumbs[key]; }
+function want(key) { let e = imgs[key]; if (!e) { const i = new Image(); i.decoding = 'async'; i.src = IMG[key]; e = imgs[key] = { i, ok: false }; e.p = i.decode().then(() => { e.ok = true; need(); }).catch(() => { e.ok = !!i.naturalWidth; need(); }); }
+  const j = lru.indexOf(key); if (j >= 0) lru.splice(j, 1); lru.push(key);
+  while (lru.length > (mobile ? 5 : 9)) { const k = lru.shift(); if (imgs[k]) { imgs[k].i.src = ''; delete imgs[k]; } } return e; }
+function prefetch() { const k = dominant(); [k - 1, k + 1, k].forEach((j) => j >= 0 && j < N && want(PLATES[j].img)); }
+
+// ───────────── rendering (on demand only)
+let dirty = true, raf = 0, quality = 'high', texPat = null;
+function need() { dirty = true; if (!raf) raf = requestAnimationFrame(frame); }
+function drawPlate(c, k, alpha) {
+  const key = PLATES[k].img; const e = imgs[key]; const im = e && e.ok ? e.i : thumb(key); if (!im || !im.naturalWidth) return;
+  const r = R[k]; const [x, y] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z; const NW = im.naturalWidth, NH = im.naturalHeight;
+  const dx0 = Math.max(0, x), dy0 = Math.max(0, y), dx1 = Math.min(W, x + sw), dy1 = Math.min(H, y + sh); if (dx1 <= dx0 || dy1 <= dy0) return;
+  c.globalAlpha = alpha; c.drawImage(im, ((dx0 - x) / sw) * NW, ((dy0 - y) / sh) * NH, ((dx1 - dx0) / sw) * NW, ((dy1 - dy0) / sh) * NH, dx0 * DPR, dy0 * DPR, (dx1 - dx0) * DPR, (dy1 - dy0) * DPR); c.globalAlpha = 1;
+}
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
+  const a = alphas(); let s = 0; const bg = [0, 0, 0];
+  a.forEach((v, k) => { const b = META[PLATES[k].img].bg; s += v; for (let i = 0; i < 3; i++) bg[i] += b[i] * v; });
+  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.5; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  for (let k = 0; k < N; k++) { if (a[k] < 0.004) continue; const sg = sig(k);
+    if (k > 0 && sg < 0.97) { // the deeper plate opens through a soft radial iris centred on its portal
+      const o = off(); const r = R[k]; const [x0, y0] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z;
+      const bx = Math.max(0, Math.floor(x0 * DPR)), by = Math.max(0, Math.floor(y0 * DPR)), bw = Math.min(cv.width, Math.ceil((x0 + sw) * DPR)) - bx, bh = Math.min(cv.height, Math.ceil((y0 + sh) * DPR)) - by;
+      if (bw <= 0 || bh <= 0) continue;
+      o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(bx, by, bw, bh); o.imageSmoothingQuality = quality; drawPlate(o, k, 1);
+      const cx = (x0 + sw / 2) * DPR, cy = (y0 + sh / 2) * DPR, rr = Math.max(sw, sh) * (0.3 + 0.5 * sst(0.5, 0.97, sg)) * DPR;
+      const g = o.createRadialGradient(cx, cy, rr * 0.42, cx, cy, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(bx, by, bw, bh); o.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = a[k]; ctx.drawImage(offC, bx, by, bw, bh, bx, by, bw, bh); ctx.globalAlpha = 1;
+    } else drawPlate(ctx, k, a[k]); }
+  updateHUD(a); updatePins(a);
+}
+
+// ───────────── camera dynamics
+const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
+const zMin = () => homeZ(0) * 0.7, zMax = () => homeZ(N - 1) * 4;
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function clampCenter() { const r = R[dominant()]; const m = 0.14 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m * 0.6, r.y + r.h + m * 0.6); }
+const ratio = (k) => homeZ(k + 1) / homeZ(k);
+function steer(strength) { // while zooming in, glide toward the next portal (progress-based so short and long dives feel alike)
+  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); if (p <= 0.28) return 0;
+  const r = R[k + 1]; const kk = sst(0.28, 0.85, p) * strength; cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+function frame() {
+  raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = false;
+  if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
+    const w = Math.abs(f.z1 - f.z0) / f.z1 < 1e-3 ? e : (1 / z - 1 / f.z0) / (1 / f.z1 - 1 / f.z0); cam.z = z; cam.cx = f.c0[0] + (f.c1[0] - f.c0[0]) * w; cam.cy = f.c0[1] + (f.c1[1] - f.c0[1]) * w;
+    if (u >= 1) { flight = null; if (f.done) f.done(); } else moving = true; }
+  else {
+    if (Math.abs(pend) > 1e-4) { const step = pend * (1 - Math.exp(-dt * 16)); pend -= step; zoomAt(anchorS[0], anchorS[1], Math.exp(step)); moving = true; if (step > 0) steering = true; } else pend = 0;
+    if (Math.abs(vel[0]) + Math.abs(vel[1]) > 0.02) { cam.cx -= vel[0] / cam.z; cam.cy -= vel[1] / cam.z; const d = Math.exp(-dt * 6); vel[0] *= d; vel[1] *= d; moving = true; } else vel = [0, 0];
+    if (steering) { if (steer(1 - Math.exp(-dt * 7)) > 1e-4) moving = true; if (Math.abs(pend) < 1e-4) steering = false; }
+    clampCenter(); }
+  if (dirty || moving) { dirty = false; quality = moving || ptrs.size ? 'medium' : 'high'; render(); }
+  if (moving) raf = requestAnimationFrame(frame); else if (quality !== 'high') { clearTimeout(frame.hq); frame.hq = setTimeout(() => { if (!raf && !ptrs.size) { quality = 'high'; render(); } }, 90); }
+}
+function flyTo(cx, cy, z, dur, done) { flight = { t0: performance.now(), dur: dur ?? clamp(0.75 + Math.abs(Math.log(z / cam.z)) * 0.3, 0.75, 2.6) * 1000, c0: [cam.cx, cam.cy], c1: [cx, cy], z0: cam.z, z1: z, done }; pend = 0; vel = [0, 0]; need(); }
+function flyHome(k, done) { k = clamp(k, 0, N - 1); for (let j = Math.min(k, dominant()); j <= Math.max(k, dominant()); j++) want(PLATES[j].img); const h = home(k); flyTo(h.cx, h.cy, h.z, undefined, done); }
+function camAtDepth(t) { t = clamp(t, 0, N - 1); const k = Math.min(N - 2, Math.floor(t)); const f = t - k; const a = home(k), b = home(k + 1);
+  const z = Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * f); const w = (1 / z - 1 / a.z) / (1 / b.z - 1 / a.z); return { cx: a.cx + (b.cx - a.cx) * w, cy: a.cy + (b.cy - a.cy) * w, z }; }
+function depthOf() { const k = dominant(); if (k >= N - 1) return N - 1; return k + clamp(Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)), 0, 1); }
+
+// ───────────── HUD: magnification follows the acts (×1 → ×100 → ×10 000), scale bar follows the plates
+let hudKey = '', plateKey = -1;
+function niceLen(cmPerPx) { const target = cmPerPx * 92; const e = Math.pow(10, Math.floor(Math.log10(target))); const m = target / e; const n = (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; return [n, n / cmPerPx]; }
+function fmtLen(cm) { if (cm >= 1) return `${+cm.toPrecision(3)} cm`; if (cm >= 0.1) return `${+(cm * 10).toPrecision(3)} mm`; if (cm >= 1e-4) return `${+(cm * 1e4).toPrecision(3)} µm`; return `${+(cm * 1e7).toPrecision(3)} nm`; }
+function fmtMag(m) { if (m < 10) return '×' + m.toFixed(1).replace('.', ',').replace(',0', ''); const e = Math.pow(10, Math.floor(Math.log10(m)) - 1); return '×' + Math.round(Math.round(m / e) * e).toLocaleString('fr-FR'); }
+function magNow() { const t = depthOf(), k = Math.floor(t), f = t - k;
+  if (k >= N - 1) return MAG[N - 1] * Math.max(1, sig(N - 1)); if (k === 0 && sig(0) < 1) return MAG[0] * sig(0);
+  return Math.exp(Math.log(MAG[k]) + (Math.log(MAG[k + 1]) - Math.log(MAG[k])) * f); }
+function updateHUD(a) {
+  let sw = 0, lr = 0; for (let k = 0; k < N; k++) { if (a[k] < 0.01) continue; sw += a[k]; lr += a[k] * Math.log(REALW[k] / (R[k].w * cam.z)); }
+  const k = dominant(); const [n, px] = niceLen(Math.exp(lr / sw)); const M = magNow(); const t = depthOf();
+  const key = `${fmtMag(M)}|${k}|${Math.round(px)}|${fmtLen(n)}`;
+  if (key !== hudKey) { hudKey = key; $('#mag').innerHTML = `${fmtMag(M)}<small>${PLATES[k].scale}</small>`; $('#sbi').style.width = `${Math.round(px)}px`; $('#sbt').textContent = fmtLen(n); }
+  if (k !== plateKey) { const first = plateKey < 0; plateKey = k; const P = PLATES[k];
+    $('#ltitle').innerHTML = lig(P.title); $('#path').innerHTML = `Appareil génital féminin &nbsp;›&nbsp; Acte ${ROMAN[P.act]} · ${ACTS[P.act].name} &nbsp;›&nbsp; <b>${k + 1} / ${N}</b>`;
+    document.querySelectorAll('.pl').forEach((b, i) => b.classList.toggle('on', i === k)); document.querySelectorAll('.grp').forEach((g, i) => g.classList.toggle('on', i === P.act));
+    document.querySelectorAll('.rail .tick').forEach((el, i) => { el.classList.toggle('on', i === k); el.classList.toggle('cur', el.classList.contains('major') && PLATES[i].act === P.act); });
+    if (!first) toast(`${k + 1}. ${P.short} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}`); prefetch(); }
+  $('#rth').style.top = `${6 + (t / (N - 1)) * railH}px`; $('#rfill').style.height = `${(t / (N - 1)) * railH}px`;
+  $('#lvf').style.width = `${clamp(Math.log(M) / Math.log(10000), 0, 1) * 100}%`;
+}
+
+// ───────────── hotspots
+const pinEls = [];
+function buildPins() { const host = $('#pins');
+  PLATES.forEach((P, k) => P.pins.forEach((p, j) => { const el = document.createElement('div'); el.className = 'pin' + (p.portal ? ' portal' : '');
+    el.innerHTML = `<button aria-label="${p.t.replace(/"/g, '')}"><b></b><i></i></button>` + (p.portal ? `<button class="go">${lig(p.portal)} →</button>` : `<span>${lig(p.t)}</span>`);
+    el.querySelector('button').addEventListener('click', (ev) => { ev.stopPropagation(); openCard(k, j, true); });
+    if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
+    host.appendChild(el); pinEls.push({ el, k, j, vis: false }); })); }
+function updatePins(a) {
+  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.5 : 3.8), x = 0, y = 0;
+    if (show) { const r = R[P.k]; [x, y] = toS(r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; }
+    if (show && p.portal) { // dive button: right by default, left when preferred or when only the left fits; if neither fits, the roomier side, narrowed to fit
+      const go = P.go || (P.go = P.el.querySelector('.go')); if (!P.gw) P.gw = go.offsetWidth || 260; const off = mobile ? 20 : 24;
+      const rR = W - (mobile ? 0 : 92) - x - off - 8, rL = x - off - 8, fr = P.gw <= rR, fl = P.gw <= rL; const L = fl && fr ? p.side === 'l' : fl || fr ? fl : rL > rR;
+      if (L !== P.left) { P.left = L; P.el.classList.toggle('left', L); } const mw = fl || fr ? '' : `${Math.max(96, Math.round((L ? rL : rR) - 24))}px`; if (mw !== P.mw) { P.mw = mw; go.style.maxWidth = mw; } }
+    if (show) { P.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; if (!P.vis) { P.el.classList.add('on'); P.vis = true; } } else if (P.vis) { P.el.classList.remove('on'); P.vis = false; } } }
+
+// ───────────── study card
+let open = null; const seen = new Set();
+function openCard(k, j, fly) {
+  const P = PLATES[k]; const p = P.pins[j]; open = { k, j }; seen.add(`${k}.${j}`); const n = P.pins.length;
+  pinEls.forEach((E) => { E.el.classList.toggle('active', E.k === k && E.j === j); E.el.classList.toggle('seen', seen.has(`${E.k}.${E.j}`)); });
+  const C = $('#card'); C.classList.toggle('portal', !!p.portal);
+  C.innerHTML = `<button class="x" aria-label="Fermer">✕</button><div class="chip"><i></i>Planche ${k + 1} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}</div><h3>${lig(p.t)}</h3><p>${p.p}</p>
+    <div class="trap"><span>⚠ Piège d’EMD</span>${p.trap}</div>${p.note ? `<div class="note">Note sur la planche : ${p.note}</div>` : ''}
+    <div class="act">${p.portal ? `<button class="btn dive">${p.portal} →</button>` : ''}<button class="btn zoom">Recentrer</button></div>
+    <div class="nav"><button class="pv">← Précédent</button><span>${j + 1} / ${n} · ${[...seen].filter((s) => s.startsWith(`${k}.`)).length} vus</span><button class="nx">Suivant →</button></div>`;
+  C.querySelector('.x').onclick = closeCard; C.querySelector('.zoom').onclick = () => focusPin(k, j);
+  C.querySelector('.pv').onclick = () => openCard(k, (j - 1 + n) % n, true); C.querySelector('.nx').onclick = () => openCard(k, (j + 1) % n, true);
+  if (p.portal) C.querySelector('.dive').onclick = () => { closeCard(); flyHome(k + 1); };
+  C.classList.add('on'); if (fly) focusPin(k, j); hideHint();
+}
+function closeCard() { open = null; $('#card').classList.remove('on'); pinEls.forEach((E) => E.el.classList.remove('active')); }
+function focusPin(k, j) { const p = PLATES[k].pins[j]; const r = R[k]; const wx = r.x + p.x * r.w, wy = r.y + p.y * r.h; const z = homeZ(k) * (p.portal ? 1.35 : 1.7);
+  const fx = mobile ? vcx : Math.min(vcx, (W - (H < 520 ? 50 : 92) - Math.min(410, W * 0.54)) / 2 + 24), fy = mobile ? Math.min(vcy, H * 0.24) : vcy; flyTo(wx - (fx - vcx) / z, wy - (fy - vcy) / z, z); }
+
+// ───────────── input
+let hintGone = false; function hideHint() { if (hintGone) return; hintGone = true; $('#hint').classList.add('gone'); }
+let tt = 0; function toast(s) { const t = $('#toast'); t.textContent = s; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1700); }
+function zoomBy(f, sx = vcx, sy = vcy) { flight = null; anchorS = [sx, sy]; pend = clamp(pend + Math.log(f), -3, 3); need(); hideHint(); }
+addEventListener('wheel', (e) => { if (e.target.closest && e.target.closest('.card,.dock,.ctrl,.top')) { if (!e.target.closest('.card,.dock')) e.preventDefault(); return; }
+  e.preventDefault(); let d = e.deltaY; if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= H; zoomBy(Math.exp(-d * (e.ctrlKey ? 0.006 : 0.0016)), e.clientX, e.clientY); }, { passive: false });
+let lastPinch = 0, lastMid = null, downAt = 0, lastTap = 0, moved = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); flight = null; pend = 0; vel = [0, 0]; downAt = performance.now(); moved = 0; cv.classList.add('drag');
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a[0] - b[0], a[1] - b[1]); lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; } hideHint(); });
+cv.addEventListener('pointermove', (e) => { if (!ptrs.has(e.pointerId)) return; const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 1) { const dx = e.clientX - prev[0], dy = e.clientY - prev[1]; moved += Math.abs(dx) + Math.abs(dy); cam.cx -= dx / cam.z; cam.cy -= dy / cam.z; vel = [dx * 0.9, dy * 0.9]; clampCenter(); need(); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.cx -= (mid[0] - lastMid[0]) / cam.z; cam.cy -= (mid[1] - lastMid[1]) / cam.z; if (lastPinch) { const f = d / lastPinch; zoomAt(mid[0], mid[1], f); if (f > 1) steer(0.06); }
+    lastPinch = d; lastMid = mid; moved += 10; vel = [0, 0]; clampCenter(); need(); } });
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = 0; if (ptrs.size === 1) lastMid = [...ptrs.values()][0];
+  if (!ptrs.size) { cv.classList.remove('drag'); if (performance.now() - downAt > 80) need(); else vel = [0, 0];
+    if (moved < 6 && performance.now() - downAt < 300) { const tn = performance.now(); if (tn - lastTap < 320) { zoomBy(2.2, e.clientX, e.clientY); lastTap = 0; } else { lastTap = tn; if (open) closeCard(); } } } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; const k = e.key;
+  if (k === 'f' || k === 'F') toggleFS(); else if (k === '+' || k === '=') zoomBy(1.35); else if (k === '-' || k === '_') zoomBy(1 / 1.35);
+  else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { closeCard(); flyHome(dominant() + 1); }
+  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { closeCard(); flyHome(dominant() - 1); }
+  else if (k === 'r' || k === 'R' || k === '0' || k === 'Home') { closeCard(); flyHome(0); } else if (k === 'End') { closeCard(); flyHome(N - 1); }
+  else if (k === 'Escape') closeCard(); else if (/^[1-9]$/.test(k)) { closeCard(); flyHome(+k - 1); } else return;
+  e.preventDefault(); hideHint(); });
+function toggleFS() { const d = document, el = d.documentElement; if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); else (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); }
+$('#zin').onclick = () => zoomBy(1.6); $('#zout').onclick = () => zoomBy(1 / 1.6); $('#reset').onclick = () => { closeCard(); flyHome(0); }; $('#fs').onclick = toggleFS;
+// depth rail: one tick per plate, labels at the start of each act
+const rail = $('#rail'); PLATES.forEach((P, i) => { const t = document.createElement('div'); const major = i === 0 || PLATES[i - 1].act !== P.act; t.className = 'tick' + (major ? ' major' : '');
+  t.style.top = `calc(6px + ${(i / (N - 1)) * 100}% - ${(i / (N - 1)) * 12}px)`; t.title = `${i + 1}. ${P.short}`;
+  if (major) t.innerHTML = `<span>${ACTS[P.act].name}<em>${fmtMag(ACTS[P.act].mag)}</em></span>`;
+  t.onclick = (ev) => { ev.stopPropagation(); closeCard(); flyHome(i); }; rail.appendChild(t); });
+let railDrag = false; const railSet = (e) => { const r = rail.getBoundingClientRect(); const c = camAtDepth(clamp((e.clientY - r.top - 6) / (r.height - 12), 0, 1) * (N - 1)); flight = null; pend = 0; vel = [0, 0]; cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; prefetch(); need(); hideHint(); };
+rail.addEventListener('pointerdown', (e) => { if (e.target.closest('.tick')) return; railDrag = true; rail.setPointerCapture(e.pointerId); railSet(e); }); rail.addEventListener('pointermove', (e) => railDrag && railSet(e)); rail.addEventListener('pointerup', () => (railDrag = false));
+// plate dock, grouped by act
+ACTS.forEach((A, ai) => { const g = document.createElement('div'); g.className = 'grp'; g.innerHTML = `<div class="gh"><b>${ROMAN[ai]}</b>${A.name}<em>${fmtMag(A.mag)}</em></div><div class="gt"></div>`;
+  PLATES.forEach((P, i) => { if (P.act !== ai) return; const b = document.createElement('button'); b.className = 'pl'; b.title = `${i + 1}. ${P.title}`;
+    b.innerHTML = `<img alt="" src="${IMG[P.img + '_t']}"><i>${i + 1}</i><b>${lig(P.short)}</b>`; b.onclick = () => { closeCard(); hideHint(); flyHome(i); }; g.querySelector('.gt').appendChild(b); });
+  $('#dock').appendChild(g); });
+addEventListener('resize', () => { const t = depthOf(); layout(); if (!flight) { const c = camAtDepth(t); cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; } need(); });
+
+// ───────────── boot
+async function boot() {
+  if (matchMedia('(pointer:coarse)').matches) { $('#hint1').textContent = 'Pincez pour plonger'; $('#hint2').textContent = 'Glisser pour explorer · double-tap · touchez les points et les boutons lumineux' + (innerHeight > innerWidth ? ' · tournez le téléphone pour agrandir les planches' : ''); }
+  buildPins(); layout();
+  if (window.__TEX__) { const ti = new Image(); ti.src = window.__TEX__; ti.decode().then(() => { texPat = ctx.createPattern(ti, 'repeat'); need(); }).catch(() => {}); }
+  const h = home(0); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z * 0.9; $('#lb').style.width = '35%';
+  await want(PLATES[0].img).p; $('#lb').style.width = '100%'; prefetch(); render();
+  setTimeout(() => { $('#loader').classList.add('done'); flyTo(h.cx, h.cy, h.z, 1300); }, 120);
+  // decode the rest in the background, one at a time, so long dives never show a blurry placeholder (desktop)
+  if (!mobile) for (const P of PLATES) await want(P.img).p;
+}
+window.__atlas = { cam, flyHome, openCard, depthOf, dominant: () => dominant(), R, PLATES, alphasNow: () => alphas(), magNow };
+boot().catch((e) => { $('#lmsg').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+<script>(function(){
+var d=document,w=window,root=d.documentElement;
+['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+function q(s){return d.querySelector(s);}
+var loader=q('#loader');
+function isReady(){return !loader||loader.classList.contains('done');}
+function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;var list=A.PLATES||A.L;k=Math.floor(k);if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);var h=d.getElementById('hint');if(h)h.classList.add('gone');}catch(e){}}
+if(!root.classList.contains('az-embed')){
+  var top=q('.top');
+  if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');
+    a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Atlas Zoom</span>';
+    top.insertBefore(a,top.firstChild);}
+  var pm=/[?&]planche=(\d{1,2})(?:&|$)/.exec(location.search);
+  if(pm)whenReady(function(){setTimeout(function(){gotoPlate(+pm[1]-1);},0);});
+  return;
+}
+var target=(self.origin&&self.origin!=='null')?self.origin:'*';
+function post(type,data){try{var m={source:'medart-atlas',type:type};if(data){for(var k in data)m[k]=data[k];}w.parent.postMessage(m,target);}catch(e){}}
+w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(target!=='*'&&e.origin!==target)||!m||m.source!=='medart-hub')return;
+  if(m.type==='inset'&&typeof m.top==='number'&&m.top>=0&&m.top<400){root.style.setProperty('--az-top',Math.round(m.top)+'px');}
+  else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
+post('hello');
+w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
+function read(){
+  var level='',mag='';
+  if(mEl){var sm=mEl.querySelector('small');level=sm?sm.textContent.trim():'';
+    for(var n=mEl.firstChild;n;n=n.nextSibling){if(n!==sm)mag+=n.textContent||'';}mag=mag.trim();}
+  var k=-1,n=0;try{var A=w.__atlas;if(A){k=A.dominant();var list=A.PLATES||A.L;n=list?list.length:0;}}catch(e){}
+  return {title:tEl?tEl.textContent.trim():'',level:level,mag:mag,index:k,count:n};
+}
+function flush(){var s=read(),key=s.title+'|'+s.level+'|'+s.index;
+  if(key!==last){last=key;lastMag=s.mag;post('state',s);return;}
+  if(s.mag!==lastMag){lastMag=s.mag;post('mag',{mag:s.mag});}}
+function schedule(){if(timer)return;timer=setTimeout(function(){timer=0;flush();},120);}
+[tEl,mEl,pEl].forEach(function(el){if(el)new MutationObserver(schedule).observe(el,{childList:true,characterData:true,subtree:true});});
+whenReady(function(){post('ready');flush();});
+w.addEventListener('keydown',function(e){var k=e.key;if((k==='f'||k==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;e.stopPropagation();e.preventDefault();post('fullscreen');}},true);
+flush();
+})();</script>
+</body>
+</html>

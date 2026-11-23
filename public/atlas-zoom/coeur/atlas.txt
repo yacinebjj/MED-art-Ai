@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#191d21">
+<title>Le Cœur · Atlas zoomable · MedArt AI Studio</title>
+<link rel="preload" href="/atlas-zoom/coeur/p1.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<style>
+.az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
+.az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
+.az-embed .top .scale{margin-left:auto}.az-embed .scale .sbar{margin-top:0}
+.az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
+.az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
+@media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+</style>
+<meta name="description" content="Le cœur en 9 planches et 3 actes : anatomie, histologie, cytologie et ultrastructure, en zoom continu.">
+<style>
+@font-face{font-family:'Kalam';font-weight:400;font-display:swap;src:url(/atlas-zoom/_shared/kalam-400.woff2) format('woff2')}
+@font-face{font-family:'Kalam';font-weight:700;font-display:swap;src:url(/atlas-zoom/_shared/kalam-700.woff2) format('woff2')}
+:root{--bg:#191d21;--ink:#f6efe2;--chalk:#f3e2bd;--soft:rgba(240,233,220,.74);--mute:rgba(232,226,214,.5);--line:rgba(243,226,189,.14);--acc:#ffb86b;--acc2:#7fd8ff;
+  --hand:'Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',system-ui,sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab}#cv.drag{cursor:grabbing}
+/* slate atmosphere: vignette + chalk grain (static layers, composited once) */
+.vig{position:fixed;inset:0;pointer-events:none;z-index:1;background:radial-gradient(130% 100% at 50% 48%,transparent 52%,rgba(6,8,10,.55) 100%)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.06;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scrim{position:fixed;left:0;right:0;top:0;height:120px;z-index:2;pointer-events:none;background:linear-gradient(rgba(13,16,21,.66),rgba(13,16,21,.3) 55%,transparent)}
+/* pins */
+#pins{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pin{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
+.pin.on{opacity:1}.pin.on button{pointer-events:auto}
+.pin button{all:unset;cursor:pointer;position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.pin i{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff6e4,var(--acc) 60%,#e07a2c);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 16px 3px rgba(255,184,107,.55);transition:transform .25s var(--ease)}
+.pin b{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,184,107,.75);animation:pulse 2.2s var(--ease) infinite}
+.pin.portal i{background:radial-gradient(circle at 40% 35%,#eafaff,var(--acc2) 60%,#2f8fc0);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 20px 5px rgba(127,216,255,.6)}
+.pin.portal b{border-color:rgba(127,216,255,.85);animation-duration:1.6s}
+.pin.seen i{filter:saturate(.55) brightness(.92)}
+.pin button:hover i,.pin.active i{transform:scale(1.25)}
+.pin span{position:absolute;left:22px;top:-13px;white-space:nowrap;padding:5px 11px;border-radius:999px;font:700 15px/1.1 var(--hand);color:var(--chalk);background:rgba(20,24,28,.86);border:1px solid var(--line);opacity:0;transform:translateX(-4px);transition:.25s var(--ease);pointer-events:none}
+.pin .go{all:unset;cursor:pointer;position:absolute;left:24px;top:-16px;white-space:nowrap;padding:7px 14px 7px 13px;border-radius:999px;font:700 15.5px/1.1 var(--hand);color:#e6f8ff;background:linear-gradient(135deg,rgba(30,74,104,.9),rgba(16,40,60,.92));border:1px solid rgba(127,216,255,.55);box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 22px rgba(127,216,255,.35),0 8px 24px -8px rgba(0,0,0,.7);animation:glow 2.4s var(--ease) infinite;transition:transform .2s var(--ease),filter .2s}
+.pin.on .go{pointer-events:auto}.pin .go:hover{transform:translateX(3px);filter:brightness(1.15)}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 18px rgba(127,216,255,.28),0 8px 24px -8px rgba(0,0,0,.7)}50%{box-shadow:0 0 0 1px rgba(127,216,255,.25),0 0 30px rgba(127,216,255,.55),0 8px 24px -8px rgba(0,0,0,.7)}}
+.pin button:hover+span,.pin.active span{opacity:1;transform:none}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.55);opacity:0}}
+/* glass */
+.glass{background:linear-gradient(160deg,rgba(40,45,52,.78),rgba(22,26,31,.86));border:1px solid rgba(243,226,189,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 30px 70px -24px rgba(0,0,0,.75)}
+@supports (backdrop-filter:blur(1px)){.glass{background:linear-gradient(160deg,rgba(40,45,52,.62),rgba(22,26,31,.74));backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%)}}
+/* header */
+.top{position:fixed;left:0;right:0;top:0;z-index:6;display:flex;align-items:flex-start;gap:18px;padding:16px 22px;pointer-events:none}
+.top>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:8px 14px 8px 9px;border-radius:16px}
+.brand svg{width:32px;height:32px;flex:none}.brand b{display:block;font-weight:700;font-size:13.5px;letter-spacing:-.01em}.brand em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:1px}
+.crumb{margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;padding-top:4px;max-width:46vw}
+.crumb .path{font:600 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:rgba(236,230,218,.66);text-shadow:0 1px 8px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.crumb .path b{color:var(--acc)}
+.crumb h2{margin:0;font:700 25px/1.15 var(--hand);color:var(--chalk);text-shadow:0 2px 18px rgba(0,0,0,.6);transition:opacity .3s}
+.scale{min-width:170px;padding:10px 14px;border-radius:16px;text-align:right}
+.scale .m{font:800 24px/1 var(--sans);letter-spacing:-.03em;color:#fff}.scale .m small{font-size:13px;color:var(--mute);font-weight:600;margin-left:6px;letter-spacing:.06em;text-transform:uppercase}
+.sbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;font:600 11.5px var(--sans);color:var(--soft)}
+.sbar i{display:block;height:6px;border:1.5px solid rgba(243,226,189,.85);border-top:0;transition:width .25s var(--ease)}
+/* side controls */
+.ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px;border-radius:22px}
+.ctrl button{all:unset;cursor:pointer;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:var(--ink);transition:background .2s}
+.ctrl button:hover{background:rgba(255,255,255,.08)}.ctrl svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rail{position:relative;width:38px;height:min(330px,40vh);margin:4px 0;cursor:pointer;touch-action:none}
+.rail .tr{position:absolute;left:18px;top:6px;bottom:6px;width:2px;border-radius:2px;background:rgba(243,226,189,.18)}
+.rail .fill{position:absolute;left:18px;top:6px;width:2px;border-radius:2px;background:linear-gradient(var(--acc),var(--acc2))}
+.rail .tick{position:absolute;left:13px;width:12px;height:2px;margin-top:-1px;background:rgba(243,226,189,.28);border-radius:2px}.rail .tick.major{left:8px;width:22px;background:rgba(243,226,189,.45)}.rail .tick::before{content:"";position:absolute;left:-6px;right:-6px;top:-7px;bottom:-7px}
+.rail .tick{cursor:pointer}.rail .tick span{position:absolute;right:32px;top:-14px;padding:4px 8px 3px;border-radius:9px;background:rgba(18,22,27,.72);border:1px solid rgba(243,226,189,.08);font:700 13.5px/1 var(--hand);color:var(--mute);white-space:nowrap;text-align:right;cursor:pointer}.rail .tick em{display:block;font:600 9.5px var(--sans);letter-spacing:.08em;font-style:normal;margin-top:1px}
+.rail .tick span{opacity:0;transition:opacity .3s}.rail .tick.cur span,.ctrl:hover .rail .tick span{opacity:1}.rail .tick.cur span{color:var(--chalk)}.rail .tick.on{background:var(--acc)}
+.rail .th{position:absolute;left:7px;width:24px;height:24px;margin-top:-12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#ffd9a8);box-shadow:0 0 0 4px rgba(255,184,107,.22),0 4px 14px rgba(0,0,0,.5)}
+/* plate dock, grouped by act */
+.dock{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:6px 8px 7px;border-radius:22px;max-width:calc(100vw - 16px)}
+.grp{display:flex;flex-direction:column;gap:4px;padding:0 4px}.grp+.grp{border-left:1px solid rgba(243,226,189,.1);padding-left:10px}
+.gh{display:flex;align-items:baseline;gap:6px;padding-left:4px;font:700 10px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);transition:color .3s}
+.gh b{font:700 12px var(--hand);letter-spacing:0;color:var(--acc);opacity:.6}.gh em{font-style:normal;font-weight:600;letter-spacing:.04em;text-transform:none;opacity:.8}
+.grp.on .gh{color:var(--soft)}.grp.on .gh b{opacity:1}
+.gt{display:flex;gap:3px}
+.pl{all:unset;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:78px;padding:3px 0 2px;border-radius:13px;transition:background .3s var(--ease)}
+.pl img{width:70px;height:39px;object-fit:cover;border-radius:9px;display:block;border:1px solid rgba(243,226,189,.16);filter:saturate(.7) brightness(.75);transition:.3s var(--ease)}
+.pl i{position:absolute;left:6px;top:6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;display:grid;place-items:center;font:800 9.5px var(--sans);font-style:normal;color:#1a1d21;background:rgba(243,226,189,.85)}
+.pl b{font:700 12px/1.05 var(--hand);color:var(--mute);transition:color .3s;max-width:76px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl:hover{background:rgba(255,255,255,.05)}.pl:hover img{filter:saturate(.9) brightness(.95)}
+.pl.on{background:rgba(255,184,107,.12)}.pl.on img{filter:none;border-color:var(--acc);box-shadow:0 0 16px rgba(255,184,107,.38)}.pl.on b{color:var(--chalk)}.pl.on i{background:var(--acc)}
+/* scale track (1× → 100× → 10 000×) */
+.lvb{position:relative;display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;font:700 11px/1.1 var(--sans);color:var(--soft);text-align:center}
+.lvb span{display:flex;flex-direction:column;align-items:center;min-width:40px}.lvb span:first-of-type{align-items:flex-start}.lvb span:last-of-type{align-items:flex-end}
+.lvb em{font:600 9px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-style:normal;margin-top:2px}
+.lvb .lt{position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:rgba(243,226,189,.14);overflow:hidden}.lvb .lt i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.wait{position:fixed;left:50%;top:50%;z-index:7;width:34px;height:34px;margin:-17px;opacity:0;transition:opacity .2s;pointer-events:none}.wait.on{opacity:1}
+.wait i{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(243,226,189,.2);border-top-color:var(--acc);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+/* study card */
+.card{position:fixed;z-index:8;right:84px;top:150px;width:min(390px,calc(100vw - 32px));max-height:calc(100vh - 262px);overflow:auto;padding:20px 22px 18px;border-radius:24px;opacity:0;transform:translateX(18px) scale(.98);pointer-events:none;transition:opacity .35s var(--ease),transform .45s var(--ease);scrollbar-width:none}
+.card::-webkit-scrollbar{display:none}.card.on{opacity:1;transform:none;pointer-events:auto}
+.card .chip{display:inline-flex;align-items:center;gap:7px;font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}.card .chip i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.card.portal .chip i{background:var(--acc2);box-shadow:0 0 10px var(--acc2)}
+.card h3{margin:8px 34px 10px 0;font:700 26px/1.12 var(--hand);color:var(--chalk)}
+.card p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--soft)}.card p b{color:#fff;font-weight:650}
+.trap{position:relative;margin:12px 0 4px;padding:12px 14px 12px 16px;border-radius:16px;background:linear-gradient(135deg,rgba(255,120,90,.15),rgba(255,120,90,.04));border:1px solid rgba(255,140,110,.3);font-size:13.2px;line-height:1.55;color:#f6e3dc}
+.trap span{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:800 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#ff9a7e}
+.note{margin-top:10px;font-size:12px;line-height:1.5;color:var(--mute);border-left:2px solid rgba(243,226,189,.25);padding-left:10px}
+.card .x{all:unset;cursor:pointer;position:absolute;right:14px;top:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:var(--soft)}.card .x:hover{background:rgba(255,255,255,.08)}
+.card .act{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:13px;font:700 13px var(--sans);background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--ink);transition:.2s}
+.btn:hover{background:rgba(255,255,255,.12)}.btn.dive{background:linear-gradient(135deg,#7fd8ff,#4aa9e0);color:#06202e;border:0}.btn.dive:hover{filter:brightness(1.08)}
+.card .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font:600 11px var(--sans);color:var(--mute)}
+.card .nav button{all:unset;cursor:pointer;padding:6px 9px;border-radius:9px;color:var(--soft)}.card .nav button:hover{background:rgba(255,255,255,.07)}
+/* hint + loader */
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;padding:16px 20px;border-radius:20px;text-align:center;font:700 18px var(--hand);color:var(--chalk);transition:opacity .6s;pointer-events:none}
+.hint small{display:block;margin-top:4px;font:500 12px var(--sans);color:var(--soft)}.hint.gone{opacity:0}
+.hint svg{width:26px;height:38px;display:block;margin:0 auto 8px}.hint svg .w{animation:wheel 1.4s var(--ease) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}100%{transform:translateY(8px);opacity:0}}
+#loader{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);transition:opacity .7s,visibility .7s}#loader.done{opacity:0;visibility:hidden}
+#loader h1{margin:0;font:700 44px var(--hand);color:var(--chalk);text-align:center}#loader p{margin:6px 0 22px;color:var(--soft);font-size:14px;text-align:center}
+#loader .tr{width:240px;height:2px;margin:0 auto;border-radius:2px;background:rgba(243,226,189,.15);overflow:hidden}#loader .tr i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .3s}
+#loader .msg{margin-top:12px;text-align:center;font-size:12px;color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:116px;transform:translateX(-50%);z-index:9;padding:9px 14px;border-radius:13px;font:600 12.5px var(--sans);color:var(--soft);opacity:0;transition:opacity .4s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:1050px){.crumb .path{display:none}.crumb{max-width:40vw}}
+@media (max-width:1100px){.pl{width:62px}.pl img{width:56px;height:32px}.pl b{font-size:11px;max-width:60px}}
+@media (max-width:900px){.pl b{display:none}.gh em{display:none}}
+@media (max-width:760px){
+  .top{padding:10px 10px;gap:8px}.brand{padding:6px 9px 6px 6px}.brand em{display:none}.brand b{font-size:12px}.crumb{display:none}
+  .scale{min-width:0;padding:8px 10px}.scale .m{font-size:19px}
+  .ctrl{right:6px;top:auto;bottom:84px;transform:none;padding:6px 4px;gap:2px}.ctrl button{width:34px;height:34px}.rail{height:120px}.rail .tick span{display:none}
+  .dock{bottom:6px;gap:2px;padding:4px 5px;border-radius:16px}.grp{padding:0 1px;gap:2px}.grp+.grp{padding-left:4px}.gh{font-size:8px;letter-spacing:.08em;padding-left:2px}.gh b{font-size:10px}.gt{gap:1px}
+  .pl{width:calc((100vw - 52px)/9);max-width:44px;padding:2px 0;border-radius:9px}.pl img{width:100%;height:auto;aspect-ratio:16/10;border-radius:7px}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .lvb{margin-top:6px;padding-top:7px;gap:6px;font-size:10px}.lvb em{display:none}.lvb span{min-width:0}
+  .card{left:8px;right:8px;top:auto;bottom:76px;width:auto;max-height:54vh;transform:translateY(24px);border-radius:22px}
+  .pin .go{font-size:13.5px;padding:6px 11px;left:20px;top:-14px}
+  .pin span{display:none}.scrim{height:84px}
+  .hint{padding:12px 16px;font-size:15px;max-width:78vw}.hint small{font-size:11px}
+}
+@media (max-height:520px) and (min-width:761px){
+  .top{padding:8px 12px;gap:10px}.brand{padding:5px 9px 5px 5px}.brand svg{width:26px;height:26px}.brand em{display:none}.brand b{font-size:12px}
+  .crumb .path{display:none}.crumb h2{font-size:17px}.scrim{height:70px}
+  .scale{min-width:0;padding:6px 10px}.scale .m{font-size:17px}.sbar{margin-top:4px}.lvb{display:none}
+  .ctrl{right:6px;padding:4px 3px;gap:0}.ctrl button{width:30px;height:30px}.rail{height:min(150px,36vh);margin:2px 0}.rail .tick span{display:none}
+  .dock{bottom:5px;padding:4px 6px;gap:2px;border-radius:14px}.gh{display:none}.grp+.grp{padding-left:5px}.pl{width:50px;padding:2px 0}.pl img{width:46px;height:26px;border-radius:6px}.pl b{display:none}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .card{top:52px;right:50px;bottom:8px;max-height:none;width:min(360px,52vw);padding:14px 16px}.card h3{font-size:21px}.card p{font-size:13px}
+  .hint{padding:10px 14px;font-size:15px}.hint svg{display:none}.toast{bottom:52px}.pin span{display:none}
+}
+@media (prefers-reduced-motion:reduce){.pin b,.pin .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Atlas zoomable du cœur"></canvas>
+<div class="vig"></div><div class="grain"></div><div class="scrim"></div>
+<div id="pins"></div>
+<header class="top">
+  <div class="brand glass"><svg viewBox="0 0 32 32" fill="none"><rect x=".5" y=".5" width="31" height="31" rx="9" fill="#232830" stroke="rgba(243,226,189,.25)"/><path d="M16 24.5s-7.5-4.6-7.5-10.2c0-2.6 2-4.6 4.4-4.6 1.4 0 2.5.7 3.1 1.7.6-1 1.7-1.7 3.1-1.7 2.4 0 4.4 2 4.4 4.6 0 5.6-7.5 10.2-7.5 10.2z" stroke="#ffb86b" stroke-width="1.7" stroke-linejoin="round"/><path d="M9.6 15.4h3.2l1.4-2.6 2.2 5 1.5-2.4h4.6" stroke="#7fd8ff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div><b>MedArt AI Studio</b><em>Atlas zoomable · Le cœur</em></div></div>
+  <div class="crumb"><div class="path" id="path"></div><h2 id="ltitle"></h2></div>
+  <div class="scale glass"><div class="m" id="mag">×1</div><div class="sbar"><i id="sbi"></i><span id="sbt">5 cm</span></div><div class="lvb"><div class="lt"><i id="lvf"></i></div><span>1×<em>Organe</em></span><span>100×<em>Tissu</em></span><span>10 000×<em>Cellule · Molécule</em></span></div></div>
+</header>
+<nav class="ctrl glass" aria-label="Zoom">
+  <button id="zin" title="Zoomer (+)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="rail" id="rail" title="Profondeur"><div class="tr"></div><div class="fill" id="rfill"></div><div class="th" id="rth"></div></div>
+  <button id="zout" title="Dézoomer (−)"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <button id="reset" title="Vue d’ensemble (R)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+  <button id="fs" title="Plein écran (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+<nav class="dock glass" id="dock" aria-label="Planches"></nav>
+<aside class="card glass" id="card" aria-live="polite"></aside>
+<div class="hint glass" id="hint"><svg viewBox="0 0 26 38" fill="none"><rect x="1.5" y="1.5" width="23" height="35" rx="11.5" stroke="#f3e2bd" stroke-width="2"/><rect class="w" x="11.5" y="8" width="3" height="7" rx="1.5" fill="#ffb86b"/></svg>
+  <span id="hint1">Faites défiler pour plonger dans le cœur</span><small id="hint2">Molette · double-clic · boutons lumineux · ←/→ planche précédente / suivante · F plein écran</small></div>
+<div class="toast glass" id="toast"></div><div class="wait" id="wait"><i></i></div>
+<div id="loader"><div><h1>Le Cœur</h1><p>9 planches · 3 actes — de l’organe à la molécule</p><div class="tr"><i id="lb"></i></div><div class="msg" id="lmsg">Chargement des planches…</div></div></div>
+<script>window.__IMG__={"p1":"/atlas-zoom/coeur/p1.webp","p1_t":"/atlas-zoom/coeur/p1_t.webp","p2":"/atlas-zoom/coeur/p2.webp","p2_t":"/atlas-zoom/coeur/p2_t.webp","p3":"/atlas-zoom/coeur/p3.webp","p3_t":"/atlas-zoom/coeur/p3_t.webp","p4":"/atlas-zoom/coeur/p4.webp","p4_t":"/atlas-zoom/coeur/p4_t.webp","p5":"/atlas-zoom/coeur/p5.webp","p5_t":"/atlas-zoom/coeur/p5_t.webp","p6":"/atlas-zoom/coeur/p6.webp","p6_t":"/atlas-zoom/coeur/p6_t.webp","p7":"/atlas-zoom/coeur/p7.webp","p7_t":"/atlas-zoom/coeur/p7_t.webp","p8":"/atlas-zoom/coeur/p8.webp","p8_t":"/atlas-zoom/coeur/p8_t.webp","p9":"/atlas-zoom/coeur/p9.webp","p9_t":"/atlas-zoom/coeur/p9_t.webp"};window.__META__={"p1": {"w": 2048, "h": 1018, "bg": [32, 33, 36]}, "p2": {"w": 2048, "h": 1002, "bg": [33, 35, 40]}, "p3": {"w": 2048, "h": 1011, "bg": [30, 33, 38]}, "p4": {"w": 2048, "h": 990, "bg": [30, 33, 38]}, "p5": {"w": 2048, "h": 998, "bg": [31, 33, 37]}, "p6": {"w": 2048, "h": 931, "bg": [31, 34, 38]}, "p7": {"w": 2048, "h": 1016, "bg": [32, 35, 40]}, "p8": {"w": 2048, "h": 994, "bg": [27, 28, 32]}, "p9": {"w": 2048, "h": 1036, "bg": [28, 30, 35]}};window.__TEX__="/atlas-zoom/_shared/board.webp";</script>
+<script>// Le Cœur — 9 planches en une plongée continue (3 actes × 3 planches).
+// Coordonnées normalisées dans la planche (x sur la largeur, y sur la hauteur, après recadrage).
+// portal : rectangle où la planche suivante est emboîtée (centre c, largeur w relative à la planche parente).
+// pin.portal : libellé du bouton d'action lumineux qui plonge vers la planche suivante.
+const ACTS = [
+  { name: 'Anatomie', sub: 'Organe', mag: 1 },
+  { name: 'Histologie', sub: 'Tissu', mag: 100 },
+  { name: 'Cytologie', sub: 'Cellule · Molécule', mag: 10000 },
+];
+const PLATES = [
+// ─────────────────────────────── ACTE I — ANATOMIE ───────────────────────────────
+{ img: 'p1', act: 0, short: 'Externe', scale: 'Organe', title: 'Anatomie externe du cœur, gros vaisseaux et péricarde',
+  portal: { c: [0.354, 0.528], w: 0.45 },
+  pins: [
+  { x: .255, y: .115, t: 'Crosse de l’aorte', p: 'Fait suite à l’aorte ascendante, se recourbe en arrière et à gauche au-dessus de la bronche souche gauche. Trois branches : <b>tronc brachio-céphalique</b>, <b>carotide commune gauche</b>, <b>subclavière gauche</b>.', trap: 'Le tronc brachio-céphalique n’existe qu’à droite. Les artères coronaires naissent de l’aorte <b>ascendante</b> (sinus de Valsalva), pas de la crosse.' },
+  { x: .30, y: .30, t: 'Tronc pulmonaire', p: 'Naît de l’infundibulum du <b>ventricule droit</b>, monte en arrière et à gauche, se divise sous la crosse en artères pulmonaires droite et gauche. Relié à la crosse par le <b>ligament artériel</b> (vestige du canal artériel).', trap: 'Le nerf laryngé récurrent <b>gauche</b> contourne la crosse de l’aorte au contact du ligament artériel : il peut être lésé en chirurgie de cette région.' },
+  { x: .255, y: .345, t: 'Sinus transverse de Theile', p: 'Récessus du péricarde séreux situé <b>entre le pédicule artériel</b> en avant (aorte ascendante + tronc pulmonaire) <b>et le pédicule veineux</b> en arrière (atria, veine cave supérieure, veines pulmonaires).', trap: 'Le chirurgien y glisse un doigt ou un lacs pour clamper l’aorte et le tronc pulmonaire ensemble (circulation extracorporelle). À ne pas confondre avec le sinus oblique, cul-de-sac rétro-atrial gauche.', note: 'L’étiquette « Péricarde fibreux et séreux (sinus de Theile, sinus de Haller) » pointe la graisse des sillons : les sinus eux-mêmes ne sont pas dessinés.' },
+  { x: .31, y: .42, t: 'Auricule gauche', p: 'Diverticule de l’atrium gauche qui contourne le bord gauche du tronc pulmonaire ; paroi trabéculée par des muscles pectinés.', trap: 'En fibrillation atriale non valvulaire, <b>≈ 90 % des thrombus</b> se forment dans l’auricule gauche : on la contrôle en échographie transœsophagienne avant cardioversion.' },
+  { x: .285, y: .62, t: 'Sillon interventriculaire antérieur', p: 'Contient l’<b>artère interventriculaire antérieure (IVA)</b> et la grande veine du cœur, dans la graisse sous-épicardique. Limite entre VD et VG sur la face sterno-costale.', trap: 'La face sterno-costale est formée surtout par le <b>ventricule droit</b> ; le VG n’en occupe qu’une bande gauche et forme l’apex.' },
+  { x: .345, y: .855, t: 'Apex (pointe)', p: 'Formé par le <b>ventricule gauche</b>. Il se projette dans le 5e espace intercostal gauche, sur la ligne médio-claviculaire : c’est le choc de pointe.', trap: 'Un choc de pointe dévié en bas et en dehors oriente vers une hypertrophie ou une dilatation du VG.' },
+  { x: .20, y: .55, portal: 'Ouvrir le cœur', t: 'Ouvrir le cœur', p: 'Plongez dans l’anatomie interne : cavités, septums, appareils valvulaires et squelette fibreux.', trap: 'Retenez la circulation : VCS/VCI → AD → tricuspide → VD → valve pulmonaire → poumons → veines pulmonaires → AG → mitrale → VG → valve aortique.' },
+  { x: .705, y: .455, t: 'Sinus oblique de Haller', p: 'Cul-de-sac du péricarde séreux <b>derrière l’atrium gauche</b>, limité par les réflexions autour des 4 veines pulmonaires et de la veine cave inférieure ; ouvert en bas, fermé en haut.', trap: 'L’atrium gauche est en rapport direct avec l’<b>œsophage</b> : base de l’échographie transœsophagienne, et dysphagie possible si l’AG est très dilaté (rétrécissement mitral).', note: 'L’étiquette « Veines pulmonaires (4) » n’en montre que deux de ce côté.' },
+  { x: .705, y: .535, t: 'Sinus coronaire', p: 'Collecteur veineux du myocarde dans le <b>sillon coronaire postérieur</b> ; il se jette dans l’atrium droit entre l’orifice de la veine cave inférieure et l’orifice tricuspide.', trap: 'Il draine les grande, moyenne et petite veines du cœur ; les veines antérieures du cœur et les veines minimes (de Thebesius) n’y passent pas.' },
+  { x: .755, y: .70, t: 'Sillon interventriculaire postérieur', p: 'Contient l’<b>artère interventriculaire postérieure (IVP)</b> et la veine moyenne du cœur, sur la face diaphragmatique.', trap: 'L’artère qui donne l’IVP définit la <b>dominance</b> : droite dans ≈ 80–85 % des cas.' },
+]},
+{ img: 'p2', act: 0, short: 'Interne', scale: 'Organe', title: 'Anatomie interne : cavités, septums et valves cardiaques',
+  portal: { c: [0.172, 0.55], w: 0.45 },
+  pins: [
+  { x: .15, y: .33, t: 'Atrium droit et fosse ovale', p: 'Partie postérieure lisse (sinus des veines caves) et antérieure trabéculée (<b>muscles pectinés</b>), séparées par la crête terminale. Sur le septum : <b>fosse ovale</b>, vestige du foramen ovale ; orifice du sinus coronaire.', trap: 'Un foramen ovale perméable persiste chez ≈ 25 % des adultes : risque d’<b>embolie paradoxale</b> (AVC du sujet jeune).' },
+  { x: .27, y: .58, t: 'Septum interventriculaire', p: 'Partie <b>musculaire</b>, épaisse, et partie <b>membraneuse</b>, mince, haute, sous la valve aortique.', trap: 'La CIV la plus fréquente est <b>périmembraneuse</b>. Le faisceau de His longe son bord inférieur : risque de bloc atrio-ventriculaire lors de sa fermeture chirurgicale.', note: 'Le libellé « Septum interventriculaire » apparaît deux fois sur la planche.' },
+  { x: .20, y: .70, t: 'Ventricule droit', p: 'Paroi mince, nombreuses <b>trabécules charnues</b>, crête supra-ventriculaire, <b>bandelette ansiforme</b> (trabécule septo-marginale) qui porte la branche droite du His jusqu’au muscle papillaire antérieur.', trap: 'La bandelette ansiforme n’existe que dans le VD : bon repère échographique pour identifier ce ventricule.' },
+  { x: .34, y: .66, t: 'Muscles papillaires et cordages', p: 'Les piliers et les cordages tendineux <b>empêchent l’éversion</b> des valves atrio-ventriculaires pendant la systole ; ils ne les ouvrent pas.', trap: 'Rupture de pilier (souvent <b>postéro-médial</b>, vascularisé par une seule artère) après un infarctus inférieur → insuffisance mitrale aiguë.' },
+  { x: .645, y: .58, t: 'Valve tricuspide', p: '3 cuspides (antérieure, postérieure, septale) entre AD et VD, 3 muscles papillaires.', trap: 'Foyer tricuspide : 4e–5e espace intercostal au bord gauche du sternum. Une endocardite tricuspide évoque la toxicomanie intraveineuse.', note: 'La planche étiquette deux fois « Valve tricuspide » et deux fois « Valve aortique ».' },
+  { x: .835, y: .58, t: 'Valve mitrale (bicuspide)', p: '<b>2 cuspides</b> (antérieure, grande, et postérieure) entre AG et VG, 2 muscles papillaires (antéro-latéral et postéro-médial).', trap: 'Mitrale = <b>2</b> valves (« mitre d’évêque »), tricuspide = 3 : piège classique. Foyer mitral = apex.', note: 'Les flèches des valves sont incohérentes : la grande valve gauche du dessin a 3 cuspides et porte l’étiquette « aortique », et la valve centrale est fléchée à la fois « mitrale » et « aortique ». Repère : l’aortique est centrale, enchâssée, à 3 valvules sigmoïdes ; la mitrale est à gauche et en arrière, avec 2 cuspides.' },
+  { x: .75, y: .36, t: 'Valve aortique', p: '3 valvules sigmoïdes (droite, gauche, postérieure non coronaire) ; au-dessus, les <b>sinus de Valsalva</b> d’où naissent les artères coronaires.', trap: 'Les coronaires se remplissent surtout en <b>diastole</b>. Foyer aortique : 2e espace intercostal droit.' },
+  { x: .745, y: .19, t: 'Valve pulmonaire', p: '3 valvules sigmoïdes ; la valve la plus antérieure et la plus haute du cœur.', trap: 'Valves sigmoïdes (aortique, pulmonaire) : <b>ni cordages ni piliers</b>, contrairement aux valves atrio-ventriculaires. Foyer pulmonaire : 2e espace intercostal gauche.' },
+  { x: .765, y: .62, t: 'Squelette fibreux du cœur', p: '4 anneaux fibreux unis par le <b>trigone fibreux droit</b> (corps fibreux central) et le trigone gauche : insertion des valves et du myocarde, isolant électrique entre atria et ventricules.', trap: 'Seul le faisceau de His traverse normalement ce squelette (trigone droit). Une voie accessoire (faisceau de Kent) donne le syndrome de <b>Wolff-Parkinson-White</b>.' },
+  { x: .25, y: .45, portal: 'Explorer les coronaires & le tissu nodal', t: 'Coronaires et tissu nodal', p: 'Passez à la vascularisation coronaire et au système de conduction du cœur.', trap: 'Le tissu nodal est un myocarde spécialisé, pas du tissu nerveux.' },
+]},
+{ img: 'p3', act: 0, short: 'Coronaires', scale: 'Organe', title: 'Vascularisation coronaire et tissu nodal du cœur',
+  portal: { c: [0.27, 0.66], w: 0.16 },
+  pins: [
+  { x: .265, y: .21, t: 'Tronc commun coronaire gauche', p: 'Naît du sinus de Valsalva gauche, court (≈ 1 cm), passe derrière le tronc pulmonaire puis se divise en <b>IVA</b> et <b>circonflexe</b>.', trap: 'Une sténose du tronc commun menace une grande partie du VG : indication classique de pontage.' },
+  { x: .295, y: .53, t: 'Artère interventriculaire antérieure (IVA)', p: 'Descend dans le sillon interventriculaire antérieur jusqu’à l’apex ; branches <b>diagonales</b> (paroi antérieure du VG) et <b>septales</b> (2/3 antérieurs du septum, branche droite du His).', trap: 'Occlusion de l’IVA = infarctus <b>antérieur</b> (V1–V4), le plus étendu et le plus grave.', note: 'La planche étiquette deux fois « Artère IVA ».' },
+  { x: .36, y: .47, t: 'Artère circonflexe (Cx)', p: 'Contourne le bord gauche dans le sillon coronaire gauche ; branches marginales ; vascularise la paroi <b>latérale</b> du VG et l’atrium gauche.', trap: 'Infarctus latéral (DI, aVL, V5–V6). La Cx ne donne l’IVP qu’en <b>dominance gauche</b> (≈ 10 %).' },
+  { x: .15, y: .52, t: 'Artère coronaire droite (CD)', p: 'Naît du sinus droit, chemine dans le sillon coronaire droit ; donne l’artère du nœud sinusal (≈ 60 %), les marginales droites et, en dominance droite, l’<b>IVP</b> et l’artère du nœud atrio-ventriculaire.', trap: 'Infarctus <b>inférieur</b> (DII, DIII, aVF) avec bloc atrio-ventriculaire : penser coronaire droite (artère du nœud AV).' },
+  { x: .16, y: .70, t: 'Sinus coronaire', p: 'Grand collecteur veineux du cœur, il ramène le sang du myocarde à l’atrium droit.', trap: 'Les sondes de resynchronisation (stimulation du VG) et la cardioplégie rétrograde passent par le sinus coronaire.', note: 'Ici l’étiquette pointe la face antérieure : le sinus coronaire est en réalité dans le sillon coronaire <b>postérieur</b> (voir la vue postérieure de la planche 1).' },
+  { x: .655, y: .34, t: 'Nœud sinusal (Keith et Flack)', p: 'Sous l’épicarde, à la jonction <b>veine cave supérieure – atrium droit</b>, près du sillon terminal ; pacemaker physiologique, 60–100/min.', trap: 'Artère du nœud sinusal : coronaire droite ≈ 60 %, circonflexe ≈ 40 %.' },
+  { x: .69, y: .45, t: 'Nœud atrio-ventriculaire (Aschoff-Tawara)', p: 'Dans le <b>triangle de Koch</b> (tendon de Todaro, orifice du sinus coronaire, cuspide septale tricuspide) ; il ralentit la conduction (≈ 0,1 s), ce qui laisse les ventricules se remplir.', trap: 'Le triangle de Koch est le repère de l’ablation de la voie lente (tachycardie par réentrée intranodale). Artère du nœud AV : coronaire dominante, droite dans ≈ 80 %.' },
+  { x: .765, y: .49, t: 'Faisceau de His et branches', p: 'Traverse le trigone fibreux droit puis se divise sur le septum musculaire en <b>branche droite</b> (via la bandelette ansiforme) et <b>branche gauche</b> (hémi-branches antérieure et postérieure).', trap: 'Bloc de branche droit : rsR′ en V1. Bloc de branche gauche : QS en V1, R large en V6 ; un BBG récent avec douleur thoracique = équivalent de sus-décalage du ST.', note: 'La planche écrit « Branches droite et et gauche ».' },
+  { x: .87, y: .75, t: 'Réseau de Purkinje', p: 'Sous-endocardique, conduction la plus rapide (2–4 m/s) : les ventricules se dépolarisent de l’apex vers la base et de l’endocarde vers l’épicarde.', trap: 'Rythmes d’échappement : jonctionnel 40–60/min (QRS fins), ventriculaire 20–40/min (QRS larges).' },
+  { x: .27, y: .66, portal: 'Zoomer dans la paroi (×100)', t: 'La paroi cardiaque', p: 'Plongez dans l’épaisseur de la paroi ventriculaire : endocarde, myocarde, épicarde.', trap: 'De dedans en dehors : endocarde → myocarde → épicarde (= péricarde séreux viscéral).' },
+]},
+// ─────────────────────────────── ACTE II — HISTOLOGIE ───────────────────────────────
+{ img: 'p4', act: 1, short: 'Paroi', scale: 'Tissu', title: 'Histologie de la paroi cardiaque : endocarde, myocarde, épicarde',
+  portal: { c: [0.711, 0.60], w: 0.45 },
+  pins: [
+  { x: .265, y: .08, t: 'Endocarde', p: 'Endothélium, couche sous-endothéliale conjonctive, puis <b>couche sous-endocardique</b> (vaisseaux, nerfs, cellules de Purkinje). Il tapisse aussi les valves.', trap: 'L’endocardite infectieuse atteint surtout l’endocarde <b>valvulaire</b>, peu vascularisé : antibiothérapie prolongée nécessaire.' },
+  { x: .69, y: .27, t: 'Couche sous-endocardique (Purkinje)', p: 'Les cellules de Purkinje sont grandes, pâles (glycogène), pauvres en myofibrilles.', trap: 'La couche sous-endocardique est la <b>plus vulnérable à l’ischémie</b> (perfusée surtout en diastole, comprimée en systole).' },
+  { x: .37, y: .32, t: 'Myocarde', p: 'Cardiomyocytes en faisceaux spiralés ; épaisseur ≈ 10–12 mm pour le VG, 3–5 mm pour le VD.', trap: 'Le myocarde adulte ne se régénère pas : une nécrose est remplacée par une <b>cicatrice fibreuse</b>.' },
+  { x: .20, y: .57, t: 'Réseau capillaire dense', p: 'Environ <b>un capillaire par cardiomyocyte</b> ; au repos le myocarde extrait déjà ≈ 70 % de l’O₂ du sang.', trap: 'Le cœur ne peut augmenter son apport en O₂ qu’en augmentant le <b>débit coronaire</b> : une sténose qui limite ce débit provoque l’ischémie d’effort (angor).' },
+  { x: .15, y: .86, t: 'Épicarde et mésothélium', p: 'Feuillet viscéral du péricarde séreux : <b>mésothélium</b> sur un conjonctif sous-épicardique avec graisse, vaisseaux coronaires et nerfs.', trap: 'Péricarde = fibreux (externe) + séreux (pariétal et viscéral = épicarde). La cavité péricardique est entre les deux feuillets séreux.' },
+  { x: .92, y: .72, t: 'Couche sous-épicardique', p: 'Tissu adipeux où cheminent les <b>troncs coronaires épicardiques</b> ; leurs branches perforantes plongent dans le myocarde.', trap: 'Les artères coronaires sont fonctionnellement <b>terminales</b> : leur occlusion entraîne la nécrose de leur territoire.' },
+  { x: .745, y: .47, portal: 'Zoomer dans le myocarde', t: 'Myocarde contractile', p: 'Agrandissez le myocarde : cardiomyocytes ramifiés et stries scalariformes.', trap: 'Les stries scalariformes (disques intercalaires) signent le muscle cardiaque.' },
+]},
+{ img: 'p5', act: 1, short: 'Myocarde', scale: 'Tissu', title: 'Histologie du myocarde contractile et stries scalariformes',
+  portal: { c: [0.321, 0.42], w: 0.45 },
+  pins: [
+  { x: .17, y: .18, t: 'Cardiomyocytes ramifiés', p: 'Cellules courtes (≈ 100 µm), <b>ramifiées</b>, anastomosées en réseau et unies bout à bout par les disques intercalaires.', trap: 'Muscle squelettique : fibres longues, plurinucléées, noyaux <b>périphériques</b>, non ramifiées. Cardiaque : 1–2 noyaux <b>centraux</b>, cellules ramifiées.' },
+  { x: .265, y: .42, t: 'Noyau central', p: 'Un noyau (parfois deux) central et ovoïde, entouré d’un <b>halo clair</b> (glycogène, lipofuscine, Golgi).', trap: 'La lipofuscine (« pigment d’usure ») augmente avec l’âge : elle n’est pas pathologique.' },
+  { x: .59, y: .56, t: 'Stries scalariformes', p: 'Disques intercalaires en <b>marches d’escalier</b> : segments transversaux (adhérence mécanique) et longitudinaux (jonctions communicantes).', trap: 'Spécifiques du muscle cardiaque : absentes du muscle squelettique et du muscle lisse.', note: 'Le libellé au-dessus du bloc (« Eaviidiomyocytes centralreleians d’escalires ») est corrompu sur la planche ; il désigne vraisemblablement ces disques intercalaires en marches d’escalier.' },
+  { x: .655, y: .30, t: 'Striation transversale', p: 'Bandes <b>A</b> (sombres, anisotropes) et <b>I</b> (claires, isotropes), comme dans le muscle squelettique.', trap: 'La striation ne distingue pas cardiaque et squelettique : regardez la position des noyaux, les ramifications et les disques intercalaires.' },
+  { x: .87, y: .28, t: 'Coupe transversale', p: 'Myofibrilles groupées autour d’un noyau central ; un capillaire entre chaque fibre.', trap: 'En coupe transversale, un noyau <b>central</b> oriente vers le myocarde, un noyau <b>périphérique</b> vers le muscle squelettique.' },
+  { x: .79, y: .62, t: 'Réseau capillaire', p: 'Hématies dans des capillaires continus, environ un par fibre.', trap: 'Dans l’hypertrophie ventriculaire (HTA), les cardiomyocytes grossissent mais les capillaires ne se multiplient pas assez : ischémie relative.' },
+  { x: .10, y: .70, t: 'Endomysium', p: 'Conjonctif lâche autour de chaque cardiomyocyte, riche en capillaires.', trap: 'Dans l’amylose cardiaque, les dépôts envahissent l’interstitium : cardiomyopathie <b>restrictive</b>.' },
+  { x: .30, y: .62, portal: 'Comparer : Purkinje & valves', t: 'Tissu nodal et valves', p: 'Comparez cardiomyocytes contractiles et cellules de Purkinje, puis la structure d’une valve.', trap: 'Les cellules de Purkinje sont des cardiomyocytes modifiés, pas des neurones.' },
+]},
+{ img: 'p6', act: 1, short: 'Purkinje & valves', scale: 'Tissu', title: 'Histologie du tissu nodal (Purkinje) et des valves cardiaques',
+  portal: { c: [0.415, 0.52], w: 0.16 },
+  pins: [
+  { x: .21, y: .42, t: 'Cellules de Purkinje', p: 'Plus larges que les cardiomyocytes contractiles, cytoplasme <b>pâle</b> riche en <b>glycogène</b>, 1–2 noyaux centraux, nombreuses jonctions communicantes.', trap: 'Conduction la plus rapide du cœur (2–4 m/s) grâce au grand diamètre et aux connexines (Cx40).' },
+  { x: .24, y: .74, t: 'Myofibrilles rares', p: 'Peu de myofibrilles, rejetées en périphérie : cellules spécialisées dans la conduction, peu contractiles.', trap: 'Ne prenez pas la clarté du cytoplasme de Purkinje pour une dégénérescence vacuolaire.' },
+  { x: .43, y: .70, t: 'Cardiomyocytes contractiles', p: 'Plus petits, plus éosinophiles, riches en myofibrilles et en mitochondries.', trap: 'Les fibres de Purkinje sous-endocardiques <b>survivent mieux</b> à l’ischémie (glycogène, diffusion depuis la cavité) : elles peuvent déclencher des arythmies ventriculaires après un infarctus.' },
+  { x: .70, y: .42, t: 'Feuillet valvulaire avasculaire', p: 'Repli d’endocarde à charpente fibro-élastique, <b>sans vaisseaux</b> : nourri par diffusion.', trap: 'Valve avasculaire : greffe bactérienne difficile à stériliser (endocardite). Le rhumatisme articulaire aigu la néovascularise et la fibrose, surtout la mitrale.' },
+  { x: .84, y: .55, t: 'Fibrosa', p: 'Collagène dense en continuité avec l’anneau fibreux : résistance mécanique.', trap: 'La fibrosa est du côté de l’<b>éjection</b> ; la couche élastique (ventricularis des sigmoïdes, atrialis des valves AV) est du côté de l’entrée du flux.' },
+  { x: .72, y: .70, t: 'Spongiosa', p: 'Conjonctif lâche riche en <b>protéoglycanes</b> : amortit les chocs de fermeture.', trap: 'Dégénérescence myxoïde (maladie de Barlow) = expansion de la spongiosa → <b>prolapsus mitral</b>.' },
+  { x: .80, y: .14, t: 'Anneau fibreux d’insertion', p: 'Partie du squelette fibreux du cœur sur laquelle s’insère la valve.', trap: 'La calcification de l’anneau mitral du sujet âgé peut donner une insuffisance mitrale et des troubles conductifs (proximité du His).' },
+  { x: .415, y: .52, portal: 'Entrer dans le cardiomyocyte (×10 000)', t: 'Le cardiomyocyte', p: 'Passez à la microscopie électronique : organites, tubules T, diades.', trap: 'Les mitochondries occupent ≈ 35 % du volume du cardiomyocyte.' },
+]},
+// ─────────────────────────────── ACTE III — CYTOLOGIE ───────────────────────────────
+{ img: 'p7', act: 2, short: 'Cardiomyocyte', scale: 'Cellule', title: 'Cytologie du cardiomyocyte : ultrastructure et diades',
+  portal: { c: [0.335, 0.677], w: 0.35 },
+  pins: [
+  { x: .495, y: .40, t: 'Noyau central', p: 'Unique (parfois deux), central, ovoïde. Le cardiomyocyte adulte ne se divise quasiment plus.', trap: 'Le cœur adulte grandit par <b>hypertrophie</b> (cellules plus grosses), pas par hyperplasie.', note: 'Le libellé « Noyau central unique avec chromatine » figure deux fois.' },
+  { x: .62, y: .34, t: 'Mitochondries (sarcosomes)', p: 'Environ <b>35 % du volume</b>, crêtes serrées : métabolisme aérobie, surtout à partir des acides gras.', trap: 'Le myocarde ne tolère pas la dette d’O₂ : la contraction cesse en moins d’une minute d’ischémie et la nécrose débute après ≈ 20–40 minutes.' },
+  { x: .755, y: .42, t: 'Myofibrilles striées', p: 'Sarcomères en série ; les myofibrilles sont moins bien individualisées que dans le muscle squelettique.', trap: 'Longueur de repos du sarcomère ≈ 2 µm ; la loi de Frank-Starling repose sur sa longueur en fin de diastole.' },
+  { x: .645, y: .52, t: 'Tubules T', p: 'Invaginations du sarcolemme, <b>plus larges</b> que dans le muscle squelettique, situées <b>en regard de la strie Z</b>.', trap: 'Squelettique : tubules T à la jonction A–I (2 par sarcomère). Cardiaque : au niveau de la strie Z (1 par sarcomère).' },
+  { x: .66, y: .64, t: 'Diade cardiaque', p: '<b>1 tubule T + 1 citerne</b> de réticulum sarcoplasmique, contre la triade du muscle squelettique (1 tubule T + 2 citernes).', trap: 'Diade cardiaque / triade squelettique : question très fréquente. Le RS cardiaque est moins développé, d’où la dépendance au Ca²⁺ extracellulaire.', note: 'La planche écrit « 1 tubule T + terminale » : il faut lire 1 tubule T + 1 citerne terminale.' },
+  { x: .33, y: .43, t: 'Granules d’ANP', p: 'Dans les cardiomyocytes <b>atriaux</b> : granules de peptide natriurétique atrial, libérés lors de l’étirement de l’atrium → natriurèse, vasodilatation.', trap: 'L’ANP est atrial, le BNP ventriculaire (marqueur de l’insuffisance cardiaque) : le cœur est aussi une glande endocrine.' },
+  { x: .52, y: .58, t: 'Réticulum sarcoplasmique', p: 'Réseau anastomosé autour des myofibrilles ; il stocke le Ca²⁺ (calséquestrine).', trap: 'La pompe SERCA2a recapte le Ca²⁺ : c’est la <b>relaxation</b> (lusitropie), qui consomme aussi de l’ATP.' },
+  { x: .26, y: .70, portal: 'Zoomer sur le disque intercalaire', t: 'Disque intercalaire', p: 'Jonction entre deux cardiomyocytes : fascia adherens, desmosomes, jonctions communicantes.', trap: 'Couplage mécanique (segments transversaux) et électrique (segments longitudinaux).', note: 'Les deux encarts de microscopie électronique sont schématiques ; leurs légendes sont illisibles.' },
+]},
+{ img: 'p8', act: 2, short: 'Disque intercalaire', scale: 'Cellule', title: 'Ultrastructure du disque intercalaire (strie scalariforme)',
+  portal: { c: [0.17, 0.424], w: 0.30 },
+  pins: [
+  { x: .37, y: .38, t: 'Segment transversal', p: 'Perpendiculaire aux myofibrilles, au niveau d’une strie Z : <b>fascia adherens + desmosomes</b> = couplage mécanique.', trap: 'Le disque intercalaire remplace une strie Z : l’actine du dernier sarcomère s’ancre dans le fascia adherens.' },
+  { x: .235, y: .41, t: 'Fascia adherens', p: 'Ancre les filaments d’actine ; <b>N-cadhérine</b> reliée à l’actine par les caténines et la vinculine.', trap: 'Fascia adherens (en plaque, propre au cœur) ≠ zonula adherens des épithéliums (en ceinture).' },
+  { x: .32, y: .70, t: 'Desmosomes (macula adherens)', p: 'Desmogléine et desmocolline, plaque de desmoplakine ; ancrent les <b>filaments intermédiaires de desmine</b>.', trap: 'Mutations des protéines desmosomales (plakophiline-2…) → <b>dysplasie arythmogène du VD</b>, cause de mort subite du sportif.' },
+  { x: .43, y: .78, t: 'Jonctions communicantes (nexus)', p: 'Dans les <b>segments longitudinaux</b> : connexons de connexine 43 qui couplent électriquement les cellules.', trap: 'Le myocarde est un syncytium <b>fonctionnel</b>, pas anatomique : chaque cardiomyocyte reste une cellule distincte.' },
+  { x: .83, y: .40, t: 'Connexons (connexine 43)', p: 'Hexamère de 6 connexines ; deux connexons alignés forment un canal qui laisse passer ions et petites molécules (< 1 kDa).', trap: 'Cx43 : myocarde de travail ; Cx40 : atria et His-Purkinje ; Cx45 : nœuds (conduction lente).' },
+  { x: .84, y: .76, t: 'Passage des ions', p: 'Le courant ionique passe directement d’une cellule à l’autre : la dépolarisation se propage de proche en proche.', trap: 'L’ischémie et l’acidose ferment les jonctions communicantes : ralentissement de la conduction, terrain d’arythmies par réentrée.' },
+  { x: .20, y: .30, portal: 'Zoomer sur le sarcomère', t: 'Le sarcomère', p: 'Plongez dans le sarcomère et le couplage excitation-contraction.', trap: 'Sarcomère = d’une strie Z à la suivante.' },
+]},
+{ img: 'p9', act: 2, short: 'Sarcomère', scale: 'Molécule', title: 'Ultrastructure du sarcomère et canaux ioniques cardiaques',
+  pins: [
+  { x: .305, y: .25, t: 'Strie Z', p: 'Limite du sarcomère ; l’<b>α-actinine</b> y ancre les filaments fins et la titine.', trap: 'À la contraction, les bandes I et H raccourcissent ; la bande A reste constante (glissement des filaments).', note: 'Sur la planche, l’accolade « Strie Z » couvre une demi-bande I : la strie Z est la fine ligne au milieu de la bande I.' },
+  { x: .42, y: .27, t: 'Bande A et myosine', p: 'Longueur des filaments épais de <b>myosine</b> (≈ 1,6 µm), dont les têtes portent l’activité ATPasique.', trap: 'A = Anisotrope = constAnte : sa longueur ne change pas à la contraction.' },
+  { x: .505, y: .30, t: 'Bande H et ligne M', p: 'Bande H : myosine seule ; ligne M : protéines de liaison au centre (myomésine, créatine kinase).', trap: 'La bande H disparaît presque en contraction maximale.' },
+  { x: .09, y: .25, t: 'Troponine et tropomyosine', p: 'Filament fin : actine F + tropomyosine + troponine (<b>TnC</b> fixe le Ca²⁺, <b>TnI</b> inhibe, <b>TnT</b> se lie à la tropomyosine).', trap: 'Les troponines cardiaques I et T sont les <b>biomarqueurs</b> de la nécrose myocardique.' },
+  { x: .675, y: .30, t: 'Titine', p: 'Protéine géante de la strie Z à la ligne M : ressort moléculaire, élasticité passive et rigidité diastolique.', trap: 'Les isoformes de titine règlent la compliance du VG (insuffisance cardiaque à fraction d’éjection préservée).' },
+  { x: .23, y: .80, t: 'Canal calcique L (DHPR)', p: 'Canal Cav1.2 du tubule T, ouvert pendant le <b>plateau</b> (phase 2) du potentiel d’action : entrée de Ca²⁺ « gâchette ».', trap: 'Cardiaque : le Ca²⁺ entrant <b>déclenche</b> la libération (CICR). Squelettique : couplage mécanique DHPR–RyR1, sans Ca²⁺ extracellulaire. Les inhibiteurs calciques (vérapamil, diltiazem) sont inotropes négatifs.' },
+  { x: .455, y: .78, t: 'RyR2 et CICR', p: 'Récepteur à la ryanodine du RS : libération massive de Ca²⁺ induite par le Ca²⁺ (<b>CICR</b>) → fixation sur la TnC → contraction.', trap: 'Mutations de RyR2 → tachycardie ventriculaire polymorphe catécholergique.' },
+  { x: .665, y: .78, t: 'SERCA2a et phospholamban', p: 'SERCA2a recapte le Ca²⁺ dans le RS (relaxation). Le <b>phospholamban</b> la freine ; sa phosphorylation (PKA, stimulation β1) lève ce frein → lusitropie positive.', trap: 'Ne pas confondre : SERCA est sur la membrane du <b>RS</b>, la NCX et la Na⁺/K⁺-ATPase sur le sarcolemme.', note: 'La planche écrit « Pa⁺ » près de la pompe, et sa seconde étiquette SERCA (en haut à droite) pointe une protéine du sarcolemme.' },
+  { x: .795, y: .81, t: 'NCX et Na⁺/K⁺-ATPase', p: 'NCX : sort <b>1 Ca²⁺</b> contre <b>3 Na⁺</b> entrants ; Na⁺/K⁺-ATPase : 3 Na⁺ sortent, 2 K⁺ entrent.', trap: 'Digoxine : inhibe la Na⁺/K⁺-ATPase → Na⁺ intracellulaire ↑ → NCX moins efficace → Ca²⁺ ↑ → effet <b>inotrope positif</b>.' },
+  { x: .36, y: .70, t: 'Système tubule T – RS', p: 'Le tubule T amène le potentiel d’action au contact du RS : c’est la diade, siège du couplage excitation-contraction.', trap: 'Sans Ca²⁺ extracellulaire, le cœur cesse de se contracter, alors que le muscle squelettique continue.' },
+]},
+];
+</script>
+<script>// Le Cœur — atlas à zoom continu, 9 planches emboîtées (Canvas 2D, zéro dépendance).
+// Chaque planche vit dans le « portail » de la précédente ; une seule caméra (cx, cy, z) traverse le monde.
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const META = window.__META__, IMG = window.__IMG__; const N = PLATES.length;
+const ROMAN = ['I', 'II', 'III'];
+const MAG = PLATES.map((p) => ACTS[p.act].mag), REALW = PLATES.map((p) => 40 / ACTS[p.act].mag); // plate width in cm at its home view
+
+// ───────────── world: plate k+1 sits inside plate k's portal rectangle
+const R = [{ x: 0, y: 0, w: 1, h: META[PLATES[0].img].h / META[PLATES[0].img].w }];
+for (let k = 1; k < N; k++) { const p = PLATES[k - 1].portal, par = R[k - 1], m = META[PLATES[k].img]; const w = par.w * p.w, h = w * (m.h / m.w);
+  R.push({ x: par.x + p.c[0] * par.w - w / 2, y: par.y + p.c[1] * par.h - h / 2, w, h }); }
+
+// ───────────── canvas & view
+const cv = $('#cv'), ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false, railH = 200;
+let offC = null, offX = null;
+function off() { if (!offC) { offC = document.createElement('canvas'); offX = offC.getContext('2d'); } if (offC.width !== cv.width || offC.height !== cv.height) { offC.width = cv.width; offC.height = cv.height; } return offX; }
+function layout() {
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const short = !mobile && H < 520; const top = mobile ? 62 : short ? 48 : 82, bottom = mobile ? 76 : short ? 50 : 112, left = mobile ? 2 : short ? 6 : 22, right = mobile ? 2 : short ? 48 : 92;
+  aw = (W - left - right) * 0.985; ah = (H - top - bottom) * 0.985; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
+  railH = ($('#rail').clientHeight || 200) - 12; need();
+}
+const homeZ = (k) => Math.min(aw / R[k].w, ah / R[k].h);
+const home = (k) => ({ cx: R[k].x + R[k].w / 2, cy: R[k].y + R[k].h / 2, z: homeZ(k) });
+const cam = { cx: 0.5, cy: 0.25, z: 600 };
+const sig = (k, z = cam.z) => z / homeZ(k);
+const toS = (wx, wy) => [vcx + (wx - cam.cx) * cam.z, vcy + (wy - cam.cy) * cam.z];
+const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
+function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)); a.push(A * D); } return a; }
+function dominant(z = cam.z) { const a = alphas(z); let b = 0; for (let k = 1; k < N; k++) if (a[k] > a[b]) b = k; return b; }
+
+// ───────────── images: decoded on demand; a small LRU keeps phone memory low
+const imgs = {}, thumbs = {}, lru = [];
+function thumb(key) { if (!thumbs[key]) { const i = new Image(); i.src = IMG[key + '_t']; thumbs[key] = i; } return thumbs[key]; }
+function want(key) { let e = imgs[key]; if (!e) { const i = new Image(); i.decoding = 'async'; i.src = IMG[key]; e = imgs[key] = { i, ok: false }; e.p = i.decode().then(() => { e.ok = true; need(); }).catch(() => { e.ok = !!i.naturalWidth; need(); }); }
+  const j = lru.indexOf(key); if (j >= 0) lru.splice(j, 1); lru.push(key);
+  while (lru.length > (mobile ? 5 : 9)) { const k = lru.shift(); if (imgs[k]) { imgs[k].i.src = ''; delete imgs[k]; } } return e; }
+function prefetch() { const k = dominant(); [k - 1, k + 1, k].forEach((j) => j >= 0 && j < N && want(PLATES[j].img)); }
+
+// ───────────── rendering (on demand only)
+let dirty = true, raf = 0, quality = 'high', texPat = null;
+function need() { dirty = true; if (!raf) raf = requestAnimationFrame(frame); }
+function drawPlate(c, k, alpha) {
+  const key = PLATES[k].img; const e = imgs[key]; const im = e && e.ok ? e.i : thumb(key); if (!im || !im.naturalWidth) return;
+  const r = R[k]; const [x, y] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z; const NW = im.naturalWidth, NH = im.naturalHeight;
+  const dx0 = Math.max(0, x), dy0 = Math.max(0, y), dx1 = Math.min(W, x + sw), dy1 = Math.min(H, y + sh); if (dx1 <= dx0 || dy1 <= dy0) return;
+  c.globalAlpha = alpha; c.drawImage(im, ((dx0 - x) / sw) * NW, ((dy0 - y) / sh) * NH, ((dx1 - dx0) / sw) * NW, ((dy1 - dy0) / sh) * NH, dx0 * DPR, dy0 * DPR, (dx1 - dx0) * DPR, (dy1 - dy0) * DPR); c.globalAlpha = 1;
+}
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
+  const a = alphas(); let s = 0; const bg = [0, 0, 0];
+  a.forEach((v, k) => { const b = META[PLATES[k].img].bg; s += v; for (let i = 0; i < 3; i++) bg[i] += b[i] * v; });
+  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.5; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  for (let k = 0; k < N; k++) { if (a[k] < 0.004) continue; const sg = sig(k);
+    if (k > 0 && sg < 0.97) { // the deeper plate opens through a soft radial iris centred on its portal
+      const o = off(); const r = R[k]; const [x0, y0] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z;
+      const bx = Math.max(0, Math.floor(x0 * DPR)), by = Math.max(0, Math.floor(y0 * DPR)), bw = Math.min(cv.width, Math.ceil((x0 + sw) * DPR)) - bx, bh = Math.min(cv.height, Math.ceil((y0 + sh) * DPR)) - by;
+      if (bw <= 0 || bh <= 0) continue;
+      o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(bx, by, bw, bh); o.imageSmoothingQuality = quality; drawPlate(o, k, 1);
+      const cx = (x0 + sw / 2) * DPR, cy = (y0 + sh / 2) * DPR, rr = Math.max(sw, sh) * (0.3 + 0.5 * sst(0.5, 0.97, sg)) * DPR;
+      const g = o.createRadialGradient(cx, cy, rr * 0.42, cx, cy, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(bx, by, bw, bh); o.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = a[k]; ctx.drawImage(offC, bx, by, bw, bh, bx, by, bw, bh); ctx.globalAlpha = 1;
+    } else drawPlate(ctx, k, a[k]); }
+  updateHUD(a); updatePins(a);
+}
+
+// ───────────── camera dynamics
+const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
+const zMin = () => homeZ(0) * 0.7, zMax = () => homeZ(N - 1) * 4;
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function clampCenter() { const r = R[dominant()]; const m = 0.14 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m * 0.6, r.y + r.h + m * 0.6); }
+const ratio = (k) => homeZ(k + 1) / homeZ(k);
+function steer(strength) { // while zooming in, glide toward the next portal (progress-based so short and long dives feel alike)
+  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); if (p <= 0.28) return 0;
+  const r = R[k + 1]; const kk = sst(0.28, 0.85, p) * strength; cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+function frame() {
+  raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = false;
+  if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
+    const w = Math.abs(f.z1 - f.z0) / f.z1 < 1e-3 ? e : (1 / z - 1 / f.z0) / (1 / f.z1 - 1 / f.z0); cam.z = z; cam.cx = f.c0[0] + (f.c1[0] - f.c0[0]) * w; cam.cy = f.c0[1] + (f.c1[1] - f.c0[1]) * w;
+    if (u >= 1) { flight = null; if (f.done) f.done(); } else moving = true; }
+  else {
+    if (Math.abs(pend) > 1e-4) { const step = pend * (1 - Math.exp(-dt * 16)); pend -= step; zoomAt(anchorS[0], anchorS[1], Math.exp(step)); moving = true; if (step > 0) steering = true; } else pend = 0;
+    if (Math.abs(vel[0]) + Math.abs(vel[1]) > 0.02) { cam.cx -= vel[0] / cam.z; cam.cy -= vel[1] / cam.z; const d = Math.exp(-dt * 6); vel[0] *= d; vel[1] *= d; moving = true; } else vel = [0, 0];
+    if (steering) { if (steer(1 - Math.exp(-dt * 7)) > 1e-4) moving = true; if (Math.abs(pend) < 1e-4) steering = false; }
+    clampCenter(); }
+  if (dirty || moving) { dirty = false; quality = moving || ptrs.size ? 'medium' : 'high'; render(); }
+  if (moving) raf = requestAnimationFrame(frame); else if (quality !== 'high') { clearTimeout(frame.hq); frame.hq = setTimeout(() => { if (!raf && !ptrs.size) { quality = 'high'; render(); } }, 90); }
+}
+function flyTo(cx, cy, z, dur, done) { flight = { t0: performance.now(), dur: dur ?? clamp(0.75 + Math.abs(Math.log(z / cam.z)) * 0.3, 0.75, 2.6) * 1000, c0: [cam.cx, cam.cy], c1: [cx, cy], z0: cam.z, z1: z, done }; pend = 0; vel = [0, 0]; need(); }
+function flyHome(k, done) { k = clamp(k, 0, N - 1); for (let j = Math.min(k, dominant()); j <= Math.max(k, dominant()); j++) want(PLATES[j].img); const h = home(k); flyTo(h.cx, h.cy, h.z, undefined, done); }
+function camAtDepth(t) { t = clamp(t, 0, N - 1); const k = Math.min(N - 2, Math.floor(t)); const f = t - k; const a = home(k), b = home(k + 1);
+  const z = Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * f); const w = (1 / z - 1 / a.z) / (1 / b.z - 1 / a.z); return { cx: a.cx + (b.cx - a.cx) * w, cy: a.cy + (b.cy - a.cy) * w, z }; }
+function depthOf() { const k = dominant(); if (k >= N - 1) return N - 1; return k + clamp(Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)), 0, 1); }
+
+// ───────────── HUD: magnification follows the acts (×1 → ×100 → ×10 000), scale bar follows the plates
+let hudKey = '', plateKey = -1;
+function niceLen(cmPerPx) { const target = cmPerPx * 92; const e = Math.pow(10, Math.floor(Math.log10(target))); const m = target / e; const n = (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; return [n, n / cmPerPx]; }
+function fmtLen(cm) { if (cm >= 1) return `${+cm.toPrecision(3)} cm`; if (cm >= 0.1) return `${+(cm * 10).toPrecision(3)} mm`; if (cm >= 1e-4) return `${+(cm * 1e4).toPrecision(3)} µm`; return `${+(cm * 1e7).toPrecision(3)} nm`; }
+function fmtMag(m) { if (m < 10) return '×' + m.toFixed(1).replace('.', ',').replace(',0', ''); const e = Math.pow(10, Math.floor(Math.log10(m)) - 1); return '×' + Math.round(Math.round(m / e) * e).toLocaleString('fr-FR'); }
+function magNow() { const t = depthOf(), k = Math.floor(t), f = t - k;
+  if (k >= N - 1) return MAG[N - 1] * Math.max(1, sig(N - 1)); if (k === 0 && sig(0) < 1) return MAG[0] * sig(0);
+  return Math.exp(Math.log(MAG[k]) + (Math.log(MAG[k + 1]) - Math.log(MAG[k])) * f); }
+function updateHUD(a) {
+  let sw = 0, lr = 0; for (let k = 0; k < N; k++) { if (a[k] < 0.01) continue; sw += a[k]; lr += a[k] * Math.log(REALW[k] / (R[k].w * cam.z)); }
+  const k = dominant(); const [n, px] = niceLen(Math.exp(lr / sw)); const M = magNow(); const t = depthOf();
+  const key = `${fmtMag(M)}|${k}|${Math.round(px)}|${fmtLen(n)}`;
+  if (key !== hudKey) { hudKey = key; $('#mag').innerHTML = `${fmtMag(M)}<small>${PLATES[k].scale}</small>`; $('#sbi').style.width = `${Math.round(px)}px`; $('#sbt').textContent = fmtLen(n); }
+  if (k !== plateKey) { const first = plateKey < 0; plateKey = k; const P = PLATES[k];
+    $('#ltitle').textContent = P.title; $('#path').innerHTML = `Le cœur &nbsp;›&nbsp; Acte ${ROMAN[P.act]} · ${ACTS[P.act].name} &nbsp;›&nbsp; <b>${k + 1} / ${N}</b>`;
+    document.querySelectorAll('.pl').forEach((b, i) => b.classList.toggle('on', i === k)); document.querySelectorAll('.grp').forEach((g, i) => g.classList.toggle('on', i === P.act));
+    document.querySelectorAll('.rail .tick').forEach((el, i) => { el.classList.toggle('on', i === k); el.classList.toggle('cur', el.classList.contains('major') && PLATES[i].act === P.act); });
+    if (!first) toast(`${k + 1}. ${P.short} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}`); prefetch(); }
+  $('#rth').style.top = `${6 + (t / (N - 1)) * railH}px`; $('#rfill').style.height = `${(t / (N - 1)) * railH}px`;
+  $('#lvf').style.width = `${clamp(Math.log(M) / Math.log(10000), 0, 1) * 100}%`;
+}
+
+// ───────────── hotspots
+const pinEls = [];
+function buildPins() { const host = $('#pins');
+  PLATES.forEach((P, k) => P.pins.forEach((p, j) => { const el = document.createElement('div'); el.className = 'pin' + (p.portal ? ' portal' : '');
+    el.innerHTML = `<button aria-label="${p.t.replace(/"/g, '')}"><b></b><i></i></button>` + (p.portal ? `<button class="go">${p.portal} →</button>` : `<span>${p.t}</span>`);
+    el.querySelector('button').addEventListener('click', (ev) => { ev.stopPropagation(); openCard(k, j, true); });
+    if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
+    host.appendChild(el); pinEls.push({ el, k, j, vis: false }); })); }
+function updatePins(a) {
+  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.5 : 3.8), x = 0, y = 0;
+    if (show) { const r = R[P.k]; [x, y] = toS(r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; }
+    if (show) { P.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; if (!P.vis) { P.el.classList.add('on'); P.vis = true; } } else if (P.vis) { P.el.classList.remove('on'); P.vis = false; } } }
+
+// ───────────── study card
+let open = null; const seen = new Set();
+function openCard(k, j, fly) {
+  const P = PLATES[k]; const p = P.pins[j]; open = { k, j }; seen.add(`${k}.${j}`); const n = P.pins.length;
+  pinEls.forEach((E) => { E.el.classList.toggle('active', E.k === k && E.j === j); E.el.classList.toggle('seen', seen.has(`${E.k}.${E.j}`)); });
+  const C = $('#card'); C.classList.toggle('portal', !!p.portal);
+  C.innerHTML = `<button class="x" aria-label="Fermer">✕</button><div class="chip"><i></i>Planche ${k + 1} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}</div><h3>${p.t}</h3><p>${p.p}</p>
+    <div class="trap"><span>⚠ Piège d’EMD</span>${p.trap}</div>${p.note ? `<div class="note">Note sur la planche : ${p.note}</div>` : ''}
+    <div class="act">${p.portal ? `<button class="btn dive">${p.portal} →</button>` : ''}<button class="btn zoom">Recentrer</button></div>
+    <div class="nav"><button class="pv">← Précédent</button><span>${j + 1} / ${n} · ${[...seen].filter((s) => s.startsWith(`${k}.`)).length} vus</span><button class="nx">Suivant →</button></div>`;
+  C.querySelector('.x').onclick = closeCard; C.querySelector('.zoom').onclick = () => focusPin(k, j);
+  C.querySelector('.pv').onclick = () => openCard(k, (j - 1 + n) % n, true); C.querySelector('.nx').onclick = () => openCard(k, (j + 1) % n, true);
+  if (p.portal) C.querySelector('.dive').onclick = () => { closeCard(); flyHome(k + 1); };
+  C.classList.add('on'); if (fly) focusPin(k, j); hideHint();
+}
+function closeCard() { open = null; $('#card').classList.remove('on'); pinEls.forEach((E) => E.el.classList.remove('active')); }
+function focusPin(k, j) { const p = PLATES[k].pins[j]; const r = R[k]; const wx = r.x + p.x * r.w, wy = r.y + p.y * r.h; const z = homeZ(k) * (p.portal ? 1.35 : 1.7);
+  const fx = mobile ? vcx : Math.min(vcx, (W - (H < 520 ? 50 : 92) - Math.min(410, W * 0.54)) / 2 + 24), fy = mobile ? Math.min(vcy, H * 0.24) : vcy; flyTo(wx - (fx - vcx) / z, wy - (fy - vcy) / z, z); }
+
+// ───────────── input
+let hintGone = false; function hideHint() { if (hintGone) return; hintGone = true; $('#hint').classList.add('gone'); }
+let tt = 0; function toast(s) { const t = $('#toast'); t.textContent = s; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1700); }
+function zoomBy(f, sx = vcx, sy = vcy) { flight = null; anchorS = [sx, sy]; pend = clamp(pend + Math.log(f), -3, 3); need(); hideHint(); }
+addEventListener('wheel', (e) => { if (e.target.closest && e.target.closest('.card,.dock,.ctrl,.top')) { if (!e.target.closest('.card,.dock')) e.preventDefault(); return; }
+  e.preventDefault(); let d = e.deltaY; if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= H; zoomBy(Math.exp(-d * (e.ctrlKey ? 0.006 : 0.0016)), e.clientX, e.clientY); }, { passive: false });
+let lastPinch = 0, lastMid = null, downAt = 0, lastTap = 0, moved = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); flight = null; pend = 0; vel = [0, 0]; downAt = performance.now(); moved = 0; cv.classList.add('drag');
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a[0] - b[0], a[1] - b[1]); lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; } hideHint(); });
+cv.addEventListener('pointermove', (e) => { if (!ptrs.has(e.pointerId)) return; const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 1) { const dx = e.clientX - prev[0], dy = e.clientY - prev[1]; moved += Math.abs(dx) + Math.abs(dy); cam.cx -= dx / cam.z; cam.cy -= dy / cam.z; vel = [dx * 0.9, dy * 0.9]; clampCenter(); need(); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.cx -= (mid[0] - lastMid[0]) / cam.z; cam.cy -= (mid[1] - lastMid[1]) / cam.z; if (lastPinch) { const f = d / lastPinch; zoomAt(mid[0], mid[1], f); if (f > 1) steer(0.06); }
+    lastPinch = d; lastMid = mid; moved += 10; vel = [0, 0]; clampCenter(); need(); } });
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = 0; if (ptrs.size === 1) lastMid = [...ptrs.values()][0];
+  if (!ptrs.size) { cv.classList.remove('drag'); if (performance.now() - downAt > 80) need(); else vel = [0, 0];
+    if (moved < 6 && performance.now() - downAt < 300) { const tn = performance.now(); if (tn - lastTap < 320) { zoomBy(2.2, e.clientX, e.clientY); lastTap = 0; } else { lastTap = tn; if (open) closeCard(); } } } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; const k = e.key;
+  if (k === 'f' || k === 'F') toggleFS(); else if (k === '+' || k === '=') zoomBy(1.35); else if (k === '-' || k === '_') zoomBy(1 / 1.35);
+  else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { closeCard(); flyHome(dominant() + 1); }
+  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { closeCard(); flyHome(dominant() - 1); }
+  else if (k === 'r' || k === 'R' || k === '0' || k === 'Home') { closeCard(); flyHome(0); } else if (k === 'End') { closeCard(); flyHome(N - 1); }
+  else if (k === 'Escape') closeCard(); else if (/^[1-9]$/.test(k)) { closeCard(); flyHome(+k - 1); } else return;
+  e.preventDefault(); hideHint(); });
+function toggleFS() { const d = document, el = d.documentElement; if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); else (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); }
+$('#zin').onclick = () => zoomBy(1.6); $('#zout').onclick = () => zoomBy(1 / 1.6); $('#reset').onclick = () => { closeCard(); flyHome(0); }; $('#fs').onclick = toggleFS;
+// depth rail: one tick per plate, labels at the start of each act
+const rail = $('#rail'); PLATES.forEach((P, i) => { const t = document.createElement('div'); const major = i === 0 || PLATES[i - 1].act !== P.act; t.className = 'tick' + (major ? ' major' : '');
+  t.style.top = `calc(6px + ${(i / (N - 1)) * 100}% - ${(i / (N - 1)) * 12}px)`; t.title = `${i + 1}. ${P.short}`;
+  if (major) t.innerHTML = `<span>${ACTS[P.act].name}<em>${fmtMag(ACTS[P.act].mag)}</em></span>`;
+  t.onclick = (ev) => { ev.stopPropagation(); closeCard(); flyHome(i); }; rail.appendChild(t); });
+let railDrag = false; const railSet = (e) => { const r = rail.getBoundingClientRect(); const c = camAtDepth(clamp((e.clientY - r.top - 6) / (r.height - 12), 0, 1) * (N - 1)); flight = null; pend = 0; vel = [0, 0]; cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; prefetch(); need(); hideHint(); };
+rail.addEventListener('pointerdown', (e) => { if (e.target.closest('.tick')) return; railDrag = true; rail.setPointerCapture(e.pointerId); railSet(e); }); rail.addEventListener('pointermove', (e) => railDrag && railSet(e)); rail.addEventListener('pointerup', () => (railDrag = false));
+// plate dock, grouped by act
+ACTS.forEach((A, ai) => { const g = document.createElement('div'); g.className = 'grp'; g.innerHTML = `<div class="gh"><b>${ROMAN[ai]}</b>${A.name}<em>${fmtMag(A.mag)}</em></div><div class="gt"></div>`;
+  PLATES.forEach((P, i) => { if (P.act !== ai) return; const b = document.createElement('button'); b.className = 'pl'; b.title = `${i + 1}. ${P.title}`;
+    b.innerHTML = `<img alt="" src="${IMG[P.img + '_t']}"><i>${i + 1}</i><b>${P.short}</b>`; b.onclick = () => { closeCard(); hideHint(); flyHome(i); }; g.querySelector('.gt').appendChild(b); });
+  $('#dock').appendChild(g); });
+addEventListener('resize', () => { const t = depthOf(); layout(); if (!flight) { const c = camAtDepth(t); cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; } need(); });
+
+// ───────────── boot
+async function boot() {
+  if (matchMedia('(pointer:coarse)').matches) { $('#hint1').textContent = 'Pincez pour plonger'; $('#hint2').textContent = 'Glisser pour explorer · double-tap · touchez les points et les boutons lumineux' + (innerHeight > innerWidth ? ' · tournez le téléphone pour agrandir les planches' : ''); }
+  buildPins(); layout();
+  if (window.__TEX__) { const ti = new Image(); ti.src = window.__TEX__; ti.decode().then(() => { texPat = ctx.createPattern(ti, 'repeat'); need(); }).catch(() => {}); }
+  const h = home(0); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z * 0.9; $('#lb').style.width = '35%';
+  await want(PLATES[0].img).p; $('#lb').style.width = '100%'; prefetch(); render();
+  setTimeout(() => { $('#loader').classList.add('done'); flyTo(h.cx, h.cy, h.z, 1300); }, 120);
+  // decode the rest in the background, one at a time, so long dives never show a blurry placeholder (desktop)
+  if (!mobile) for (const P of PLATES) await want(P.img).p;
+}
+window.__atlas = { cam, flyHome, openCard, depthOf, dominant: () => dominant(), R, PLATES, alphasNow: () => alphas(), magNow };
+boot().catch((e) => { $('#lmsg').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+<script>(function(){
+var d=document,w=window,root=d.documentElement;
+['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+function q(s){return d.querySelector(s);}
+var loader=q('#loader');
+function isReady(){return !loader||loader.classList.contains('done');}
+function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;var list=A.PLATES||A.L;k=Math.floor(k);if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);var h=d.getElementById('hint');if(h)h.classList.add('gone');}catch(e){}}
+if(!root.classList.contains('az-embed')){
+  var top=q('.top');
+  if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');
+    a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Atlas Zoom</span>';
+    top.insertBefore(a,top.firstChild);}
+  var pm=/[?&]planche=(\d{1,2})(?:&|$)/.exec(location.search);
+  if(pm)whenReady(function(){setTimeout(function(){gotoPlate(+pm[1]-1);},0);});
+  return;
+}
+var target=(self.origin&&self.origin!=='null')?self.origin:'*';
+function post(type,data){try{var m={source:'medart-atlas',type:type};if(data){for(var k in data)m[k]=data[k];}w.parent.postMessage(m,target);}catch(e){}}
+w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(target!=='*'&&e.origin!==target)||!m||m.source!=='medart-hub')return;
+  if(m.type==='inset'&&typeof m.top==='number'&&m.top>=0&&m.top<400){root.style.setProperty('--az-top',Math.round(m.top)+'px');}
+  else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
+post('hello');
+w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
+function read(){
+  var level='',mag='';
+  if(mEl){var sm=mEl.querySelector('small');level=sm?sm.textContent.trim():'';
+    for(var n=mEl.firstChild;n;n=n.nextSibling){if(n!==sm)mag+=n.textContent||'';}mag=mag.trim();}
+  var k=-1,n=0;try{var A=w.__atlas;if(A){k=A.dominant();var list=A.PLATES||A.L;n=list?list.length:0;}}catch(e){}
+  return {title:tEl?tEl.textContent.trim():'',level:level,mag:mag,index:k,count:n};
+}
+function flush(){var s=read(),key=s.title+'|'+s.level+'|'+s.index;
+  if(key!==last){last=key;lastMag=s.mag;post('state',s);return;}
+  if(s.mag!==lastMag){lastMag=s.mag;post('mag',{mag:s.mag});}}
+function schedule(){if(timer)return;timer=setTimeout(function(){timer=0;flush();},120);}
+[tEl,mEl,pEl].forEach(function(el){if(el)new MutationObserver(schedule).observe(el,{childList:true,characterData:true,subtree:true});});
+whenReady(function(){post('ready');flush();});
+w.addEventListener('keydown',function(e){var k=e.key;if((k==='f'||k==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;e.stopPropagation();e.preventDefault();post('fullscreen');}},true);
+flush();
+})();</script>
+</body>
+</html>

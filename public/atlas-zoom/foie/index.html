@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#191d21">
+<title>Le Foie · Atlas zoomable · MedArt AI Studio</title>
+<link rel="preload" href="/atlas-zoom/foie/p1.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<style>
+.az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
+.az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
+.az-embed .top .scale{margin-left:auto}.az-embed .scale .sbar{margin-top:0}
+.az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
+.az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
+@media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+</style>
+<meta name="description" content="Le foie et les voies biliaires en 9 planches et 3 actes : de la segmentation de Couinaud au canalicule biliaire, en zoom continu.">
+<style>
+@font-face{font-family:'Kalam';font-weight:400;font-display:swap;src:url(/atlas-zoom/_shared/kalam-400.woff2) format('woff2')}
+@font-face{font-family:'Kalam';font-weight:700;font-display:swap;src:url(/atlas-zoom/_shared/kalam-700.woff2) format('woff2')}
+:root{--bg:#191d21;--ink:#f6efe2;--chalk:#f3e2bd;--soft:rgba(240,233,220,.74);--mute:rgba(232,226,214,.5);--line:rgba(243,226,189,.14);--acc:#ffb86b;--acc2:#7fd8ff;
+  --hand:'Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',system-ui,sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab}#cv.drag{cursor:grabbing}
+/* slate atmosphere: vignette + chalk grain (static layers, composited once) */
+.vig{position:fixed;inset:0;pointer-events:none;z-index:1;background:radial-gradient(130% 100% at 50% 48%,transparent 52%,rgba(6,8,10,.55) 100%)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.06;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scrim{position:fixed;left:0;right:0;top:0;height:120px;z-index:2;pointer-events:none;background:linear-gradient(rgba(13,16,21,.66),rgba(13,16,21,.3) 55%,transparent)}
+/* pins */
+#pins{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pin{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
+.pin.on{opacity:1}.pin.on button{pointer-events:auto}
+.pin button{all:unset;cursor:pointer;position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.pin i{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff6e4,var(--acc) 60%,#e07a2c);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 16px 3px rgba(255,184,107,.55);transition:transform .25s var(--ease)}
+.pin b{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,184,107,.75);animation:pulse 2.2s var(--ease) infinite}
+.pin.portal i{background:radial-gradient(circle at 40% 35%,#eafaff,var(--acc2) 60%,#2f8fc0);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 20px 5px rgba(127,216,255,.6)}
+.pin.portal b{border-color:rgba(127,216,255,.85);animation-duration:1.6s}
+.pin.seen i{filter:saturate(.55) brightness(.92)}
+.pin button:hover i,.pin.active i{transform:scale(1.25)}
+.pin span{position:absolute;left:22px;top:-13px;white-space:nowrap;padding:5px 11px;border-radius:999px;font:700 15px/1.1 var(--hand);color:var(--chalk);background:rgba(20,24,28,.86);border:1px solid var(--line);opacity:0;transform:translateX(-4px);transition:.25s var(--ease);pointer-events:none}
+.pin .go{all:unset;cursor:pointer;position:absolute;left:24px;top:-16px;white-space:nowrap;padding:7px 14px 7px 13px;border-radius:999px;font:700 15.5px/1.1 var(--hand);color:#e6f8ff;background:linear-gradient(135deg,rgba(30,74,104,.9),rgba(16,40,60,.92));border:1px solid rgba(127,216,255,.55);box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 22px rgba(127,216,255,.35),0 8px 24px -8px rgba(0,0,0,.7);animation:glow 2.4s var(--ease) infinite;transition:transform .2s var(--ease),filter .2s}
+.pin.on .go{pointer-events:auto}.pin.left .go{left:auto;right:24px}.pin.left .go:hover{transform:translateX(-3px)}.pin .go:hover{transform:translateX(3px);filter:brightness(1.15)}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 18px rgba(127,216,255,.28),0 8px 24px -8px rgba(0,0,0,.7)}50%{box-shadow:0 0 0 1px rgba(127,216,255,.25),0 0 30px rgba(127,216,255,.55),0 8px 24px -8px rgba(0,0,0,.7)}}
+.pin button:hover+span,.pin.active span{opacity:1;transform:none}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.55);opacity:0}}
+/* glass */
+.glass{background:linear-gradient(160deg,rgba(40,45,52,.78),rgba(22,26,31,.86));border:1px solid rgba(243,226,189,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 30px 70px -24px rgba(0,0,0,.75)}
+@supports (backdrop-filter:blur(1px)){.glass{background:linear-gradient(160deg,rgba(40,45,52,.62),rgba(22,26,31,.74));backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%)}}
+/* header */
+.top{position:fixed;left:0;right:0;top:0;z-index:6;display:flex;align-items:flex-start;gap:18px;padding:16px 22px;pointer-events:none}
+.top>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:8px 14px 8px 9px;border-radius:16px}
+.brand svg{width:32px;height:32px;flex:none}.brand b{display:block;font-weight:700;font-size:13.5px;letter-spacing:-.01em}.brand em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:1px}
+.crumb{margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;padding-top:4px;max-width:46vw}
+.crumb .path{font:600 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:rgba(236,230,218,.66);text-shadow:0 1px 8px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.crumb .path b{color:var(--acc)}
+.crumb h2{margin:0;font:700 25px/1.15 var(--hand);color:var(--chalk);text-shadow:0 2px 18px rgba(0,0,0,.6);transition:opacity .3s}
+.scale{min-width:170px;padding:10px 14px;border-radius:16px;text-align:right}
+.scale .m{font:800 24px/1 var(--sans);letter-spacing:-.03em;color:#fff}.scale .m small{font-size:13px;color:var(--mute);font-weight:600;margin-left:6px;letter-spacing:.06em;text-transform:uppercase}
+.sbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;font:600 11.5px var(--sans);color:var(--soft)}
+.sbar i{display:block;height:6px;border:1.5px solid rgba(243,226,189,.85);border-top:0;transition:width .25s var(--ease)}
+/* side controls */
+.ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px;border-radius:22px}
+.ctrl button{all:unset;cursor:pointer;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:var(--ink);transition:background .2s}
+.ctrl button:hover{background:rgba(255,255,255,.08)}.ctrl svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rail{position:relative;width:38px;height:min(330px,40vh);margin:4px 0;cursor:pointer;touch-action:none}
+.rail .tr{position:absolute;left:18px;top:6px;bottom:6px;width:2px;border-radius:2px;background:rgba(243,226,189,.18)}
+.rail .fill{position:absolute;left:18px;top:6px;width:2px;border-radius:2px;background:linear-gradient(var(--acc),var(--acc2))}
+.rail .tick{position:absolute;left:13px;width:12px;height:2px;margin-top:-1px;background:rgba(243,226,189,.28);border-radius:2px}.rail .tick.major{left:8px;width:22px;background:rgba(243,226,189,.45)}.rail .tick::before{content:"";position:absolute;left:-6px;right:-6px;top:-7px;bottom:-7px}
+.rail .tick{cursor:pointer}.rail .tick span{position:absolute;right:32px;top:-14px;padding:4px 8px 3px;border-radius:9px;background:rgba(18,22,27,.72);border:1px solid rgba(243,226,189,.08);font:700 13.5px/1 var(--hand);color:var(--mute);white-space:nowrap;text-align:right;cursor:pointer}.rail .tick em{display:block;font:600 9.5px var(--sans);letter-spacing:.08em;font-style:normal;margin-top:1px}
+.rail .tick span{opacity:0;transition:opacity .3s}.ctrl:hover .rail .tick span{opacity:1}.rail .tick.cur span{color:var(--chalk)}.rail .tick.on{background:var(--acc)}
+.rail .th{position:absolute;left:7px;width:24px;height:24px;margin-top:-12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#ffd9a8);box-shadow:0 0 0 4px rgba(255,184,107,.22),0 4px 14px rgba(0,0,0,.5)}
+/* plate dock, grouped by act */
+.dock{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:6px 8px 7px;border-radius:22px;max-width:calc(100vw - 16px)}
+.grp{display:flex;flex-direction:column;gap:4px;padding:0 4px}.grp+.grp{border-left:1px solid rgba(243,226,189,.1);padding-left:10px}
+.gh{display:flex;align-items:baseline;gap:6px;padding-left:4px;font:700 10px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);transition:color .3s}
+.gh b{font:700 12px var(--hand);letter-spacing:0;color:var(--acc);opacity:.6}.gh em{font-style:normal;font-weight:600;letter-spacing:.04em;text-transform:none;opacity:.8}
+.grp.on .gh{color:var(--soft)}.grp.on .gh b{opacity:1}
+.gt{display:flex;gap:3px}
+.pl{all:unset;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:78px;padding:3px 0 2px;border-radius:13px;transition:background .3s var(--ease)}
+.pl img{width:70px;height:39px;object-fit:cover;border-radius:9px;display:block;border:1px solid rgba(243,226,189,.16);filter:saturate(.7) brightness(.75);transition:.3s var(--ease)}
+.pl i{position:absolute;left:6px;top:6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;display:grid;place-items:center;font:800 9.5px var(--sans);font-style:normal;color:#1a1d21;background:rgba(243,226,189,.85)}
+.pl b{font:700 12px/1.05 var(--hand);color:var(--mute);transition:color .3s;max-width:76px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl:hover{background:rgba(255,255,255,.05)}.pl:hover img{filter:saturate(.9) brightness(.95)}
+.pl.on{background:rgba(255,184,107,.12)}.pl.on img{filter:none;border-color:var(--acc);box-shadow:0 0 16px rgba(255,184,107,.38)}.pl.on b{color:var(--chalk)}.pl.on i{background:var(--acc)}
+/* scale track (1× → 100× → 10 000×) */
+.lvb{position:relative;display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;font:700 11px/1.1 var(--sans);color:var(--soft);text-align:center}
+.lvb span{display:flex;flex-direction:column;align-items:center;min-width:40px}.lvb span:first-of-type{align-items:flex-start}.lvb span:last-of-type{align-items:flex-end}
+.lvb em{font:600 9px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-style:normal;margin-top:2px}
+.lvb .lt{position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:rgba(243,226,189,.14);overflow:hidden}.lvb .lt i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.wait{position:fixed;left:50%;top:50%;z-index:7;width:34px;height:34px;margin:-17px;opacity:0;transition:opacity .2s;pointer-events:none}.wait.on{opacity:1}
+.wait i{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(243,226,189,.2);border-top-color:var(--acc);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+/* study card */
+.card{position:fixed;z-index:8;right:84px;top:150px;width:min(390px,calc(100vw - 32px));max-height:calc(100vh - 262px);overflow:auto;padding:20px 22px 18px;border-radius:24px;opacity:0;transform:translateX(18px) scale(.98);pointer-events:none;transition:opacity .35s var(--ease),transform .45s var(--ease);scrollbar-width:none}
+.card::-webkit-scrollbar{display:none}.card.on{opacity:1;transform:none;pointer-events:auto}
+.card .chip{display:inline-flex;align-items:center;gap:7px;font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}.card .chip i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.card.portal .chip i{background:var(--acc2);box-shadow:0 0 10px var(--acc2)}
+.card h3{margin:8px 34px 10px 0;font:700 26px/1.12 var(--hand);color:var(--chalk)}
+.card p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--soft)}.card p b{color:#fff;font-weight:650}
+.trap{position:relative;margin:12px 0 4px;padding:12px 14px 12px 16px;border-radius:16px;background:linear-gradient(135deg,rgba(255,120,90,.15),rgba(255,120,90,.04));border:1px solid rgba(255,140,110,.3);font-size:13.2px;line-height:1.55;color:#f6e3dc}
+.trap span{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:800 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#ff9a7e}
+.note{margin-top:10px;font-size:12px;line-height:1.5;color:var(--mute);border-left:2px solid rgba(243,226,189,.25);padding-left:10px}
+.card .x{all:unset;cursor:pointer;position:absolute;right:14px;top:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:var(--soft)}.card .x:hover{background:rgba(255,255,255,.08)}
+.card .act{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:13px;font:700 13px var(--sans);background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--ink);transition:.2s}
+.btn:hover{background:rgba(255,255,255,.12)}.btn.dive{background:linear-gradient(135deg,#7fd8ff,#4aa9e0);color:#06202e;border:0}.btn.dive:hover{filter:brightness(1.08)}
+.card .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font:600 11px var(--sans);color:var(--mute)}
+.card .nav button{all:unset;cursor:pointer;padding:6px 9px;border-radius:9px;color:var(--soft)}.card .nav button:hover{background:rgba(255,255,255,.07)}
+/* hint + loader */
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;padding:16px 20px;border-radius:20px;text-align:center;font:700 18px var(--hand);color:var(--chalk);transition:opacity .6s;pointer-events:none}
+.hint small{display:block;margin-top:4px;font:500 12px var(--sans);color:var(--soft)}.hint.gone{opacity:0}
+.hint svg{width:26px;height:38px;display:block;margin:0 auto 8px}.hint svg .w{animation:wheel 1.4s var(--ease) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}100%{transform:translateY(8px);opacity:0}}
+#loader{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);transition:opacity .7s,visibility .7s}#loader.done{opacity:0;visibility:hidden}
+#loader h1{margin:0;font:700 44px var(--hand);color:var(--chalk);text-align:center}#loader p{margin:6px 0 22px;color:var(--soft);font-size:14px;text-align:center}
+#loader .tr{width:240px;height:2px;margin:0 auto;border-radius:2px;background:rgba(243,226,189,.15);overflow:hidden}#loader .tr i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .3s}
+#loader .msg{margin-top:12px;text-align:center;font-size:12px;color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:116px;transform:translateX(-50%);z-index:9;padding:9px 14px;border-radius:13px;font:600 12.5px var(--sans);color:var(--soft);opacity:0;transition:opacity .4s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:1050px){.crumb .path{display:none}.crumb{max-width:40vw}}
+@media (max-width:1100px){.pl{width:62px}.pl img{width:56px;height:32px}.pl b{font-size:11px;max-width:60px}}
+@media (max-width:900px){.pl b{display:none}.gh em{display:none}}
+@media (max-width:760px){
+  .top{padding:10px 10px;gap:8px}.brand{padding:6px 9px 6px 6px}.brand em{display:none}.brand b{font-size:12px}.crumb{display:none}
+  .scale{min-width:0;padding:8px 10px}.scale .m{font-size:19px}
+  .ctrl{right:6px;top:auto;bottom:84px;transform:none;padding:6px 4px;gap:2px}.ctrl button{width:34px;height:34px}.rail{height:120px}.rail .tick span{display:none}
+  .dock{bottom:6px;gap:2px;padding:4px 5px;border-radius:16px}.grp{padding:0 1px;gap:2px}.grp+.grp{padding-left:4px}.gh{font-size:8px;letter-spacing:.08em;padding-left:2px}.gh b{font-size:10px}.gt{gap:1px}
+  .pl{width:calc((100vw - 52px)/9);max-width:44px;padding:2px 0;border-radius:9px}.pl img{width:100%;height:auto;aspect-ratio:16/10;border-radius:7px}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .lvb{margin-top:6px;padding-top:7px;gap:6px;font-size:10px}.lvb em{display:none}.lvb span{min-width:0}
+  .card{left:8px;right:8px;top:auto;bottom:76px;width:auto;max-height:54vh;transform:translateY(24px);border-radius:22px}
+  .pin .go{font-size:13.5px;padding:6px 11px;left:20px;top:-14px;white-space:normal;width:max-content;max-width:min(46vw,188px);line-height:1.15}.pin.left .go{left:auto;right:20px}
+  .pin span{display:none}.scrim{height:84px}
+  .hint{padding:12px 16px;font-size:15px;max-width:78vw}.hint small{font-size:11px}
+}
+@media (max-height:520px) and (min-width:761px){
+  .top{padding:8px 12px;gap:10px}.brand{padding:5px 9px 5px 5px}.brand svg{width:26px;height:26px}.brand em{display:none}.brand b{font-size:12px}
+  .crumb .path{display:none}.crumb h2{font-size:17px}.scrim{height:70px}
+  .scale{min-width:0;padding:6px 10px}.scale .m{font-size:17px}.sbar{margin-top:4px}.lvb{display:none}
+  .ctrl{right:6px;padding:4px 3px;gap:0}.ctrl button{width:30px;height:30px}.rail{height:min(150px,36vh);margin:2px 0}.rail .tick span{display:none}
+  .dock{bottom:5px;padding:4px 6px;gap:2px;border-radius:14px}.gh{display:none}.grp+.grp{padding-left:5px}.pl{width:50px;padding:2px 0}.pl img{width:46px;height:26px;border-radius:6px}.pl b{display:none}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .card{top:52px;right:50px;bottom:8px;max-height:none;width:min(360px,52vw);padding:14px 16px}.card h3{font-size:21px}.card p{font-size:13px}
+  .hint{padding:10px 14px;font-size:15px}.hint svg{display:none}.toast{bottom:52px}.pin span{display:none}
+}
+@media (prefers-reduced-motion:reduce){.pin b,.pin .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Atlas zoomable du foie"></canvas>
+<div class="vig"></div><div class="grain"></div><div class="scrim"></div>
+<div id="pins"></div>
+<header class="top">
+  <div class="brand glass"><svg viewBox="0 0 32 32" fill="none"><rect x=".5" y=".5" width="31" height="31" rx="9" fill="#232830" stroke="rgba(243,226,189,.25)"/><path d="M6.5 13.2c0-3.1 2.4-5 5.8-5h12.1c1.7 0 2.6 1.3 1.9 2.8-1.2 2.6-4 4.6-7.8 6.1-3 1.2-5.2 3.3-7.2 4.6-2.6 1.6-4.8-1.4-4.8-8.5z" stroke="#ffb86b" stroke-width="1.6" stroke-linejoin="round"/><path d="M15.5 17.6v3.6c0 1.4 1.1 2.5 2.5 2.5" stroke="#7fd8ff" stroke-width="1.4" stroke-linecap="round"/><ellipse cx="19.6" cy="23.6" rx="1.8" ry="1.3" stroke="#7fd8ff" stroke-width="1.3"/></svg>
+    <div><b>MedArt AI Studio</b><em>Atlas zoomable · Le foie</em></div></div>
+  <div class="crumb"><div class="path" id="path"></div><h2 id="ltitle"></h2></div>
+  <div class="scale glass"><div class="m" id="mag">×1</div><div class="sbar"><i id="sbi"></i><span id="sbt">5 cm</span></div><div class="lvb"><div class="lt"><i id="lvf"></i></div><span>1×<em>Organe</em></span><span>100×<em>Tissu</em></span><span>10 000×<em>Cellule · Canalicule</em></span></div></div>
+</header>
+<nav class="ctrl glass" aria-label="Zoom">
+  <button id="zin" title="Zoomer (+)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="rail" id="rail" title="Profondeur"><div class="tr"></div><div class="fill" id="rfill"></div><div class="th" id="rth"></div></div>
+  <button id="zout" title="Dézoomer (−)"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <button id="reset" title="Vue d’ensemble (R)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+  <button id="fs" title="Plein écran (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+<nav class="dock glass" id="dock" aria-label="Planches"></nav>
+<aside class="card glass" id="card" aria-live="polite"></aside>
+<div class="hint glass" id="hint"><svg viewBox="0 0 26 38" fill="none"><rect x="1.5" y="1.5" width="23" height="35" rx="11.5" stroke="#f3e2bd" stroke-width="2"/><rect class="w" x="11.5" y="8" width="3" height="7" rx="1.5" fill="#ffb86b"/></svg>
+  <span id="hint1">Faites défiler pour plonger dans le foie</span><small id="hint2">Molette · double-clic · boutons lumineux · ←/→ planche précédente / suivante · F plein écran</small></div>
+<div class="toast glass" id="toast"></div><div class="wait" id="wait"><i></i></div>
+<div id="loader"><div><h1>Le Foie</h1><p>9 planches · 3 actes — de l’organe au canalicule biliaire</p><div class="tr"><i id="lb"></i></div><div class="msg" id="lmsg">Chargement des planches…</div></div></div>
+<script>window.__IMG__={"p1":"/atlas-zoom/foie/p1.webp","p1_t":"/atlas-zoom/foie/p1_t.webp","p2":"/atlas-zoom/foie/p2.webp","p2_t":"/atlas-zoom/foie/p2_t.webp","p3":"/atlas-zoom/foie/p3.webp","p3_t":"/atlas-zoom/foie/p3_t.webp","p4":"/atlas-zoom/foie/p4.webp","p4_t":"/atlas-zoom/foie/p4_t.webp","p5":"/atlas-zoom/foie/p5.webp","p5_t":"/atlas-zoom/foie/p5_t.webp","p6":"/atlas-zoom/foie/p6.webp","p6_t":"/atlas-zoom/foie/p6_t.webp","p7":"/atlas-zoom/foie/p7.webp","p7_t":"/atlas-zoom/foie/p7_t.webp","p8":"/atlas-zoom/foie/p8.webp","p8_t":"/atlas-zoom/foie/p8_t.webp","p9":"/atlas-zoom/foie/p9.webp","p9_t":"/atlas-zoom/foie/p9_t.webp"};window.__META__={"p1": {"w": 2048, "h": 1009, "bg": [30, 34, 37]}, "p2": {"w": 2048, "h": 1018, "bg": [30, 32, 37]}, "p3": {"w": 2048, "h": 1012, "bg": [29, 34, 39]}, "p4": {"w": 2048, "h": 993, "bg": [31, 33, 40]}, "p5": {"w": 2048, "h": 1022, "bg": [28, 32, 36]}, "p6": {"w": 2048, "h": 1008, "bg": [28, 31, 34]}, "p7": {"w": 2048, "h": 1033, "bg": [32, 33, 38]}, "p8": {"w": 2048, "h": 1030, "bg": [31, 33, 37]}, "p9": {"w": 2048, "h": 1016, "bg": [30, 33, 37]}};window.__TEX__="/atlas-zoom/_shared/board.webp";</script>
+<script>// Foie — 9 planches en une plongée continue (3 actes × 3 planches), du foie entier au canalicule biliaire.
+// Coordonnées normalisées dans la planche recadrée. portal : rectangle où s'emboîte la planche suivante.
+const ACTS = [
+  { name: 'Anatomie', sub: 'Organe', mag: 1 },
+  { name: 'Histologie', sub: 'Tissu', mag: 100 },
+  { name: 'Cytologie', sub: 'Cellule · Canalicule', mag: 10000 },
+];
+const PLATES = [
+// ─────────────────────────────── ACTE I — ANATOMIE ───────────────────────────────
+{ img: 'p1', act: 0, short: 'Foie', scale: 'Organe', title: 'Anatomie externe du foie : faces diaphragmatique et viscérale',
+  portal: { c: [0.25, 0.45], w: 0.45 },
+  pins: [
+  { x: .12, y: .30, t: 'Lobe droit anatomique', p: 'Le plus volumineux ; il porte la vésicule biliaire sur sa face viscérale. Bord inférieur sous le rebord costal droit.', trap: 'Flèche hépatique normale ≈ <b>10 à 12 cm</b> sur la ligne médio-claviculaire : au-delà, hépatomégalie.', note: 'Sur cette vue, « Lobe gauche » et « Lobe droit » sont inversés : le gros lobe, à gauche de l’image, sous lequel dépasse le fond de la vésicule, est le lobe droit.' },
+  { x: .24, y: .20, t: 'Ligaments coronaire et triangulaires', p: 'Réflexions du péritoine du diaphragme vers le foie ; le ligament coronaire encadre l’aire nue, les ligaments triangulaires en sont les extrémités latérales.', trap: 'On les sectionne pour mobiliser le foie (hépatectomie, transplantation).' },
+  { x: .385, y: .26, t: 'Aire nue (area nuda)', p: 'Zone de la face <b>postérieure</b> du lobe droit, entre les deux feuillets du ligament coronaire, directement au contact du diaphragme : <b>non péritonisée</b>.', trap: 'Le foie est entièrement péritonisé <b>sauf</b> l’aire nue (avec le hile, le lit vésiculaire et le sillon de la VCI) : un abcès ou une rupture à ce niveau diffuse vers le rétropéritoine, pas dans la cavité péritonéale.', note: 'La planche la dessine sur la face antéro-supérieure ; elle est en réalité postérieure.' },
+  { x: .283, y: .50, t: 'Ligament falciforme', p: 'Repli péritonéal qui unit la face antéro-supérieure du foie au diaphragme et à la paroi abdominale antérieure ; il sépare les lobes anatomiques droit et gauche.', trap: 'Il ne sépare <b>pas</b> le foie droit du foie gauche fonctionnels : cette limite est la <b>ligne de Cantlie</b> (lit vésiculaire → bord gauche de la VCI), suivie par la veine sus-hépatique moyenne.' },
+  { x: .285, y: .66, t: 'Ligament rond', p: 'Vestige de la <b>veine ombilicale</b>, dans le bord libre du ligament falciforme, jusqu’à la branche gauche de la veine porte.', trap: 'Ligament rond = veine ombilicale ; ligament veineux (d’Arantius) = canal veineux. En hypertension portale, les veines para-ombilicales se reperméabilisent : <b>tête de méduse</b> (Cruveilhier-Baumgarten).' },
+  { x: .71, y: .27, t: 'Lobe caudé (de Spiegel)', p: 'Entre la VCI et le sillon du ligament veineux = <b>segment I</b>. Il reçoit des branches des deux pédicules et se draine directement dans la VCI.', trap: '<b>Syndrome de Budd-Chiari</b> : le lobe caudé, drainé par ses propres petites veines, est épargné et s’<b>hypertrophie</b>.' },
+  { x: .775, y: .22, t: 'Veine cave inférieure', p: 'Rétro-hépatique, dans un sillon de la face postérieure ; elle reçoit les 3 veines sus-hépatiques juste sous le diaphragme.', trap: 'Budd-Chiari = obstacle au drainage veineux hépatique : hépatomégalie douloureuse, ascite, insuffisance hépatique.' },
+  { x: .765, y: .47, t: 'Hile hépatique (porte du foie)', p: 'Sillon transverse où entrent la veine porte et l’artère hépatique propre et d’où sortent les canaux hépatiques.', trap: '<b>Manœuvre de Pringle</b> : clampage du pédicule hépatique dans le ligament hépato-duodénal (par le hiatus de Winslow). Si le saignement persiste, il vient des veines sus-hépatiques ou de la VCI.' },
+  { x: .82, y: .68, t: 'Vésicule biliaire', p: 'Dans la fossette cystique de la face viscérale du lobe droit, entre segments IV et V ; son fond se projette à l’extrémité du 9e cartilage costal droit.', trap: '<b>Signe de Murphy</b> : arrêt de l’inspiration à la palpation de l’hypocondre droit (cholécystite aiguë).', note: 'La flèche « Vésicule biliaire » se termine sur le canal du hile, pas sur la vésicule.' },
+  { x: .745, y: .69, t: 'Lobe carré', p: 'Entre la fossette cystique et la fissure du ligament rond : il correspond au <b>segment IVb</b>.', trap: 'Anatomiquement rattaché au lobe droit, il appartient <b>fonctionnellement au foie gauche</b> (segment IV).' },
+  { x: .58, y: .30, t: 'Lobe gauche anatomique', p: 'À gauche du ligament rond et du ligament veineux : il correspond aux <b>segments II et III</b> (secteur latéral gauche).', trap: 'La lobectomie gauche « latérale » (II + III) est le greffon classique du donneur vivant pour l’enfant.', note: 'Sur la face viscérale, « Lobe droit » (à gauche) et « Lobe gauche » (en haut à droite) sont inversés : la vésicule repose sur le lobe droit, à droite de l’image.' },
+  { x: .89, y: .40, t: 'Empreintes viscérales du lobe droit', p: 'Empreintes colique, rénale, surrénalienne et duodénale sur la face viscérale.', trap: 'Le <b>récessus hépato-rénal (de Morison)</b> est le point le plus déclive en décubitus : on y cherche l’épanchement à l’échographie FAST.' },
+  { x: .15, y: .56, portal: 'Explorer les 8 segments de Couinaud', t: 'Segmentation de Couinaud', p: 'Passez du foie « anatomique » (lobes) au foie « fonctionnel » (segments) dessiné par ses vaisseaux.', trap: 'La chirurgie hépatique suit les segments, pas les lobes.' },
+]},
+{ img: 'p2', act: 0, short: 'Couinaud', scale: 'Organe', title: 'Segmentation hépatique de Couinaud (8 segments) et pédicule',
+  portal: { c: [0.45, 0.80], w: 0.3 },
+  pins: [
+  { x: .49, y: .08, t: 'Veine cave inférieure', p: 'Elle reçoit les veines sus-hépatiques droite, moyenne et gauche (la gauche et la moyenne souvent par un tronc commun).', trap: 'Veines sus-hépatiques = <b>intersegmentaires</b> (dans les scissures) ; branches portales = <b>intrasegmentaires</b> (au centre des segments).' },
+  { x: .33, y: .20, t: 'Veine sus-hépatique droite', p: 'Dans la <b>scissure portale droite</b> : elle sépare le secteur antérieur droit (V, VIII) du secteur postérieur droit (VI, VII).', trap: 'Une veine hépatique inférieure droite (fréquente) draine le segment VI directement dans la VCI.' },
+  { x: .50, y: .22, t: 'Veine sus-hépatique moyenne', p: 'Dans la <b>scissure portale principale</b> (ligne de Cantlie) : elle sépare le foie droit (V–VIII) du foie gauche (II–IV).', trap: 'Hépatectomie droite = segments V, VI, VII, VIII ; hépatectomie gauche = II, III, IV (± I).' },
+  { x: .65, y: .24, t: 'Veine sus-hépatique gauche', p: 'Dans la scissure portale gauche, entre les segments II et III.', trap: 'Le <b>sillon ombilical</b> (ligament rond) sépare le segment IV des segments II–III : c’est une scissure <b>hépatique</b> (elle contient le pédicule portal gauche), sans veine sus-hépatique.' },
+  { x: .74, y: .31, t: 'Segment I (caudé)', p: 'Segment <b>autonome</b>, postérieur, autour de la VCI : pédicules droits et gauches, drainage direct dans la VCI.', trap: 'C’est le seul segment ni « droit » ni « gauche » ; il est invisible sur une vue antérieure.', note: 'La flèche « Segment I (caudé) » pointe la pointe du lobe gauche (segment II).' },
+  { x: .56, y: .42, t: 'Les 8 segments de Couinaud', p: 'Les 3 veines sus-hépatiques délimitent 4 secteurs ; le plan de bifurcation portale coupe chaque secteur en segments. Chaque segment a son pédicule (porte, artère, voie biliaire) et peut être réséqué seul.', trap: 'Numérotation dans le sens horaire (vue antérieure) : I caudé, II–III latéral gauche, IV, puis V, VI, VII, VIII dans le foie droit.', note: 'L’étiquette « Segments I à VIII » pointe le lobe gauche.' },
+  { x: .67, y: .54, t: 'Segments II et III', p: 'Secteur latéral gauche : II postéro-supérieur, III antéro-inférieur.', trap: 'Une métastase de cancer colorectal limitée à II–III se traite par une sectoriectomie latérale gauche.', note: 'Le segment III n’est pas étiqueté : la flèche « Segment II » pointe en fait la zone antéro-inférieure du lobe gauche, qui est le segment III.' },
+  { x: .44, y: .60, t: 'Segment IV', p: 'Entre le sillon ombilical et la scissure principale : IVa (supérieur) et IVb (inférieur = lobe carré).', trap: 'Le segment IV appartient au <b>foie gauche</b>. Cancer de la vésicule : résection du lit vésiculaire (IVb + V).' },
+  { x: .32, y: .865, t: 'Segment V', p: 'Antéro-inférieur droit, sous le segment VIII ; il porte une partie du lit vésiculaire.', trap: 'Segments V et VIII = secteur antérieur droit (paramédian), irrigué par la branche antérieure de la veine porte droite.' },
+  { x: .30, y: .62, t: 'Segment VI', p: 'Postéro-inférieur droit.', trap: 'Ponction-biopsie hépatique transpariétale : 8e–9e espace intercostal droit, ligne axillaire moyenne (segments VI–VII). En cas de troubles de l’hémostase ou d’ascite : voie <b>transjugulaire</b>.' },
+  { x: .27, y: .49, t: 'Segment VII', p: 'Postéro-supérieur droit, sous le diaphragme.', trap: 'L’<b>abcès amibien</b> siège surtout dans le lobe droit, en position postéro-supérieure (VII–VIII) ; il peut se rompre dans la plèvre.' },
+  { x: .29, y: .32, t: 'Segment VIII', p: 'Antéro-supérieur droit, sous le dôme diaphragmatique.', trap: 'Les segments VII et VIII, hauts et postérieurs, sont les plus difficiles d’accès en cœlioscopie.' },
+  { x: .48, y: .62, t: 'Veine porte hépatique', p: 'Formée derrière l’isthme du pancréas par la veine mésentérique supérieure et le tronc spléno-mésaraïque ; ≈ <b>75 % du débit</b> hépatique, ≈ 50 % de l’O₂.', trap: 'Hypertension portale : anastomoses porto-caves <b>œsophagiennes</b> (varices), rectales, para-ombilicales (tête de méduse), rétropéritonéales (Retzius).' },
+  { x: .545, y: .88, t: 'Artère hépatique propre', p: 'Branche du tronc cœliaque via l’artère hépatique commune ; ≈ 25 % du débit, ≈ 50 % de l’O₂. Elle irrigue <b>seule</b> les voies biliaires.', trap: 'Thrombose de l’artère hépatique après greffe → <b>nécrose biliaire</b>. Variantes : hépatique droite née de la mésentérique supérieure (≈ 15 %), gauche née de la gastrique gauche.' },
+  { x: .497, y: .90, t: 'Voie biliaire principale', p: 'Dans le ligament hépato-duodénal : <b>VBP en avant et à droite</b>, artère hépatique en avant et à gauche, <b>veine porte en arrière</b>.', trap: 'Disposition classique du pédicule hépatique, très demandée en EMD.' },
+  { x: .40, y: .80, side: 'l', portal: 'Voir les voies biliaires & la vésicule', t: 'Voies biliaires', p: 'Suivez la voie biliaire principale hors du foie jusqu’au duodénum.', trap: 'La bile sort du foie par les canaux hépatiques droit et gauche.' },
+]},
+{ img: 'p3', act: 0, short: 'Voies biliaires', scale: 'Organe', title: 'Voies biliaires intra- et extra-hépatiques et vésicule biliaire',
+  portal: { c: [0.60, 0.08], w: 0.14 },
+  pins: [
+  { x: .42, y: .06, t: 'Canaux hépatiques droit et gauche', p: 'Ils naissent de la confluence des canaux biliaires intrahépatiques et s’unissent au hile (convergence biliaire supérieure).', trap: 'Tumeur de la convergence = <b>tumeur de Klatskin</b> : ictère cholestatique sans grosse vésicule.' },
+  { x: .47, y: .10, t: 'Triangle de Calot (hépato-cystique)', p: 'Entre le canal cystique, le canal hépatique commun et le bord inférieur du foie ; il contient l’<b>artère cystique</b>.', trap: 'Cholécystectomie : obtenir la « vue critique de sécurité » du triangle avant toute section, pour ne pas sectionner la voie biliaire principale.' },
+  { x: .455, y: .155, t: 'Canal cystique et valvules de Heister', p: 'Relie le col de la vésicule à la voie biliaire principale ; sa muqueuse forme des replis spiralés, les <b>valvules de Heister</b>.', trap: 'Canal hépatique commun + canal cystique = <b>cholédoque</b>. Un calcul enclavé dans le cystique donne une cholécystite, pas d’ictère (sauf syndrome de Mirizzi).' },
+  { x: .505, y: .25, t: 'Canal hépatique commun', p: 'Né de l’union des canaux hépatiques droit et gauche, il devient cholédoque après l’abouchement du cystique.', trap: 'Voie biliaire principale = canal hépatique commun + cholédoque.' },
+  { x: .29, y: .33, t: 'Vésicule biliaire', p: 'Fond, corps, col (poche de Hartmann) ; ≈ 50 mL. Elle <b>concentre</b> la bile (5 à 10×) et se contracte sous l’effet de la <b>cholécystokinine</b>.', trap: 'Douleur biliaire projetée à l’<b>épaule droite</b> (irritation diaphragmatique, nerf phrénique).', note: 'La planche écrit « col et et valvule » ; les valvules de Heister sont dans le canal cystique, pas dans la vésicule.' },
+  { x: .505, y: .43, t: 'Cholédoque', p: '≈ 6 à 8 cm, diamètre < 6–7 mm ; il descend derrière le duodénum et la tête du pancréas jusqu’à l’ampoule.', trap: 'Triade de <b>Charcot</b> (angiocholite) : douleur, fièvre, puis ictère.' },
+  { x: .60, y: .50, t: 'Tête du pancréas', p: 'Le cholédoque terminal traverse ou longe la face postérieure de la tête du pancréas.', trap: 'Loi de <b>Courvoisier-Terrier</b> : ictère + grosse vésicule palpable = obstacle néoplasique (tête du pancréas) plutôt que lithiasique.' },
+  { x: .70, y: .57, t: 'Canal de Wirsung', p: 'Canal pancréatique principal ; il rejoint le cholédoque dans l’ampoule hépato-pancréatique.', trap: 'Un calcul enclavé dans l’ampoule peut bloquer les deux canaux : <b>pancréatite aiguë biliaire</b>.' },
+  { x: .462, y: .71, t: 'Ampoule hépato-pancréatique (de Vater)', p: 'Confluent du cholédoque et du Wirsung dans la paroi du 2e duodénum.', trap: 'L’ampullome vatérien donne un ictère <b>fluctuant</b> (nécrose tumorale) avec méléna.' },
+  { x: .48, y: .77, t: 'Sphincter d’Oddi', p: 'Muscle lisse autour de l’ampoule ; il se relâche sous l’effet de la cholécystokinine.', trap: 'Les <b>opiacés</b> (morphine) contractent le sphincter d’Oddi ; la sphinctérotomie endoscopique (CPRE) traite la lithiase de la VBP.' },
+  { x: .42, y: .79, t: 'Papille duodénale majeure', p: 'Sur la face médiale du <b>2e duodénum</b> ; la papille mineure, plus haute, reçoit le canal accessoire (de Santorini).', trap: 'Repère de la CPRE (cathétérisme de la papille par duodénoscope à vision latérale).' },
+  { x: .37, y: .60, t: 'Duodénum', p: 'Cadre en C autour de la tête du pancréas ; la papille s’ouvre sur sa 2e portion.', trap: 'Iléus biliaire : un gros calcul passe dans le duodénum par une fistule cholécysto-duodénale et bloque l’iléon terminal.' },
+  { x: .60, y: .08, portal: 'Zoomer dans le lobule hépatique (×100)', t: 'Le parenchyme hépatique', p: 'Entrez dans le tissu du foie : lobule hexagonal, travées, sinusoïdes.', trap: 'La bile naît dans les canalicules, au cœur des lobules, bien avant les canaux hépatiques.' },
+]},
+// ─────────────────────────────── ACTE II — HISTOLOGIE ───────────────────────────────
+{ img: 'p4', act: 1, short: 'Lobule', scale: 'Tissu', title: 'Histologie du lobule hépatique classique (hexagone)',
+  portal: { c: [0.13, 0.50], w: 0.18 },
+  pins: [
+  { x: .295, y: .36, t: 'Veine centrolobulaire', p: 'Au centre du lobule ; elle draine les sinusoïdes vers les veines sus-lobulaires puis sus-hépatiques.', trap: 'Le <b>foie cardiaque</b> (insuffisance cardiaque droite) donne une congestion et une nécrose <b>centrolobulaires</b> : aspect de « foie muscade ».' },
+  { x: .43, y: .19, t: 'Espaces portes de Kiernan', p: 'Aux angles du lobule : branche de la veine porte, branche de l’artère hépatique, canal biliaire (triade), plus des lymphatiques.', trap: 'Le lobule classique est centré sur la veine centrolobulaire, le <b>lobule portal</b> sur l’espace porte, l’<b>acinus</b> sur l’axe vasculaire entre deux espaces portes.' },
+  { x: .22, y: .28, t: 'Lobule hexagonal', p: 'Prisme de 1 à 2 mm, centré sur la veine centrolobulaire, avec des espaces portes à ses angles.', trap: 'Chez l’homme, les lobules sont <b>mal délimités</b> (peu de tissu conjonctif interlobulaire), contrairement au porc.' },
+  { x: .27, y: .56, t: 'Flux sanguin centripète', p: 'Le sang porte et artériel se mélange dans les sinusoïdes et coule de l’espace porte vers la veine centrolobulaire.', trap: 'Sang centripète, <b>bile centrifuge</b> : les deux flux circulent en sens inverse.' },
+  { x: .415, y: .50, t: 'Flux biliaire centrifuge', p: 'La bile coule dans les canalicules de la veine centrale vers l’espace porte (canaux de Hering → canal biliaire).', trap: 'Les canaux de Hering abritent des <b>cellules progénitrices</b> : réaction ductulaire des hépatopathies chroniques.' },
+  { x: .37, y: .86, t: 'Capsule de Glisson', p: 'Capsule conjonctive du foie, qui s’enfonce au hile avec les pédicules (gaine glissonienne).', trap: 'La capsule est innervée : sa distension (hépatomégalie aiguë, foie cardiaque) est douloureuse, alors que le parenchyme ne l’est pas.' },
+  { x: .81, y: .30, t: 'Travées de Remak', p: 'Lames d’hépatocytes épaisses d’une à deux cellules, disposées en rayons autour de la veine centrale.', trap: 'Des travées épaissies (≥ 3 cellules) et une perte de la réticuline orientent vers un <b>carcinome hépatocellulaire</b>.' },
+  { x: .745, y: .80, t: 'Capillaires sinusoïdes', p: 'Capillaires larges et irréguliers entre les travées, bordés d’un endothélium fenêtré et de cellules de Kupffer.', trap: 'Ils reçoivent un sang mêlé : porte (≈ 75 %) et artériel (≈ 25 %).' },
+  { x: .85, y: .72, t: 'Hépatocytes polygonaux', p: 'Cellules de 20 à 30 µm, cytoplasme éosinophile, noyau rond central, parfois deux noyaux.', trap: 'Ballonisation des hépatocytes + corps de Mallory-Denk = <b>stéatohépatite</b> (alcoolique ou métabolique).' },
+  { x: .13, y: .50, portal: 'Analyser la triade & l’acinus', t: 'Espace porte et acinus', p: 'Agrandissez un espace porte et découvrez l’acinus de Rappaport.', trap: 'Triade porte = veine porte + artère hépatique + canal biliaire.' },
+]},
+{ img: 'p5', act: 1, short: 'Triade & acinus', scale: 'Tissu', title: 'Espace porte (triade de Glisson) et acinus de Rappaport',
+  portal: { c: [0.30, 0.60], w: 0.2 },
+  pins: [
+  { x: .18, y: .20, t: 'Branche de la veine porte', p: 'Le plus gros vaisseau de l’espace porte : lumière large, paroi mince.', trap: 'Repère de lecture : veine = grande lumière, paroi fine ; artère = petite lumière, paroi musculaire épaisse ; canal biliaire = épithélium cubique.' },
+  { x: .35, y: .19, t: 'Branche de l’artère hépatique', p: 'Petite artère à média musculaire épaisse ; ses branches irriguent le plexus péribiliaire.', trap: 'Une artère <b>sans canal biliaire</b> voisin (ductopénie) évoque une cholangite biliaire primitive ou un rejet chronique de greffe.' },
+  { x: .235, y: .66, t: 'Canal biliaire interlobulaire', p: 'Épithélium <b>cubique simple</b> (cholangiocytes) ; il collecte la bile venue des canaux de Hering.', trap: 'Cholangite biliaire primitive : destruction auto-immune des petits canaux (anticorps <b>anti-mitochondries</b>). Cholangite sclérosante primitive : gros canaux, rectocolite associée.' },
+  { x: .19, y: .80, t: 'Tissu conjonctif de l’espace porte', p: 'Conjonctif lâche avec lymphatiques et nerfs ; il prolonge la capsule de Glisson.', trap: 'Hépatite chronique : infiltrat inflammatoire de l’espace porte puis fibrose portale → septa → cirrhose (score <b>METAVIR</b> F0 à F4).' },
+  { x: .37, y: .72, t: 'Lame limitante périportale', p: 'Première rangée d’hépatocytes qui borde l’espace porte.', trap: 'Sa destruction par l’inflammation = <b>hépatite d’interface</b> (ex-nécrose parcellaire), signe d’activité des hépatites chroniques.' },
+  { x: .755, y: .15, t: 'Veine centrolobulaire (sommet de l’acinus)', p: 'Les veines centrales sont aux extrémités de l’acinus : c’est là que finit la zone 3.', trap: 'Dans l’acinus, la veine centrale est en <b>périphérie</b> ; dans le lobule classique, elle est au centre.', note: 'Les quatre sommets du losange sont dessinés à l’identique : dans l’acinus, deux sommets opposés sont des espaces portes (l’axe qui les relie est la zone 1) et les deux autres des veines centrolobulaires (zone 3).' },
+  { x: .575, y: .50, t: 'Espace porte (sommet de l’acinus)', p: 'L’acinus est centré sur les branches terminales de la veine porte et de l’artère hépatique qui partent de l’espace porte.', trap: 'L’acinus de Rappaport est l’unité <b>fonctionnelle</b> (perfusion), le lobule classique l’unité <b>morphologique</b>.' },
+  { x: .70, y: .47, t: 'Zone 1 (périportale)', p: 'La mieux oxygénée : néoglucogenèse, β-oxydation, cycle de l’urée, synthèse du cholestérol.', trap: 'Atteinte de la zone 1 : toxiques à action directe (phosphore, fer), éclampsie, hépatite virale (interface).' },
+  { x: .80, y: .40, t: 'Zone 2 (intermédiaire)', p: 'Fonctions intermédiaires entre les zones 1 et 3.', trap: 'Zone 2 classiquement touchée par la <b>fièvre jaune</b> (corps de Councilman).' },
+  { x: .81, y: .63, t: 'Zone 3 (centrolobulaire)', p: 'La moins oxygénée, la plus riche en <b>cytochromes P450</b> (CYP2E1) : glycolyse, lipogenèse, détoxification.', trap: 'Zone 3 = cible de l’<b>ischémie</b> (choc, foie cardiaque), du <b>paracétamol</b> (NAPQI) et de l’alcool.' },
+  { x: .30, y: .60, portal: 'Suivre la bile jusqu’à la vésicule', t: 'Vers la vésicule biliaire', p: 'Les canaux biliaires mènent la bile jusqu’à la vésicule, qui la stocke et la concentre.', trap: 'Entre les repas, le sphincter d’Oddi fermé dirige la bile vers la vésicule.' },
+]},
+{ img: 'p6', act: 1, short: 'Vésicule', scale: 'Tissu', title: 'Histologie de la vésicule biliaire',
+  portal: { c: [0.40, 0.22], w: 0.16 },
+  pins: [
+  { x: .28, y: .13, t: 'Muqueuse très plissée', p: 'Replis nombreux quand la vésicule est vide ; ils s’effacent quand elle est distendue.', trap: 'Vésicule « porcelaine » (paroi calcifiée) : risque de cancer, indication de cholécystectomie.' },
+  { x: .23, y: .28, t: 'Épithélium cylindrique simple', p: 'Cellules hautes à microvillosités, <b>sans cellules caliciformes</b> : réabsorption d’eau et d’électrolytes (Na⁺/K⁺-ATPase basolatérale) qui concentre la bile.', trap: 'Épithélium cylindrique simple absorbant, sans cellules caliciformes : ne le confondez pas avec celui de l’intestin.' },
+  { x: .27, y: .43, t: 'Chorion sans musculaire muqueuse', p: 'Lamina propria lâche, riche en vaisseaux ; il n’y a <b>ni musculaire muqueuse ni sous-muqueuse</b>.', trap: 'Absence de sous-muqueuse : un cancer de la vésicule envahit très tôt la musculeuse puis le foie (pronostic sombre).' },
+  { x: .325, y: .48, t: 'Sinus de Rokitansky-Aschoff', p: 'Diverticules de la muqueuse qui s’enfoncent dans la musculeuse ; ils se multiplient avec l’âge et l’inflammation.', trap: 'Ils signent la <b>cholécystite chronique</b> et l’adénomyomatose ; ils peuvent retenir bile et calculs.' },
+  { x: .30, y: .66, t: 'Musculeuse plexiforme', p: 'Faisceaux de muscle lisse entrecroisés, sans couches nettes ; contraction sous l’effet de la <b>cholécystokinine</b>.', trap: 'La CCK est libérée par le duodénum au contact des graisses : un repas gras déclenche la colique hépatique.' },
+  { x: .26, y: .80, t: 'Tissu conjonctif périvésiculaire', p: 'Couche conjonctive épaisse avec vaisseaux, nerfs et lymphatiques ; du côté hépatique, elle unit la vésicule au foie.', trap: 'Canaux de <b>Luschka</b> : petits canaux biliaires accessoires du lit vésiculaire, source de fuite biliaire après cholécystectomie.' },
+  { x: .30, y: .93, t: 'Séreuse / adventice', p: 'Séreuse péritonéale sur la face libre, adventice sur la face adhérente au foie.', trap: 'Cholécystite gangréneuse : perforation possible de la paroi libre → péritonite biliaire.' },
+  { x: .695, y: .30, t: 'Microvillosités de l’épithélium', p: 'Elles augmentent la surface de réabsorption de l’eau.', trap: 'La bile vésiculaire est 5 à 10 fois plus concentrée que la bile hépatique.' },
+  { x: .82, y: .33, t: 'Lamina propria', p: 'Conjonctif lâche, vaisseaux et cellules immunitaires.', trap: 'Cholestérolose : macrophages spumeux chargés de cholestérol dans le chorion (vésicule « fraise »).' },
+  { x: .72, y: .52, t: 'Fente entre deux replis', p: 'Lumière découpée entre deux replis de la muqueuse.', trap: 'Un vrai sinus de Rokitansky-Aschoff traverse la musculeuse ; une simple fente entre deux replis n’en est pas un.', note: 'Dans le zoom circulaire, la flèche « Sinus de Rokitansky-Aschoff » montre une fente muqueuse normale, qui ne s’enfonce pas dans la musculeuse.' },
+  { x: .79, y: .77, t: 'Capillaires et vaisseaux', p: 'Riche réseau vasculaire du chorion : l’eau réabsorbée regagne le sang.', trap: 'L’artère cystique est terminale : son atteinte favorise la nécrose de la paroi.' },
+  { x: .40, y: .22, portal: 'Entrer dans l’hépatocyte (×10 000)', t: 'À la source de la bile', p: 'La bile stockée ici est fabriquée par les hépatocytes : remontez à sa source, la cellule hépatique.', trap: 'Bile = eau, sels biliaires, bilirubine conjuguée, cholestérol, phospholipides ; ≈ 600 mL/jour.' },
+]},
+// ─────────────────────────────── ACTE III — CYTOLOGIE ───────────────────────────────
+{ img: 'p7', act: 2, short: 'Hépatocyte', scale: 'Cellule', title: 'Cytologie de l’hépatocyte : ultrastructure et polarité',
+  portal: { c: [0.42, 0.17], w: 0.18 },
+  pins: [
+  { x: .50, y: .10, t: 'Pôle vasculaire (sinusoïdal)', p: 'Face basolatérale hérissée de microvillosités dans l’espace de Disse : ≈ 70 % de la membrane, échanges avec le plasma.', trap: 'L’hépatocyte a 3 domaines : <b>sinusoïdal</b> (basolatéral), <b>canaliculaire</b> (apical, la bile) et latéral (jonctions).' },
+  { x: .64, y: .30, t: 'Pôle biliaire (canalicule)', p: 'Domaine apical : gouttière creusée entre deux hépatocytes voisins, scellée par des jonctions serrées.', trap: 'Le pôle apical de l’hépatocyte ne regarde pas un vaisseau mais le <b>canalicule biliaire</b>.' },
+  { x: .50, y: .47, t: 'Noyau sphérique central', p: 'Rond, nucléole net ; ≈ 25 % des hépatocytes sont binucléés, beaucoup sont <b>polyploïdes</b>.', trap: 'Les hépatocytes sont quiescents (G0) mais peuvent rentrer en cycle : <b>régénération</b> après hépatectomie (on peut réséquer jusqu’à ≈ 70 % d’un foie sain).' },
+  { x: .43, y: .52, t: 'Réticulum endoplasmique rugueux', p: 'Synthèse de l’<b>albumine</b>, des facteurs de coagulation (fibrinogène, II, V, VII, IX, X) et des protéines de transport.', trap: 'Le <b>facteur V</b>, non vitamine K-dépendant, distingue l’insuffisance hépatocellulaire (V ↓) d’une carence en vitamine K (V normal).' },
+  { x: .60, y: .40, t: 'Réticulum endoplasmique lisse', p: '<b>Cytochromes P450</b> (phase I), glucuronoconjugaison (UGT1A1 pour la bilirubine), synthèse des lipides et du cholestérol.', trap: 'Inducteurs enzymatiques (rifampicine, phénobarbital, carbamazépine) → hypertrophie du REL. Gilbert = UGT1A1 ↓ → bilirubine <b>libre</b> ↑.', note: 'Le libellé « Réticulum endoplasmique lisse » figure deux fois.' },
+  { x: .65, y: .51, t: 'Appareil de Golgi multiple', p: 'Plusieurs dictyosomes, près du pôle biliaire : glycosylation des protéines plasmatiques, assemblage et sécrétion des <b>VLDL</b>.', trap: 'Défaut d’export des VLDL (alcool, kwashiorkor) → accumulation de triglycérides : <b>stéatose</b>.' },
+  { x: .58, y: .65, t: 'Mitochondries abondantes', p: '≈ 1 000 à 2 000 par cellule : β-oxydation, néoglucogenèse, cétogenèse, début du cycle de l’urée.', trap: 'Stéatose <b>microvésiculaire</b> = souffrance mitochondriale (syndrome de Reye, stéatose aiguë gravidique, valproate).' },
+  { x: .57, y: .72, t: 'Rosettes de glycogène', p: 'Particules α denses ; la glycogénolyse maintient la glycémie pendant le jeûne court.', trap: 'Maladie de <b>von Gierke</b> (glucose-6-phosphatase) : hépatomégalie, hypoglycémie de jeûne, acidose lactique. Glycogène = PAS+, digéré par la diastase.' },
+  { x: .555, y: .78, t: 'Peroxysomes et lysosomes', p: 'Peroxysomes : catalase, β-oxydation des acides gras à très longue chaîne. Lysosomes : lipofuscine, fer (ferritine, hémosidérine), cuivre.', trap: 'Hémochromatose : fer dans les hépatocytes (<b>Perls</b>). Maladie de Wilson : cuivre, céruloplasmine basse.' },
+  { x: .33, y: .80, t: 'Sinusoïde au pôle vasculaire', p: 'Les sinusoïdes bordent le pôle vasculaire ; leur endothélium est fenêtré.', trap: 'Le sang n’est jamais au contact direct de l’hépatocyte : il en est séparé par l’endothélium et l’espace de Disse.', note: 'Le libellé « endothelial fenestrair » est un mélange d’anglais et de faute : il faut lire « endothélium fenêtré ».' },
+  { x: .08, y: .10, t: 'Hépatocyte en MET', p: 'Mitochondries, citernes de RER et grains denses de glycogène.', trap: 'En MET, le glycogène apparaît en rosettes très denses, souvent groupées près du REL.' },
+  { x: .41, y: .17, portal: 'Zoomer sur l’espace de Disse', t: 'Sinusoïde et espace de Disse', p: 'Agrandissez la zone entre le sinusoïde et le pôle vasculaire.', trap: 'L’espace de Disse est entre l’endothélium et l’hépatocyte, pas dans la lumière.' },
+]},
+{ img: 'p8', act: 2, short: 'Sinusoïde & Disse', scale: 'Cellule', title: 'Ultrastructure du sinusoïde hépatique et de l’espace de Disse',
+  portal: { c: [0.68, 0.70], w: 0.2 },
+  pins: [
+  { x: .45, y: .15, t: 'Lumière du sinusoïde', p: 'Sang mêlé, porte et artériel, à basse pression, qui coule de l’espace porte vers la veine centrolobulaire.', trap: 'Hypertension portale <b>pré-sinusoïdale</b> (thrombose porte, bilharziose), <b>sinusoïdale</b> (cirrhose), <b>post-sinusoïdale</b> (Budd-Chiari).' },
+  { x: .25, y: .30, t: 'Endothélium fenêtré', p: 'Fenêtres de 100 à 150 nm <b>sans diaphragme</b>, groupées en cribles ; <b>pas de lame basale continue</b> : capillaire sinusoïde (discontinu).', trap: 'Cirrhose : <b>capillarisation</b> des sinusoïdes (perte des fenêtres, dépôt d’une lame basale) qui gêne les échanges.' },
+  { x: .44, y: .30, t: 'Cellule de Kupffer', p: 'Macrophage résident <b>dans la lumière</b> du sinusoïde : filtre le sang porte (bactéries, endotoxines, hématies âgées).', trap: 'Kupffer = <b>intrasinusoïdale</b> ; cellule de Ito = dans l’<b>espace de Disse</b>. Les Kupffer représentent la plus grande population de macrophages fixés de l’organisme.' },
+  { x: .32, y: .62, t: 'Espace de Disse', p: 'Entre l’endothélium et les microvillosités des hépatocytes : le plasma y baigne les hépatocytes ; il contient la réticuline et les cellules de Ito.', trap: 'La lymphe hépatique naît dans l’espace de Disse ; en cirrhose, sa production augmente et participe à l’<b>ascite</b>.', note: 'Le libellé « Espace périsinusoïdal de Disse » figure deux fois.' },
+  { x: .41, y: .72, t: 'Cellule étoilée de Ito', p: 'Stocke la <b>vitamine A</b> dans ses gouttelettes lipidiques (≈ 80 % des réserves de l’organisme).', trap: 'Activée, elle devient <b>myofibroblaste</b> et produit du collagène I : cellule clé de la fibrose et de la cirrhose.' },
+  { x: .30, y: .82, t: 'Fibres de réticuline', p: 'Collagène III, colorées par l’imprégnation argentique (Gordon-Sweet) ; elles soutiennent les travées.', trap: 'La perte de la trame réticulinique aide à distinguer un carcinome hépatocellulaire du foie normal.' },
+  { x: .66, y: .42, t: 'Microvillosités du pôle vasculaire', p: 'Elles multiplient la surface d’échange ; on y trouve le transporteur <b>NTCP</b> qui capte les sels biliaires conjugués.', trap: 'NTCP est le <b>récepteur d’entrée des virus B et D</b> (cible du bulévirtide).' },
+  { x: .80, y: .50, t: 'Hépatocyte : pôle vasculaire', p: 'Captation de la bilirubine libre (liée à l’albumine) par les transporteurs <b>OATP1B1/1B3</b>.', trap: 'Déficit en OATP1B1/1B3 = <b>syndrome de Rotor</b> (hyperbilirubinémie conjuguée bénigne).' },
+  { x: .78, y: .62, t: 'Mitochondries', p: 'Abondantes au voisinage du pôle vasculaire, très actives (métabolisme, détoxification).', trap: 'Mégamitochondries dans l’hépatocyte = signe histologique de l’<b>hépatopathie alcoolique</b>.' },
+  { x: .08, y: .12, t: 'Endothélium fenêtré en MET', p: 'Cellule endothéliale mince percée de fenêtres.', trap: 'Capillaires : continus (muscle, cerveau), fenêtrés avec diaphragme (intestin, glandes endocrines), sinusoïdes discontinus (foie, rate, moelle osseuse).' },
+  { x: .68, y: .72, portal: 'Zoomer sur le canalicule biliaire', t: 'Le canalicule biliaire', p: 'Passez du pôle vasculaire au pôle biliaire : le canalicule entre deux hépatocytes voisins.', trap: 'Pôle vasculaire = captation ; pôle biliaire = excrétion.' },
+]},
+{ img: 'p9', act: 2, short: 'Canalicule', scale: 'Canalicule', title: 'Ultrastructure du canalicule biliaire et sécrétion de la bile',
+  pins: [
+  { x: .49, y: .40, t: 'Canalicule biliaire', p: '1 à 2 µm, <b>sans paroi propre</b> : il est creusé entre les membranes apicales de 2 ou 3 hépatocytes ; la bile s’écoule vers les canaux de Hering.', trap: 'Le canalicule n’est pas un vaisseau : il n’a ni endothélium ni épithélium propre.' },
+  { x: .40, y: .25, t: 'Microvillosités apicales', p: 'Elles bordent la lumière canaliculaire ; un réseau péricanaliculaire d’actine et de myosine propulse la bile.', trap: 'Bile ≈ 600 mL/jour : une fraction <b>dépendante</b> des sels biliaires et une fraction <b>indépendante</b> (glutathion, bicarbonates).' },
+  { x: .49, y: .53, t: 'Jonctions serrées (zonula occludens)', p: 'Elles scellent le canalicule : <b>barrière sang–bile</b>.', trap: 'En cholestase, la barrière fuit : sels biliaires et bilirubine conjuguée passent dans le sang (prurit, ictère).' },
+  { x: .31, y: .62, t: 'Desmosomes et jonctions communicantes', p: 'Ancrage mécanique entre hépatocytes et couplage par jonctions communicantes (connexine 32).', trap: 'Seules les jonctions serrées sont étanches ; les desmosomes n’empêchent pas les fuites.' },
+  { x: .63, y: .27, t: 'Transporteur BSEP', p: 'Pompe <b>ABC</b> (ATP-dépendante, ABCB11) qui exporte les sels biliaires dans le canalicule.', trap: 'Déficit génétique = <b>PFIC2</b> ; des médicaments qui inhibent BSEP (bosentan, ciclosporine) donnent des cholestases.', note: 'Les H⁺/K⁺ dessinés autour de BSEP n’ont pas lieu d’être : BSEP n’échange pas d’ions, il hydrolyse l’ATP. « Hı^zA » est un artefact du dessin.' },
+  { x: .75, y: .30, t: 'Transporteur MRP2', p: 'Pompe ABC (ABCC2) qui exporte la <b>bilirubine conjuguée</b> (glucuronides) et d’autres conjugués.', trap: 'Déficit en MRP2 = <b>syndrome de Dubin-Johnson</b> : hyperbilirubinémie conjuguée, foie noir (pigment).' },
+  { x: .72, y: .46, t: 'Cholestérol et phospholipides', p: 'Les phospholipides (phosphatidylcholine) sont exportés par <b>MDR3</b> (ABCB4), le cholestérol par ABCG5/G8 ; avec les sels biliaires, ils forment des micelles.', trap: 'Bile <b>sursaturée</b> en cholestérol par rapport aux sels biliaires et aux phospholipides → calculs cholestéroliques. Déficit en MDR3 → PFIC3, lithiase intrahépatique (LPAC).' },
+  { x: .74, y: .62, t: 'Vésicules golgiennes', p: 'Elles apportent les transporteurs à la membrane canaliculaire et assurent la transcytose (IgA polymériques vers la bile).', trap: 'L’insertion des transporteurs canaliculaires est régulée : les sels biliaires et l’AMPc l’augmentent.' },
+  { x: .74, y: .80, t: 'Mitochondries', p: 'Elles fournissent l’ATP consommé par les pompes ABC canaliculaires.', trap: 'BSEP et MRP2 = transport <b>actif primaire</b> (ATP) ; NTCP au pôle vasculaire = actif <b>secondaire</b> (gradient de Na⁺).' },
+  { x: .08, y: .10, t: 'Canalicule en MET', p: 'Lumière étroite bordée de microvillosités entre deux hépatocytes.', trap: 'Les canalicules forment un réseau tridimensionnel en « grillage » autour de chaque hépatocyte.' },
+  { x: .92, y: .12, t: 'Jonctions serrées en MET', p: 'Fusion focale des feuillets externes des membranes, de part et d’autre du canalicule.', trap: 'La claudine-1 et la ZO-2 sont nécessaires à cette barrière : leurs mutations donnent des cholestases génétiques.', note: 'Le libellé « Jonctions serrées (MET) » figure deux fois.' },
+]},
+];
+</script>
+<script>// Foie — atlas à zoom continu du foie et des voies biliaires, 9 planches emboîtées (Canvas 2D, zéro dépendance).
+// Chaque planche vit dans le « portail » de la précédente ; une seule caméra (cx, cy, z) traverse le monde.
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const META = window.__META__, IMG = window.__IMG__; const N = PLATES.length;
+const ROMAN = ['I', 'II', 'III'];
+const MAG = PLATES.map((p) => p.mag || ACTS[p.act].mag), REALW = MAG.map((m) => 40 / m); // plate width in cm at its home view
+
+// ───────────── world: plate k+1 sits inside plate k's portal rectangle
+const R = [{ x: 0, y: 0, w: 1, h: META[PLATES[0].img].h / META[PLATES[0].img].w }];
+for (let k = 1; k < N; k++) { const p = PLATES[k - 1].portal, par = R[k - 1], m = META[PLATES[k].img]; const w = par.w * p.w, h = w * (m.h / m.w);
+  R.push({ x: par.x + p.c[0] * par.w - w / 2, y: par.y + p.c[1] * par.h - h / 2, w, h }); }
+
+// ───────────── canvas & view
+const cv = $('#cv'), ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false, railH = 200;
+let offC = null, offX = null;
+function off() { if (!offC) { offC = document.createElement('canvas'); offX = offC.getContext('2d'); } if (offC.width !== cv.width || offC.height !== cv.height) { offC.width = cv.width; offC.height = cv.height; } return offX; }
+function layout() {
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const short = !mobile && H < 520; const top = mobile ? 62 : short ? 48 : 82, bottom = mobile ? 76 : short ? 50 : 112, left = mobile ? 2 : short ? 6 : 22, right = mobile ? 2 : short ? 48 : 92;
+  aw = (W - left - right) * 0.985; ah = (H - top - bottom) * 0.985; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
+  railH = ($('#rail').clientHeight || 200) - 12; need();
+}
+const homeZ = (k) => Math.min(aw / R[k].w, ah / R[k].h);
+const home = (k) => ({ cx: R[k].x + R[k].w / 2, cy: R[k].y + R[k].h / 2, z: homeZ(k) });
+const cam = { cx: 0.5, cy: 0.25, z: 600 };
+const sig = (k, z = cam.z) => z / homeZ(k);
+const toS = (wx, wy) => [vcx + (wx - cam.cx) * cam.z, vcy + (wy - cam.cy) * cam.z];
+const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
+function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)); a.push(A * D); } return a; }
+function dominant(z = cam.z) { const a = alphas(z); let b = 0; for (let k = 1; k < N; k++) if (a[k] > a[b]) b = k; return b; }
+
+// ───────────── images: decoded on demand; a small LRU keeps phone memory low
+const imgs = {}, thumbs = {}, lru = [];
+function thumb(key) { if (!thumbs[key]) { const i = new Image(); i.src = IMG[key + '_t']; thumbs[key] = i; } return thumbs[key]; }
+function want(key) { let e = imgs[key]; if (!e) { const i = new Image(); i.decoding = 'async'; i.src = IMG[key]; e = imgs[key] = { i, ok: false }; e.p = i.decode().then(() => { e.ok = true; need(); }).catch(() => { e.ok = !!i.naturalWidth; need(); }); }
+  const j = lru.indexOf(key); if (j >= 0) lru.splice(j, 1); lru.push(key);
+  while (lru.length > (mobile ? 5 : 9)) { const k = lru.shift(); if (imgs[k]) { imgs[k].i.src = ''; delete imgs[k]; } } return e; }
+function prefetch() { const k = dominant(); [k - 1, k + 1, k].forEach((j) => j >= 0 && j < N && want(PLATES[j].img)); }
+
+// ───────────── rendering (on demand only)
+let dirty = true, raf = 0, quality = 'high', texPat = null;
+function need() { dirty = true; if (!raf) raf = requestAnimationFrame(frame); }
+function drawPlate(c, k, alpha) {
+  const key = PLATES[k].img; const e = imgs[key]; const im = e && e.ok ? e.i : thumb(key); if (!im || !im.naturalWidth) return;
+  const r = R[k]; const [x, y] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z; const NW = im.naturalWidth, NH = im.naturalHeight;
+  const dx0 = Math.max(0, x), dy0 = Math.max(0, y), dx1 = Math.min(W, x + sw), dy1 = Math.min(H, y + sh); if (dx1 <= dx0 || dy1 <= dy0) return;
+  c.globalAlpha = alpha; c.drawImage(im, ((dx0 - x) / sw) * NW, ((dy0 - y) / sh) * NH, ((dx1 - dx0) / sw) * NW, ((dy1 - dy0) / sh) * NH, dx0 * DPR, dy0 * DPR, (dx1 - dx0) * DPR, (dy1 - dy0) * DPR); c.globalAlpha = 1;
+}
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
+  const a = alphas(); let s = 0; const bg = [0, 0, 0];
+  a.forEach((v, k) => { const b = META[PLATES[k].img].bg; s += v; for (let i = 0; i < 3; i++) bg[i] += b[i] * v; });
+  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.5; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  for (let k = 0; k < N; k++) { if (a[k] < 0.004) continue; const sg = sig(k);
+    if (k > 0 && sg < 0.97) { // the deeper plate opens through a soft radial iris centred on its portal
+      const o = off(); const r = R[k]; const [x0, y0] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z;
+      const bx = Math.max(0, Math.floor(x0 * DPR)), by = Math.max(0, Math.floor(y0 * DPR)), bw = Math.min(cv.width, Math.ceil((x0 + sw) * DPR)) - bx, bh = Math.min(cv.height, Math.ceil((y0 + sh) * DPR)) - by;
+      if (bw <= 0 || bh <= 0) continue;
+      o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(bx, by, bw, bh); o.imageSmoothingQuality = quality; drawPlate(o, k, 1);
+      const cx = (x0 + sw / 2) * DPR, cy = (y0 + sh / 2) * DPR, rr = Math.max(sw, sh) * (0.3 + 0.5 * sst(0.5, 0.97, sg)) * DPR;
+      const g = o.createRadialGradient(cx, cy, rr * 0.42, cx, cy, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(bx, by, bw, bh); o.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = a[k]; ctx.drawImage(offC, bx, by, bw, bh, bx, by, bw, bh); ctx.globalAlpha = 1;
+    } else drawPlate(ctx, k, a[k]); }
+  updateHUD(a); updatePins(a);
+}
+
+// ───────────── camera dynamics
+const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
+const zMin = () => homeZ(0) * 0.7, zMax = () => homeZ(N - 1) * 4;
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function clampCenter() { const r = R[dominant()]; const m = 0.14 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m * 0.6, r.y + r.h + m * 0.6); }
+const ratio = (k) => homeZ(k + 1) / homeZ(k);
+function steer(strength) { // while zooming in, glide toward the next portal (progress-based so short and long dives feel alike)
+  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); if (p <= 0.28) return 0;
+  const r = R[k + 1]; const kk = sst(0.28, 0.85, p) * strength; cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+function frame() {
+  raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = false;
+  if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
+    const w = Math.abs(f.z1 - f.z0) / f.z1 < 1e-3 ? e : (1 / z - 1 / f.z0) / (1 / f.z1 - 1 / f.z0); cam.z = z; cam.cx = f.c0[0] + (f.c1[0] - f.c0[0]) * w; cam.cy = f.c0[1] + (f.c1[1] - f.c0[1]) * w;
+    if (u >= 1) { flight = null; if (f.done) f.done(); } else moving = true; }
+  else {
+    if (Math.abs(pend) > 1e-4) { const step = pend * (1 - Math.exp(-dt * 16)); pend -= step; zoomAt(anchorS[0], anchorS[1], Math.exp(step)); moving = true; if (step > 0) steering = true; } else pend = 0;
+    if (Math.abs(vel[0]) + Math.abs(vel[1]) > 0.02) { cam.cx -= vel[0] / cam.z; cam.cy -= vel[1] / cam.z; const d = Math.exp(-dt * 6); vel[0] *= d; vel[1] *= d; moving = true; } else vel = [0, 0];
+    if (steering) { if (steer(1 - Math.exp(-dt * 7)) > 1e-4) moving = true; if (Math.abs(pend) < 1e-4) steering = false; }
+    clampCenter(); }
+  if (dirty || moving) { dirty = false; quality = moving || ptrs.size ? 'medium' : 'high'; render(); }
+  if (moving) raf = requestAnimationFrame(frame); else if (quality !== 'high') { clearTimeout(frame.hq); frame.hq = setTimeout(() => { if (!raf && !ptrs.size) { quality = 'high'; render(); } }, 90); }
+}
+function flyTo(cx, cy, z, dur, done) { flight = { t0: performance.now(), dur: dur ?? clamp(0.75 + Math.abs(Math.log(z / cam.z)) * 0.3, 0.75, 2.6) * 1000, c0: [cam.cx, cam.cy], c1: [cx, cy], z0: cam.z, z1: z, done }; pend = 0; vel = [0, 0]; need(); }
+function flyHome(k, done) { k = clamp(k, 0, N - 1); for (let j = Math.min(k, dominant()); j <= Math.max(k, dominant()); j++) want(PLATES[j].img); const h = home(k); flyTo(h.cx, h.cy, h.z, undefined, done); }
+function camAtDepth(t) { t = clamp(t, 0, N - 1); const k = Math.min(N - 2, Math.floor(t)); const f = t - k; const a = home(k), b = home(k + 1);
+  const z = Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * f); const w = (1 / z - 1 / a.z) / (1 / b.z - 1 / a.z); return { cx: a.cx + (b.cx - a.cx) * w, cy: a.cy + (b.cy - a.cy) * w, z }; }
+function depthOf() { const k = dominant(); if (k >= N - 1) return N - 1; return k + clamp(Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)), 0, 1); }
+
+// ───────────── HUD: magnification follows the acts (×1 → ×100 → ×10 000), scale bar follows the plates
+let hudKey = '', plateKey = -1;
+function niceLen(cmPerPx) { const target = cmPerPx * 92; const e = Math.pow(10, Math.floor(Math.log10(target))); const m = target / e; const n = (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; return [n, n / cmPerPx]; }
+function fmtLen(cm) { if (cm >= 1) return `${+cm.toPrecision(3)} cm`; if (cm >= 0.1) return `${+(cm * 10).toPrecision(3)} mm`; if (cm >= 1e-4) return `${+(cm * 1e4).toPrecision(3)} µm`; return `${+(cm * 1e7).toPrecision(3)} nm`; }
+function fmtMag(m) { if (m < 10) return '×' + m.toFixed(1).replace('.', ',').replace(',0', ''); const e = Math.pow(10, Math.floor(Math.log10(m)) - 1); return '×' + Math.round(Math.round(m / e) * e).toLocaleString('fr-FR'); }
+function magNow() { const t = depthOf(), k = Math.floor(t), f = t - k;
+  if (k >= N - 1) return MAG[N - 1] * Math.max(1, sig(N - 1)); if (k === 0 && sig(0) < 1) return MAG[0] * sig(0);
+  return Math.exp(Math.log(MAG[k]) + (Math.log(MAG[k + 1]) - Math.log(MAG[k])) * f); }
+function updateHUD(a) {
+  let sw = 0, lr = 0; for (let k = 0; k < N; k++) { if (a[k] < 0.01) continue; sw += a[k]; lr += a[k] * Math.log(REALW[k] / (R[k].w * cam.z)); }
+  const k = dominant(); const [n, px] = niceLen(Math.exp(lr / sw)); const M = magNow(); const t = depthOf();
+  const key = `${fmtMag(M)}|${k}|${Math.round(px)}|${fmtLen(n)}`;
+  if (key !== hudKey) { hudKey = key; $('#mag').innerHTML = `${fmtMag(M)}<small>${PLATES[k].scale}</small>`; $('#sbi').style.width = `${Math.round(px)}px`; $('#sbt').textContent = fmtLen(n); }
+  if (k !== plateKey) { const first = plateKey < 0; plateKey = k; const P = PLATES[k];
+    $('#ltitle').textContent = P.title; $('#path').innerHTML = `Foie et voies biliaires &nbsp;›&nbsp; Acte ${ROMAN[P.act]} · ${ACTS[P.act].name} &nbsp;›&nbsp; <b>${k + 1} / ${N}</b>`;
+    document.querySelectorAll('.pl').forEach((b, i) => b.classList.toggle('on', i === k)); document.querySelectorAll('.grp').forEach((g, i) => g.classList.toggle('on', i === P.act));
+    document.querySelectorAll('.rail .tick').forEach((el, i) => { el.classList.toggle('on', i === k); el.classList.toggle('cur', el.classList.contains('major') && PLATES[i].act === P.act); });
+    if (!first) toast(`${k + 1}. ${P.short} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}`); prefetch(); }
+  $('#rth').style.top = `${6 + (t / (N - 1)) * railH}px`; $('#rfill').style.height = `${(t / (N - 1)) * railH}px`;
+  $('#lvf').style.width = `${clamp(Math.log(M) / Math.log(10000), 0, 1) * 100}%`;
+}
+
+// ───────────── hotspots
+const pinEls = [];
+function buildPins() { const host = $('#pins');
+  PLATES.forEach((P, k) => P.pins.forEach((p, j) => { const el = document.createElement('div'); el.className = 'pin' + (p.portal ? ' portal' : '');
+    el.innerHTML = `<button aria-label="${p.t.replace(/"/g, '')}"><b></b><i></i></button>` + (p.portal ? `<button class="go">${p.portal} →</button>` : `<span>${p.t}</span>`);
+    el.querySelector('button').addEventListener('click', (ev) => { ev.stopPropagation(); openCard(k, j, true); });
+    if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
+    host.appendChild(el); pinEls.push({ el, k, j, vis: false }); })); }
+function updatePins(a) {
+  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.5 : 3.8), x = 0, y = 0;
+    if (show) { const r = R[P.k]; [x, y] = toS(r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; }
+    if (show && p.portal) { if (!P.gw) P.gw = P.el.querySelector('.go').offsetWidth || 260; const fl = x > P.gw + 34, fr = x + P.gw + 34 < W - (mobile ? 0 : 92); // dive button: right by default, left when preferred or when the right side overflows
+      const L = fl && fr ? p.side === 'l' : fl || fr ? fl : x > W - x; if (L !== P.left) { P.left = L; P.el.classList.toggle('left', L); } }
+    if (show) { P.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; if (!P.vis) { P.el.classList.add('on'); P.vis = true; } } else if (P.vis) { P.el.classList.remove('on'); P.vis = false; } } }
+
+// ───────────── study card
+let open = null; const seen = new Set();
+function openCard(k, j, fly) {
+  const P = PLATES[k]; const p = P.pins[j]; open = { k, j }; seen.add(`${k}.${j}`); const n = P.pins.length;
+  pinEls.forEach((E) => { E.el.classList.toggle('active', E.k === k && E.j === j); E.el.classList.toggle('seen', seen.has(`${E.k}.${E.j}`)); });
+  const C = $('#card'); C.classList.toggle('portal', !!p.portal);
+  C.innerHTML = `<button class="x" aria-label="Fermer">✕</button><div class="chip"><i></i>Planche ${k + 1} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}</div><h3>${p.t}</h3><p>${p.p}</p>
+    <div class="trap"><span>⚠ Piège d’EMD</span>${p.trap}</div>${p.note ? `<div class="note">Note sur la planche : ${p.note}</div>` : ''}
+    <div class="act">${p.portal ? `<button class="btn dive">${p.portal} →</button>` : ''}<button class="btn zoom">Recentrer</button></div>
+    <div class="nav"><button class="pv">← Précédent</button><span>${j + 1} / ${n} · ${[...seen].filter((s) => s.startsWith(`${k}.`)).length} vus</span><button class="nx">Suivant →</button></div>`;
+  C.querySelector('.x').onclick = closeCard; C.querySelector('.zoom').onclick = () => focusPin(k, j);
+  C.querySelector('.pv').onclick = () => openCard(k, (j - 1 + n) % n, true); C.querySelector('.nx').onclick = () => openCard(k, (j + 1) % n, true);
+  if (p.portal) C.querySelector('.dive').onclick = () => { closeCard(); flyHome(k + 1); };
+  C.classList.add('on'); if (fly) focusPin(k, j); hideHint();
+}
+function closeCard() { open = null; $('#card').classList.remove('on'); pinEls.forEach((E) => E.el.classList.remove('active')); }
+function focusPin(k, j) { const p = PLATES[k].pins[j]; const r = R[k]; const wx = r.x + p.x * r.w, wy = r.y + p.y * r.h; const z = homeZ(k) * (p.portal ? 1.35 : 1.7);
+  const fx = mobile ? vcx : Math.min(vcx, (W - (H < 520 ? 50 : 92) - Math.min(410, W * 0.54)) / 2 + 24), fy = mobile ? Math.min(vcy, H * 0.24) : vcy; flyTo(wx - (fx - vcx) / z, wy - (fy - vcy) / z, z); }
+
+// ───────────── input
+let hintGone = false; function hideHint() { if (hintGone) return; hintGone = true; $('#hint').classList.add('gone'); }
+let tt = 0; function toast(s) { const t = $('#toast'); t.textContent = s; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1700); }
+function zoomBy(f, sx = vcx, sy = vcy) { flight = null; anchorS = [sx, sy]; pend = clamp(pend + Math.log(f), -3, 3); need(); hideHint(); }
+addEventListener('wheel', (e) => { if (e.target.closest && e.target.closest('.card,.dock,.ctrl,.top')) { if (!e.target.closest('.card,.dock')) e.preventDefault(); return; }
+  e.preventDefault(); let d = e.deltaY; if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= H; zoomBy(Math.exp(-d * (e.ctrlKey ? 0.006 : 0.0016)), e.clientX, e.clientY); }, { passive: false });
+let lastPinch = 0, lastMid = null, downAt = 0, lastTap = 0, moved = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); flight = null; pend = 0; vel = [0, 0]; downAt = performance.now(); moved = 0; cv.classList.add('drag');
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a[0] - b[0], a[1] - b[1]); lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; } hideHint(); });
+cv.addEventListener('pointermove', (e) => { if (!ptrs.has(e.pointerId)) return; const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 1) { const dx = e.clientX - prev[0], dy = e.clientY - prev[1]; moved += Math.abs(dx) + Math.abs(dy); cam.cx -= dx / cam.z; cam.cy -= dy / cam.z; vel = [dx * 0.9, dy * 0.9]; clampCenter(); need(); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.cx -= (mid[0] - lastMid[0]) / cam.z; cam.cy -= (mid[1] - lastMid[1]) / cam.z; if (lastPinch) { const f = d / lastPinch; zoomAt(mid[0], mid[1], f); if (f > 1) steer(0.06); }
+    lastPinch = d; lastMid = mid; moved += 10; vel = [0, 0]; clampCenter(); need(); } });
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = 0; if (ptrs.size === 1) lastMid = [...ptrs.values()][0];
+  if (!ptrs.size) { cv.classList.remove('drag'); if (performance.now() - downAt > 80) need(); else vel = [0, 0];
+    if (moved < 6 && performance.now() - downAt < 300) { const tn = performance.now(); if (tn - lastTap < 320) { zoomBy(2.2, e.clientX, e.clientY); lastTap = 0; } else { lastTap = tn; if (open) closeCard(); } } } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; const k = e.key;
+  if (k === 'f' || k === 'F') toggleFS(); else if (k === '+' || k === '=') zoomBy(1.35); else if (k === '-' || k === '_') zoomBy(1 / 1.35);
+  else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { closeCard(); flyHome(dominant() + 1); }
+  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { closeCard(); flyHome(dominant() - 1); }
+  else if (k === 'r' || k === 'R' || k === '0' || k === 'Home') { closeCard(); flyHome(0); } else if (k === 'End') { closeCard(); flyHome(N - 1); }
+  else if (k === 'Escape') closeCard(); else if (/^[1-9]$/.test(k)) { closeCard(); flyHome(+k - 1); } else return;
+  e.preventDefault(); hideHint(); });
+function toggleFS() { const d = document, el = d.documentElement; if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); else (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); }
+$('#zin').onclick = () => zoomBy(1.6); $('#zout').onclick = () => zoomBy(1 / 1.6); $('#reset').onclick = () => { closeCard(); flyHome(0); }; $('#fs').onclick = toggleFS;
+// depth rail: one tick per plate, labels at the start of each act
+const rail = $('#rail'); PLATES.forEach((P, i) => { const t = document.createElement('div'); const major = i === 0 || PLATES[i - 1].act !== P.act; t.className = 'tick' + (major ? ' major' : '');
+  t.style.top = `calc(6px + ${(i / (N - 1)) * 100}% - ${(i / (N - 1)) * 12}px)`; t.title = `${i + 1}. ${P.short}`;
+  if (major) t.innerHTML = `<span>${ACTS[P.act].name}<em>${fmtMag(ACTS[P.act].mag)}</em></span>`;
+  t.onclick = (ev) => { ev.stopPropagation(); closeCard(); flyHome(i); }; rail.appendChild(t); });
+let railDrag = false; const railSet = (e) => { const r = rail.getBoundingClientRect(); const c = camAtDepth(clamp((e.clientY - r.top - 6) / (r.height - 12), 0, 1) * (N - 1)); flight = null; pend = 0; vel = [0, 0]; cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; prefetch(); need(); hideHint(); };
+rail.addEventListener('pointerdown', (e) => { if (e.target.closest('.tick')) return; railDrag = true; rail.setPointerCapture(e.pointerId); railSet(e); }); rail.addEventListener('pointermove', (e) => railDrag && railSet(e)); rail.addEventListener('pointerup', () => (railDrag = false));
+// plate dock, grouped by act
+ACTS.forEach((A, ai) => { const g = document.createElement('div'); g.className = 'grp'; g.innerHTML = `<div class="gh"><b>${ROMAN[ai]}</b>${A.name}<em>${fmtMag(A.mag)}</em></div><div class="gt"></div>`;
+  PLATES.forEach((P, i) => { if (P.act !== ai) return; const b = document.createElement('button'); b.className = 'pl'; b.title = `${i + 1}. ${P.title}`;
+    b.innerHTML = `<img alt="" src="${IMG[P.img + '_t']}"><i>${i + 1}</i><b>${P.short}</b>`; b.onclick = () => { closeCard(); hideHint(); flyHome(i); }; g.querySelector('.gt').appendChild(b); });
+  $('#dock').appendChild(g); });
+addEventListener('resize', () => { const t = depthOf(); layout(); if (!flight) { const c = camAtDepth(t); cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; } need(); });
+
+// ───────────── boot
+async function boot() {
+  if (matchMedia('(pointer:coarse)').matches) { $('#hint1').textContent = 'Pincez pour plonger'; $('#hint2').textContent = 'Glisser pour explorer · double-tap · touchez les points et les boutons lumineux' + (innerHeight > innerWidth ? ' · tournez le téléphone pour agrandir les planches' : ''); }
+  buildPins(); layout();
+  if (window.__TEX__) { const ti = new Image(); ti.src = window.__TEX__; ti.decode().then(() => { texPat = ctx.createPattern(ti, 'repeat'); need(); }).catch(() => {}); }
+  const h = home(0); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z * 0.9; $('#lb').style.width = '35%';
+  await want(PLATES[0].img).p; $('#lb').style.width = '100%'; prefetch(); render();
+  setTimeout(() => { $('#loader').classList.add('done'); flyTo(h.cx, h.cy, h.z, 1300); }, 120);
+  // decode the rest in the background, one at a time, so long dives never show a blurry placeholder (desktop)
+  if (!mobile) for (const P of PLATES) await want(P.img).p;
+}
+window.__atlas = { cam, flyHome, openCard, depthOf, dominant: () => dominant(), R, PLATES, alphasNow: () => alphas(), magNow };
+boot().catch((e) => { $('#lmsg').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+<script>(function(){
+var d=document,w=window,root=d.documentElement;
+['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+function q(s){return d.querySelector(s);}
+var loader=q('#loader');
+function isReady(){return !loader||loader.classList.contains('done');}
+function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;var list=A.PLATES||A.L;k=Math.floor(k);if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);var h=d.getElementById('hint');if(h)h.classList.add('gone');}catch(e){}}
+if(!root.classList.contains('az-embed')){
+  var top=q('.top');
+  if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');
+    a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Atlas Zoom</span>';
+    top.insertBefore(a,top.firstChild);}
+  var pm=/[?&]planche=(\d{1,2})(?:&|$)/.exec(location.search);
+  if(pm)whenReady(function(){setTimeout(function(){gotoPlate(+pm[1]-1);},0);});
+  return;
+}
+var target=(self.origin&&self.origin!=='null')?self.origin:'*';
+function post(type,data){try{var m={source:'medart-atlas',type:type};if(data){for(var k in data)m[k]=data[k];}w.parent.postMessage(m,target);}catch(e){}}
+w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(target!=='*'&&e.origin!==target)||!m||m.source!=='medart-hub')return;
+  if(m.type==='inset'&&typeof m.top==='number'&&m.top>=0&&m.top<400){root.style.setProperty('--az-top',Math.round(m.top)+'px');}
+  else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
+post('hello');
+w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
+function read(){
+  var level='',mag='';
+  if(mEl){var sm=mEl.querySelector('small');level=sm?sm.textContent.trim():'';
+    for(var n=mEl.firstChild;n;n=n.nextSibling){if(n!==sm)mag+=n.textContent||'';}mag=mag.trim();}
+  var k=-1,n=0;try{var A=w.__atlas;if(A){k=A.dominant();var list=A.PLATES||A.L;n=list?list.length:0;}}catch(e){}
+  return {title:tEl?tEl.textContent.trim():'',level:level,mag:mag,index:k,count:n};
+}
+function flush(){var s=read(),key=s.title+'|'+s.level+'|'+s.index;
+  if(key!==last){last=key;lastMag=s.mag;post('state',s);return;}
+  if(s.mag!==lastMag){lastMag=s.mag;post('mag',{mag:s.mag});}}
+function schedule(){if(timer)return;timer=setTimeout(function(){timer=0;flush();},120);}
+[tEl,mEl,pEl].forEach(function(el){if(el)new MutationObserver(schedule).observe(el,{childList:true,characterData:true,subtree:true});});
+whenReady(function(){post('ready');flush();});
+w.addEventListener('keydown',function(e){var k=e.key;if((k==='f'||k==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;e.stopPropagation();e.preventDefault();post('fullscreen');}},true);
+flush();
+})();</script>
+</body>
+</html>

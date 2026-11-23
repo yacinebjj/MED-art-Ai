@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#191d21">
+<title>Appareil Génital Masculin · Atlas zoomable · MedArt AI Studio</title>
+<link rel="preload" href="/atlas-zoom/genital-masculin/p1.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<style>
+.az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
+.az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
+.az-embed .top .scale{margin-left:auto}.az-embed .scale .sbar{margin-top:0}
+.az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
+.az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
+@media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+</style>
+<meta name="description" content="L’appareil génital masculin en 9 planches et 3 actes : de la coupe sagittale aux cellules de Sertoli et de Leydig et au spermatozoïde, en zoom continu.">
+<style>
+@font-face{font-family:'Kalam';font-weight:400;font-display:swap;src:url(/atlas-zoom/_shared/kalam-400.woff2) format('woff2')}
+@font-face{font-family:'Kalam';font-weight:700;font-display:swap;src:url(/atlas-zoom/_shared/kalam-700.woff2) format('woff2')}
+:root{--bg:#191d21;--ink:#f6efe2;--chalk:#f3e2bd;--soft:rgba(240,233,220,.74);--mute:rgba(232,226,214,.5);--line:rgba(243,226,189,.14);--acc:#ffb86b;--acc2:#7fd8ff;
+  --hand:'Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive;--sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',system-ui,sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#cv{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;cursor:grab}#cv.drag{cursor:grabbing}
+/* slate atmosphere: vignette + chalk grain (static layers, composited once) */
+.vig{position:fixed;inset:0;pointer-events:none;z-index:1;background:radial-gradient(130% 100% at 50% 48%,transparent 52%,rgba(6,8,10,.55) 100%)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.06;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scrim{position:fixed;left:0;right:0;top:0;height:120px;z-index:2;pointer-events:none;background:linear-gradient(rgba(13,16,21,.66),rgba(13,16,21,.3) 55%,transparent)}
+.pin b{pointer-events:none}.pin i{pointer-events:none}
+.lig{letter-spacing:-.17em;font-style:normal;font-weight:inherit;display:inline;position:static;opacity:1;color:inherit}
+/* pins */
+#pins{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pin{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
+.pin.on{opacity:1}.pin.on button{pointer-events:auto}
+.pin button{all:unset;cursor:pointer;position:absolute;left:-17px;top:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.pin i{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff6e4,var(--acc) 60%,#e07a2c);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 16px 3px rgba(255,184,107,.55);transition:transform .25s var(--ease)}
+.pin b{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,184,107,.75);animation:pulse 2.2s var(--ease) infinite}
+.pin.portal i{background:radial-gradient(circle at 40% 35%,#eafaff,var(--acc2) 60%,#2f8fc0);box-shadow:0 0 0 2px rgba(25,29,33,.85),0 0 20px 5px rgba(127,216,255,.6)}
+.pin.portal b{border-color:rgba(127,216,255,.85);animation-duration:1.6s}
+.pin.seen i{filter:saturate(.55) brightness(.92)}
+.pin button:hover i,.pin.active i{transform:scale(1.25)}
+.pin span{position:absolute;left:22px;top:-13px;white-space:nowrap;padding:5px 11px;border-radius:999px;font:700 15px/1.1 var(--hand);color:var(--chalk);background:rgba(20,24,28,.86);border:1px solid var(--line);opacity:0;transform:translateX(-4px);transition:.25s var(--ease);pointer-events:none}
+.pin .go{all:unset;cursor:pointer;position:absolute;left:24px;top:-16px;white-space:nowrap;padding:7px 14px 7px 13px;border-radius:999px;font:700 15.5px/1.1 var(--hand);color:#e6f8ff;background:linear-gradient(135deg,rgba(30,74,104,.9),rgba(16,40,60,.92));border:1px solid rgba(127,216,255,.55);box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 22px rgba(127,216,255,.35),0 8px 24px -8px rgba(0,0,0,.7);animation:glow 2.4s var(--ease) infinite;transition:transform .2s var(--ease),filter .2s}
+.pin.on .go{pointer-events:auto}.pin.left .go{left:auto;right:24px}.pin.left .go:hover{transform:translateX(-3px)}.pin .go:hover{transform:translateX(3px);filter:brightness(1.15)}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1px rgba(127,216,255,.12),0 0 18px rgba(127,216,255,.28),0 8px 24px -8px rgba(0,0,0,.7)}50%{box-shadow:0 0 0 1px rgba(127,216,255,.25),0 0 30px rgba(127,216,255,.55),0 8px 24px -8px rgba(0,0,0,.7)}}
+.pin button:hover+span,.pin.active span{opacity:1;transform:none}
+@keyframes pulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(1.55);opacity:0}}
+/* glass */
+.glass{background:linear-gradient(160deg,rgba(40,45,52,.78),rgba(22,26,31,.86));border:1px solid rgba(243,226,189,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 30px 70px -24px rgba(0,0,0,.75)}
+@supports (backdrop-filter:blur(1px)){.glass{background:linear-gradient(160deg,rgba(40,45,52,.62),rgba(22,26,31,.74));backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%)}}
+/* header */
+.top{position:fixed;left:0;right:0;top:0;z-index:6;display:flex;align-items:flex-start;gap:18px;padding:16px 22px;pointer-events:none}
+.top>*{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:8px 14px 8px 9px;border-radius:16px}
+.brand svg{width:32px;height:32px;flex:none}.brand b{display:block;font-weight:700;font-size:13.5px;letter-spacing:-.01em}.brand em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:1px}
+.crumb{margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;padding-top:4px;max-width:46vw}
+.crumb .path{font:600 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:rgba(236,230,218,.66);text-shadow:0 1px 8px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.crumb .path b{color:var(--acc)}
+.crumb h2{margin:0;font:700 25px/1.15 var(--hand);color:var(--chalk);text-shadow:0 2px 18px rgba(0,0,0,.6);transition:opacity .3s}
+.scale{min-width:170px;padding:10px 14px;border-radius:16px;text-align:right}
+.scale .m{font:800 24px/1 var(--sans);letter-spacing:-.03em;color:#fff}.scale .m small{font-size:13px;color:var(--mute);font-weight:600;margin-left:6px;letter-spacing:.06em;text-transform:uppercase}
+.sbar{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;font:600 11.5px var(--sans);color:var(--soft)}
+.sbar i{display:block;height:6px;border:1.5px solid rgba(243,226,189,.85);border-top:0;transition:width .25s var(--ease)}
+/* side controls */
+.ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 8px;border-radius:22px}
+.ctrl button{all:unset;cursor:pointer;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:var(--ink);transition:background .2s}
+.ctrl button:hover{background:rgba(255,255,255,.08)}.ctrl svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.rail{position:relative;width:38px;height:min(330px,40vh);margin:4px 0;cursor:pointer;touch-action:none}
+.rail .tr{position:absolute;left:18px;top:6px;bottom:6px;width:2px;border-radius:2px;background:rgba(243,226,189,.18)}
+.rail .fill{position:absolute;left:18px;top:6px;width:2px;border-radius:2px;background:linear-gradient(var(--acc),var(--acc2))}
+.rail .tick{position:absolute;left:13px;width:12px;height:2px;margin-top:-1px;background:rgba(243,226,189,.28);border-radius:2px}.rail .tick.major{left:8px;width:22px;background:rgba(243,226,189,.45)}.rail .tick::before{content:"";position:absolute;left:-6px;right:-6px;top:-7px;bottom:-7px}
+.rail .tick{cursor:pointer}.rail .tick span{position:absolute;right:32px;top:-14px;padding:4px 8px 3px;border-radius:9px;background:rgba(18,22,27,.72);border:1px solid rgba(243,226,189,.08);font:700 13.5px/1 var(--hand);color:var(--mute);white-space:nowrap;text-align:right;cursor:pointer}.rail .tick em{display:block;font:600 9.5px var(--sans);letter-spacing:.08em;font-style:normal;margin-top:1px}
+.rail .tick span{opacity:0;transition:opacity .3s}.ctrl:hover .rail .tick span{opacity:1}.rail .tick.cur span{color:var(--chalk)}.rail .tick.on{background:var(--acc)}
+.rail .th{position:absolute;left:7px;width:24px;height:24px;margin-top:-12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#ffd9a8);box-shadow:0 0 0 4px rgba(255,184,107,.22),0 4px 14px rgba(0,0,0,.5)}
+/* plate dock, grouped by act */
+.dock{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:6px 8px 7px;border-radius:22px;max-width:calc(100vw - 16px)}
+.grp{display:flex;flex-direction:column;gap:4px;padding:0 4px}.grp+.grp{border-left:1px solid rgba(243,226,189,.1);padding-left:10px}
+.gh{display:flex;align-items:baseline;gap:6px;padding-left:4px;font:700 10px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);transition:color .3s}
+.gh b{font:700 12px var(--hand);letter-spacing:0;color:var(--acc);opacity:.6}.gh em{font-style:normal;font-weight:600;letter-spacing:.04em;text-transform:none;opacity:.8}
+.grp.on .gh{color:var(--soft)}.grp.on .gh b{opacity:1}
+.gt{display:flex;gap:3px}
+.pl{all:unset;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;width:78px;padding:3px 0 2px;border-radius:13px;transition:background .3s var(--ease)}
+.pl img{width:70px;height:39px;object-fit:cover;border-radius:9px;display:block;border:1px solid rgba(243,226,189,.16);filter:saturate(.7) brightness(.75);transition:.3s var(--ease)}
+.pl i{position:absolute;left:6px;top:6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;display:grid;place-items:center;font:800 9.5px var(--sans);font-style:normal;color:#1a1d21;background:rgba(243,226,189,.85)}
+.pl b{font:700 12px/1.05 var(--hand);color:var(--mute);transition:color .3s;max-width:76px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl:hover{background:rgba(255,255,255,.05)}.pl:hover img{filter:saturate(.9) brightness(.95)}
+.pl.on{background:rgba(255,184,107,.12)}.pl.on img{filter:none;border-color:var(--acc);box-shadow:0 0 16px rgba(255,184,107,.38)}.pl.on b{color:var(--chalk)}.pl.on i{background:var(--acc)}
+/* scale track (1× → 100× → 10 000×) */
+.lvb{position:relative;display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;font:700 11px/1.1 var(--sans);color:var(--soft);text-align:center}
+.lvb span{display:flex;flex-direction:column;align-items:center;min-width:40px}.lvb span:first-of-type{align-items:flex-start}.lvb span:last-of-type{align-items:flex-end}
+.lvb em{font:600 9px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-style:normal;margin-top:2px}
+.lvb .lt{position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:rgba(243,226,189,.14);overflow:hidden}.lvb .lt i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.wait{position:fixed;left:50%;top:50%;z-index:7;width:34px;height:34px;margin:-17px;opacity:0;transition:opacity .2s;pointer-events:none}.wait.on{opacity:1}
+.wait i{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(243,226,189,.2);border-top-color:var(--acc);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+/* study card */
+.card{position:fixed;z-index:8;right:84px;top:150px;width:min(390px,calc(100vw - 32px));max-height:calc(100vh - 262px);overflow:auto;padding:20px 22px 18px;border-radius:24px;opacity:0;transform:translateX(18px) scale(.98);pointer-events:none;transition:opacity .35s var(--ease),transform .45s var(--ease);scrollbar-width:none}
+.card::-webkit-scrollbar{display:none}.card.on{opacity:1;transform:none;pointer-events:auto}
+.card .chip{display:inline-flex;align-items:center;gap:7px;font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}.card .chip i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.card.portal .chip i{background:var(--acc2);box-shadow:0 0 10px var(--acc2)}
+.card h3{margin:8px 34px 10px 0;font:700 26px/1.12 var(--hand);color:var(--chalk)}
+.card p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--soft)}.card p b{color:#fff;font-weight:650}
+.trap{position:relative;margin:12px 0 4px;padding:12px 14px 12px 16px;border-radius:16px;background:linear-gradient(135deg,rgba(255,120,90,.15),rgba(255,120,90,.04));border:1px solid rgba(255,140,110,.3);font-size:13.2px;line-height:1.55;color:#f6e3dc}
+.trap span{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:800 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#ff9a7e}
+.note{margin-top:10px;font-size:12px;line-height:1.5;color:var(--mute);border-left:2px solid rgba(243,226,189,.25);padding-left:10px}
+.card .x{all:unset;cursor:pointer;position:absolute;right:14px;top:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:var(--soft)}.card .x:hover{background:rgba(255,255,255,.08)}
+.card .act{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:13px;font:700 13px var(--sans);background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--ink);transition:.2s}
+.btn:hover{background:rgba(255,255,255,.12)}.btn.dive{background:linear-gradient(135deg,#7fd8ff,#4aa9e0);color:#06202e;border:0}.btn.dive:hover{filter:brightness(1.08)}
+.card .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font:600 11px var(--sans);color:var(--mute)}
+.card .nav button{all:unset;cursor:pointer;padding:6px 9px;border-radius:9px;color:var(--soft)}.card .nav button:hover{background:rgba(255,255,255,.07)}
+/* hint + loader */
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;padding:16px 20px;border-radius:20px;text-align:center;font:700 18px var(--hand);color:var(--chalk);transition:opacity .6s;pointer-events:none}
+.hint small{display:block;margin-top:4px;font:500 12px var(--sans);color:var(--soft)}.hint.gone{opacity:0}
+.hint svg{width:26px;height:38px;display:block;margin:0 auto 8px}.hint svg .w{animation:wheel 1.4s var(--ease) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}100%{transform:translateY(8px);opacity:0}}
+#loader{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg);transition:opacity .7s,visibility .7s}#loader.done{opacity:0;visibility:hidden}
+#loader h1{margin:0;font:700 44px var(--hand);color:var(--chalk);text-align:center}#loader p{margin:6px 0 22px;color:var(--soft);font-size:14px;text-align:center}
+#loader .tr{width:240px;height:2px;margin:0 auto;border-radius:2px;background:rgba(243,226,189,.15);overflow:hidden}#loader .tr i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .3s}
+#loader .msg{margin-top:12px;text-align:center;font-size:12px;color:var(--mute)}
+.toast{position:fixed;left:50%;bottom:116px;transform:translateX(-50%);z-index:9;padding:9px 14px;border-radius:13px;font:600 12.5px var(--sans);color:var(--soft);opacity:0;transition:opacity .4s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:1050px){.crumb .path{display:none}.crumb{max-width:40vw}}
+@media (max-width:1100px){.pl{width:62px}.pl img{width:56px;height:32px}.pl b{font-size:11px;max-width:60px}}
+@media (max-width:900px){.pl b{display:none}.gh em{display:none}}
+@media (max-width:760px){
+  .top{padding:10px 10px;gap:8px}.brand{padding:6px 9px 6px 6px}.brand em{display:none}.brand b{font-size:12px}.crumb{display:none}
+  .scale{min-width:0;padding:8px 10px}.scale .m{font-size:19px}
+  .ctrl{right:6px;top:auto;bottom:84px;transform:none;padding:6px 4px;gap:2px}.ctrl button{width:34px;height:34px}.rail{height:120px}.rail .tick span{display:none}
+  .dock{bottom:6px;gap:2px;padding:4px 5px;border-radius:16px}.grp{padding:0 1px;gap:2px}.grp+.grp{padding-left:4px}.gh{font-size:8px;letter-spacing:.08em;padding-left:2px}.gh b{font-size:10px}.gt{gap:1px}
+  .pl{width:calc((100vw - 52px)/9);max-width:44px;padding:2px 0;border-radius:9px}.pl img{width:100%;height:auto;aspect-ratio:16/10;border-radius:7px}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .lvb{margin-top:6px;padding-top:7px;gap:6px;font-size:10px}.lvb em{display:none}.lvb span{min-width:0}
+  .card{left:8px;right:8px;top:auto;bottom:76px;width:auto;max-height:54vh;transform:translateY(24px);border-radius:22px}
+  .pin .go{font-size:13.5px;padding:6px 11px;left:20px;top:-14px;white-space:normal;width:max-content;max-width:min(46vw,188px);line-height:1.15}.pin.left .go{left:auto;right:20px}
+  .pin span{display:none}.scrim{height:84px}
+  .pin>button:first-child{left:-12px;top:-12px;width:24px;height:24px}.pin i{inset:6px}
+  .hint{padding:12px 16px;font-size:15px;max-width:78vw}.hint small{font-size:11px}
+}
+@media (max-height:520px) and (min-width:761px){
+  .top{padding:8px 12px;gap:10px}.brand{padding:5px 9px 5px 5px}.brand svg{width:26px;height:26px}.brand em{display:none}.brand b{font-size:12px}
+  .crumb .path{display:none}.crumb h2{font-size:17px}.scrim{height:70px}
+  .scale{min-width:0;padding:6px 10px}.scale .m{font-size:17px}.sbar{margin-top:4px}.lvb{display:none}
+  .ctrl{right:6px;padding:4px 3px;gap:0}.ctrl button{width:30px;height:30px}.rail{height:min(150px,36vh);margin:2px 0}.rail .tick span{display:none}
+  .dock{bottom:5px;padding:4px 6px;gap:2px;border-radius:14px}.gh{display:none}.grp+.grp{padding-left:5px}.pl{width:50px;padding:2px 0}.pl img{width:46px;height:26px;border-radius:6px}.pl b{display:none}.pl i{left:3px;top:3px;min-width:12px;height:12px;font-size:8px}
+  .card{top:52px;right:50px;bottom:8px;max-height:none;width:min(360px,52vw);padding:14px 16px}.card h3{font-size:21px}.card p{font-size:13px}
+  .hint{padding:10px 14px;font-size:15px}.hint svg{display:none}.toast{bottom:52px}.pin span{display:none}
+}
+@media (prefers-reduced-motion:reduce){.pin b,.pin .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Atlas zoomable de l’appareil génital masculin"></canvas>
+<div class="vig"></div><div class="grain"></div><div class="scrim"></div>
+<div id="pins"></div>
+<header class="top">
+  <div class="brand glass"><svg viewBox="0 0 32 32" fill="none"><rect x=".5" y=".5" width="31" height="31" rx="9" fill="#232830" stroke="rgba(243,226,189,.25)"/><ellipse cx="11.2" cy="16" rx="4.2" ry="3.4" stroke="#ffb86b" stroke-width="1.6"/><path d="M15.4 16c2.2 0 3.2-2.2 5-2.2 1.6 0 2.1 1.8 3.4 1.8 1 0 1.6-.6 2.2-1.2M15.4 16c2.2 0 3.2 2.2 5 2.2 1.6 0 2.1-1.8 3.4-1.8" stroke="#7fd8ff" stroke-width="1.4" stroke-linecap="round"/><path d="M8.6 14.2c1-.9 2.6-1.1 3.8-.4" stroke="#ffb86b" stroke-width="1.2" stroke-linecap="round"/></svg>
+    <div><b>MedArt AI Studio</b><em>Atlas zoomable · Appareil génital masculin</em></div></div>
+  <div class="crumb"><div class="path" id="path"></div><h2 id="ltitle"></h2></div>
+  <div class="scale glass"><div class="m" id="mag">×1</div><div class="sbar"><i id="sbi"></i><span id="sbt">5 cm</span></div><div class="lvb"><div class="lt"><i id="lvf"></i></div><span>1×<em>Organe</em></span><span>100×<em>Tissu</em></span><span>10 000×<em>Cellule · Gamète</em></span></div></div>
+</header>
+<nav class="ctrl glass" aria-label="Zoom">
+  <button id="zin" title="Zoomer (+)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="rail" id="rail" title="Profondeur"><div class="tr"></div><div class="fill" id="rfill"></div><div class="th" id="rth"></div></div>
+  <button id="zout" title="Dézoomer (−)"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <button id="reset" title="Vue d’ensemble (R)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+  <button id="fs" title="Plein écran (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+<nav class="dock glass" id="dock" aria-label="Planches"></nav>
+<aside class="card glass" id="card" aria-live="polite"></aside>
+<div class="hint glass" id="hint"><svg viewBox="0 0 26 38" fill="none"><rect x="1.5" y="1.5" width="23" height="35" rx="11.5" stroke="#f3e2bd" stroke-width="2"/><rect class="w" x="11.5" y="8" width="3" height="7" rx="1.5" fill="#ffb86b"/></svg>
+  <span id="hint1">Faites défiler pour plonger dans l’appareil génital masculin</span><small id="hint2">Molette · double-clic · boutons lumineux · ←/→ planche précédente / suivante · F plein écran</small></div>
+<div class="toast glass" id="toast"></div><div class="wait" id="wait"><i></i></div>
+<div id="loader"><div><h1>Appareil Génital Masculin</h1><p>9 planches · 3 actes — de l’organe au spermatozoïde</p><div class="tr"><i id="lb"></i></div><div class="msg" id="lmsg">Chargement des planches…</div></div></div>
+<script>window.__IMG__={"p1":"/atlas-zoom/genital-masculin/p1.webp","p1_t":"/atlas-zoom/genital-masculin/p1_t.webp","p2":"/atlas-zoom/genital-masculin/p2.webp","p2_t":"/atlas-zoom/genital-masculin/p2_t.webp","p3":"/atlas-zoom/genital-masculin/p3.webp","p3_t":"/atlas-zoom/genital-masculin/p3_t.webp","p4":"/atlas-zoom/genital-masculin/p4.webp","p4_t":"/atlas-zoom/genital-masculin/p4_t.webp","p5":"/atlas-zoom/genital-masculin/p5.webp","p5_t":"/atlas-zoom/genital-masculin/p5_t.webp","p6":"/atlas-zoom/genital-masculin/p6.webp","p6_t":"/atlas-zoom/genital-masculin/p6_t.webp","p7":"/atlas-zoom/genital-masculin/p7.webp","p7_t":"/atlas-zoom/genital-masculin/p7_t.webp","p8":"/atlas-zoom/genital-masculin/p8.webp","p8_t":"/atlas-zoom/genital-masculin/p8_t.webp","p9":"/atlas-zoom/genital-masculin/p9.webp","p9_t":"/atlas-zoom/genital-masculin/p9_t.webp"};window.__META__={"p1": {"w": 2048, "h": 1016, "bg": [34, 36, 41]}, "p2": {"w": 2048, "h": 1024, "bg": [29, 31, 36]}, "p3": {"w": 2048, "h": 1019, "bg": [32, 33, 38]}, "p4": {"w": 2048, "h": 1011, "bg": [31, 33, 37]}, "p5": {"w": 2048, "h": 1017, "bg": [32, 35, 39]}, "p6": {"w": 2048, "h": 1006, "bg": [28, 33, 37]}, "p7": {"w": 2048, "h": 1026, "bg": [31, 33, 38]}, "p8": {"w": 2048, "h": 1048, "bg": [29, 32, 36]}, "p9": {"w": 2048, "h": 904, "bg": [31, 33, 38]}};window.__TEX__="/atlas-zoom/_shared/board.webp";</script>
+<script>// Appareil génital masculin — 9 planches en une plongée continue (3 actes × 3 planches), de la coupe sagittale
+// aux cellules de Sertoli et de Leydig et à l'ultrastructure du spermatozoïde.
+// Coordonnées normalisées dans la planche recadrée. portal : rectangle où s'emboîte la planche suivante.
+const ACTS = [
+  { name: 'Anatomie', sub: 'Organe', mag: 1 },
+  { name: 'Histologie', sub: 'Tissu', mag: 100 },
+  { name: 'Cytologie', sub: 'Cellule · Gamète', mag: 10000 },
+];
+const PLATES = [
+// ─────────────────────────────── ACTE I — ANATOMIE ───────────────────────────────
+{ img: 'p1', act: 0, short: 'Coupe sagittale', scale: 'Organe', title: 'Anatomie de l’appareil génital masculin (coupe sagittale)',
+  portal: { c: [0.37, 0.77], w: 0.3 },
+  pins: [
+  { x: .47, y: .20, t: 'Vessie', p: 'Réservoir sous-péritonéal ; son col repose sur la base de la prostate.', trap: 'Une <b>HBP</b> obstructive donne une vessie de lutte (paroi épaissie, diverticules), un résidu post-mictionnel et, au maximum, une rétention aiguë d’urine.' },
+  { x: .335, y: .27, t: 'Symphyse pubienne', p: 'Articulation médiane du bassin, en avant de la vessie ; l’espace de Retzius (prévésical) les sépare.', trap: 'Fracture du bassin avec disjonction pubienne : penser à une <b>rupture de l’urètre membraneux</b> (urétrorragie, globe, prostate ascensionnée au TR) → pas de sondage, cathéter sus-pubien.' },
+  { x: .335, y: .36, t: 'Canal déférent', p: '≈ 40 cm, de la queue de l’épididyme au canal éjaculateur : cordon spermatique, canal inguinal, puis paroi pelvienne ; il croise l’uretère <b>au-dessus</b> de lui.', trap: '« L’eau passe sous le pont » : l’uretère passe <b>sous</b> le déférent (comme sous l’artère utérine chez la femme). Vasectomie : section des déférents, l’éjaculat garde son volume (≈ 95 % hors testicule).' },
+  { x: .605, y: .27, t: 'Vésicule séminale', p: 'Glande paire, en arrière de la vessie ; ≈ 60–70 % du volume de l’éjaculat : liquide alcalin riche en <b>fructose</b> (énergie des spermatozoïdes), prostaglandines, séménogéline.', trap: 'Azoospermie avec faible volume, pH acide et fructose bas : agénésie bilatérale des déférents et des vésicules (<b>mucoviscidose</b>, gène CFTR) ou obstruction des canaux éjaculateurs.' },
+  { x: .50, y: .41, t: 'Prostate', p: 'Glande sous-vésicale, traversée par l’urètre prostatique et les canaux éjaculateurs ; ≈ 20–30 % de l’éjaculat (PSA, acide citrique, zinc).', trap: 'La prostate est en avant du <b>rectum</b> : le <b>toucher rectal</b> palpe la zone périphérique postérieure (siège de la majorité des cancers).' },
+  { x: .545, y: .41, t: 'Canal éjaculateur', p: 'Union du déférent et du canal de la vésicule séminale ; il traverse la prostate et s’ouvre sur le <b>veru montanum</b> de l’urètre prostatique.', trap: 'Le veru montanum (colliculus séminal) est un repère endoscopique majeur : la résection prostatique s’arrête en amont pour préserver le sphincter strié.' },
+  { x: .505, y: .47, t: 'Urètre prostatique', p: '≈ 3 cm, le plus large et le plus dilatable ; il reçoit les canaux éjaculateurs et prostatiques.', trap: 'Urètre masculin ≈ 18–20 cm : prostatique, membraneux (le plus <b>court et étroit</b>, sphincter strié), spongieux (le plus long). Urètre postérieur = prostatique + membraneux.' },
+  { x: .55, y: .53, t: 'Glande bulbo-urétrale (Cowper)', p: 'Petite glande paire dans le diaphragme uro-génital ; son canal s’ouvre dans l’urètre spongieux (bulbe) : mucus pré-éjaculatoire lubrifiant.', trap: 'Les glandes de Cowper sont l’équivalent des glandes de <b>Bartholin</b> chez la femme.' },
+  { x: .26, y: .55, t: 'Urètre spongieux (pénien)', p: 'Dans le corps spongieux, du bulbe au méat ; il présente la fosse naviculaire dans le gland.', trap: '<b>Hypospadias</b> : méat ectopique sur la face <b>ventrale</b> du pénis (défaut de fusion des plis urétraux) ; pas de circoncision avant la correction (le prépuce sert à la plastie).' },
+  { x: .24, y: .62, t: 'Corps caverneux', p: 'Deux cylindres érectiles dorsaux, fixés aux branches ischio-pubiennes par leurs racines (piliers).', trap: 'Fracture du pénis : rupture de l’<b>albuginée</b> d’un corps caverneux en érection (craquement, détumescence, hématome) → chirurgie en urgence.' },
+  { x: .27, y: .715, t: 'Corps spongieux', p: 'Corps érectile ventral qui entoure l’urètre ; il forme le bulbe en arrière et le gland en avant.', trap: 'Le corps spongieux reste relativement souple en érection : l’urètre reste perméable pour l’éjaculation.' },
+  { x: .21, y: .84, t: 'Gland', p: 'Extrémité renflée du corps spongieux, couverte par le prépuce ; très innervé (nerf dorsal du pénis).', trap: '<b>Paraphimosis</b> : prépuce rétracté étranglant le gland = urgence (réduction manuelle). Phimosis : prépuce non rétractable.' },
+  { x: .395, y: .705, t: 'Épididyme', p: 'Coiffe le bord postéro-supérieur du testicule : tête, corps, queue ; il se prolonge par le déférent.', trap: '<b>Orchi-épididymite</b> : IST (chlamydia, gonocoque) avant 35 ans, entérobactéries après ; signe de <b>Prehn</b> positif (la surélévation soulage).' },
+  { x: .355, y: .83, t: 'Testicule', p: 'Glande mixte, exocrine (spermatozoïdes) et endocrine (testostérone), dans le scrotum, ≈ 2–3 °C sous la température centrale.', trap: '<b>Torsion du cordon spermatique</b> : douleur brutale, testicule ascensionné, réflexe crémastérien aboli, Prehn négatif → <b>exploration chirurgicale en urgence</b> (< 6 h), sans attendre l’échographie.', note: 'Le libellé « Testicule » figure deux fois ; une des flèches de la légende de gauche aboutit sur la peau du scrotum.' },
+  { x: .43, y: .88, t: 'Scrotum', p: 'Peau fine, dartos (muscle lisse), puis les enveloppes dérivées de la paroi abdominale ; il thermorégule le testicule.', trap: '<b>Cryptorchidie</b> : testicule non descendu → orchidopexie avant 1 an (fertilité, risque de cancer, dépistage facilité).' },
+  { x: .65, y: .30, t: 'Rectum', p: 'En arrière de la vésicule séminale et de la prostate, séparé par l’aponévrose de Denonvilliers.', trap: 'L’aponévrose prostato-péritonéale de <b>Denonvilliers</b> est le plan de dissection de la prostatectomie radicale ; elle freine l’extension rectale des cancers.', note: 'Les légendes de droite sont décalées : la flèche « Rectum » aboutit sur le périnée près de la glande de Cowper, et la flèche « Corps caverneux » (à droite) sur le canal anal.' },
+  { x: .53, y: .63, t: 'Bulbe du pénis', p: 'Renflement postérieur du corps spongieux, fixé au périnée et entouré par le muscle bulbo-spongieux.', trap: 'Chute à califourchon : rupture de l’<b>urètre bulbaire</b> (hématome périnéal en ailes de papillon).' },
+  { x: .37, y: .745, side: 'l', portal: 'Ouvrir le testicule & le cordon', t: 'Le testicule et ses enveloppes', p: 'Agrandissez le testicule, l’épididyme et le cordon spermatique.', trap: 'Le testicule descend de la région lombaire au scrotum à travers le canal inguinal (gubernaculum).' },
+]},
+{ img: 'p2', act: 0, short: 'Testicule & cordon', scale: 'Organe', title: 'Anatomie du testicule, de l’épididyme et du cordon spermatique',
+  portal: { c: [0.635, 0.08], w: 0.12 },
+  pins: [
+  { x: .535, y: .30, t: 'Artère testiculaire', p: 'Née de l’<b>aorte abdominale</b> sous les artères rénales (L2), elle descend dans le cordon.', trap: 'Le testicule a une origine lombaire : drainage lymphatique vers les ganglions <b>lombo-aortiques</b> (pas inguinaux), douleur testiculaire possible dans une colique néphrétique.' },
+  { x: .47, y: .15, t: 'Plexus veineux pampiniforme', p: 'Réseau veineux autour de l’artère testiculaire : il refroidit le sang artériel (échangeur à contre-courant).', trap: '<b>Varicocèle</b> surtout <b>gauche</b> (≈ 90 %) : la veine testiculaire gauche se jette à angle droit dans la veine rénale gauche (pince aorto-mésentérique). Varicocèle droite isolée ou d’apparition brutale → chercher une masse (rein, rétropéritoine).' },
+  { x: .495, y: .085, t: 'Cordon spermatique', p: 'Contenu : canal déférent, artères testiculaire, déférentielle et crémastérique, plexus pampiniforme, lymphatiques, nerfs, reliquat du processus vaginal.', trap: 'Enveloppes du cordon : fascia spermatique externe (oblique externe), crémaster (oblique interne), fascia spermatique interne (fascia transversalis).' },
+  { x: .63, y: .22, t: 'Canal déférent', p: 'Paroi musculaire épaisse : il roule sous les doigts comme une ficelle dure à la palpation du cordon.', trap: 'Absence de déférent palpable (bilatérale) chez un homme infertile → rechercher une mutation <b>CFTR</b>.' },
+  { x: .44, y: .35, t: 'Muscle crémaster', p: 'Fibres issues de l’oblique interne autour du cordon (nerf génito-fémoral) : il remonte le testicule.', trap: '<b>Réflexe crémastérien</b> (L1–L2) : son abolition oriente vers une <b>torsion</b> testiculaire.' },
+  { x: .60, y: .35, t: 'Tête de l’épididyme', p: 'Elle reçoit les canaux efférents ; corps et queue suivent le bord postérieur du testicule.', trap: 'Torsion d’hydatide (appendice testiculaire ou épididymaire) : douleur localisée au pôle supérieur, « tache bleue » ; diagnostic différentiel de la torsion du cordon.' },
+  { x: .635, y: .49, t: 'Canaux efférents', p: '10 à 15 canaux qui relient le rete testis à la tête de l’épididyme ; épithélium festonné (cellules ciliées et absorbantes).', trap: 'Les canaux efférents réabsorbent l’essentiel du fluide testiculaire (sous l’effet des œstrogènes) : ils concentrent les spermatozoïdes.' },
+  { x: .645, y: .55, t: 'Rete testis (réseau de Haller)', p: 'Réseau de canaux anastomosés dans le médiastinum du testicule, qui collecte les tubes droits.', trap: 'Trajet : tubes séminifères contournés → tubes droits → rete testis → canaux efférents → épididyme → déférent.' },
+  { x: .455, y: .55, t: 'Albuginée et septa', p: 'Capsule fibreuse épaisse et peu extensible ; des septa la relient au médiastinum et délimitent ≈ 250 lobules.', trap: 'L’albuginée inextensible explique la douleur intense de l’<b>orchite ourlienne</b> (oreillons après la puberté, risque d’atrophie).' },
+  { x: .49, y: .66, t: 'Lobules et tubes séminifères', p: 'Chaque lobule contient 1 à 4 tubes séminifères contournés très longs (≈ 30–80 cm chacun).', trap: 'Le tissu interstitiel entre les tubes contient les cellules de <b>Leydig</b> (testostérone).', note: 'Le libellé « Lobules testiculaires (tubes séminifères contournés) » figure deux fois.' },
+  { x: .345, y: .84, t: 'Tunique vaginale', p: 'Séreuse issue du péritoine (processus vaginal) : feuillets pariétal et viscéral autour du testicule.', trap: '<b>Hydrocèle</b> : liquide dans la vaginale, translucide à la transillumination. Persistance du canal péritonéo-vaginal : hydrocèle communicante ou hernie inguinale indirecte de l’enfant.', note: 'La planche écrit « parital » pour « pariétal ».' },
+  { x: .65, y: .85, t: 'Testicule', p: '≈ 4–5 cm, 15–20 mL ; consistance ferme et homogène.', trap: '<b>Masse testiculaire dure</b> chez l’homme jeune = cancer jusqu’à preuve du contraire (séminome, non séminomateux) : échographie, marqueurs (α-FP, β-hCG, LDH), orchidectomie par voie <b>inguinale</b> (jamais scrotale).' },
+  { x: .68, y: .65, t: 'Queue de l’épididyme', p: 'Réservoir des spermatozoïdes ; elle se continue par le canal déférent.', trap: 'Les spermatozoïdes acquièrent leur mobilité et leur pouvoir fécondant pendant leur transit épididymaire (≈ 10–15 jours).' },
+  { x: .635, y: .07, side: 'l', portal: 'Suivre le déférent : prostate & pénis', t: 'Vers la prostate et le pénis', p: 'Suivez le canal déférent jusqu’aux canaux éjaculateurs, à travers la prostate, puis l’urètre du pénis.', trap: 'Le déférent passe par le canal inguinal : il peut être lésé lors d’une cure de hernie.' },
+]},
+{ img: 'p3', act: 0, short: 'Pénis & prostate', scale: 'Organe', title: 'Anatomie du pénis (corps érectiles), prostate et vascularisation',
+  portal: { c: [0.75, 0.33], w: 0.14 },
+  pins: [
+  { x: .165, y: .33, t: 'Corps caverneux', p: 'Tissu érectile aréolaire entouré d’une albuginée épaisse ; artère caverneuse (profonde) au centre.', trap: '<b>Priapisme</b> ischémique (veino-occlusif, douloureux : drépanocytose, injections intracaverneuses) = urgence (ponction-aspiration) ; priapisme artériel (non ischémique) après traumatisme périnéal.' },
+  { x: .18, y: .43, t: 'Artère caverneuse (profonde)', p: 'Branche de l’artère pudendale interne ; elle donne les artères hélicines qui remplissent les aréoles.', trap: 'La <b>dysfonction érectile</b> vasculaire précède souvent la maladie coronaire de quelques années : chercher les facteurs de risque cardiovasculaire.' },
+  { x: .275, y: .16, t: 'Veine dorsale profonde', p: 'Médiane, sous le fascia de Buck : elle draine les corps caverneux vers le plexus veineux prostatique (de Santorini).', trap: 'Pendant l’érection, les veines émissaires sont comprimées contre l’albuginée : <b>mécanisme veino-occlusif</b>.' },
+  { x: .215, y: .195, t: 'Artères dorsales du pénis', p: 'Paires, de part et d’autre de la veine dorsale profonde ; elles vascularisent le gland et la peau.', trap: 'Disposition dorsale de dedans en dehors : veine dorsale profonde – artères dorsales – nerfs dorsaux.' },
+  { x: .345, y: .20, t: 'Nerf dorsal du pénis', p: 'Branche du nerf <b>pudendal</b> (S2–S4) : sensibilité du pénis et du gland.', trap: 'Érection = <b>parasympathique</b> (nerfs érecteurs S2–S4, NO) ; éjaculation = <b>sympathique</b> (émission) puis somatique (bulbo-spongieux). « Point and shoot ».' },
+  { x: .25, y: .72, t: 'Corps spongieux et urètre spongieux', p: 'Corps érectile ventral, traversé par l’urètre.', trap: 'Sténose de l’urètre (post-infectieuse, iatrogène, lichen) : jet faible, infections ; urétrographie rétrograde.', note: 'Une des deux flèches de « Corps spongieux et urètre spongieux » aboutit sur l’albuginée du corps caverneux gauche.' },
+  { x: .385, y: .71, t: 'Fascia profond de Buck', p: 'Gaine commune des trois corps érectiles, sous le fascia superficiel (de Colles au périnée).', trap: 'Rupture de l’urètre <b>sous</b> le fascia de Buck intact : hématome limité au pénis. Fascia de Buck rompu : hématome périnéal en <b>ailes de papillon</b> (limité par le fascia de Colles).' },
+  { x: .235, y: .43, t: 'Septum et albuginée', p: 'Albuginée bilaminée (fibres longitudinales et circulaires), incomplète entre les deux corps caverneux (septum pectiniforme).', trap: '<b>Maladie de La Peyronie</b> : plaque fibreuse de l’albuginée → courbure du pénis en érection.' },
+  { x: .68, y: .46, t: 'Zone périphérique (McNeal)', p: 'Postérieure et latérale, ≈ 70 % du tissu glandulaire : siège d’environ 70 % des <b>cancers</b>.', trap: 'Cancer de la prostate : souvent asymptomatique ; TR (nodule dur), <b>PSA</b>, IRM multiparamétrique, biopsies ; score de Gleason / ISUP.' },
+  { x: .725, y: .64, t: 'Zone de transition', p: 'Autour de l’urètre prostatique proximal, ≈ 5 % de la glande jeune : siège de l’<b>HBP</b>.', trap: 'HBP : traitement par α-bloquants (tamsulosine : hypotension orthostatique, éjaculation rétrograde) et inhibiteurs de la 5α-réductase (finastéride : <b>PSA divisé par 2</b>, à corriger).' },
+  { x: .815, y: .52, t: 'Zone centrale', p: 'En cône autour des canaux éjaculateurs, ≈ 25 % de la glande ; peu de cancers.', trap: 'Zones de McNeal : périphérique (cancer), transition (HBP), centrale (canaux éjaculateurs), stroma fibromusculaire antérieur (non glandulaire).', note: 'La légende « Zone centrale et vésicules séminales » figure deux fois ; celle du bas pointe l’urètre prostatique.' },
+  { x: .80, y: .58, t: 'Canaux éjaculateurs', p: 'Ils traversent la zone centrale et s’ouvrent sur le veru montanum.', trap: 'Hémospermie : le plus souvent bénigne chez l’homme jeune ; après 40 ans, rechercher une pathologie prostatique.' },
+  { x: .72, y: .21, t: 'Vésicules séminales', p: 'Glandes paires très plissées, au-dessus de la prostate ; leur canal rejoint l’ampoule du déférent.', trap: 'L’envahissement des vésicules séminales (pT3b) aggrave le pronostic du cancer prostatique.' },
+  { x: .765, y: .70, t: 'Urètre prostatique', p: 'Il traverse la prostate de la base à l’apex, entouré par la zone de transition.', trap: 'L’HBP comprime l’urètre prostatique : dysurie, pollakiurie, nycturie (score IPSS).' },
+  { x: .75, y: .32, side: 'l', portal: 'Zoomer dans le tube séminifère (×100)', t: 'Retour au testicule', p: 'Les spermatozoïdes qui traversent les canaux éjaculateurs naissent dans les tubes séminifères : entrez dans le testicule.', trap: 'Spermatogenèse ≈ 74 jours chez l’homme, dans les tubes séminifères.' },
+]},
+// ─────────────────────────────── ACTE II — HISTOLOGIE ───────────────────────────────
+{ img: 'p4', act: 1, short: 'Tube séminifère', scale: 'Tissu', title: 'Histologie du testicule : tube séminifère et tissu interstitiel',
+  portal: { c: [0.725, 0.42], w: 0.1 },
+  pins: [
+  { x: .395, y: .185, t: 'Albuginée', p: 'Capsule conjonctive dense qui entoure le testicule.', trap: 'L’albuginée doublée de la vaginale viscérale forme la paroi du testicule ; une rupture (traumatisme) impose la chirurgie.' },
+  { x: .145, y: .31, t: 'Tube séminifère', p: 'Tube contourné de ≈ 200 µm de diamètre : épithélium séminal (cellules germinales + cellules de Sertoli) sur une lame basale.', trap: 'Tube séminifère = compartiment <b>exocrine</b> (spermatozoïdes) ; tissu interstitiel = compartiment <b>endocrine</b> (Leydig).' },
+  { x: .20, y: .47, t: 'Épithélium germinatif (séminal)', p: 'Couches successives de la base vers la lumière : spermatogonies, spermatocytes I et II, spermatides, spermatozoïdes.', trap: 'Différenciation <b>centripète</b> : les cellules les plus mûres sont près de la lumière.' },
+  { x: .79, y: .25, t: 'Spermatogonies', p: 'Cellules souches diploïdes (2n) au contact de la lame basale ; elles se divisent par mitose (A et B).', trap: 'La spermatogenèse démarre à la <b>puberté</b> et dure toute la vie (≠ ovogenèse, stock fixé avant la naissance).' },
+  { x: .81, y: .375, t: 'Spermatocytes I et II', p: 'Spermatocytes I (2n, gros noyau, méiose I longue) puis spermatocytes II (n, méiose II très courte, donc rarement vus).', trap: 'Une spermatogonie B donne <b>4 spermatides</b> (≠ ovogenèse : 1 ovocyte + globules polaires).' },
+  { x: .78, y: .48, t: 'Spermatides et spermatozoïdes', p: 'Spermatides haploïdes près de la lumière : la <b>spermiogenèse</b> les transforme en spermatozoïdes (acrosome, flagelle, condensation nucléaire).', trap: 'Spermiogenèse = différenciation sans division ; spermiation = libération dans la lumière.', note: 'La planche écrit « Spermatogonies » / « spermatozoïde » avec des lettres manquantes dans le cercle (artefact du dessin).' },
+  { x: .79, y: .61, t: 'Cellules de Sertoli', p: 'Cellules somatiques qui s’étendent de la lame basale à la lumière ; noyau clair, triangulaire, nucléole volumineux.', trap: 'Syndrome « <b>Sertoli cell only</b> » : tubes ne contenant que des cellules de Sertoli (azoospermie non obstructive, FSH élevée).' },
+  { x: .615, y: .68, t: 'Cellules myoïdes péritubulaires', p: 'Cellules contractiles autour de la lame basale : elles propulsent le fluide et les spermatozoïdes immobiles.', trap: 'Les spermatozoïdes testiculaires sont <b>immobiles</b> : ils sont transportés passivement jusqu’à l’épididyme.' },
+  { x: .635, y: .77, t: 'Cellules de Leydig', p: 'Amas de cellules éosinophiles dans le tissu interstitiel, près des capillaires : sécrétion de testostérone sous l’effet de la <b>LH</b>.', trap: 'Tumeur à cellules de Leydig : puberté précoce chez l’enfant, gynécomastie chez l’adulte.' },
+  { x: .73, y: .865, t: 'Capillaires sanguins', p: 'Capillaires du tissu interstitiel, entre les tubes.', trap: 'La testostérone gagne le sang <b>et</b> les tubes voisins : la concentration intratesticulaire est ≈ 100 fois la concentration sanguine.' },
+  { x: .82, y: .81, t: 'Capillaire et Leydig', p: 'Capillaire au contact d’un îlot de cellules de Leydig.', trap: 'Testostérone exogène (dopage, traitement) → LH effondrée → testostérone intratesticulaire basse → <b>azoospermie</b> réversible.', note: 'Le libellé « Capilldaieres Leydig » est une coquille (capillaires).' },
+  { x: .725, y: .42, side: 'l', portal: 'Comparer épididyme & déférent', t: 'Vers les voies spermatiques', p: 'Les spermatozoïdes libérés dans la lumière gagnent l’épididyme puis le canal déférent.', trap: 'Maturation épididymaire : mobilité, pouvoir fécondant.' },
+]},
+{ img: 'p5', act: 1, short: 'Épididyme & déférent', scale: 'Tissu', title: 'Histologie de l’épididyme et du canal déférent',
+  portal: { c: [0.71, 0.47], w: 0.1 },
+  pins: [
+  { x: .25, y: .36, t: 'Épithélium pseudostratifié (épididyme)', p: 'Cellules principales hautes (absorption, sécrétion de glycoprotéines, carnitine) et cellules basales.', trap: 'Épididyme : <b>lumière régulière, ronde</b>, épithélium haut, musculaire fine ; déférent : <b>lumière étoilée</b>, musculeuse très épaisse.' },
+  { x: .24, y: .43, t: 'Stéréocils', p: 'Longues microvillosités immobiles (actine), <b>sans axonème</b> : absorption du fluide testiculaire.', trap: 'Stéréocils (épididyme, déférent, oreille interne) ≠ cils vrais (axonème 9+2, mobiles : trompe, bronches).' },
+  { x: .26, y: .54, t: 'Lumière remplie de spermatozoïdes', p: 'Les spermatozoïdes sont stockés et mûrissent dans l’épididyme.', trap: 'Les spermatozoïdes ne deviennent fécondants qu’après la <b>capacitation</b> dans les voies génitales féminines.' },
+  { x: .24, y: .745, t: 'Fine couche musculaire lisse', p: 'Mince couche circulaire autour du canal épididymaire, qui s’épaissit vers la queue.', trap: 'Le canal épididymaire est unique, pelotonné (≈ 6 m de long).' },
+  { x: .72, y: .48, t: 'Lumière étoilée (déférent)', p: 'Lumière irrégulière en étoile, due aux replis longitudinaux de la muqueuse.', trap: 'Diagnostic histologique classique : lumière étoilée + musculeuse épaisse à 3 couches = <b>canal déférent</b>.' },
+  { x: .775, y: .43, t: 'Épithélium pseudostratifié (déférent)', p: 'Épithélium plus bas, avec stéréocils, sur un chorion élastique.', trap: 'L’ampoule du déférent (avant le canal éjaculateur) est un réservoir glandulaire.' },
+  { x: .80, y: .55, t: 'Couche longitudinale interne', p: 'Première des trois couches musculaires lisses.', trap: 'Musculeuse du déférent : longitudinale interne, circulaire moyenne, longitudinale externe.' },
+  { x: .80, y: .66, t: 'Couche circulaire moyenne', p: 'La plus épaisse des trois couches.', trap: 'Contractions puissantes au moment de l’<b>émission</b> (sympathique, récepteurs α1).' },
+  { x: .815, y: .75, t: 'Couche longitudinale externe', p: 'Couche externe, en continuité avec l’adventice.', trap: 'Les α-bloquants (tamsulosine) peuvent donner une anéjaculation ou une éjaculation rétrograde.' },
+  { x: .815, y: .825, t: 'Adventice', p: 'Conjonctif lâche qui unit le déférent aux autres éléments du cordon.', trap: 'Le déférent est palpable dans le cordon grâce à sa paroi épaisse (ficelle dure).' },
+  { x: .70, y: .12, side: 'l', portal: 'Vers la prostate & le tissu érectile', t: 'Les glandes annexes', p: 'Le déférent rejoint la prostate : passez à la prostate et au tissu érectile.', trap: 'Spermatozoïdes + sécrétions des vésicules séminales, de la prostate et des glandes de Cowper = sperme.' },
+]},
+{ img: 'p6', act: 1, short: 'Prostate & érectile', scale: 'Tissu', title: 'Histologie de la prostate et du tissu érectile (corps caverneux)',
+  portal: { c: [0.30, 0.50], w: 0.1 },
+  pins: [
+  { x: .245, y: .30, t: 'Glandes tubulo-alvéolaires', p: '30 à 50 glandes ramifiées, à lumière large et festonnée (replis papillaires).', trap: 'Cancer de la prostate (adénocarcinome) : glandes petites, serrées, <b>sans couche basale</b> (p63 et CK5/6 négatives, AMACR positive).' },
+  { x: .18, y: .44, t: 'Épithélium sécrétoire et cellules basales', p: 'Cellules sécrétoires cylindriques (PSA, phosphatase acide) sur une couche de cellules basales.', trap: 'Le <b>PSA</b> est spécifique de la prostate, pas du cancer : il augmente aussi dans l’HBP, la prostatite, après un sondage ou un TR.' },
+  { x: .225, y: .60, t: 'Sympexions (corps amylacés)', p: 'Concrétions éosinophiles lamellaires dans la lumière des glandes, plus nombreuses avec l’âge ; elles peuvent se calcifier.', trap: 'Les corps amylacés sont <b>bénins</b> et typiques de la prostate âgée ; ils ne signent pas un cancer.' },
+  { x: .385, y: .71, t: 'Stroma fibromusculaire dense', p: 'Muscle lisse abondant mêlé de fibres conjonctives : il expulse les sécrétions lors de l’éjaculation.', trap: 'Les récepteurs <b>α1</b> du muscle lisse prostatique expliquent l’effet des α-bloquants dans l’HBP (composante dynamique).' },
+  { x: .76, y: .33, t: 'Espaces vasculaires (aréoles)', p: 'Cavités sinusoïdes bordées d’endothélium : elles se remplissent de sang lors de l’érection.', trap: 'Érection : NO → GMPc → relâchement du muscle lisse trabéculaire → remplissage des aréoles. Les <b>inhibiteurs de la PDE5</b> (sildénafil) prolongent l’effet du GMPc ; contre-indiqués avec les dérivés nitrés.' },
+  { x: .805, y: .42, t: 'Endothélium vasculaire', p: 'Il produit le NO (NO-synthase endothéliale) avec les terminaisons nitrergiques.', trap: 'Diabète, tabac, HTA altèrent l’endothélium : dysfonction érectile vasculogénique.' },
+  { x: .79, y: .535, t: 'Trabécules de muscle lisse', p: 'Travées de muscle lisse et de fibres élastiques entre les aréoles.', trap: 'Au repos, le tonus sympathique (noradrénaline, α1) contracte les trabécules : flaccidité.' },
+  { x: .72, y: .76, t: 'Artères hélicines', p: 'Petites artères spiralées, branches de l’artère caverneuse, qui s’ouvrent dans les aréoles.', trap: 'En érection, les artères hélicines se déroulent et se dilatent : le débit artériel augmente fortement.' },
+  { x: .30, y: .50, portal: 'Entrer dans la cellule de Sertoli (×10 000)', t: 'Retour aux cellules du testicule', p: 'Les glandes annexes nourrissent et transportent les spermatozoïdes, mais c’est dans le tube séminifère, au contact des cellules de Sertoli, qu’ils se forment.', trap: 'Une cellule de Sertoli soutient de nombreuses cellules germinales à tous les stades.' },
+]},
+// ─────────────────────────────── ACTE III — CYTOLOGIE ───────────────────────────────
+{ img: 'p7', act: 2, short: 'Sertoli & BHT', scale: 'Cellule', title: 'Cytologie de la cellule de Sertoli et barrière hémato-testiculaire',
+  portal: { c: [0.20, 0.82], w: 0.14 },
+  pins: [
+  { x: .335, y: .53, t: 'Cellule de Sertoli', p: 'Noyau triangulaire indenté, chromatine claire, gros nucléole ; cytoplasme qui enveloppe toutes les cellules germinales.', trap: 'Une cellule de Sertoli ne prolifère plus après la puberté : leur nombre fixe la capacité de production spermatique.' },
+  { x: .505, y: .61, t: 'Jonctions serrées : barrière hémato-testiculaire', p: 'Jonctions serrées entre cellules de Sertoli voisines (claudine-11), au-dessus des spermatogonies.', trap: 'La barrière isole les cellules germinales <b>haploïdes</b>, apparues après la puberté (« étrangères » au système immunitaire) : sa rupture (traumatisme, vasectomie, infection) entraîne des <b>anticorps anti-spermatozoïdes</b>.', note: 'La flèche « Jonctions serrées (barrière hémato-testiculaire) » aboutit dans le cytoplasme ; les jonctions sont dessinées comme l’échelle entre les deux cellules, au-dessus des spermatogonies.' },
+  { x: .505, y: .78, t: 'Compartiment basal', p: 'Sous les jonctions serrées : spermatogonies diploïdes (2n), en contact avec le milieu intérieur.', trap: 'Les spermatocytes I au stade préleptotène franchissent la barrière, qui se défait et se reforme derrière eux.' },
+  { x: .615, y: .17, t: 'Compartiment adluminal', p: 'Au-dessus de la barrière : spermatocytes, spermatides et spermatozoïdes, dans un milieu contrôlé par la cellule de Sertoli.', trap: 'Le testicule est un site <b>immunoprivilégié</b> (barrière, Fas-ligand, cellules T régulatrices) : les leucémies y rechutent (sanctuaire).' },
+  { x: .50, y: .29, t: 'Spermatides haploïdes', p: 'Cellules rondes puis allongées, enchâssées dans des récessus du cytoplasme sertolien.', trap: 'Chaque spermatide est haploïde (n = 23) mais garde des ponts cytoplasmiques avec ses sœurs.' },
+  { x: .465, y: .42, t: 'Spermatocyte II', p: 'Cellule issue de la méiose I, très brève avant la méiose II.', trap: 'La méiose I est réductionnelle (séparation des homologues), la méiose II équationnelle (séparation des chromatides).' },
+  { x: .36, y: .17, t: 'Spermiation', p: 'Libération des spermatozoïdes dans la lumière ; le cytoplasme en excès reste sous forme de corps résiduel.', trap: 'Une gouttelette cytoplasmique persistante sur le spermatozoïde signe une spermiogenèse imparfaite (spermogramme).' },
+  { x: .71, y: .33, t: 'Phagocytose des corps résiduels', p: 'La cellule de Sertoli phagocyte les corps résiduels et les cellules germinales apoptotiques.', trap: 'Environ la moitié des cellules germinales meurent par apoptose avant la fin de la spermatogenèse.' },
+  { x: .745, y: .45, t: 'ABP et inhibine B', p: '<b>ABP</b> (androgen-binding protein) : concentre la testostérone dans les tubes. <b>Inhibine B</b> : freine la FSH. Aussi : hormone anti-müllérienne (AMH) chez le fœtus.', trap: 'Inhibine B basse + FSH élevée = atteinte de la spermatogenèse. L’<b>AMH</b> sertolienne fait régresser les canaux de Müller chez le fœtus mâle.' },
+  { x: .79, y: .62, t: 'Récepteurs FSH et androgènes', p: 'Récepteur de la FSH membranaire (RCPG) ; récepteur des androgènes intracellulaire.', trap: '<b>FSH → Sertoli</b>, <b>LH → Leydig</b>. La testostérone agit sur la Sertoli pour la spermatogenèse.', note: 'La planche dessine les récepteurs de la testostérone sur la membrane : le récepteur des androgènes est <b>intracellulaire</b> (récepteur nucléaire).' },
+  { x: .705, y: .81, t: 'Lame basale', p: 'Elle sépare l’épithélium séminal des cellules myoïdes et du tissu interstitiel.', trap: 'Un épaississement de la lame basale (hyalinisation) se voit dans le syndrome de Klinefelter.' },
+  { x: .29, y: .85, t: 'Capillaire sanguin', p: 'Capillaire du tissu interstitiel, sous la lame basale.', trap: 'Les substances du sang n’atteignent les cellules adluminales qu’à travers le cytoplasme de la Sertoli.' },
+  { x: .06, y: .10, t: 'Jonctions serrées en MET', p: 'Fusion des feuillets membranaires entre deux cellules de Sertoli.', trap: 'La barrière hémato-testiculaire est l’une des barrières les plus étanches de l’organisme.' },
+  { x: .93, y: .80, t: 'Spermatide et corps résiduels (MET)', p: 'Spermatide allongée et vésicules de corps résiduels phagocytés.', trap: 'Les corps résiduels contiennent ribosomes, gouttelettes lipidiques et mitochondries en excès.' },
+  { x: .17, y: .80, portal: 'Voir la cellule de Leydig & la testostérone', t: 'Le tissu interstitiel', p: 'Sortez du tube : à côté du capillaire, la cellule de Leydig fabrique la testostérone.', trap: 'LH → Leydig → testostérone → Sertoli → spermatogenèse.' },
+]},
+{ img: 'p8', act: 2, short: 'Leydig', scale: 'Cellule', title: 'Cytologie de la cellule de Leydig et stéroïdogenèse (testostérone)',
+  portal: { c: [0.75, 0.66], w: 0.1 },
+  pins: [
+  { x: .45, y: .39, t: 'Noyau sphérique et nucléole', p: 'Noyau rond, central, nucléole net.', trap: 'Cellule de Leydig = cellule sécrétrice de <b>stéroïdes</b> : REL, mitochondries à crêtes tubulaires, gouttelettes lipidiques (comme la corticosurrénale et le corps jaune).' },
+  { x: .575, y: .28, t: 'Réticulum endoplasmique lisse', p: 'Très abondant : enzymes de la stéroïdogenèse (3β-HSD, CYP17, 17β-HSD3).', trap: 'Cellule stéroïdogène = <b>REL</b> ; cellule sécrétrice de protéines = RER.' },
+  { x: .695, y: .37, t: 'Mitochondries à crêtes tubulaires', p: 'Siège de la première étape : cholestérol → prégnénolone (CYP11A1, enzyme de clivage de la chaîne latérale).', trap: 'Étape limitante : transport du cholestérol dans la mitochondrie par la protéine <b>StAR</b>, stimulée par la LH.' },
+  { x: .67, y: .46, t: 'Gouttelettes lipidiques', p: 'Réserves de cholestérol estérifié, précurseur de la testostérone.', trap: 'Le cholestérol vient surtout des LDL plasmatiques et de la synthèse locale.' },
+  { x: .70, y: .57, t: 'Cristalloïdes de Reinke', p: 'Inclusions protéiques en bâtonnets, spécifiques de la cellule de Leydig humaine adulte.', trap: 'Les cristalloïdes de Reinke aident à reconnaître une <b>tumeur à cellules de Leydig</b> (présents dans environ un tiers des cas).' },
+  { x: .25, y: .53, t: 'Récepteur de la LH', p: 'Récepteur membranaire couplé à une protéine G (AMPc) ; il reconnaît aussi l’<b>hCG</b>.', trap: 'L’hCG placentaire stimule les cellules de Leydig fœtales : virilisation et descente testiculaire. Test à l’hCG pour explorer un testicule non palpable.' },
+  { x: .345, y: .70, t: 'Diffusion de la testostérone', p: 'Stéroïde liposoluble : il diffuse vers le sang et vers les tubes séminifères (lié à l’ABP).', trap: 'Dans les tissus cibles, la 5α-réductase la transforme en <b>DHT</b> (prostate, organes génitaux externes) ; l’aromatase en estradiol.' },
+  { x: .28, y: .82, t: 'Capillaire et lame basale', p: 'Capillaire du tissu interstitiel au contact de la cellule.', trap: 'Rétrocontrôle : la testostérone freine la LH (hypothalamus-hypophyse) ; l’inhibine B freine la FSH.' },
+  { x: .505, y: .13, t: 'Espace interstitiel', p: 'Tissu conjonctif lâche entre les tubes : cellules de Leydig, vaisseaux, macrophages.', trap: 'Klinefelter (47,XXY) : tubes hyalinisés, amas de cellules de Leydig, testostérone basse, LH et FSH élevées.', note: 'Le libellé « Lumière de l’espace interstitiel » est impropre : le tissu interstitiel n’a pas de lumière ; la flèche aboutit sur la membrane de la cellule.' },
+  { x: .76, y: .53, t: 'Tube séminifère voisin', p: 'Paroi d’un tube séminifère adjacent.', trap: 'La testostérone intratesticulaire, très élevée, est indispensable à la spermatogenèse.' },
+  { x: .60, y: .88, t: 'Cholestérol → testostérone', p: 'Cholestérol → prégnénolone → (17-OH) → DHEA → androstènedione → <b>testostérone</b>.', trap: 'Déficit en <b>5α-réductase</b> : organes génitaux externes ambigus à la naissance, virilisation à la puberté.', note: 'L’équation « cholestérol → … → testostérone » figure deux fois (plus une copie en petit), avec des étapes manquantes.' },
+  { x: .07, y: .12, t: 'REL et mitochondries en MET', p: 'Réseau tubulaire de REL et mitochondries à crêtes tubulaires.', trap: 'Crêtes tubulaires (cellules stéroïdogènes) ≠ crêtes lamellaires (la plupart des cellules).' },
+  { x: .90, y: .79, t: 'Cristalloïde de Reinke en MET', p: 'Réseau cristallin régulier de filaments protéiques.', trap: 'Leur fonction reste inconnue.' },
+  { x: .73, y: .76, side: 'l', portal: 'Voir le spermatozoïde mature', t: 'Le produit final', p: 'Grâce à la testostérone et aux cellules de Sertoli, les spermatides deviennent des spermatozoïdes : voyez leur ultrastructure.', trap: 'Spermatogenèse ≈ 74 jours ; un spermogramme reflète la production d’environ 3 mois plus tôt.' },
+]},
+{ img: 'p9', act: 2, short: 'Spermatozoïde', scale: 'Gamète', title: 'Ultrastructure du spermatozoïde mature (tête, pièce intermédiaire et flagelle)',
+  pins: [
+  { x: .06, y: .36, t: 'Acrosome', p: 'Vésicule dérivée du <b>Golgi</b> coiffant le noyau : hyaluronidase, acrosine.', trap: '<b>Réaction acrosomique</b> au contact de la zone pellucide (ZP3 chez la souris) : exocytose des enzymes qui permettent la traversée. Globozoospermie : spermatozoïdes à tête ronde sans acrosome.' },
+  { x: .17, y: .45, t: 'Noyau haploïde', p: 'Chromatine très condensée grâce aux <b>protamines</b> (qui remplacent les histones) : n = 23 chromosomes, X ou Y.', trap: 'C’est le spermatozoïde qui détermine le <b>sexe</b> de l’embryon (X ou Y).' },
+  { x: .31, y: .42, t: 'Col : centriole proximal', p: 'Pièce de connexion entre tête et flagelle ; le centriole proximal apporte le centrosome du zygote.', trap: 'Chez l’homme, le centrosome du zygote vient du <b>spermatozoïde</b> ; les mitochondries, elles, viennent de l’ovocyte.' },
+  { x: .43, y: .42, t: 'Pièce intermédiaire : gaine mitochondriale', p: 'Mitochondries enroulées en hélice autour de l’axonème : ATP pour le battement flagellaire.', trap: 'Les mitochondries paternelles sont détruites après la fécondation : l’ADN mitochondrial est d’hérédité <b>maternelle</b>.' },
+  { x: .63, y: .30, t: 'Pièce principale : axonème 9+2', p: '9 doublets périphériques + 2 microtubules centraux ; les bras de <b>dynéine</b> produisent le battement.', trap: '<b>Dyskinésie ciliaire primitive</b> (Kartagener) : spermatozoïdes immobiles → infertilité masculine, avec bronchectasies et situs inversus.' },
+  { x: .70, y: .40, t: 'Fibres denses externes et gaine fibreuse', p: '9 fibres denses externes (pièces intermédiaire et principale) ; gaine fibreuse en côtes (pièce principale) : rigidité et forme du battement.', trap: 'Absence de gaine fibreuse (« dysplasie de la gaine fibreuse ») : flagelles courts et épais, immobiles.' },
+  { x: .93, y: .26, t: 'Pièce terminale', p: 'Partie distale, seulement l’axonème entouré de la membrane plasmique.', trap: 'Longueur totale ≈ 60 µm, tête ≈ 5 µm : le spermatozoïde est l’une des plus petites cellules humaines.' },
+  { x: .88, y: .62, t: 'Coupe transversale (9+2)', p: 'Axonème central entouré des 9 fibres denses externes.', trap: 'Microtubules : tubuline α/β ; dynéine = moteur ATPasique vers l’extrémité « moins ».', note: 'Le libellé « Coupe transversale (axonème (9+2)) » figure deux fois.' },
+  { x: .62, y: .82, t: 'Tête en MET', p: 'Noyau dense, acrosome et col.', trap: 'Spermogramme (OMS 2021) : volume ≥ 1,4 mL, concentration ≥ 16 millions/mL, mobilité progressive ≥ 30 %, formes typiques ≥ 4 %.' },
+  { x: .75, y: .70, t: 'Pièce intermédiaire en MET', p: 'Gaine mitochondriale en coupe longitudinale.', trap: 'Asthénospermie : mobilité diminuée (défaut d’axonème, de mitochondries, infections, varicocèle).' },
+  { x: .50, y: .515, t: 'Membrane plasmique', p: 'Elle entoure tout le spermatozoïde ; sa composition change pendant la capacitation (perte de cholestérol).', trap: 'La <b>capacitation</b> (voies génitales féminines) est nécessaire à la réaction acrosomique.', note: 'Le libellé « Membrane plasmique » n’a pas de flèche.' },
+]},
+];
+</script>
+<script>// Appareil génital masculin — atlas à zoom continu, 9 planches emboîtées (Canvas 2D, zéro dépendance).
+// Chaque planche vit dans le « portail » de la précédente ; une seule caméra (cx, cy, z) traverse le monde.
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const sst = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const META = window.__META__, IMG = window.__IMG__; const N = PLATES.length;
+const ROMAN = ['I', 'II', 'III'];
+const lig = (s) => s.replace(/(œ|Œ)/g, '<em class="lig">$1</em>'); // Kalam’s œ glyph is very wide: tighten it in handwritten text
+const MAG = PLATES.map((p) => p.mag || ACTS[p.act].mag), REALW = MAG.map((m) => 40 / m); // plate width in cm at its home view
+
+// ───────────── world: plate k+1 sits inside plate k's portal rectangle
+const R = [{ x: 0, y: 0, w: 1, h: META[PLATES[0].img].h / META[PLATES[0].img].w }];
+for (let k = 1; k < N; k++) { const p = PLATES[k - 1].portal, par = R[k - 1], m = META[PLATES[k].img]; const w = par.w * p.w, h = w * (m.h / m.w);
+  R.push({ x: par.x + p.c[0] * par.w - w / 2, y: par.y + p.c[1] * par.h - h / 2, w, h }); }
+
+// ───────────── canvas & view
+const cv = $('#cv'), ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false, railH = 200;
+let offC = null, offX = null;
+function off() { if (!offC) { offC = document.createElement('canvas'); offX = offC.getContext('2d'); } if (offC.width !== cv.width || offC.height !== cv.height) { offC.width = cv.width; offC.height = cv.height; } return offX; }
+function layout() {
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const short = !mobile && H < 520; const top = mobile ? 62 : short ? 48 : 82, bottom = mobile ? 76 : short ? 50 : 112, left = mobile ? 2 : short ? 6 : 22, right = mobile ? 2 : short ? 48 : 92;
+  aw = (W - left - right) * 0.985; ah = (H - top - bottom) * 0.985; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
+  railH = ($('#rail').clientHeight || 200) - 12; need();
+}
+const homeZ = (k) => Math.min(aw / R[k].w, ah / R[k].h);
+const home = (k) => ({ cx: R[k].x + R[k].w / 2, cy: R[k].y + R[k].h / 2, z: homeZ(k) });
+const cam = { cx: 0.5, cy: 0.25, z: 600 };
+const sig = (k, z = cam.z) => z / homeZ(k);
+const toS = (wx, wy) => [vcx + (wx - cam.cx) * cam.z, vcy + (wy - cam.cy) * cam.z];
+const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
+function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)); a.push(A * D); } return a; }
+function dominant(z = cam.z) { const a = alphas(z); let b = 0; for (let k = 1; k < N; k++) if (a[k] > a[b]) b = k; return b; }
+
+// ───────────── images: decoded on demand; a small LRU keeps phone memory low
+const imgs = {}, thumbs = {}, lru = [];
+function thumb(key) { if (!thumbs[key]) { const i = new Image(); i.src = IMG[key + '_t']; thumbs[key] = i; } return thumbs[key]; }
+function want(key) { let e = imgs[key]; if (!e) { const i = new Image(); i.decoding = 'async'; i.src = IMG[key]; e = imgs[key] = { i, ok: false }; e.p = i.decode().then(() => { e.ok = true; need(); }).catch(() => { e.ok = !!i.naturalWidth; need(); }); }
+  const j = lru.indexOf(key); if (j >= 0) lru.splice(j, 1); lru.push(key);
+  while (lru.length > (mobile ? 5 : 9)) { const k = lru.shift(); if (imgs[k]) { imgs[k].i.src = ''; delete imgs[k]; } } return e; }
+function prefetch() { const k = dominant(); [k - 1, k + 1, k].forEach((j) => j >= 0 && j < N && want(PLATES[j].img)); }
+
+// ───────────── rendering (on demand only)
+let dirty = true, raf = 0, quality = 'high', texPat = null;
+function need() { dirty = true; if (!raf) raf = requestAnimationFrame(frame); }
+function drawPlate(c, k, alpha) {
+  const key = PLATES[k].img; const e = imgs[key]; const im = e && e.ok ? e.i : thumb(key); if (!im || !im.naturalWidth) return;
+  const r = R[k]; const [x, y] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z; const NW = im.naturalWidth, NH = im.naturalHeight;
+  const dx0 = Math.max(0, x), dy0 = Math.max(0, y), dx1 = Math.min(W, x + sw), dy1 = Math.min(H, y + sh); if (dx1 <= dx0 || dy1 <= dy0) return;
+  c.globalAlpha = alpha; c.drawImage(im, ((dx0 - x) / sw) * NW, ((dy0 - y) / sh) * NH, ((dx1 - dx0) / sw) * NW, ((dy1 - dy0) / sh) * NH, dx0 * DPR, dy0 * DPR, (dx1 - dx0) * DPR, (dy1 - dy0) * DPR); c.globalAlpha = 1;
+}
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
+  const a = alphas(); let s = 0; const bg = [0, 0, 0];
+  a.forEach((v, k) => { const b = META[PLATES[k].img].bg; s += v; for (let i = 0; i < 3; i++) bg[i] += b[i] * v; });
+  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.5; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  for (let k = 0; k < N; k++) { if (a[k] < 0.004) continue; const sg = sig(k);
+    if (k > 0 && sg < 0.97) { // the deeper plate opens through a soft radial iris centred on its portal
+      const o = off(); const r = R[k]; const [x0, y0] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z;
+      const bx = Math.max(0, Math.floor(x0 * DPR)), by = Math.max(0, Math.floor(y0 * DPR)), bw = Math.min(cv.width, Math.ceil((x0 + sw) * DPR)) - bx, bh = Math.min(cv.height, Math.ceil((y0 + sh) * DPR)) - by;
+      if (bw <= 0 || bh <= 0) continue;
+      o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(bx, by, bw, bh); o.imageSmoothingQuality = quality; drawPlate(o, k, 1);
+      const cx = (x0 + sw / 2) * DPR, cy = (y0 + sh / 2) * DPR, rr = Math.max(sw, sh) * (0.3 + 0.5 * sst(0.5, 0.97, sg)) * DPR;
+      const g = o.createRadialGradient(cx, cy, rr * 0.42, cx, cy, rr); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      o.globalCompositeOperation = 'destination-in'; o.fillStyle = g; o.fillRect(bx, by, bw, bh); o.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = a[k]; ctx.drawImage(offC, bx, by, bw, bh, bx, by, bw, bh); ctx.globalAlpha = 1;
+    } else drawPlate(ctx, k, a[k]); }
+  updateHUD(a); updatePins(a);
+}
+
+// ───────────── camera dynamics
+const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
+const zMin = () => homeZ(0) * 0.7, zMax = () => homeZ(N - 1) * 4;
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function clampCenter() { const r = R[dominant()]; const m = 0.14 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m * 0.6, r.y + r.h + m * 0.6); }
+const ratio = (k) => homeZ(k + 1) / homeZ(k);
+function steer(strength) { // while zooming in, glide toward the next portal (progress-based so short and long dives feel alike)
+  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); if (p <= 0.28) return 0;
+  const r = R[k + 1]; const kk = sst(0.28, 0.85, p) * strength; cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+function frame() {
+  raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = false;
+  if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
+    const w = Math.abs(f.z1 - f.z0) / f.z1 < 1e-3 ? e : (1 / z - 1 / f.z0) / (1 / f.z1 - 1 / f.z0); cam.z = z; cam.cx = f.c0[0] + (f.c1[0] - f.c0[0]) * w; cam.cy = f.c0[1] + (f.c1[1] - f.c0[1]) * w;
+    if (u >= 1) { flight = null; if (f.done) f.done(); } else moving = true; }
+  else {
+    if (Math.abs(pend) > 1e-4) { const step = pend * (1 - Math.exp(-dt * 16)); pend -= step; zoomAt(anchorS[0], anchorS[1], Math.exp(step)); moving = true; if (step > 0) steering = true; } else pend = 0;
+    if (Math.abs(vel[0]) + Math.abs(vel[1]) > 0.02) { cam.cx -= vel[0] / cam.z; cam.cy -= vel[1] / cam.z; const d = Math.exp(-dt * 6); vel[0] *= d; vel[1] *= d; moving = true; } else vel = [0, 0];
+    if (steering) { if (steer(1 - Math.exp(-dt * 7)) > 1e-4) moving = true; if (Math.abs(pend) < 1e-4) steering = false; }
+    clampCenter(); }
+  if (dirty || moving) { dirty = false; quality = moving || ptrs.size ? 'medium' : 'high'; render(); }
+  if (moving) raf = requestAnimationFrame(frame); else if (quality !== 'high') { clearTimeout(frame.hq); frame.hq = setTimeout(() => { if (!raf && !ptrs.size) { quality = 'high'; render(); } }, 90); }
+}
+function flyTo(cx, cy, z, dur, done) { flight = { t0: performance.now(), dur: dur ?? clamp(0.75 + Math.abs(Math.log(z / cam.z)) * 0.3, 0.75, 2.6) * 1000, c0: [cam.cx, cam.cy], c1: [cx, cy], z0: cam.z, z1: z, done }; pend = 0; vel = [0, 0]; need(); }
+function flyHome(k, done) { k = clamp(k, 0, N - 1); for (let j = Math.min(k, dominant()); j <= Math.max(k, dominant()); j++) want(PLATES[j].img); const h = home(k); flyTo(h.cx, h.cy, h.z, undefined, done); }
+function camAtDepth(t) { t = clamp(t, 0, N - 1); const k = Math.min(N - 2, Math.floor(t)); const f = t - k; const a = home(k), b = home(k + 1);
+  const z = Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * f); const w = (1 / z - 1 / a.z) / (1 / b.z - 1 / a.z); return { cx: a.cx + (b.cx - a.cx) * w, cy: a.cy + (b.cy - a.cy) * w, z }; }
+function depthOf() { const k = dominant(); if (k >= N - 1) return N - 1; return k + clamp(Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)), 0, 1); }
+
+// ───────────── HUD: magnification follows the acts (×1 → ×100 → ×10 000), scale bar follows the plates
+let hudKey = '', plateKey = -1;
+function niceLen(cmPerPx) { const target = cmPerPx * 92; const e = Math.pow(10, Math.floor(Math.log10(target))); const m = target / e; const n = (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; return [n, n / cmPerPx]; }
+function fmtLen(cm) { if (cm >= 1) return `${+cm.toPrecision(3)} cm`; if (cm >= 0.1) return `${+(cm * 10).toPrecision(3)} mm`; if (cm >= 1e-4) return `${+(cm * 1e4).toPrecision(3)} µm`; return `${+(cm * 1e7).toPrecision(3)} nm`; }
+function fmtMag(m) { if (m < 10) return '×' + m.toFixed(1).replace('.', ',').replace(',0', ''); const e = Math.pow(10, Math.floor(Math.log10(m)) - 1); return '×' + Math.round(Math.round(m / e) * e).toLocaleString('fr-FR'); }
+function magNow() { const t = depthOf(), k = Math.floor(t), f = t - k;
+  if (k >= N - 1) return MAG[N - 1] * Math.max(1, sig(N - 1)); if (k === 0 && sig(0) < 1) return MAG[0] * sig(0);
+  return Math.exp(Math.log(MAG[k]) + (Math.log(MAG[k + 1]) - Math.log(MAG[k])) * f); }
+function updateHUD(a) {
+  let sw = 0, lr = 0; for (let k = 0; k < N; k++) { if (a[k] < 0.01) continue; sw += a[k]; lr += a[k] * Math.log(REALW[k] / (R[k].w * cam.z)); }
+  const k = dominant(); const [n, px] = niceLen(Math.exp(lr / sw)); const M = magNow(); const t = depthOf();
+  const key = `${fmtMag(M)}|${k}|${Math.round(px)}|${fmtLen(n)}`;
+  if (key !== hudKey) { hudKey = key; $('#mag').innerHTML = `${fmtMag(M)}<small>${PLATES[k].scale}</small>`; $('#sbi').style.width = `${Math.round(px)}px`; $('#sbt').textContent = fmtLen(n); }
+  if (k !== plateKey) { const first = plateKey < 0; plateKey = k; const P = PLATES[k];
+    $('#ltitle').innerHTML = lig(P.title); $('#path').innerHTML = `Appareil génital masculin &nbsp;›&nbsp; Acte ${ROMAN[P.act]} · ${ACTS[P.act].name} &nbsp;›&nbsp; <b>${k + 1} / ${N}</b>`;
+    document.querySelectorAll('.pl').forEach((b, i) => b.classList.toggle('on', i === k)); document.querySelectorAll('.grp').forEach((g, i) => g.classList.toggle('on', i === P.act));
+    document.querySelectorAll('.rail .tick').forEach((el, i) => { el.classList.toggle('on', i === k); el.classList.toggle('cur', el.classList.contains('major') && PLATES[i].act === P.act); });
+    if (!first) toast(`${k + 1}. ${P.short} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}`); prefetch(); }
+  $('#rth').style.top = `${6 + (t / (N - 1)) * railH}px`; $('#rfill').style.height = `${(t / (N - 1)) * railH}px`;
+  $('#lvf').style.width = `${clamp(Math.log(M) / Math.log(10000), 0, 1) * 100}%`;
+}
+
+// ───────────── hotspots
+const pinEls = [];
+function buildPins() { const host = $('#pins');
+  PLATES.forEach((P, k) => P.pins.forEach((p, j) => { const el = document.createElement('div'); el.className = 'pin' + (p.portal ? ' portal' : '');
+    el.innerHTML = `<button aria-label="${p.t.replace(/"/g, '')}"><b></b><i></i></button>` + (p.portal ? `<button class="go">${lig(p.portal)} →</button>` : `<span>${lig(p.t)}</span>`);
+    el.querySelector('button').addEventListener('click', (ev) => { ev.stopPropagation(); openCard(k, j, true); });
+    if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
+    host.appendChild(el); pinEls.push({ el, k, j, vis: false }); })); }
+function updatePins(a) {
+  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.5 : 3.8), x = 0, y = 0;
+    if (show) { const r = R[P.k]; [x, y] = toS(r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; }
+    if (show && p.portal) { // dive button: right by default, left when preferred or when only the left fits; if neither fits, the roomier side, narrowed to fit
+      const go = P.go || (P.go = P.el.querySelector('.go')); if (!P.gw) P.gw = go.offsetWidth || 260; const off = mobile ? 20 : 24;
+      const rR = W - (mobile ? 0 : 92) - x - off - 8, rL = x - off - 8, fr = P.gw <= rR, fl = P.gw <= rL; const L = fl && fr ? p.side === 'l' : fl || fr ? fl : rL > rR;
+      if (L !== P.left) { P.left = L; P.el.classList.toggle('left', L); } const mw = fl || fr ? '' : `${Math.max(96, Math.round((L ? rL : rR) - 24))}px`; if (mw !== P.mw) { P.mw = mw; go.style.maxWidth = mw; } }
+    if (show) { P.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; if (!P.vis) { P.el.classList.add('on'); P.vis = true; } } else if (P.vis) { P.el.classList.remove('on'); P.vis = false; } } }
+
+// ───────────── study card
+let open = null; const seen = new Set();
+function openCard(k, j, fly) {
+  const P = PLATES[k]; const p = P.pins[j]; open = { k, j }; seen.add(`${k}.${j}`); const n = P.pins.length;
+  pinEls.forEach((E) => { E.el.classList.toggle('active', E.k === k && E.j === j); E.el.classList.toggle('seen', seen.has(`${E.k}.${E.j}`)); });
+  const C = $('#card'); C.classList.toggle('portal', !!p.portal);
+  C.innerHTML = `<button class="x" aria-label="Fermer">✕</button><div class="chip"><i></i>Planche ${k + 1} · ${ACTS[P.act].name} ${fmtMag(MAG[k])}</div><h3>${lig(p.t)}</h3><p>${p.p}</p>
+    <div class="trap"><span>⚠ Piège d’EMD</span>${p.trap}</div>${p.note ? `<div class="note">Note sur la planche : ${p.note}</div>` : ''}
+    <div class="act">${p.portal ? `<button class="btn dive">${p.portal} →</button>` : ''}<button class="btn zoom">Recentrer</button></div>
+    <div class="nav"><button class="pv">← Précédent</button><span>${j + 1} / ${n} · ${[...seen].filter((s) => s.startsWith(`${k}.`)).length} vus</span><button class="nx">Suivant →</button></div>`;
+  C.querySelector('.x').onclick = closeCard; C.querySelector('.zoom').onclick = () => focusPin(k, j);
+  C.querySelector('.pv').onclick = () => openCard(k, (j - 1 + n) % n, true); C.querySelector('.nx').onclick = () => openCard(k, (j + 1) % n, true);
+  if (p.portal) C.querySelector('.dive').onclick = () => { closeCard(); flyHome(k + 1); };
+  C.classList.add('on'); if (fly) focusPin(k, j); hideHint();
+}
+function closeCard() { open = null; $('#card').classList.remove('on'); pinEls.forEach((E) => E.el.classList.remove('active')); }
+function focusPin(k, j) { const p = PLATES[k].pins[j]; const r = R[k]; const wx = r.x + p.x * r.w, wy = r.y + p.y * r.h; const z = homeZ(k) * (p.portal ? 1.35 : 1.7);
+  const fx = mobile ? vcx : Math.min(vcx, (W - (H < 520 ? 50 : 92) - Math.min(410, W * 0.54)) / 2 + 24), fy = mobile ? Math.min(vcy, H * 0.24) : vcy; flyTo(wx - (fx - vcx) / z, wy - (fy - vcy) / z, z); }
+
+// ───────────── input
+let hintGone = false; function hideHint() { if (hintGone) return; hintGone = true; $('#hint').classList.add('gone'); }
+let tt = 0; function toast(s) { const t = $('#toast'); t.textContent = s; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1700); }
+function zoomBy(f, sx = vcx, sy = vcy) { flight = null; anchorS = [sx, sy]; pend = clamp(pend + Math.log(f), -3, 3); need(); hideHint(); }
+addEventListener('wheel', (e) => { if (e.target.closest && e.target.closest('.card,.dock,.ctrl,.top')) { if (!e.target.closest('.card,.dock')) e.preventDefault(); return; }
+  e.preventDefault(); let d = e.deltaY; if (e.deltaMode === 1) d *= 16; else if (e.deltaMode === 2) d *= H; zoomBy(Math.exp(-d * (e.ctrlKey ? 0.006 : 0.0016)), e.clientX, e.clientY); }, { passive: false });
+let lastPinch = 0, lastMid = null, downAt = 0, lastTap = 0, moved = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); flight = null; pend = 0; vel = [0, 0]; downAt = performance.now(); moved = 0; cv.classList.add('drag');
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastPinch = Math.hypot(a[0] - b[0], a[1] - b[1]); lastMid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; } hideHint(); });
+cv.addEventListener('pointermove', (e) => { if (!ptrs.has(e.pointerId)) return; const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 1) { const dx = e.clientX - prev[0], dy = e.clientY - prev[1]; moved += Math.abs(dx) + Math.abs(dy); cam.cx -= dx / cam.z; cam.cy -= dy / cam.z; vel = [dx * 0.9, dy * 0.9]; clampCenter(); need(); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.cx -= (mid[0] - lastMid[0]) / cam.z; cam.cy -= (mid[1] - lastMid[1]) / cam.z; if (lastPinch) { const f = d / lastPinch; zoomAt(mid[0], mid[1], f); if (f > 1) steer(0.06); }
+    lastPinch = d; lastMid = mid; moved += 10; vel = [0, 0]; clampCenter(); need(); } });
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = 0; if (ptrs.size === 1) lastMid = [...ptrs.values()][0];
+  if (!ptrs.size) { cv.classList.remove('drag'); if (performance.now() - downAt > 80) need(); else vel = [0, 0];
+    if (moved < 6 && performance.now() - downAt < 300) { const tn = performance.now(); if (tn - lastTap < 320) { zoomBy(2.2, e.clientX, e.clientY); lastTap = 0; } else { lastTap = tn; if (open) closeCard(); } } } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; const k = e.key;
+  if (k === 'f' || k === 'F') toggleFS(); else if (k === '+' || k === '=') zoomBy(1.35); else if (k === '-' || k === '_') zoomBy(1 / 1.35);
+  else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { closeCard(); flyHome(dominant() + 1); }
+  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { closeCard(); flyHome(dominant() - 1); }
+  else if (k === 'r' || k === 'R' || k === '0' || k === 'Home') { closeCard(); flyHome(0); } else if (k === 'End') { closeCard(); flyHome(N - 1); }
+  else if (k === 'Escape') closeCard(); else if (/^[1-9]$/.test(k)) { closeCard(); flyHome(+k - 1); } else return;
+  e.preventDefault(); hideHint(); });
+function toggleFS() { const d = document, el = d.documentElement; if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); else (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); }
+$('#zin').onclick = () => zoomBy(1.6); $('#zout').onclick = () => zoomBy(1 / 1.6); $('#reset').onclick = () => { closeCard(); flyHome(0); }; $('#fs').onclick = toggleFS;
+// depth rail: one tick per plate, labels at the start of each act
+const rail = $('#rail'); PLATES.forEach((P, i) => { const t = document.createElement('div'); const major = i === 0 || PLATES[i - 1].act !== P.act; t.className = 'tick' + (major ? ' major' : '');
+  t.style.top = `calc(6px + ${(i / (N - 1)) * 100}% - ${(i / (N - 1)) * 12}px)`; t.title = `${i + 1}. ${P.short}`;
+  if (major) t.innerHTML = `<span>${ACTS[P.act].name}<em>${fmtMag(ACTS[P.act].mag)}</em></span>`;
+  t.onclick = (ev) => { ev.stopPropagation(); closeCard(); flyHome(i); }; rail.appendChild(t); });
+let railDrag = false; const railSet = (e) => { const r = rail.getBoundingClientRect(); const c = camAtDepth(clamp((e.clientY - r.top - 6) / (r.height - 12), 0, 1) * (N - 1)); flight = null; pend = 0; vel = [0, 0]; cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; prefetch(); need(); hideHint(); };
+rail.addEventListener('pointerdown', (e) => { if (e.target.closest('.tick')) return; railDrag = true; rail.setPointerCapture(e.pointerId); railSet(e); }); rail.addEventListener('pointermove', (e) => railDrag && railSet(e)); rail.addEventListener('pointerup', () => (railDrag = false));
+// plate dock, grouped by act
+ACTS.forEach((A, ai) => { const g = document.createElement('div'); g.className = 'grp'; g.innerHTML = `<div class="gh"><b>${ROMAN[ai]}</b>${A.name}<em>${fmtMag(A.mag)}</em></div><div class="gt"></div>`;
+  PLATES.forEach((P, i) => { if (P.act !== ai) return; const b = document.createElement('button'); b.className = 'pl'; b.title = `${i + 1}. ${P.title}`;
+    b.innerHTML = `<img alt="" src="${IMG[P.img + '_t']}"><i>${i + 1}</i><b>${lig(P.short)}</b>`; b.onclick = () => { closeCard(); hideHint(); flyHome(i); }; g.querySelector('.gt').appendChild(b); });
+  $('#dock').appendChild(g); });
+addEventListener('resize', () => { const t = depthOf(); layout(); if (!flight) { const c = camAtDepth(t); cam.cx = c.cx; cam.cy = c.cy; cam.z = c.z; } need(); });
+
+// ───────────── boot
+async function boot() {
+  if (matchMedia('(pointer:coarse)').matches) { $('#hint1').textContent = 'Pincez pour plonger'; $('#hint2').textContent = 'Glisser pour explorer · double-tap · touchez les points et les boutons lumineux' + (innerHeight > innerWidth ? ' · tournez le téléphone pour agrandir les planches' : ''); }
+  buildPins(); layout();
+  if (window.__TEX__) { const ti = new Image(); ti.src = window.__TEX__; ti.decode().then(() => { texPat = ctx.createPattern(ti, 'repeat'); need(); }).catch(() => {}); }
+  const h = home(0); cam.cx = h.cx; cam.cy = h.cy; cam.z = h.z * 0.9; $('#lb').style.width = '35%';
+  await want(PLATES[0].img).p; $('#lb').style.width = '100%'; prefetch(); render();
+  setTimeout(() => { $('#loader').classList.add('done'); flyTo(h.cx, h.cy, h.z, 1300); }, 120);
+  // decode the rest in the background, one at a time, so long dives never show a blurry placeholder (desktop)
+  if (!mobile) for (const P of PLATES) await want(P.img).p;
+}
+window.__atlas = { cam, flyHome, openCard, depthOf, dominant: () => dominant(), R, PLATES, alphasNow: () => alphas(), magNow };
+boot().catch((e) => { $('#lmsg').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+<script>(function(){
+var d=document,w=window,root=d.documentElement;
+['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault();},{passive:false});});
+function q(s){return d.querySelector(s);}
+var loader=q('#loader');
+function isReady(){return !loader||loader.classList.contains('done');}
+function whenReady(fn){if(isReady()){fn();return;}var mo=new MutationObserver(function(){if(isReady()){mo.disconnect();fn();}});mo.observe(loader,{attributes:true,attributeFilter:['class']});}
+function gotoPlate(k){var A=w.__atlas;if(!A||typeof A.flyHome!=='function')return;var list=A.PLATES||A.L;k=Math.floor(k);if(!list||!(k>=0&&k<list.length))return;
+  try{A.flyHome(k);var h=d.getElementById('hint');if(h)h.classList.add('gone');}catch(e){}}
+if(!root.classList.contains('az-embed')){
+  var top=q('.top');
+  if(top){var a=d.createElement('a');a.className='az-back glass';a.href='/dashboard/atlas';a.setAttribute('aria-label','Retour \u00e0 l\u2019Atlas Zoom');
+    a.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Atlas Zoom</span>';
+    top.insertBefore(a,top.firstChild);}
+  var pm=/[?&]planche=(\d{1,2})(?:&|$)/.exec(location.search);
+  if(pm)whenReady(function(){setTimeout(function(){gotoPlate(+pm[1]-1);},0);});
+  return;
+}
+var target=(self.origin&&self.origin!=='null')?self.origin:'*';
+function post(type,data){try{var m={source:'medart-atlas',type:type};if(data){for(var k in data)m[k]=data[k];}w.parent.postMessage(m,target);}catch(e){}}
+w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(target!=='*'&&e.origin!==target)||!m||m.source!=='medart-hub')return;
+  if(m.type==='inset'&&typeof m.top==='number'&&m.top>=0&&m.top<400){root.style.setProperty('--az-top',Math.round(m.top)+'px');}
+  else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
+post('hello');
+w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
+function read(){
+  var level='',mag='';
+  if(mEl){var sm=mEl.querySelector('small');level=sm?sm.textContent.trim():'';
+    for(var n=mEl.firstChild;n;n=n.nextSibling){if(n!==sm)mag+=n.textContent||'';}mag=mag.trim();}
+  var k=-1,n=0;try{var A=w.__atlas;if(A){k=A.dominant();var list=A.PLATES||A.L;n=list?list.length:0;}}catch(e){}
+  return {title:tEl?tEl.textContent.trim():'',level:level,mag:mag,index:k,count:n};
+}
+function flush(){var s=read(),key=s.title+'|'+s.level+'|'+s.index;
+  if(key!==last){last=key;lastMag=s.mag;post('state',s);return;}
+  if(s.mag!==lastMag){lastMag=s.mag;post('mag',{mag:s.mag});}}
+function schedule(){if(timer)return;timer=setTimeout(function(){timer=0;flush();},120);}
+[tEl,mEl,pEl].forEach(function(el){if(el)new MutationObserver(schedule).observe(el,{childList:true,characterData:true,subtree:true});});
+whenReady(function(){post('ready');flush();});
+w.addEventListener('keydown',function(e){var k=e.key;if((k==='f'||k==='F')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){var t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;e.stopPropagation();e.preventDefault();post('fullscreen');}},true);
+flush();
+})();</script>
+</body>
+</html>
