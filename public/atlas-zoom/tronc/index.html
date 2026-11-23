@@ -6,7 +6,22 @@
 <meta name="theme-color" content="#191d21">
 <title>Le Tronc · Atlas zoomable · MedArt AI Studio</title>
 <link rel="preload" href="/atlas-zoom/tronc/p1.webp" as="image" fetchpriority="high"><link rel="preload" href="/atlas-zoom/_shared/kalam-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/atlas-zoom/_shared/kalam-700.woff2" as="font" type="font/woff2" crossorigin>
-<script>(function(){var d=document.documentElement;try{d.classList.add(window.self!==window.top?'az-embed':'az-standalone')}catch(e){d.classList.add('az-embed')}})();</script>
+<script>(function(){var d=document.documentElement,emb;try{emb=window.self!==window.top}catch(e){emb=true}d.classList.add(emb?'az-embed':'az-standalone');
+/* zoom headroom: where the next plate starts opening (in its own zoom units) and where the camera starts gliding to it */
+window.__azA0=function(r){return r>1?Math.min(.74,Math.max(.5,3.4/r)):.5};
+window.__azP0=function(r){return r>1.05?Math.max(.28,Math.log(window.__azA0(r)*r)/Math.log(r)):.28};
+window.__azP1=function(r){return r>1.05?Math.max(window.__azP0(r)+.05,Math.log(.92*r)/Math.log(r)):.85};
+window.__azS0=function(r){return Math.max(1.9,window.__azA0(r)*r)};
+window.__azNear=function(r,z,cx,cy,vx,vy){var x0=vx+(r.x-cx)*z,y0=vy+(r.y-cy)*z,w=r.w*z,h=r.h*z,dx=Math.max(x0-vx,0,vx-(x0+w)),dy=Math.max(y0-vy,0,vy-(y0+h)),s=.35*Math.min(w,h),t=Math.min(1,Math.hypot(dx,dy)/Math.max(1,s));return 1-t*t*(3-2*t)};
+window.__azS1=function(r){return Math.max(window.__azS0(r)+.2,.92*r)};
+/* embedded in the app: the chrome is compact, so the plates get the room */
+window.__azMargins=function(mobile,short,fam){if(!d.classList.contains('az-embed')||mobile)return null;if(short)return[48,48,4,44];return fam==='estomac'?[60,88,12,70]:fam==='main'?[60,96,12,72]:[60,90,12,66]};
+/* the textured board: drawn once per colour and size, then copied (was a full-screen overlay blend every frame) */
+window.__azBg=function(ctx,color,pat,al){var c=ctx.canvas,W=c.width,H=c.height,s=window.__azBg;if(!pat){ctx.fillStyle=color;ctx.fillRect(0,0,W,H);return}
+var k=color+'|'+W+'x'+H+'|'+al;if(s.k!==k){var b=s.c||(s.c=document.createElement('canvas'));if(b.width!==W)b.width=W;if(b.height!==H)b.height=H;var x=s.x||(s.x=b.getContext('2d',{alpha:false}));
+x.setTransform(1,0,0,1,0,0);x.globalAlpha=1;x.globalCompositeOperation='source-over';x.fillStyle=color;x.fillRect(0,0,W,H);x.globalCompositeOperation='overlay';x.globalAlpha=al;x.fillStyle=pat;x.fillRect(0,0,W,H);x.globalAlpha=1;x.globalCompositeOperation='source-over';s.k=k}
+ctx.drawImage(s.c,0,0)};
+})();</script>
 <style>
 .az-embed .brand,.az-embed .crumb,.az-embed #fs,.az-embed .scale .m{display:none!important}
 .az-embed .top{top:var(--az-top,0px);transition:top .3s cubic-bezier(.2,.8,.2,1)}
@@ -14,6 +29,21 @@
 .az-back{display:flex;align-items:center;gap:7px;height:44px;padding:0 14px 0 11px;border-radius:14px;color:#f6efe2;text-decoration:none;font:700 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;flex:none}
 .az-back svg{width:17px;height:17px}.az-back:hover{filter:brightness(1.15)}
 @media (max-width:760px){.az-back{height:38px;padding:0 10px}.az-back span{display:none}}
+/* performance: no live blur over a canvas that changes every frame; flat glass instead */
+.glass{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+html .glass{background:linear-gradient(160deg,rgba(40,45,52,.88),rgba(22,26,31,.92))}
+/* dive buttons glow on the GPU (was an animated box-shadow, repainted every frame); hidden hotspots stop pulsing */
+.pin .go{animation:none!important}
+.pin.on .go::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;box-shadow:0 0 30px rgba(127,216,255,.55);opacity:0;animation:azGlow 2.4s ease-in-out infinite}
+@keyframes azGlow{50%{opacity:1}}
+.pin:not(.on) b{animation:none!important}
+.pin.on{will-change:transform}
+/* embedded: compact chrome, and quiet while the student zooms or pans */
+@media (min-width:761px){.az-embed .top{padding:10px 12px}.az-embed .scale{padding:7px 12px}.az-embed .lvb{margin-top:6px;padding-top:7px}.az-embed .lvb em{display:none}.az-embed .ctrl{right:10px}.az-embed .dock{bottom:8px;padding:4px 7px 5px}.az-embed .pl{width:66px}.az-embed .pl img{width:58px;height:32px}.az-embed .pl b{font-size:11px;max-width:62px}}
+.az-embed .dock,.az-embed .ctrl,.az-embed .top .scale{transition:opacity .35s ease}
+.az-embed.az-busy .dock,.az-embed.az-busy .ctrl,.az-embed.az-busy .top .scale{opacity:.28}
+.az-embed.az-busy .dock:hover,.az-embed.az-busy .ctrl:hover{opacity:1}
+@media (prefers-reduced-motion:reduce){.pin.on .go::after{animation:none}}
 </style>
 <meta name="description" content="Le tronc en 9 planches : dissection continue couche par couche, de la peau aux muscles, au squelette et aux viscères thoraciques, abdominaux et pelviens.">
 <style>
@@ -374,9 +404,9 @@ let W = 0, H = 0, DPR = 1, aw = 800, ah = 600, vcx = 0, vcy = 0, mobile = false,
 let offC = null, offX = null;
 function off() { if (!offC) { offC = document.createElement('canvas'); offX = offC.getContext('2d'); } if (offC.width !== cv.width || offC.height !== cv.height) { offC.width = cv.width; offC.height = cv.height; } return offX; }
 function layout() {
-  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight; mobile = W < 760; DPR = Math.min(window.devicePixelRatio || 1, 2, Math.max(1, Math.sqrt(4.2e6 / Math.max(1, innerWidth * innerHeight))));
   cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
-  const short = !mobile && H < 520; const top = mobile ? 62 : short ? 48 : 82, bottom = mobile ? 76 : short ? 50 : 112, left = mobile ? 2 : short ? 6 : 22, right = mobile ? 2 : short ? 48 : 92;
+  const short = !mobile && H < 520; const __m = (window.__azMargins && window.__azMargins(mobile, short, 'std')) || [mobile ? 62 : short ? 48 : 82, mobile ? 76 : short ? 50 : 112, mobile ? 2 : short ? 6 : 22, mobile ? 2 : short ? 48 : 92]; const top = __m[0], bottom = __m[1], left = __m[2], right = __m[3];
   aw = (W - left - right) * 0.985; ah = (H - top - bottom) * 0.985; vcx = left + (W - left - right) / 2; vcy = top + (H - top - bottom) / 2;
   railH = ($('#rail').clientHeight || 200) - 12; need();
 }
@@ -386,7 +416,7 @@ const cam = { cx: 0.5, cy: 0.25, z: 600 };
 const sig = (k, z = cam.z) => z / homeZ(k);
 const toS = (wx, wy) => [vcx + (wx - cam.cx) * cam.z, vcy + (wy - cam.cy) * cam.z];
 const toW = (sx, sy) => [cam.cx + (sx - vcx) / cam.z, cam.cy + (sy - vcy) / cam.z];
-function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(0.5, 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)); a.push(A * D); } return a; }
+function alphas(z = cam.z) { const a = []; for (let k = 0; k < N; k++) { const A = k === 0 ? 1 : sst(window.__azA0(homeZ(k) / homeZ(k - 1)), 0.92, sig(k, z)); const D = k === N - 1 ? 1 : 1 - sst(0.82, 1.0, sig(k + 1, z)) * window.__azNear(R[k + 1], z, cam.cx, cam.cy, vcx, vcy); a.push(A * D); } return a; }
 function dominant(z = cam.z) { const a = alphas(z); let b = 0; for (let k = 1; k < N; k++) if (a[k] > a[b]) b = k; return b; }
 
 // ───────────── images: decoded on demand; a small LRU keeps phone memory low
@@ -410,8 +440,8 @@ function render() {
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = quality;
   const a = alphas(); let s = 0; const bg = [0, 0, 0];
   a.forEach((v, k) => { const b = META[PLATES[k].img].bg; s += v; for (let i = 0; i < 3; i++) bg[i] += b[i] * v; });
-  ctx.fillStyle = `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`; ctx.fillRect(0, 0, cv.width, cv.height);
-  if (texPat) { ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.5; ctx.fillStyle = texPat; ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  window.__azBg(ctx, `rgb(${bg.map((v) => Math.round(v / Math.max(1e-6, s))).join(',')})`, texPat, 0.5);
+  
   for (let k = 0; k < N; k++) { if (a[k] < 0.004) continue; const sg = sig(k);
     if (k > 0 && sg < 0.97) { // the deeper plate opens through a soft radial iris centred on its portal
       const o = off(); const r = R[k]; const [x0, y0] = toS(r.x, r.y); const sw = r.w * cam.z, sh = r.h * cam.z;
@@ -429,12 +459,12 @@ function render() {
 // ───────────── camera dynamics
 const ptrs = new Map(); let pend = 0, anchorS = [0, 0], vel = [0, 0], flight = null, steering = false, lastT = performance.now();
 const zMin = () => homeZ(0) * 0.7, zMax = () => homeZ(N - 1) * 4;
-function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); cam.z = clamp(cam.z * f, zMin(), zMax()); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
+function zoomAt(sx, sy, f) { const [wx, wy] = toW(sx, sy); const kz = dominant(); cam.z = clamp(cam.z * f, zMin(), kz >= N - 1 || (sx === vcx && sy === vcy) || window.__azNear(R[kz + 1], cam.z, cam.cx, cam.cy, vcx, vcy) > 0.5 ? zMax() : Math.max(cam.z, homeZ(kz) * 3.6)); cam.cx = wx - (sx - vcx) / cam.z; cam.cy = wy - (sy - vcy) / cam.z; }
 function clampCenter() { const r = R[dominant()]; const m = 0.14 * r.w; cam.cx = clamp(cam.cx, r.x - m, r.x + r.w + m); cam.cy = clamp(cam.cy, r.y - m * 0.6, r.y + r.h + m * 0.6); }
 const ratio = (k) => homeZ(k + 1) / homeZ(k);
 function steer(strength) { // while zooming in, glide toward the next portal (progress-based so short and long dives feel alike)
-  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); if (p <= 0.28) return 0;
-  const r = R[k + 1]; const kk = sst(0.28, 0.85, p) * strength; cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
+  const k = dominant(); if (k >= N - 1) return 0; const p = Math.log(Math.max(1e-6, sig(k))) / Math.log(ratio(k)); const p0 = window.__azP0(ratio(k)); if (p <= p0) return 0;
+  const r = R[k + 1]; const kk = sst(p0, window.__azP1(ratio(k)), p) * strength * (anchorS[0] === vcx && anchorS[1] === vcy ? 1 : window.__azNear(R[k + 1], cam.z, cam.cx, cam.cy, vcx, vcy)); cam.cx += (r.x + r.w / 2 - cam.cx) * kk; cam.cy += (r.y + r.h / 2 - cam.cy) * kk; return kk; }
 function frame() {
   raf = 0; const now = performance.now(); const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; let moving = false;
   if (flight) { const u = clamp((now - flight.t0) / flight.dur, 0, 1); const e = ease(u); const f = flight; const z = Math.exp(Math.log(f.z0) + (Math.log(f.z1) - Math.log(f.z0)) * e);
@@ -485,7 +515,7 @@ function buildPins() { const host = $('#pins');
     if (p.portal) el.querySelector('.go').addEventListener('click', (ev) => { ev.stopPropagation(); closeCard(); hideHint(); flyHome(k + 1); });
     host.appendChild(el); pinEls.push({ el, k, j, vis: false }); })); }
 function updatePins(a) {
-  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < (p.portal ? 4.5 : 3.8), x = 0, y = 0;
+  for (const P of pinEls) { const p = PLATES[P.k].pins[P.j]; const sg = sig(P.k); let show = a[P.k] > 0.7 && sg > 0.55 && sg < Math.max(p.portal ? 4.5 : 3.8, P.k < N - 1 ? 0.88 * homeZ(P.k + 1) / homeZ(P.k) : 0), x = 0, y = 0;
     if (show) { const r = R[P.k]; [x, y] = toS(r.x + p.x * r.w, r.y + p.y * r.h); show = x > -40 && y > -40 && x < W + 40 && y < H + 40; }
     if (show && p.portal) { // dive button: right by default, left when preferred or when only the left fits; if neither fits, the roomier side, narrowed to fit
       const go = P.go || (P.go = P.el.querySelector('.go')); if (!P.gw) P.gw = go.offsetWidth || 260; const off = mobile ? 20 : 24;
@@ -598,6 +628,9 @@ w.addEventListener('message',function(e){var m=e.data;if(e.source!==w.parent||(t
   else if(m.type==='goto'&&typeof m.index==='number'){var k=m.index;whenReady(function(){gotoPlate(k);});}});
 post('hello');
 w.addEventListener('blur',function(){post('blur');});w.addEventListener('focus',function(){post('focus');});
+var busy=false,busyT=0;function setBusy(on){if(on===busy)return;busy=on;root.classList.toggle('az-busy',on);post('busy',{on:on});}
+function poke(e){if(!e||!e.target||e.target.id!=='cv')return;setBusy(true);clearTimeout(busyT);busyT=setTimeout(function(){setBusy(false);},1400);}
+w.addEventListener('wheel',poke,{passive:true,capture:true});d.addEventListener('pointerdown',poke,true);d.addEventListener('pointermove',function(e){if(e.buttons)poke(e);},true);
 var tEl=q('#ltitle'),mEl=q('#mag'),pEl=q('#path'),last='',lastMag='',timer=0;
 function read(){
   var level='',mag='';

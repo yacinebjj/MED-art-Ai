@@ -240,7 +240,7 @@ export function PlanConfigForm({ selectedModuleIds, onBack, onGenerated }: PlanC
           {isUploading ? (
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           ) : (
-            <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+            <motion.div animate={{ transform: ["translateY(0px)", "translateY(-5px)", "translateY(0px)"] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
               <UploadCloud className="h-6 w-6 text-muted-foreground" />
             </motion.div>
           )}

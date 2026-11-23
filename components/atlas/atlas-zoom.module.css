@@ -213,10 +213,23 @@
 .arc {
   position: absolute;
   inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
   pointer-events: none;
+}
+
+.ringSpin,
+.arc {
+  will-change: transform, opacity;
+}
+
+.ringSvg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
 .ringLabel {
@@ -238,7 +251,6 @@
 
 .arc {
   opacity: 0;
-  filter: drop-shadow(0 0 6px rgb(251 113 133 / 0.9));
   animation:
     azArc 12s infinite both,
     azSpin 24s linear infinite;
@@ -295,7 +307,40 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
+  will-change: opacity, transform;
   animation: azLayer 12s infinite both;
+}
+
+/* Out of view, or paused by the student: every loop of the showcase holds still. */
+.vitrine[data-paused="true"] *,
+.vitrine[data-paused="true"] *::before {
+  animation-play-state: paused !important;
+}
+
+.motionBtn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  color: rgb(246 239 226 / 0.75);
+  background: rgb(255 255 255 / 0.06);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.motionBtn:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 0.12);
+}
+
+.motionBtn:focus-visible {
+  outline: 2px solid #fda4af;
+  outline-offset: 2px;
 }
 
 .layerA {
@@ -1070,20 +1115,24 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px;
-  border-radius: 20px;
-  background: rgb(18 19 25 / 0.74);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  backdrop-filter: blur(18px) saturate(140%);
+  padding: 4px;
+  border-radius: 18px;
+  /* No backdrop blur: it would be recomputed on every frame of the moving atlas behind it. */
+  background: rgb(18 19 25 / 0.9);
   border: 1px solid rgb(255 255 255 / 0.09);
   box-shadow: 0 18px 40px -20px rgb(0 0 0 / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.06);
+  transition: opacity 0.35s ease;
   animation: azBarIn 0.45s var(--az-ease, cubic-bezier(0.2, 0.8, 0.2, 1)) both;
 }
 
-@media (hover: none) {
-  .bar {
-    background: rgb(18 19 25 / 0.93);
-  }
+/* While the student zooms or pans, the bar steps back; pointing at it brings it straight back. */
+.bar[data-quiet="true"] {
+  opacity: 0.3;
+}
+
+.bar[data-quiet="true"]:hover,
+.bar[data-quiet="true"]:focus-within {
+  opacity: 1;
 }
 
 @media (max-width: 899px) {
@@ -1110,10 +1159,10 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 40px;
-  min-width: 40px;
+  height: 36px;
+  min-width: 36px;
   padding: 0 12px;
-  border-radius: 14px;
+  border-radius: 13px;
   font: 700 13px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color: #f6efe2;
   background: rgb(255 255 255 / 0.06);
@@ -1165,8 +1214,8 @@
 
 .barThumb {
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: #202124 center / cover no-repeat;
   box-shadow: 0 0 0 2px var(--c1), 0 0 16px var(--cglow);
@@ -1177,7 +1226,7 @@
 }
 
 .barName {
-  font-size: 19px;
+  font-size: 18px;
   line-height: 1.05;
   color: #fff;
   white-space: nowrap;
@@ -1223,16 +1272,16 @@
   flex: none;
   align-items: baseline;
   gap: 7px;
-  height: 40px;
-  padding: 0 13px;
-  border-radius: 14px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 13px;
   white-space: nowrap;
   background: linear-gradient(135deg, color-mix(in srgb, var(--c1) 20%, transparent), color-mix(in srgb, var(--c1) 5%, transparent));
   border: 1px solid color-mix(in srgb, var(--c1) 35%, transparent);
 }
 
 .badge b {
-  font: 800 16px/38px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 800 15px/34px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   letter-spacing: -0.02em;
   color: #fff;
 }
@@ -1488,6 +1537,24 @@
   }
 }
 
+@keyframes azLayerCalm {
+  0% {
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  33.3% {
+    opacity: 1;
+  }
+  41.6% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 @keyframes azArc {
   0% {
     opacity: 0;
@@ -1552,24 +1619,19 @@
   animation-play-state: paused !important;
 }
 
+/* Calm motion: the showcase keeps its cross-fade and slow rings (students asked for it on their
+   phones, where battery savers turn this setting on), minus the zoom pulse; it can be paused.
+   Entrances and hover moves stop. */
 @media (prefers-reduced-motion: reduce) {
-  .ringSpin,
-  .arc,
-  .layer,
-  .step::before,
-  .eyebrow i,
+  .layer {
+    animation-name: azLayerCalm;
+  }
+
   .card,
-  .loadOrb::before,
   .viewer,
   .bar,
   .menu {
     animation: none !important;
-  }
-
-  .layerA,
-  .arcA,
-  .step:nth-child(1)::before {
-    opacity: 1;
   }
 
   .card,

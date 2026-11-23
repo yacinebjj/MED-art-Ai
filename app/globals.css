@@ -2973,3 +2973,74 @@ html.theme-reveal::view-transition-new(root) {
 .press-feedback:active {
   transform: scale(0.98);
 }
+
+
+/* ---------------------------------------------------------------------------
+   LOW-END DEVICES (html[data-perf="lite"], set before first paint by
+   lib/perf-tier.ts: Save-Data, <= 4 GB RAM, <= 4 CPU threads, or a GPU that
+   renders in software). Measured on such a machine: scrolling the dashboard
+   ran at ~20 fps with the backdrop blurs (each one recomputed every frame) and
+   holds 60 fps without them. So, there only:
+   - every blur becomes the flat, more opaque tint touch screens already use
+     (same colours, no blur — the (hover: none) block above), chrome included;
+   - purely decorative loops hold still (no frames drawn while idle).
+   Feedback animations (spinners, progress, skeletons, the Copilot's states)
+   keep running. Capable devices are untouched.
+   --------------------------------------------------------------------------- */
+html[data-perf="lite"] *,
+html[data-perf="lite"] *::before,
+html[data-perf="lite"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ...except the anti-leak screen blur (components/security/SecurityGuard.tsx): a deterrent, not
+   decoration — and only on screen while the window is out of focus, so it costs nothing. */
+html[data-perf="lite"] .fixed.inset-0[aria-hidden="true"][style*="blur(15px)"] {
+  backdrop-filter: blur(15px) !important;
+  -webkit-backdrop-filter: blur(15px) !important;
+}
+
+html[data-perf="lite"] .glass-panel,
+html[data-perf="lite"] .fixed[class*="backdrop-blur"] {
+  will-change: auto;
+}
+
+html[data-perf="lite"] .glass-panel,
+html[data-perf="lite"] .glass-chrome {
+  background-color: rgb(255 255 255 / 0.94);
+}
+
+html[data-perf="lite"].dark .glass-panel {
+  background-color: rgb(15 23 42 / 0.94);
+}
+
+html[data-perf="lite"].dark .glass-chrome {
+  background-color: rgb(11 14 17 / 0.94);
+}
+
+html[data-perf="lite"] .glass-card {
+  background-color: rgb(255 255 255 / 0.86);
+}
+
+html[data-perf="lite"].dark .glass-card {
+  background-color: rgb(30 41 59 / 0.82);
+}
+
+html[data-perf="lite"] .avatar-halo::before,
+html[data-perf="lite"] .avatar-halo::after,
+html[data-perf="lite"] .install-halo,
+html[data-perf="lite"] .install-halo-soft,
+html[data-perf="lite"] .install-breathe,
+html[data-perf="lite"] .install-sheen,
+html[data-perf="lite"] .cyber-breathe,
+html[data-perf="lite"] [style*="medical-float"],
+html[data-perf="lite"] .animate-float,
+html[data-perf="lite"] .animate-flame-flicker,
+html[data-perf="lite"] .animate-mascot-wave,
+html[data-perf="lite"] .animate-sidebar-wave,
+html[data-perf="lite"] .animate-mesh-pulse,
+html[data-perf="lite"] .animate-aurora-breathe,
+html[data-perf="lite"] .nav-new-pill {
+  animation-play-state: paused !important;
+}

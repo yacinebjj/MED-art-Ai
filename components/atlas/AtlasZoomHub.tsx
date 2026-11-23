@@ -3,7 +3,7 @@
 import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, ArrowUpRight, Layers, Microscope, Search, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Layers, Microscope, Pause, Play, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LocalErrorBoundary } from "@/components/ui/LocalErrorBoundary";
 import { ATLAS_TOTALS, ATLASES, FEATURED_ATLAS, atlasMedallion, getAtlas, searchAtlases, type AtlasCategory, type AtlasEntry, type AtlasMatch } from "./atlas-catalog";
@@ -40,6 +40,8 @@ const DIVE_PATH = [
 ];
 
 /** "1 205" — same output on the server and in every browser (no locale data involved). */
+const MOTION_KEY = "medart-atlas-showcase-paused";
+
 const formatCount = (value: number) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
 
 /* ───────────── URL ⇄ viewer ───────────── */
@@ -132,6 +134,34 @@ export function AtlasZoomHub() {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query.trim());
   const searchRef = useRef<HTMLInputElement>(null);
+  const vitrineRef = useRef<HTMLElement>(null);
+  // The showcase animates on every device (calm motion included), stops when scrolled out of
+  // view, and the student can pause it (remembered on this device).
+  const [motionOff, setMotionOff] = useState(false);
+  const [offscreen, setOffscreen] = useState(false);
+
+  useEffect(() => {
+    try {
+      setMotionOff(window.localStorage.getItem(MOTION_KEY) === "1");
+    } catch {
+      // Storage unavailable (private mode): the showcase simply plays.
+    }
+    const node = vitrineRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setOffscreen(!entry.isIntersecting), { threshold: 0 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const toggleMotion = () =>
+    setMotionOff((value) => {
+      try {
+        window.localStorage.setItem(MOTION_KEY, value ? "0" : "1");
+      } catch {
+        // Not remembered, still toggled.
+      }
+      return !value;
+    });
 
   const counts = useMemo(() => {
     const result: Record<Filter, number> = { all: GRID_ATLASES.length, thorax: 0, digestif: 0, genital: 0, neuro: 0, locomoteur: 0 };
@@ -208,7 +238,17 @@ export function AtlasZoomHub() {
       </header>
 
       {/* ── showcase: Le Tronc */}
-      <section className={styles.vitrine} aria-labelledby="atlas-featured-title">
+      <section ref={vitrineRef} className={styles.vitrine} data-paused={motionOff || offscreen} aria-labelledby="atlas-featured-title">
+        <button
+          type="button"
+          className={styles.motionBtn}
+          onClick={toggleMotion}
+          aria-pressed={motionOff}
+          aria-label={motionOff ? "Relancer l’animation" : "Mettre l’animation en pause"}
+          title={motionOff ? "Relancer l’animation" : "Mettre l’animation en pause"}
+        >
+          {motionOff ? <Play className="h-3.5 w-3.5" aria-hidden /> : <Pause className="h-3.5 w-3.5" aria-hidden />}
+        </button>
         <div className={styles.stage}>
           <a
             href={featuredHref}
@@ -245,18 +285,30 @@ export function AtlasZoomHub() {
                 </textPath>
               </text>
             </svg>
-            <svg className={styles.ringSpin} viewBox="0 0 400 400" aria-hidden>
-              <circle cx="200" cy="200" r="196" fill="none" stroke="rgb(251 113 133 / 0.5)" strokeWidth="1.5" strokeDasharray="1.5 9" strokeLinecap="round" />
-            </svg>
-            <svg className={cn(styles.arc, styles.arcA)} viewBox="0 0 400 400" aria-hidden>
-              <circle cx="200" cy="200" r="188" fill="none" stroke="#fb7185" strokeWidth="3" strokeLinecap="round" strokeDasharray="236 945" />
-            </svg>
-            <svg className={cn(styles.arc, styles.arcB)} viewBox="0 0 400 400" aria-hidden>
-              <circle cx="200" cy="200" r="172" fill="none" stroke="#fda4af" strokeWidth="3" strokeLinecap="round" strokeDasharray="216 865" />
-            </svg>
-            <svg className={cn(styles.arc, styles.arcC)} viewBox="0 0 400 400" aria-hidden>
-              <circle cx="200" cy="200" r="156" fill="none" stroke="#fecdd3" strokeWidth="3" strokeLinecap="round" strokeDasharray="196 785" />
-            </svg>
+            {/* Rotations run on HTML wrappers (GPU-composited), never on the <svg> itself; the glow is a wide faint stroke, not a filter. */}
+            <span className={styles.ringSpin} aria-hidden>
+              <svg className={styles.ringSvg} viewBox="0 0 400 400">
+                <circle cx="200" cy="200" r="196" fill="none" stroke="rgb(251 113 133 / 0.5)" strokeWidth="1.5" strokeDasharray="1.5 9" strokeLinecap="round" />
+              </svg>
+            </span>
+            <span className={cn(styles.arc, styles.arcA)} aria-hidden>
+              <svg className={styles.ringSvg} viewBox="0 0 400 400">
+                <circle cx="200" cy="200" r="188" fill="none" stroke="#fb7185" strokeOpacity="0.22" strokeWidth="11" strokeLinecap="round" strokeDasharray="236 945" />
+                <circle cx="200" cy="200" r="188" fill="none" stroke="#fb7185" strokeWidth="3" strokeLinecap="round" strokeDasharray="236 945" />
+              </svg>
+            </span>
+            <span className={cn(styles.arc, styles.arcB)} aria-hidden>
+              <svg className={styles.ringSvg} viewBox="0 0 400 400">
+                <circle cx="200" cy="200" r="172" fill="none" stroke="#fda4af" strokeOpacity="0.22" strokeWidth="11" strokeLinecap="round" strokeDasharray="216 865" />
+                <circle cx="200" cy="200" r="172" fill="none" stroke="#fda4af" strokeWidth="3" strokeLinecap="round" strokeDasharray="216 865" />
+              </svg>
+            </span>
+            <span className={cn(styles.arc, styles.arcC)} aria-hidden>
+              <svg className={styles.ringSvg} viewBox="0 0 400 400">
+                <circle cx="200" cy="200" r="156" fill="none" stroke="#fecdd3" strokeOpacity="0.22" strokeWidth="11" strokeLinecap="round" strokeDasharray="196 785" />
+                <circle cx="200" cy="200" r="156" fill="none" stroke="#fecdd3" strokeWidth="3" strokeLinecap="round" strokeDasharray="196 785" />
+              </svg>
+            </span>
             <span className={styles.disc}>
               <Image src="/atlas-zoom/_hub/tronc-1.webp" alt="" fill priority sizes="(max-width: 860px) 70vw, 300px" className={cn(styles.layer, styles.layerA)} />
               <Image src="/atlas-zoom/_hub/tronc-2.webp" alt="" fill sizes="(max-width: 860px) 70vw, 300px" className={cn(styles.layer, styles.layerB)} />

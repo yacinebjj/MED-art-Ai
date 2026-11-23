@@ -215,7 +215,7 @@ export function ModuleStatsModal({
           <ErrorState message="Échec du chargement des statistiques du module." onRetry={() => setRetryToken((t) => t + 1)} />
         ) : !data || data.courseCount === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-accent/30 py-10 text-center">
-            <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+            <motion.div animate={{ transform: ["translateY(0px)", "translateY(-5px)", "translateY(0px)"] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
               <BarChart3 className="h-8 w-8 text-muted-foreground/50" />
             </motion.div>
             <p className="max-w-[220px] text-sm text-muted-foreground">

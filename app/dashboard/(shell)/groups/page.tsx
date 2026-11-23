@@ -349,7 +349,7 @@ function GroupsLobby() {
             animate={{ opacity: 1, y: 0 }}
             className="glass-card flex flex-col items-center gap-3 rounded-3xl border-dashed p-8 text-center sm:p-12"
           >
-            <motion.div animate={{ y: [0, -6, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+            <motion.div animate={{ transform: ["translateY(0px)", "translateY(-6px)", "translateY(0px)"] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
               <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-[0_0_30px_rgba(34,211,238,0.45)]">
                 <Stethoscope className="h-8 w-8" />
               </span>

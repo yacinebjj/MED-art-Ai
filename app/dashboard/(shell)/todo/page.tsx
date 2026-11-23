@@ -228,7 +228,7 @@ function TodoStepper({ currentIndex }: { currentIndex: number }) {
             <div key={s.key} className={cn("flex items-center", i < STEPS.length - 1 ? "flex-1" : "flex-none")}>
               <div className="flex flex-col items-center gap-1.5">
                 <motion.span
-                  animate={isActive ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+                  animate={isActive ? { transform: ["scale(1)", "scale(1.08)", "scale(1)"] } : { transform: "scale(1)" }}
                   transition={{ duration: 1.8, repeat: isActive ? Infinity : 0, ease: "easeInOut" }}
                   className={cn(
                     "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-bold transition-colors duration-300 sm:h-11 sm:w-11",

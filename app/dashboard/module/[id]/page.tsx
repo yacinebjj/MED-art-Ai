@@ -550,7 +550,7 @@ const ModuleSourcesPanel = memo(function ModuleSourcesPanel({
           </>
         ) : courses.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-8 text-center">
-            <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+            <motion.div animate={{ transform: ["translateY(0px)", "translateY(-5px)", "translateY(0px)"] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
               {/* An MRI ring at rest with a blank page waiting in front of it: the first course is what wakes it up. */}
               <GlassArt name="sources" size={80} className="h-20 w-20" />
             </motion.div>

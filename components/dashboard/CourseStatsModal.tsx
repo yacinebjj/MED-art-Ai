@@ -190,7 +190,7 @@ export function CourseStatsModal({ open, onOpenChange, courseTitle, stats }: Cou
 
             {globalScore === undefined ? (
               <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 py-10 text-center dark:border-slate-700 dark:bg-slate-800/40">
-                <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+                <motion.div animate={{ transform: ["translateY(0px)", "translateY(-5px)", "translateY(0px)"] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
                   <BarChart3 className="h-8 w-8 text-slate-300 dark:text-slate-600" />
                 </motion.div>
                 <p className="max-w-[220px] text-sm text-slate-500 dark:text-slate-400">

@@ -1398,7 +1398,7 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
               animate={{ opacity: 1, y: 0 }}
               className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-3 rounded-3xl border border-cyan-200/60 bg-white/70 px-6 py-8 text-center shadow-lg backdrop-blur-md dark:border-cyan-900/40 dark:bg-zinc-900/60"
             >
-              <motion.div animate={{ y: [0, -6, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
+              <motion.div animate={{ transform: ["translateY(0px)", "translateY(-6px)", "translateY(0px)"] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}>
                 <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-[0_0_30px_rgba(34,211,238,0.45)]">
                   <Stethoscope className="h-8 w-8" />
                 </span>

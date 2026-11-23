@@ -33,7 +33,8 @@ interface LiveState {
 type AtlasMessage =
   | { source: "medart-atlas"; type: "hello" | "ready" | "fullscreen" | "blur" | "focus" }
   | { source: "medart-atlas"; type: "state"; title?: unknown; level?: unknown; mag?: unknown; index?: unknown; count?: unknown }
-  | { source: "medart-atlas"; type: "mag"; mag?: unknown };
+  | { source: "medart-atlas"; type: "mag"; mag?: unknown }
+  | { source: "medart-atlas"; type: "busy"; on?: unknown };
 
 type WebkitDocument = Document & {
   webkitFullscreenEnabled?: boolean;
@@ -113,6 +114,7 @@ export function AtlasViewer({ atlas, plate, onClose, onSwitch }: AtlasViewerProp
   const [live, setLive] = useState<LiveState | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [quiet, setQuiet] = useState(false);
   const [canFullscreen, setCanFullscreen] = useState(false);
 
   // Everything below is keyed by slug, so switching organ never shows the previous one for a frame.
@@ -143,12 +145,33 @@ export function AtlasViewer({ atlas, plate, onClose, onSwitch }: AtlasViewerProp
     if (mounted) backRef.current?.focus({ preventScroll: true });
   }, [mounted]);
 
+  // The app behind the studio is fully covered: its decorative loops (halo, glows, floating icons)
+  // hold still meanwhile, so the GPU only works for the atlas. They resume on close.
+  useEffect(() => {
+    if (!mounted) return;
+    const root = rootRef.current;
+    const held = document.getAnimations().filter((animation) => {
+      const target = (animation.effect as KeyframeEffect | null)?.target;
+      return animation.playState === "running" && !!target && !(root && root.contains(target));
+    });
+    held.forEach((animation) => animation.pause());
+    return () =>
+      held.forEach((animation) => {
+        try {
+          if (animation.playState === "paused") animation.play();
+        } catch {
+          // An animation whose element left the page meanwhile has nothing to resume.
+        }
+      });
+  }, [mounted]);
+
   // ── load the atlas page (instant when the medallion was hovered first)
   useEffect(() => {
     let cancelled = false;
     helloRef.current = false;
     readyRef.current = false;
     setMenuOpen(false);
+    setQuiet(false);
     if (!atlas.available) {
       setStatus({ slug, phase: "missing" });
       return;
@@ -289,6 +312,9 @@ export function AtlasViewer({ atlas, plate, onClose, onSwitch }: AtlasViewerProp
         }
         case "fullscreen":
           toggleFullscreen();
+          break;
+        case "busy":
+          setQuiet(data.on === true);
           break;
         case "blur":
           // Focus left the atlas: for the page (the bar) or for another app? Only the latter is a real loss.
@@ -456,7 +482,7 @@ export function AtlasViewer({ atlas, plate, onClose, onSwitch }: AtlasViewerProp
         )}
       </div>
 
-      <div ref={barRef} className={styles.bar}>
+      <div ref={barRef} className={styles.bar} data-quiet={quiet && !menuOpen && phase === "ready"}>
         <button ref={backRef} type="button" className={styles.barBtn} onClick={onClose} aria-label="Retour à l’Atlas Zoom">
           <ArrowLeft aria-hidden />
           <span className={styles.barBtnLabel}>Retour</span>

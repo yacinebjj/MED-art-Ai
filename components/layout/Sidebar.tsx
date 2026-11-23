@@ -348,7 +348,7 @@ function NavRow({ entry, collapsed, pathname, tab, language }: { entry: NavEntry
       </span>
       {!collapsed && <span className="relative z-10 truncate">{label}</span>}
       {entry.badge === "new" && !collapsed && (
-        <span className="relative z-10 ml-auto shrink-0 rounded-full bg-gradient-to-r from-rose-500 to-fuchsia-500 px-1.5 text-[9px] font-black uppercase leading-4 tracking-[0.12em] text-white shadow-[0_0_10px_rgba(244,63,94,0.55)] motion-safe:animate-[pulse_3s_ease-in-out_infinite]">
+        <span className="nav-new-pill relative z-10 ml-auto shrink-0 rounded-full bg-gradient-to-r from-rose-500 to-fuchsia-500 px-1.5 text-[9px] font-black uppercase leading-4 tracking-[0.12em] text-white shadow-[0_0_10px_rgba(244,63,94,0.55)] motion-safe:animate-[pulse_3s_ease-in-out_3]">
           New
         </span>
       )}
