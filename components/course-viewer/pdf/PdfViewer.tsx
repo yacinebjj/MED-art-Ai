@@ -16,7 +16,8 @@ import { ViewerStatus, useMediaQuery } from "../shared";
  * The middleware matcher skips .mjs files, so this 1.3 MB file is served
  * straight from static hosting without an auth round trip.
  */
-pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs?v=${pdfjs.version}`;
+// The legacy build of the worker, like the library itself (next.config.mjs, scripts/copy-pdf-worker.js).
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs?v=${pdfjs.version}-legacy`;
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;

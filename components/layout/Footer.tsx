@@ -9,7 +9,8 @@ export function Footer() {
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Fait pour les étudiants en Médecine, Pharmacie et Chirurgie Dentaire en Algérie.
           </p>
-          <p className="text-sm text-slate-400 dark:text-slate-500">
+          {/* The server's year wins: a phone set to the wrong date must not make React re-render the whole page. */}
+          <p className="text-sm text-slate-400 dark:text-slate-500" suppressHydrationWarning>
             © {new Date().getFullYear()} Med Art AI
           </p>
         </div>

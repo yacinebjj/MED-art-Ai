@@ -63,10 +63,16 @@ export function PushClientFallbackProvider({ children }: { children: React.React
     async function tick() {
       if (checkingRef.current) return;
 
-      const lastDispatch = Number(localStorage.getItem(STORAGE_KEY) ?? 0);
-      if (!lastDispatch) {
-        // First-ever visit: seed the baseline instead of firing immediately.
-        localStorage.setItem(STORAGE_KEY, String(Date.now()));
+      let lastDispatch = 0;
+      try {
+        lastDispatch = Number(localStorage.getItem(STORAGE_KEY) ?? 0);
+        if (!lastDispatch) {
+          // First-ever visit: seed the baseline instead of firing immediately.
+          localStorage.setItem(STORAGE_KEY, String(Date.now()));
+          return;
+        }
+      } catch {
+        // Storage blocked: no shared clock between tabs, so never dispatch from here (the server cron still does).
         return;
       }
       if (Date.now() - lastDispatch < DISPATCH_INTERVAL_MS) return;
@@ -77,7 +83,11 @@ export function PushClientFallbackProvider({ children }: { children: React.React
         if (status !== "subscribed") return; // never opted in — nothing to dispatch, stay silent
 
         // Claim the slot BEFORE the request so two tabs of this browser can never both fire.
-        localStorage.setItem(STORAGE_KEY, String(Date.now()));
+        try {
+          localStorage.setItem(STORAGE_KEY, String(Date.now()));
+        } catch {
+          return; // can't claim the slot: don't risk a double dispatch
+        }
         await fetch("/api/push/dispatch-self", { method: "POST" }).catch(() => null);
       } finally {
         checkingRef.current = false;

@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+
 // SECURITY: this app previously shipped with zero security headers at all —
 // no CSP/frame-ancestors (real clickjacking exposure: the login/dashboard/
 // exam pages could be iframed on an attacker's site), no nosniff, no
@@ -44,6 +47,19 @@ const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
 ].join("; ");
 
+/** Loader that strips the one regex lookbehind old iPhones can't parse (see the file). */
+const STRIP_LOOKBEHIND_LOADER = fileURLToPath(new URL("./scripts/webpack/strip-regex-lookbehind-loader.cjs", import.meta.url));
+/** Loader that rewrites class static blocks, which old iPhones can't parse either (see the file). */
+const STATIC_BLOCK_LOADER = fileURLToPath(new URL("./scripts/webpack/static-block-loader.cjs", import.meta.url));
+/**
+ * pdf.js's legacy build — the one react-pdf bundles (resolved from react-pdf
+ * itself, so it stays in lockstep with public/pdf.worker.min.mjs, see
+ * scripts/copy-pdf-worker.js). The default "modern" build needs Chrome 119 /
+ * Safari 17.4 (Promise.withResolvers…): on older phones and on Windows 7/8
+ * laptops (Chrome 109) every course PDF fell back to plain text.
+ */
+const PDFJS_LEGACY = createRequire(createRequire(import.meta.url).resolve("react-pdf/package.json")).resolve("pdfjs-dist/legacy/build/pdf.mjs");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -66,6 +82,24 @@ const nextConfig = {
     // internals never reach the client bundle at all, instead of relying on
     // webpack tree-shaking to catch it after the fact.
     optimizePackageImports: ["lucide-react", "framer-motion"],
+  },
+  webpack(config, { isServer }) {
+    // remark-gfm's e-mail autolinks use a regex lookbehind that Safari < 16.4
+    // (iOS 15/16 iPhones) refuses to parse, taking the course module page,
+    // the workspace and the assistant down with it on those phones.
+    config.module.rules.push({
+      test: /[\\/]node_modules[\\/]mdast-util-gfm-autolink-literal[\\/]lib[\\/]index\.js$/,
+      use: [{ loader: STRIP_LOOKBEHIND_LOADER }],
+    });
+    if (!isServer) {
+      // The PDF viewer (react-pdf) on pdf.js's legacy build, minus its one static block.
+      config.resolve.alias = { ...config.resolve.alias, "pdfjs-dist$": PDFJS_LEGACY };
+      config.module.rules.push({
+        test: /[\\/]pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.mjs$/,
+        use: [{ loader: STATIC_BLOCK_LOADER }],
+      });
+    }
+    return config;
   },
   async headers() {
     return [

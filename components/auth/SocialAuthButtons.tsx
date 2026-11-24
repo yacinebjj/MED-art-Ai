@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { OAUTH_PROVIDERS, fetchEnabledOAuthProviders, type OAuthProviderId } from "@/lib/oauth-providers";
+import { detectInAppBrowser, externalBrowserIntent, type InAppBrowser } from "@/lib/in-app-browser";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,14 @@ export function SocialAuthButtons({ mode }: { mode: "login" | "register" }) {
   const [enabled, setEnabled] = useState<readonly OAuthProviderId[]>(fromShell ?? []);
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState<OAuthProviderId | null>(null);
+  // Instagram/Facebook/TikTok… browsers: Google refuses to sign in there (lib/in-app-browser.ts).
+  const [inApp, setInApp] = useState<InAppBrowser | null>(null);
+  const [inAppHelp, setInAppHelp] = useState(false);
+  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
+
+  useEffect(() => {
+    setInApp(detectInAppBrowser(navigator.userAgent));
+  }, []);
 
   useEffect(() => {
     const isPreview = new URLSearchParams(window.location.search).get("sso") === "preview";
@@ -91,8 +100,38 @@ export function SocialAuthButtons({ mode }: { mode: "login" | "register" }) {
   const shown = preview ? [...OAUTH_PROVIDERS] : enabled;
   if (shown.length === 0) return null;
 
+  async function copyLink() {
+    const href = window.location.href;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(href);
+      ok = true;
+    } catch {
+      // No async clipboard in many in-app browsers: the classic way.
+      try {
+        const area = document.createElement("textarea");
+        area.value = href;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        ok = document.execCommand("copy");
+        area.remove();
+      } catch {
+        ok = false;
+      }
+    }
+    setCopied(ok ? "ok" : "fail");
+  }
+
   async function continueWith(provider: OAuthProviderId) {
     if (busy) return;
+    if (provider === "google" && inApp) {
+      // Google would answer "Accès bloqué : disallowed_useragent": show the way out instead.
+      setInAppHelp(true);
+      return;
+    }
     if (!enabled.includes(provider)) {
       // Preview only: the provider isn't switched on in Supabase yet.
       toast({
@@ -151,6 +190,38 @@ export function SocialAuthButtons({ mode }: { mode: "login" | "register" }) {
           </button>
         )}
       </div>
+      {inAppHelp && inApp && (
+        <div role="status" className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-left text-sm text-amber-50">
+          <p className="font-semibold text-amber-200">
+            {fr ? `Google bloque la connexion dans ${inApp.app ?? "ce navigateur intégré"}` : `Google blocks sign-in inside ${inApp.app ?? "this in-app browser"}`}
+          </p>
+          <p className="leading-relaxed text-amber-50/90">
+            {fr
+              ? "Ouvre MedArt AI dans ton navigateur (Chrome, Safari…) : touche ⋯ en haut à droite, puis « Ouvrir dans le navigateur ». Ou connecte-toi juste en dessous avec ton e-mail et ton mot de passe : ça marche ici."
+              : "Open MedArt AI in your browser (Chrome, Safari…): tap ⋯ at the top right, then “Open in browser”. Or sign in just below with your e-mail and password: that works here."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {inApp.canOpenExternally && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = externalBrowserIntent(window.location.href);
+                }}
+                className="rounded-xl bg-amber-300 px-3 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-200"
+              >
+                {fr ? "Ouvrir dans le navigateur" : "Open in browser"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void copyLink()}
+              className="rounded-xl border border-amber-300/40 px-3 py-2 text-xs font-semibold text-amber-100 transition-colors hover:bg-amber-300/10"
+            >
+              {copied === "ok" ? (fr ? "Lien copié ✓ — colle-le dans ton navigateur" : "Link copied ✓ — paste it in your browser") : copied === "fail" ? (fr ? "Copie impossible — utilise le menu ⋯" : "Couldn't copy — use the ⋯ menu") : fr ? "Copier le lien" : "Copy the link"}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-3" aria-hidden>
         <span className="h-px flex-1 bg-gradient-to-r from-transparent to-white/15" />
         <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{fr ? "ou avec ton e-mail" : "or with your e-mail"}</span>

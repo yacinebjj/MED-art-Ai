@@ -20,6 +20,7 @@ import { createClient } from "@/lib/supabase/client";
 import { CHUNK_SECONDS } from "@/lib/audio/browser-chunking";
 import { buildTimestampedTranscript } from "@/lib/lecture-transcript";
 import { AiRunGovernor, classifyUpstreamStatus } from "@/lib/ai-run-governor";
+import { generateId } from "@/lib/generate-id";
 
 export type PipelineStage = "decoding" | "transcribing" | "analyzing";
 
@@ -171,7 +172,7 @@ export async function transcribeLecture(
 
   // Same file (fingerprint) = same deterministic chunk grid: a checkpoint is
   // reused as-is, so a relaunch skips every chunk already transcribed.
-  const checkpoint: Checkpoint = readCheckpoint(file) ?? { uploadId: crypto.randomUUID(), total: 0, results: {}, savedAt: Date.now() };
+  const checkpoint: Checkpoint = readCheckpoint(file) ?? { uploadId: generateId(), total: 0, results: {}, savedAt: Date.now() };
   let estimatedTotal = Math.max(checkpoint.total, 1);
   let produced = 0;
   let done = Object.keys(checkpoint.results).length;

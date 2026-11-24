@@ -111,13 +111,28 @@ function classifyParagraph(paragraph: string): AnalogyBlock {
 // "المثال الحي: … طبياً: … النتيجة: …". A clinical/result label that opens a
 // new sentence starts a new block, so the story, its medical translation and
 // the take-away land in their own cards.
-const INLINE_LAYER_LABEL = /(?<=[.!?؟…»"”)]\s+)(?=(?:\*\*|__)?\s*(?:طبياً|طبيا|طبّياً|Médicalement|Medically|Cliniquement|Clinically|النتيجة|Résultat|Result|Bottom\s+line)\s*(?:\*\*|__)?\s*[:：])/gu;
+// No lookbehind here on purpose: Safari before 16.4 (iPhones left on iOS 15
+// or 16) rejects `(?<=…)` outright, and the whole analogies screen failed to
+// load. The sentence end + spaces are matched instead, and the cut goes
+// right after them — the same cuts the lookbehind made.
+const INLINE_LAYER_LABEL = /[.!?؟…»"”)]\s+(?=(?:\*\*|__)?\s*(?:طبياً|طبيا|طبّياً|Médicalement|Medically|Cliniquement|Clinically|النتيجة|Résultat|Result|Bottom\s+line)\s*(?:\*\*|__)?\s*[:：])/gu;
+
+function splitBeforeInlineLabels(paragraph: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (const match of paragraph.matchAll(INLINE_LAYER_LABEL)) {
+    const cut = (match.index ?? 0) + match[0].length;
+    parts.push(paragraph.slice(start, cut));
+    start = cut;
+  }
+  parts.push(paragraph.slice(start));
+  return parts;
+}
 
 function classifyParagraphs(paragraph: string): AnalogyBlock[] {
   // Lists and tables stay whole: their lines must not be cut mid-structure.
   if (/^\s*([-*+]\s|\d+[.)]\s|\|)/m.test(paragraph)) return [classifyParagraph(paragraph)];
-  return paragraph
-    .split(INLINE_LAYER_LABEL)
+  return splitBeforeInlineLabels(paragraph)
     .map((part) => part.trim())
     .filter(Boolean)
     .map(classifyParagraph);

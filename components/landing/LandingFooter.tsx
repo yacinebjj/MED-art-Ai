@@ -66,7 +66,8 @@ export function LandingFooter() {
         </p>
 
         <div className="mt-2 flex flex-col items-center justify-between gap-3 border-t border-white/5 pt-6 text-xs text-slate-500 sm:flex-row">
-          <p>© {new Date().getFullYear()} Med Art AI</p>
+          {/* The server's year wins: a phone set to the wrong date must not make React re-render the whole page. */}
+          <p suppressHydrationWarning>© {new Date().getFullYear()} Med Art AI</p>
           <p>{fr ? "Fait en Algérie, pour les étudiants en santé." : "Made in Algeria, for health students."}</p>
         </div>
       </div>

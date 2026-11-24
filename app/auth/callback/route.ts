@@ -76,7 +76,27 @@ export async function GET(request: NextRequest) {
     if (isRecovery) {
       return NextResponse.redirect(`${origin}${RECOVERY_PATH}?error_code=${encodeURIComponent(error.code ?? "exchange_failed")}`);
     }
+    // The confirmation e-mail opened in another browser or device than the
+    // sign-up (signed up in Instagram's or Facebook's browser, or on a laptop,
+    // then tapped the link in Gmail on the phone): Supabase has ALREADY
+    // confirmed the address before sending the student here, only this
+    // browser can't open the session. Say so — the generic "sign-in didn't
+    // go through" made students believe their account was broken.
+    if (error.code === "pkce_code_verifier_not_found") return loginWithReason(origin, "other_browser", next);
   }
 
+  // An expired or already-used link (e-mail scanners open links too): Supabase sends its error code along.
+  const supabaseError = searchParams.get("error_code");
+  if (!isRecovery && supabaseError === "otp_expired") return loginWithReason(origin, "link_expired", next);
+
   return NextResponse.redirect(`${origin}/login?error=auth`);
+}
+
+/** Back to /login with a reason LoginForm explains (a fixed list, never echoed raw), keeping an invite's `next`. */
+function loginWithReason(origin: string, reason: "other_browser" | "link_expired", next: string) {
+  const target = new URL("/login", origin);
+  target.searchParams.set("error", "auth");
+  target.searchParams.set("reason", reason);
+  if (next !== "/dashboard") target.searchParams.set("next", next);
+  return NextResponse.redirect(target);
 }

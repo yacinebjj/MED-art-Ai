@@ -15,7 +15,9 @@ const fs = require("fs");
 const path = require("path");
 
 const reactPdfDir = path.dirname(require.resolve("react-pdf/package.json"));
-const src = path.join(reactPdfDir, "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
+// The LEGACY worker: next.config.mjs points react-pdf at pdf.js's legacy build (older phones and
+// Windows 7/8 laptops can't run the modern one), and the worker must be the same build.
+const src = path.join(reactPdfDir, "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.min.mjs");
 const dest = path.join(__dirname, "..", "public", "pdf.worker.min.mjs");
 
 fs.copyFileSync(src, dest);

@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import type { ChatMessage } from "@/lib/types";
 import type { ChatMode } from "@/lib/chat-constants";
 import { createStreamFlusher, type StreamFlusher } from "@/lib/stream-flush";
+import { generateId } from "@/lib/generate-id";
 
 /**
  * Per-request extras the module workspace sends with EVERY turn (including
@@ -232,8 +233,8 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
 
   async function sendChatMessage(userContent: string, options?: SendOptions) {
     const exclude = options?.excludeFromHistory === true;
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userContent, excludeFromHistory: exclude };
-    const assistantId = crypto.randomUUID();
+    const userMessage: ChatMessage = { id: generateId(), role: "user", content: userContent, excludeFromHistory: exclude };
+    const assistantId = generateId();
     // Past messages flagged excludeFromHistory (a prior quick action's quote
     // AND its reply) are dropped entirely here — not trimmed, not
     // paraphrased, just absent — so nothing about that exchange can anchor
@@ -268,7 +269,7 @@ export function useCourseChat(slug?: string, requestExtras?: CourseChatRequestEx
         .map((m) => ({ role: m.role, content: m.content }))
     );
 
-    const newAssistantId = crypto.randomUUID();
+    const newAssistantId = generateId();
     // Drop the old reply and anything after it (ChatGPT-style: regenerating a
     // turn invalidates everything downstream of it), keep the user message,
     // and append a fresh empty bubble to stream into.

@@ -16,8 +16,15 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   // mismatch); the saved choice is applied right after mount.
   const [language, setLanguageState] = useState<Language>("fr");
 
+  // Storage can be blocked or switched off (in-app browsers, strict privacy
+  // settings): the app then simply starts in French and doesn't remember.
   useEffect(() => {
-    const savedLang = localStorage.getItem("medart-language") as Language;
+    let savedLang: string | null = null;
+    try {
+      savedLang = localStorage.getItem("medart-language");
+    } catch {
+      // Storage unavailable.
+    }
     if (savedLang === "en" || savedLang === "fr") {
       setLanguageState(savedLang);
     }
@@ -25,7 +32,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
-    localStorage.setItem("medart-language", lang);
+    try {
+      localStorage.setItem("medart-language", lang);
+    } catch {
+      // Storage unavailable: the choice holds for this visit.
+    }
   }, []);
 
   const value = useMemo(() => ({ language, setLanguage }), [language, setLanguage]);

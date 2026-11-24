@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Laptop, Loader2, LogOut, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/providers/AuthProvider";
+import { detectInAppBrowser, type InAppBrowser } from "@/lib/in-app-browser";
 
 /** Fired by the global fetch wrapper (components/billing/PaywallProvider.tsx) on any same-origin 401. */
 export const AUTH_REJECTED_EVENT = "medart:auth-rejected";
@@ -46,6 +47,11 @@ export function DeviceGuard() {
   const [state, setState] = useState<DeviceState | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [inApp, setInApp] = useState<InAppBrowser | null>(null);
+
+  useEffect(() => {
+    setInApp(detectInAppBrowser(navigator.userAgent));
+  }, []);
   const lastCheckRef = useRef(0);
 
   const check = useCallback(async () => {
@@ -97,6 +103,9 @@ export function DeviceGuard() {
 
   if (!user || state?.status !== "limit") return null;
 
+  // Instagram/Facebook/TikTok's own browser keeps its own cookies, so it counts as one more device.
+  const inAppName = inApp ? (inApp.app ? (/^[aeiouyh]/i.test(inApp.app) ? `d'${inApp.app}` : `de ${inApp.app}`) : "d'une application") : null;
+
   const others = state.devices.filter((device) => !device.current);
 
   return (
@@ -109,6 +118,12 @@ export function DeviceGuard() {
           Ton compte MedArt est déjà utilisé sur {state.max} appareils. Pour continuer ici, remplace l&apos;un d&apos;eux — il sera déconnecté. Tu peux
           remplacer un appareil une fois toutes les {state.cooldownHours} h.
         </p>
+        {inAppName && (
+          <p className="mt-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-200">
+            Tu es dans le navigateur intégré {inAppName} : il compte comme un appareil à part. Plutôt que de remplacer un de tes appareils, ouvre MedArt AI dans ton
+            navigateur habituel (⋯ en haut à droite → « Ouvrir dans le navigateur »).
+          </p>
+        )}
 
         <ul className="mt-4 space-y-2">
           {others.map((device) => {

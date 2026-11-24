@@ -75,6 +75,12 @@ export function useSecurityGuard() {
       if (blurTimeout !== null) return; // already pending — a second blur before the first resolves shouldn't reset the clock.
       blurTimeout = setTimeout(() => {
         blurTimeout = null;
+        // The window also "blurs" when focus merely moves into an iframe of
+        // this page (the course viewer's Office/Google viewer, Google sign-in,
+        // the Drive picker): the page still has focus, so no blur — on laptops
+        // that used to fog the whole screen, the document being read included,
+        // until the student clicked back outside it.
+        if (document.visibilityState === "visible" && document.hasFocus()) return;
         setIsBlurred(true);
       }, BLUR_GRACE_MS);
     }
@@ -91,7 +97,11 @@ export function useSecurityGuard() {
       const selectedText = window.getSelection()?.toString() ?? "";
       if (!selectedText) return; // nothing selected — a stray copy/cut with no selection, let the browser do whatever it would normally do (nothing).
 
-      sessionStorage.setItem(INTERNAL_CLIPBOARD_KEY, selectedText);
+      try {
+        sessionStorage.setItem(INTERNAL_CLIPBOARD_KEY, selectedText);
+      } catch {
+        // Storage blocked: in-app paste falls back to the clipboard warning, the copy is still swapped.
+      }
       e.clipboardData?.setData("text/plain", EXTERNAL_COPY_WARNING);
       e.preventDefault();
     }

@@ -12,6 +12,7 @@ import { SecurityGuard } from "@/components/security/SecurityGuard";
 import { SplashScreen } from "@/components/layout/SplashScreen";
 import { ZoomLock } from "@/components/pwa/ZoomLock";
 import { PERF_TIER_SCRIPT } from "@/lib/perf-tier";
+import { STORAGE_SHIM_SCRIPT } from "@/lib/storage-shim";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -65,6 +66,10 @@ export default function RootLayout({
   return (
     <html lang="fr" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
+        {/* Blocked, disabled or full localStorage/sessionStorage can't crash the app (lib/storage-shim.ts). First, before any app code. */}
+        <Script id="medart-storage-shim" strategy="beforeInteractive">
+          {STORAGE_SHIM_SCRIPT}
+        </Script>
         {/* Low-end devices get <html data-perf="lite"> before first paint (lib/perf-tier.ts). */}
         <Script id="medart-perf-tier" strategy="beforeInteractive">
           {PERF_TIER_SCRIPT}

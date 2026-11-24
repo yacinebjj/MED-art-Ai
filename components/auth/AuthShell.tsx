@@ -158,7 +158,10 @@ export function AuthShell({ children, oauthProviders = null }: { children: React
             </motion.div>
           </TiltCard>
 
-          <p className="mt-8 text-center text-xs text-slate-500">© {new Date().getFullYear()} Med Art AI — Médecine · Pharmacie · Chirurgie Dentaire</p>
+          {/* The server's year wins: a phone set to the wrong date must not make React re-render the whole page. */}
+          <p className="mt-8 text-center text-xs text-slate-500" suppressHydrationWarning>
+            © {new Date().getFullYear()} Med Art AI — Médecine · Pharmacie · Chirurgie Dentaire
+          </p>
         </div>
       </div>
       </OAuthProvidersContext.Provider>

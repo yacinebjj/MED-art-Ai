@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AssistantMode } from "@/lib/assistant-modes";
 import { deleteSyncDoc, putSyncDoc, reconcileList } from "@/lib/user-sync";
+import { generateId } from "@/lib/generate-id";
 
 export interface ChatMessage {
   id: string;
@@ -202,7 +203,7 @@ export function useAssistantConversations(userId: string | null) {
           changed = { ...prev[existingIndex], messages, title, updatedAt: now };
           next = prev.map((c, i) => (i === existingIndex ? changed : c));
         } else {
-          const newId = crypto.randomUUID();
+          const newId = generateId();
           changed = { id: newId, title, messages, updatedAt: now };
           next = [changed, ...prev];
           setActiveId(newId);

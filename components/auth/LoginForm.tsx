@@ -43,13 +43,35 @@ export function LoginForm() {
     if (params.get("next")) setRegisterHref(`/register?next=${encodeURIComponent(sanitizeRedirectPath(params.get("next")))}`);
     // /auth/callback sends a failed or cancelled Google/Apple sign-in (or an expired e-mail link) back here.
     if (params.get("error") === "auth") {
-      toast({
-        variant: "error",
-        title: language === "fr" ? "Connexion non aboutie" : "Sign-in didn't go through",
-        description: language === "fr" ? "Réessaie, ou connecte-toi avec ton e-mail et ton mot de passe." : "Try again, or sign in with your e-mail and password.",
-      });
+      const fr = language === "fr";
+      const reason = params.get("reason");
+      if (reason === "other_browser") {
+        // The confirmation link was opened in another browser/device: the address IS confirmed.
+        toast({
+          variant: "success",
+          title: fr ? "E-mail confirmé" : "E-mail confirmed",
+          description: fr
+            ? "Le lien s'est ouvert dans un autre navigateur que celui de ton inscription : connecte-toi simplement ici avec ton e-mail et ton mot de passe."
+            : "The link opened in a different browser from the one you signed up in: just sign in here with your e-mail and password.",
+        });
+      } else if (reason === "link_expired") {
+        toast({
+          variant: "info",
+          title: fr ? "Lien expiré ou déjà utilisé" : "Link expired or already used",
+          description: fr
+            ? "Ton e-mail est sans doute déjà confirmé : connecte-toi avec ton e-mail et ton mot de passe."
+            : "Your e-mail is most likely confirmed already: sign in with your e-mail and password.",
+        });
+      } else {
+        toast({
+          variant: "error",
+          title: fr ? "Connexion non aboutie" : "Sign-in didn't go through",
+          description: fr ? "Réessaie, ou connecte-toi avec ton e-mail et ton mot de passe." : "Try again, or sign in with your e-mail and password.",
+        });
+      }
       // Off the address bar, so a refresh doesn't say it again.
       params.delete("error");
+      params.delete("reason");
       const query = params.toString();
       window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
     }

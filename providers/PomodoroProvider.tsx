@@ -62,6 +62,23 @@ export function localDayKey(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/** localStorage, but never throws: blocked or full storage must not take the whole app down (this provider wraps every page). */
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage blocked or full: the timer keeps running in memory.
+  }
+}
+
 function readFocusLog(key: string): FocusLog {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
@@ -163,9 +180,9 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   // المستخدم لأول مرة بعد التحميل الأولي).
   useEffect(() => {
     const keys = keysFor(bucket);
-    const savedSeconds = localStorage.getItem(keys.seconds);
-    const savedActive = localStorage.getItem(keys.active);
-    const savedVisible = localStorage.getItem(keys.visible);
+    const savedSeconds = readStored(keys.seconds);
+    const savedActive = readStored(keys.active);
+    const savedVisible = readStored(keys.visible);
 
     setSeconds(savedSeconds ? parseInt(savedSeconds, 10) : 0);
     setIsActive(savedActive === "true");
@@ -309,7 +326,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     void unlockPomodoroAudio();
     setIsActive((prev) => {
       const nextState = !prev;
-      localStorage.setItem(keysFor(bucketRef.current).active, nextState.toString());
+      writeStored(keysFor(bucketRef.current).active, nextState.toString());
       return nextState;
     });
   }, []);
@@ -317,7 +334,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const toggleVisible = useCallback(() => {
     setIsVisible((prev) => {
       const nextState = !prev;
-      localStorage.setItem(keysFor(bucketRef.current).visible, nextState.toString());
+      writeStored(keysFor(bucketRef.current).visible, nextState.toString());
       return nextState;
     });
   }, []);
@@ -326,8 +343,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     setSeconds(0);
     setIsActive(false);
     const keys = keysFor(bucketRef.current);
-    localStorage.setItem(keys.seconds, "0");
-    localStorage.setItem(keys.active, "false");
+    writeStored(keys.seconds, "0");
+    writeStored(keys.active, "false");
   }, []);
 
   const setUserId = useCallback((userId: string | null) => {
