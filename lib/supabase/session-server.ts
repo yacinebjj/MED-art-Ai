@@ -180,7 +180,7 @@ function authCookieFingerprint(cookieStore: ReturnType<typeof cookies>): string 
 
 /**
  * The signed-in user, or null — what every /api/** route calls. Also
- * enforces the 2-device limit (lib/devices.ts): a device beyond it is
+ * enforces the device limit (lib/devices.ts): a device beyond it is
  * treated as signed out (401) by every route, and DeviceGuard shows it the
  * device-limit screen. Use getSessionUser() only for the routes that must
  * work from such a device (listing / replacing devices, signing out).
@@ -190,8 +190,9 @@ function authCookieFingerprint(cookieStore: ReturnType<typeof cookies>): string 
 export async function getAuthenticatedUser(): Promise<User | null> {
   const user = await getSessionUser();
   if (!user) return null;
-  if ((await checkDevice(user.id)) === "limit") {
-    console.warn(`[auth] Limite d'appareils atteinte pour ${user.id} — requête refusée.`);
+  const device = await checkDevice(user.id);
+  if (device !== "ok") {
+    console.warn(`[auth] ${device === "in_app_limit" ? "Limite de navigateurs intégrés" : "Limite d'appareils"} atteinte pour ${user.id} — requête refusée.`);
     return null;
   }
   return user;

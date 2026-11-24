@@ -7,6 +7,7 @@ import { motion, useAnimationControls } from "framer-motion";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
+import { COOKIES_BLOCKED, rememberSession, resendConfirmationEmail, sessionWasStored } from "@/lib/auth-client";
 import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -42,6 +43,11 @@ export function LoginForm() {
     // An invite link (?next=/dashboard/billing/pool/<code>) survives the switch to sign-up.
     if (params.get("next")) setRegisterHref(`/register?next=${encodeURIComponent(sanitizeRedirectPath(params.get("next")))}`);
     // /auth/callback sends a failed or cancelled Google/Apple sign-in (or an expired e-mail link) back here.
+    // Cookies switched off: say so before the student types anything (signing in can't hold).
+    if (typeof navigator !== "undefined" && navigator.cookieEnabled === false) {
+      const text = COOKIES_BLOCKED[language === "fr" ? "fr" : "en"];
+      toast({ variant: "warning", title: text.title, description: text.description });
+    }
     if (params.get("error") === "auth") {
       const fr = language === "fr";
       const reason = params.get("reason");
@@ -83,14 +89,53 @@ export function LoginForm() {
 
     const supabase = createClient();
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-
-    setIsLoading(false);
+    const fr = language === "fr";
 
     if (signInError) {
-      toast({ variant: "error", title: language === "fr" ? "Connexion impossible" : "Couldn't sign in", description: translateAuthError(signInError.message) });
+      setIsLoading(false);
+      if (/email not confirmed/i.test(signInError.message)) {
+        // The confirmation e-mail was lost or filed as spam: one tap sends it again.
+        const target = email;
+        toast({
+          variant: "warning",
+          title: fr ? "Adresse e-mail pas encore confirmée" : "E-mail not confirmed yet",
+          description: fr
+            ? "Clique sur le lien reçu à l'inscription (regarde aussi dans les spams et « Promotions »). Pas reçu ? Renvoie-le."
+            : "Click the link we sent when you signed up (check spam too). Didn't get it? Send it again.",
+          action: {
+            label: fr ? "Renvoyer l'e-mail" : "Resend e-mail",
+            onClick: () => {
+              void resendConfirmationEmail(target, sanitizeRedirectPath(new URLSearchParams(window.location.search).get("next"))).then((error) =>
+                toast(
+                  error
+                    ? { variant: "error", title: fr ? "Envoi impossible" : "Couldn't send", description: error }
+                    : {
+                        variant: "success",
+                        title: fr ? "E-mail renvoyé" : "E-mail sent",
+                        description: fr ? `Vérifie ${target} (et les spams), puis clique sur le lien.` : `Check ${target} (and spam), then click the link.`,
+                      }
+                )
+              );
+            },
+          },
+        });
+      } else {
+        toast({ variant: "error", title: fr ? "Connexion impossible" : "Couldn't sign in", description: translateAuthError(signInError.message) });
+      }
       void shake.start({ x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.4 } });
       return;
     }
+
+    // Signed in, but cookies blocked: the dashboard would bounce straight back here. Say why instead.
+    if (!(await sessionWasStored())) {
+      setIsLoading(false);
+      const text = COOKIES_BLOCKED[fr ? "fr" : "en"];
+      toast({ variant: "error", title: text.title, description: text.description });
+      return;
+    }
+    // "Se souvenir de moi" unticked (a shared computer): the session ends when the browser closes.
+    await rememberSession(remember);
+    setIsLoading(false);
 
     // SECURITY: sanitizeRedirectPath forces this to a same-origin relative
     // path — a raw `next` here was a real, confirmed open redirect

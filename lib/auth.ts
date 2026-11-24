@@ -17,16 +17,40 @@ export function profileFromUser(user: User): StudentProfile {
   };
 }
 
-/** Maps a Supabase Auth error message to a French, student-facing one. */
-export function translateAuthError(message: string): string {
-  const known: Record<string, string> = {
-    "User already registered": "Un compte existe déjà avec cette adresse e-mail.",
-    "Invalid login credentials": "E-mail ou mot de passe incorrect.",
-    "Email not confirmed": "Confirme d'abord ton adresse e-mail (vérifie ta boîte de réception).",
-    "Password should be at least 6 characters": "Le mot de passe doit contenir au moins 6 caractères.",
-    "Unable to validate email address: invalid format": "Adresse e-mail invalide.",
-    "Email rate limit exceeded": "Trop de tentatives — réessaie dans quelques minutes.",
-  };
+/**
+ * Maps a Supabase Auth error message to a French, student-facing one.
+ *
+ * By pattern, not exact text: Supabase's wording varies between versions and
+ * endpoints ("Email rate limit exceeded" / "email rate limit exceeded", "For
+ * security purposes, you can only request this after 47 seconds."), and a
+ * network failure surfaces as the browser's own message ("Failed to fetch",
+ * Safari's "Load failed", Firefox's "NetworkError…"). Those used to reach
+ * students raw, in English.
+ */
+const AUTH_ERRORS: ReadonlyArray<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
+  [/user already registered|already been registered|already exists/i, "Un compte existe déjà avec cette adresse e-mail : connecte-toi, ou utilise « Mot de passe oublié ? »."],
+  [/invalid login credentials|invalid credentials/i, "E-mail ou mot de passe incorrect."],
+  [/email not confirmed/i, "Confirme d'abord ton adresse e-mail (vérifie ta boîte de réception et tes spams)."],
+  [/password should be at least (\d+)/i, (m) => `Le mot de passe doit contenir au moins ${m[1]} caractères.`],
+  [/password should contain/i, "Le mot de passe doit mélanger lettres minuscules, majuscules et chiffres."],
+  [/weak|easy to guess|pwned|leaked|compromised/i, "Ce mot de passe est trop courant (il apparaît dans des fuites de données) : choisis-en un autre."],
+  [/should be different from the old password/i, "Le nouveau mot de passe doit être différent de l'ancien."],
+  [/unable to validate email|invalid format|invalid email|email address .* is invalid/i, "Adresse e-mail invalide."],
+  [/request this after (\d+) seconds?/i, (m) => `Par sécurité, patiente ${m[1]} secondes avant de réessayer.`],
+  [/rate limit|too many requests|over_request_rate_limit|over_email_send_rate_limit/i, "Trop de tentatives depuis ce réseau — patiente quelques minutes puis réessaie (ou passe en 4G)."],
+  [/failed to fetch|load failed|networkerror|network request failed|fetch failed|network error/i, "Connexion au serveur impossible — vérifie ta connexion Internet puis réessaie."],
+  [/signups? not allowed|signup.*disabled/i, "Les inscriptions sont momentanément fermées. Réessaie un peu plus tard."],
+  [/database error saving new user|unexpected_failure/i, "Le compte n'a pas pu être créé (erreur du serveur). Réessaie dans un instant."],
+  [/link is invalid or has expired|otp.*expired|token has expired|token is expired/i, "Ce lien a expiré ou a déjà servi : demandes-en un nouveau."],
+  [/same_password|same password/i, "Le nouveau mot de passe doit être différent de l'ancien."],
+  [/captcha/i, "La vérification anti-robot a échoué — réessaie."],
+  [/session.*missing|auth session missing|session_not_found/i, "Ta session a expiré : reconnecte-toi."],
+];
 
-  return known[message] ?? message;
+export function translateAuthError(message: string): string {
+  for (const [pattern, text] of AUTH_ERRORS) {
+    const match = message.match(pattern);
+    if (match) return typeof text === "string" ? text : text(match);
+  }
+  return message;
 }

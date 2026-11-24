@@ -130,8 +130,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: false, error: "Aucun fichier reçu." }, { status: 400 });
   }
 
-  const documentExtension = DOCUMENT_EXTENSION_BY_MIME[file.type];
-  const messageType: ChatMessageType | undefined = documentExtension ? "text" : MIME_TO_TYPE[file.type];
+  // "audio/webm;codecs=opus" is audio/webm: recorders (and some pickers) add codec parameters.
+  const mimeType = (file.type.split(";")[0] ?? "").trim().toLowerCase();
+  const documentExtension = DOCUMENT_EXTENSION_BY_MIME[mimeType];
+  const messageType: ChatMessageType | undefined = documentExtension ? "text" : MIME_TO_TYPE[mimeType];
   if (!messageType) {
     return NextResponse.json(
       { success: false, error: `Type de fichier non supporté : "${file.type || "inconnu"}". Images, vidéos, audios, PDF, Word, PowerPoint, Excel ou texte.` },
@@ -158,11 +160,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   let mediaUrl: string;
   try {
     await ensureChatMediaBucket(supabase);
-    const extension = documentExtension ?? EXTENSION_BY_MIME[file.type] ?? "bin";
+    const extension = documentExtension ?? EXTENSION_BY_MIME[mimeType] ?? "bin";
     const path = `${groupId}/${randomUUID()}.${extension}`;
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    const { error: uploadError } = await supabase.storage.from(CHAT_MEDIA_BUCKET).upload(path, buffer, { contentType: file.type, upsert: false });
+    const { error: uploadError } = await supabase.storage.from(CHAT_MEDIA_BUCKET).upload(path, buffer, { contentType: mimeType, upsert: false });
     if (uploadError) throw uploadError;
 
     const { data } = supabase.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path);
@@ -184,7 +186,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
             type: "text",
             content_text: encodeEnvelope({
               text: "",
-              attachment: { url: mediaUrl, name: safeDocumentName(file.name), mime: file.type, size: file.size },
+              attachment: { url: mediaUrl, name: safeDocumentName(file.name), mime: mimeType, size: file.size },
             }),
             sender_name: senderName,
           }

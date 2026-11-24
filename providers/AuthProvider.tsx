@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { ephemeralSessionEnded, forgetEphemeralSession } from "@/lib/auth-client";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { fetchSubscriptionPayload } from "@/hooks/useUsage";
@@ -97,7 +98,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // every useAuth() consumer in the app.
     const applyUser = (next: User | null) => setUser((current) => (isSameUser(current, next) ? current : next));
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      // "Se souvenir de moi" was unticked and the browser has been closed since (lib/auth-client.ts):
+      // end that session — and free its device slot — before anything else.
+      if (data.session && ephemeralSessionEnded(data.session.access_token)) {
+        forgetEphemeralSession();
+        await fetch("/api/devices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "release" }) }).catch(() => {});
+        await supabase.auth.signOut().catch(() => {});
+        window.location.replace("/login");
+        return;
+      }
       applyUser(data.session?.user ?? null);
       setLoading(false);
     });
@@ -184,7 +194,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user?.id]);
 
   async function signOut() {
-    // Frees this device's slot (2-device limit, lib/devices.ts) while the
+    forgetEphemeralSession();
+    // Frees this device's slot (device limit, lib/devices.ts) while the
     // session cookie still exists to authenticate the call. Best effort.
     await fetch("/api/devices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "release" }) }).catch(() => {});
     await supabase.auth.signOut();

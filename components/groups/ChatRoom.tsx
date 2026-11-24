@@ -1036,8 +1036,13 @@ export function ChatRoom({ groupId }: ChatRoomProps) {
           stream.getTracks().forEach((track) => track.stop());
           clearRecordingTimer();
           mediaRecorderRef.current = null;
-          const blob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
-          if (blob.size > 0) uploadMedia(new File([blob], "vocal.webm", { type: "audio/webm" }));
+          // Labelled with the format the recorder really produced: iPhones record MP4/AAC, Firefox
+          // Ogg/Opus, Chrome WebM. Everything used to be called "vocal.webm" (audio/webm), so voice
+          // notes recorded on an iPhone couldn't be played back where the label is trusted (Safari).
+          const type = (recorder.mimeType || "audio/webm").split(";")[0].trim().toLowerCase() || "audio/webm";
+          const extension = type === "audio/mp4" ? "m4a" : type === "audio/ogg" ? "ogg" : type === "audio/mpeg" ? "mp3" : "webm";
+          const blob = new Blob(recordedChunksRef.current, { type });
+          if (blob.size > 0) uploadMedia(new File([blob], `vocal.${extension}`, { type }));
         };
         // A mid-recording failure (device unplugged, driver error, ...) puts the
         // recorder into "inactive" without ever firing onstop — without this,

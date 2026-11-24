@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Laptop, Loader2, LogOut, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/providers/AuthProvider";
-import { detectInAppBrowser, type InAppBrowser } from "@/lib/in-app-browser";
+import { detectInAppBrowser, externalBrowserIntent, type InAppBrowser } from "@/lib/in-app-browser";
 
 /** Fired by the global fetch wrapper (components/billing/PaywallProvider.tsx) on any same-origin 401. */
 export const AUTH_REJECTED_EVENT = "medart:auth-rejected";
@@ -21,7 +21,10 @@ interface DeviceRow {
 
 interface DeviceState {
   status: "ok" | "limit";
+  /** "in_app": this in-app browser is one too many (they don't take device slots, but they are capped). */
+  reason?: "in_app";
   max: number;
+  inAppMax?: number;
   cooldownHours: number;
   devices: DeviceRow[];
 }
@@ -37,7 +40,7 @@ function isPhone(label: string | null): boolean {
 }
 
 /**
- * 2-device limit screen (lib/devices.ts). Checks this device once the user
+ * Device-limit screen (lib/devices.ts). Checks this device once the user
  * is known, and again whenever an API call is rejected with 401. While the
  * account already has its maximum of OTHER devices, it covers the app with
  * the list of those devices: replace one of them, or sign out.
@@ -103,8 +106,31 @@ export function DeviceGuard() {
 
   if (!user || state?.status !== "limit") return null;
 
-  // Instagram/Facebook/TikTok's own browser keeps its own cookies, so it counts as one more device.
-  const inAppName = inApp ? (inApp.app ? (/^[aeiouyh]/i.test(inApp.app) ? `d'${inApp.app}` : `de ${inApp.app}`) : "d'une application") : null;
+  if (state.reason === "in_app") {
+    // In-app browsers never take one of the student's device slots, but only a few of them are allowed.
+    return (
+      <div role="dialog" aria-modal="true" aria-labelledby="device-limit-title" className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 animate-in fade-in-0 duration-300">
+        <div className="motion-swap w-full max-w-md rounded-3xl border border-border bg-background p-5 shadow-2xl sm:p-6">
+          <h2 id="device-limit-title" className="text-lg font-bold text-foreground">
+            Ouvre MedArt AI dans ton navigateur
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Tu as déjà utilisé MedArt AI dans {state.inAppMax ?? 2} navigateurs d&apos;applications (Instagram, Facebook, TikTok…) ces derniers jours. Ils ne comptent pas
+            dans tes appareils, mais leur nombre est limité : continue dans ton navigateur habituel — touche ⋯ en haut à droite, puis « Ouvrir dans le navigateur ».
+          </p>
+          {inApp?.canOpenExternally && (
+            <Button className="mt-4 w-full" onClick={() => (window.location.href = externalBrowserIntent(window.location.href))}>
+              Ouvrir dans le navigateur
+            </Button>
+          )}
+          <Button variant="ghost" className="mt-2 w-full" onClick={() => void signOut()}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Se déconnecter
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const others = state.devices.filter((device) => !device.current);
 
@@ -118,12 +144,6 @@ export function DeviceGuard() {
           Ton compte MedArt est déjà utilisé sur {state.max} appareils. Pour continuer ici, remplace l&apos;un d&apos;eux — il sera déconnecté. Tu peux
           remplacer un appareil une fois toutes les {state.cooldownHours} h.
         </p>
-        {inAppName && (
-          <p className="mt-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-200">
-            Tu es dans le navigateur intégré {inAppName} : il compte comme un appareil à part. Plutôt que de remplacer un de tes appareils, ouvre MedArt AI dans ton
-            navigateur habituel (⋯ en haut à droite → « Ouvrir dans le navigateur »).
-          </p>
-        )}
 
         <ul className="mt-4 space-y-2">
           {others.map((device) => {

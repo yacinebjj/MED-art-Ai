@@ -13,6 +13,7 @@ import { SocialAuthButtons } from "./SocialAuthButtons";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
+import { COOKIES_BLOCKED, resendConfirmationEmail, sessionWasStored } from "@/lib/auth-client";
 import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
 import type { AcademicYear, Specialty } from "@/types/academic";
@@ -71,6 +72,8 @@ export function RegisterForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [resend, setResend] = useState<{ state: "idle" | "sending" | "sent" | "error"; message?: string; until: number }>({ state: "idle", until: 0 });
+  const [, setTick] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
 
   const [specialties, setSpecialties] = useState<Specialty[]>([]);
@@ -171,7 +174,23 @@ export function RegisterForm() {
       return;
     }
 
+    // An address that already has an account: Supabase answers "success" (it never reveals which
+    // addresses exist) but sends NO e-mail, and the student waited forever for a link. The tell is
+    // a user without identities.
+    if (!data.session && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      setIsLoading(false);
+      showError(translateAuthError("User already registered"));
+      return;
+    }
+
     if (data.session) {
+      // Cookies blocked: the account exists, but this browser can't keep the session.
+      if (!(await sessionWasStored())) {
+        setIsLoading(false);
+        const text = COOKIES_BLOCKED[language === "fr" ? "fr" : "en"];
+        toast({ variant: "error", title: text.title, description: text.description });
+        return;
+      }
       // Real curriculum linkage — this is what makes "Mon Programme" render
       // on the very first Dashboard load, with zero extra trip to Settings.
       // Awaited before navigating (not fire-and-forget, not refreshed via
@@ -225,6 +244,31 @@ export function RegisterForm() {
           On a envoyé un lien de confirmation à <strong className="text-white">{form.email}</strong>. Clique
           dessus pour activer ton compte, puis connecte-toi.
         </p>
+        <p className="mt-3 text-xs text-slate-500">Rien reçu d&apos;ici quelques minutes ? Regarde dans les spams et l&apos;onglet « Promotions ».</p>
+        <button
+          type="button"
+          disabled={resend.state === "sending" || Date.now() < resend.until}
+          onClick={async () => {
+            setResend({ state: "sending", until: 0 });
+            const next = sanitizeRedirectPath(new URLSearchParams(window.location.search).get("next"));
+            const error = await resendConfirmationEmail(form.email, next);
+            // One resend a minute (Supabase refuses faster anyway): the button says when it's back.
+            const until = Date.now() + 60_000;
+            setResend(error ? { state: "error", message: error, until } : { state: "sent", until });
+            const timer = window.setInterval(() => {
+              setTick((t) => t + 1);
+              if (Date.now() >= until) window.clearInterval(timer);
+            }, 1000);
+          }}
+          className="mt-3 rounded-xl border border-cyan-400/30 px-4 py-2 text-sm font-semibold text-cyan-200 transition-colors hover:bg-cyan-400/10 disabled:cursor-default disabled:opacity-60"
+        >
+          {resend.state === "sending"
+            ? "Envoi…"
+            : Date.now() < resend.until
+              ? `E-mail ${resend.state === "sent" ? "renvoyé" : "non envoyé"} — nouvel essai dans ${Math.ceil((resend.until - Date.now()) / 1000)} s`
+              : "Renvoyer l'e-mail de confirmation"}
+        </button>
+        {resend.state === "error" && resend.message ? <p className="mt-2 text-xs text-red-300">{resend.message}</p> : null}
         <Link
           href="/login"
           className="mt-6 inline-block text-sm font-semibold text-cyan-300 transition-colors hover:text-cyan-200 hover:underline"

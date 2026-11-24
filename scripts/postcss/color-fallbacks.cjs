@@ -27,6 +27,8 @@
  *      static fallback declaration just before them.
  *   4. dvh/svh/lvh lengths get a vh fallback (browsers without dynamic
  *      viewport units dropped them: modals lost their max-height).
+ *   5. Selector lists mixing :focus-visible / :has() with plain selectors
+ *      are split, so older browsers keep the plain ones (hover styles…).
  * Values are clipped to sRGB, as Chrome renders them on an sRGB screen.
  */
 
@@ -302,6 +304,19 @@ const plugin = () => ({
   OnceExit(root, helpers) {
     const { AtRule, Rule, Declaration: Decl, list } = helpers;
     const theme = themeTokens(helpers.postcss);
+
+    // 0. A selector list is dropped WHOLE when one of its selectors is unknown to the browser:
+    //    `.item:focus-visible, .item:hover {…}` lost its :hover styles too on Safari < 15.4, and
+    //    a `:has()` selector does the same on Firefox < 121. Such lists are split in two rules
+    //    with the same declarations — identical for browsers that know both.
+    root.walkRules((rule) => {
+      if (insideKeyframes(rule) || !rule.selector.includes(",")) return;
+      const selectors = list.comma(rule.selector);
+      const risky = selectors.filter((sel) => /:focus-visible|:has\(/.test(sel));
+      if (risky.length === 0 || risky.length === selectors.length) return;
+      rule.cloneBefore({ selector: selectors.filter((sel) => !risky.includes(sel)).join(",") });
+      rule.selector = risky.join(",");
+    });
 
     /** --token → [{ rule, color, oklch }]: rules of THIS stylesheet defining a token with a static color. */
     const defs = new Map();
