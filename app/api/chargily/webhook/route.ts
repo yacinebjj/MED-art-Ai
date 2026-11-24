@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyChargilySignature, type ChargilyCheckout } from "@/lib/chargily";
-import { claimCheckoutAsPaid, fulfillPaidCheckout, releasePaidClaim, updatePaymentStatus } from "@/lib/chargily-settlement";
+import { claimCheckoutAsPaid, fulfillPaidCheckout, markFulfilled, releasePaidClaim, updatePaymentStatus } from "@/lib/chargily-settlement";
 import { sendPaymentThankYouEmail } from "@/lib/email/notifications";
 
 export const runtime = "nodejs";
+// Completing a pooled group activates every member in one delivery: room for that, so a large group is
+// never cut off by the platform's default timeout halfway (a stale claim is taken over anyway).
+export const maxDuration = 60;
 
 interface ChargilyWebhookEnvelope {
   id?: string;
@@ -45,23 +48,36 @@ export async function POST(request: NextRequest) {
   const checkout = payload.data ?? (payload as unknown as ChargilyCheckout);
   // Set only once THIS delivery has claimed and fulfilled the payment.
   let settledCheckout: ChargilyCheckout | null = null;
+  // Only a claim taken by THIS delivery may be released on failure — never one held by another delivery in flight.
+  let claimedByThisDelivery = false;
 
   try {
     switch (eventType) {
       case "checkout.paid": {
         // Idempotency FIRST: this both records the payment as paid AND
         // tells us whether WE are the delivery that gets to act on it. A
-        // redelivery of an already-paid checkout must never reach
-        // activateSubscription() again — see claimCheckoutAsPaid's own
-        // comment (lib/chargily-settlement.ts) for why that call is not
-        // naturally idempotent. The same claim guards the pull path
+        // redelivery of an already-settled checkout must never be fulfilled
+        // again (an old payment re-applied after a newer renewal would
+        // extend the period twice) — see claimCheckoutAsPaid
+        // (lib/chargily-settlement.ts). The same claim guards the pull path
         // (/api/chargily/reconcile), so whichever arrives first activates.
-        const { claimed } = await claimCheckoutAsPaid(checkout, payload);
-        if (!claimed) {
+        const claim = await claimCheckoutAsPaid(checkout, payload);
+        if (claim.status === "duplicate") {
           console.log(`checkout.paid: ${checkout.id} already processed — skipping duplicate delivery`);
           break;
         }
+        if (claim.status === "in_flight") {
+          // Another delivery is settling this payment right now. NOT a 200: if that attempt fails, this
+          // redelivery must come back — Chargily retries a non-2xx answer.
+          return NextResponse.json({ error: "Paiement en cours de traitement — renvoie l'événement plus tard." }, { status: 503, headers: { "Retry-After": "120" } });
+        }
+        if (claim.status === "error") {
+          // Database unreachable: nothing was decided. Chargily redelivers.
+          return NextResponse.json({ error: "Traitement momentanément impossible — renvoie l'événement plus tard." }, { status: 500 });
+        }
+        claimedByThisDelivery = true;
         await fulfillPaidCheckout(checkout);
+        await markFulfilled(checkout.id, claim.record);
         settledCheckout = checkout;
         break;
       }
@@ -79,9 +95,9 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error("Chargily webhook processing failed", error);
-    // The claim above already marked the payment "paid": release it so
+    // This delivery's claim marked the payment "paid": release it so
     // Chargily's retry of this event is processed instead of skipped as a duplicate.
-    if (eventType === "checkout.paid" && checkout?.id) await releasePaidClaim(checkout.id);
+    if (claimedByThisDelivery && checkout?.id) await releasePaidClaim(checkout.id);
     return NextResponse.json({ error: "Traitement du webhook échoué." }, { status: 500 });
   }
 

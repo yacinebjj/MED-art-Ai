@@ -8,10 +8,20 @@ import { createHmac, timingSafeEqual } from "crypto";
 const CHARGILY_API_BASE =
   process.env.CHARGILY_API_BASE || "https://pay.chargily.net/test/api/v2";
 
+let modeChecked = false;
+
 function getSecretKey(): string {
   const key = process.env.CHARGILY_SECRET_KEY;
   if (!key) {
     throw new Error("CHARGILY_SECRET_KEY n'est pas configurée sur le serveur.");
+  }
+  if (!modeChecked) {
+    modeChecked = true;
+    // A live key against the test API (CHARGILY_API_BASE left unset) — or the reverse — makes every
+    // checkout fail with an authentication error. Behaviour is unchanged; this only says why, loudly.
+    const testBase = CHARGILY_API_BASE.includes("/test/");
+    if (key.startsWith("live_") && testBase) console.error("[chargily] CHARGILY_SECRET_KEY is a LIVE key but CHARGILY_API_BASE is the TEST API — set CHARGILY_API_BASE=https://pay.chargily.net/api/v2");
+    if (key.startsWith("test_") && !testBase) console.error("[chargily] CHARGILY_SECRET_KEY is a TEST key but CHARGILY_API_BASE is the LIVE API.");
   }
   return key;
 }

@@ -2,7 +2,7 @@ import { getChargilyCheckout, type ChargilyCheckout } from "@/lib/chargily";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { activateSubscription } from "@/lib/subscription";
 import { isPlanId } from "@/lib/pricing";
-import { createLeaderSeats, recordPoolPayment } from "@/lib/billing-pools";
+import { createLeaderSeats, recordPoolPayment, recordUnusablePayment } from "@/lib/billing-pools";
 import { sendPaymentThankYouEmail } from "@/lib/email/notifications";
 
 /**
@@ -43,81 +43,124 @@ export async function updatePaymentStatus(
 }
 
 /**
- * IDEMPOTENCY GUARD against a redelivered `checkout.paid` event.
+ * IDEMPOTENCY GUARD against a redelivered `checkout.paid` event — and the
+ * state machine that makes sure a paid checkout is never left without its
+ * entitlement.
  *
- * Webhook providers (Chargily included) use at-least-once delivery: a slow
- * response, a transient 5xx, or their own retry policy can and does cause
- * the SAME event to arrive more than once — sometimes minutes or hours
- * apart. Without this guard, activateSubscription() below runs again on
- * every redelivery, and it is NOT naturally idempotent: it resets
- * generations_used/chat_messages_used/etc. to 0 and shifts period_start to
- * "now" every time it runs. A benign redelivery would silently hand the
- * student a free mid-cycle quota reset and quietly shift their billing
- * window — a real, exploitable-by-accident correctness bug, not a
- * hypothetical.
+ * Webhook providers (Chargily included) deliver at least once: the SAME
+ * event can arrive several times, minutes or hours apart. Fulfilment must
+ * run once per payment (activateSubscription extends the period; a group
+ * leader's payment opens a group…), so a payment is first CLAIMED — its row
+ * set to "paid" atomically — and only the delivery that wins the claim
+ * fulfils it. The pull path (reconcileUserPayments) goes through the same
+ * claim, so a webhook and a reconciliation racing for one payment fulfil it
+ * once.
  *
- * Two-step claim, not a single blind upsert, because the initial `payments`
- * row insert at checkout-creation time (app/api/chargily/checkout/route.ts)
- * is EXPLICITLY best-effort — a Supabase hiccup there must never block a
- * checkout Chargily already created. So by the time the webhook fires, the
- * row may genuinely not exist yet, and "no row found" must NOT be treated
- * the same as "already paid, skip":
+ * Every claim is recorded in the row's raw_payload (`medart_settlement`:
+ * claimed_at, then fulfilled_at once the entitlement is granted — no schema
+ * change), which is what tells the cases apart when the row is already
+ * "paid":
+ *   - fulfilled (or settled before these markers existed) → a genuine
+ *     duplicate: acknowledge it;
+ *   - claimed less than CLAIM_STALE_MS ago → another delivery is fulfilling
+ *     it right now: answer "try again later" (a 503 to Chargily) — never a
+ *     200, or a first attempt that then fails would never be retried;
+ *   - claimed longer ago and never fulfilled → the delivery that claimed it
+ *     crashed (fulfilment AND the release of its claim failed, typically in
+ *     the same database outage): taken over, atomically, and fulfilled.
+ * A database error is "error" (a 500 to Chargily: redelivered later), never
+ * "duplicate" — before, a hiccup here acknowledged the event and the payment
+ * stayed pending with no retry.
  *
- *   1. Conditional UPDATE ... WHERE status != 'paid' — the common case (the
- *      row exists from the checkout step). Atomic: only the request that
- *      actually flips the row wins, which is also what makes this safe
- *      against two redeliveries arriving genuinely concurrently (Postgres
- *      serializes concurrent UPDATEs to the same row; a plain
- *      SELECT-then-UPDATE would have a real time-of-check/time-of-use race
- *      here).
- *   2. If that affected zero rows, find out WHY before deciding: either the
- *      row already says "paid" (a genuine redelivery — skip), or it never
- *      existed (recover it here, from the webhook's own data, via an
- *      INSERT). The INSERT can itself lose a concurrency race to another
- *      redelivery — a unique-violation on chargily_checkout_id there means
- *      the other request won, so this one correctly stands down too.
- *
- * Returns `claimed: false` in every case where this call must NOT proceed to
- * activation. The pull path (reconcileUserPayments) uses this same claim, so
- * a webhook and a reconciliation racing for one payment activate it once.
+ * The initial `payments` row insert at checkout creation is best-effort, so
+ * the row may not exist when the webhook arrives: it is then recovered here,
+ * already paid. A unique violation on that insert means another delivery is
+ * on it ("in_flight").
  */
-export async function claimCheckoutAsPaid(checkout: ChargilyCheckout, payload: unknown): Promise<{ claimed: boolean }> {
-  if (!isSupabaseConfigured()) return { claimed: true }; // fail-open in dev/misconfigured envs, matches the rest of this file
-  const supabase = getSupabaseAdmin();
-  const nowIso = new Date().toISOString();
+const CLAIM_STALE_MS = 2 * 60 * 1000;
 
+interface SettlementMarks {
+  claimed_at: string;
+  fulfilled_at?: string;
+  takeovers?: number;
+}
+
+export type ClaimOutcome =
+  | { status: "claimed"; record: Record<string, unknown> }
+  | { status: "duplicate" }
+  | { status: "in_flight" }
+  | { status: "error" };
+
+function settlementOf(rawPayload: unknown): SettlementMarks | null {
+  if (!rawPayload || typeof rawPayload !== "object") return null;
+  const marks = (rawPayload as { medart_settlement?: unknown }).medart_settlement;
+  if (!marks || typeof marks !== "object" || typeof (marks as SettlementMarks).claimed_at !== "string") return null;
+  return marks as SettlementMarks;
+}
+
+function withSettlement(payload: unknown, marks: SettlementMarks): Record<string, unknown> {
+  const base = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : { payload };
+  return { ...base, medart_settlement: marks };
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function claimCheckoutAsPaid(checkout: ChargilyCheckout, payload: unknown): Promise<ClaimOutcome> {
+  const nowIso = new Date().toISOString();
+  const record = withSettlement(payload, { claimed_at: nowIso });
+  if (!isSupabaseConfigured()) return { status: "claimed", record }; // dev / misconfigured env, as in the rest of this file
+  const supabase = getSupabaseAdmin();
+
+  // 1. The common case: the row exists from the checkout step and is not paid yet. Atomic.
   const { data: updated, error: updateError } = await supabase
     .from("payments")
-    .update({ status: "paid", raw_payload: payload, updated_at: nowIso })
+    .update({ status: "paid", raw_payload: record, updated_at: nowIso })
     .eq("chargily_checkout_id", checkout.id)
     .neq("status", "paid")
     .select("id");
-
   if (updateError) {
-    console.error("Failed to atomically claim checkout as paid — refusing to activate on ambiguity", updateError);
-    return { claimed: false };
+    console.error(`[chargily-settlement] claim of ${checkout.id} failed — will be retried`, updateError);
+    return { status: "error" };
   }
-  if ((updated?.length ?? 0) > 0) return { claimed: true };
+  if ((updated?.length ?? 0) > 0) return { status: "claimed", record };
 
-  // Zero rows updated — disambiguate "already paid" from "row never existed".
+  // 2. Zero rows updated: already paid, or no row at all.
   const { data: existing, error: selectError } = await supabase
     .from("payments")
-    .select("status")
+    .select("status, raw_payload, updated_at")
     .eq("chargily_checkout_id", checkout.id)
     .maybeSingle();
-
   if (selectError) {
-    console.error("Failed to read payment row while disambiguating a claim miss — refusing to activate on ambiguity", selectError);
-    return { claimed: false };
+    console.error(`[chargily-settlement] could not read payment ${checkout.id} after a claim miss — will be retried`, selectError);
+    return { status: "error" };
   }
   if (existing) {
-    // Row exists and (per the failed UPDATE above) is already "paid" — a
-    // genuine redelivery. Do not re-activate.
-    return { claimed: false };
+    const row = existing as { status: string; raw_payload: unknown; updated_at: string };
+    // Not paid any more: a failing delivery released its claim between our two reads.
+    if (row.status !== "paid") return { status: "in_flight" };
+    const marks = settlementOf(row.raw_payload);
+    if (!marks || marks.fulfilled_at) return { status: "duplicate" };
+    if (Date.now() - new Date(marks.claimed_at).getTime() < CLAIM_STALE_MS) return { status: "in_flight" };
+    // 3. Claimed long ago, never fulfilled: the delivery that claimed it crashed. Take it over —
+    //    compare-and-set on updated_at, so two deliveries can't both take it.
+    const takeover = withSettlement(payload, { claimed_at: nowIso, takeovers: (marks.takeovers ?? 0) + 1 });
+    const { data: taken, error: takeoverError } = await supabase
+      .from("payments")
+      .update({ raw_payload: takeover, updated_at: nowIso })
+      .eq("chargily_checkout_id", checkout.id)
+      .eq("status", "paid")
+      .eq("updated_at", row.updated_at)
+      .select("id");
+    if (takeoverError) {
+      console.error(`[chargily-settlement] takeover of stuck payment ${checkout.id} failed — will be retried`, takeoverError);
+      return { status: "error" };
+    }
+    if ((taken?.length ?? 0) === 0) return { status: "in_flight" };
+    console.warn(`[chargily-settlement] payment ${checkout.id} was claimed at ${marks.claimed_at} but never fulfilled — taken over and fulfilled now.`);
+    return { status: "claimed", record: takeover };
   }
 
-  // No row at all — the best-effort insert at checkout time never landed.
-  // Recover it here, straight from the webhook's own payload, already paid.
+  // 4. No row at all — the best-effort insert at checkout time never landed. Recover it, already paid.
   const metadata = checkout.metadata ?? { userId: "", plan: "", email: "" };
   const { error: insertError } = await supabase.from("payments").insert({
     user_id: metadata.userId,
@@ -126,18 +169,41 @@ export async function claimCheckoutAsPaid(checkout: ChargilyCheckout, payload: u
     currency: checkout.currency,
     chargily_checkout_id: checkout.id,
     status: "paid",
-    raw_payload: payload,
+    raw_payload: record,
   });
-
   if (insertError) {
-    // 23505 = unique_violation on chargily_checkout_id: a concurrent
-    // redelivery's INSERT (or UPDATE) won this exact race — correct for
-    // this request to stand down, not to treat it as a real failure.
-    if ((insertError as { code?: string }).code === "23505") return { claimed: false };
-    console.error("Failed to recover a missing payment row as paid — refusing to activate on ambiguity", insertError);
-    return { claimed: false };
+    // 23505 = unique_violation on chargily_checkout_id: a concurrent delivery inserted it and is on it.
+    if ((insertError as { code?: string }).code === "23505") return { status: "in_flight" };
+    console.error(`[chargily-settlement] could not recover missing payment row ${checkout.id} — will be retried`, insertError);
+    return { status: "error" };
   }
-  return { claimed: true };
+  return { status: "claimed", record };
+}
+
+/**
+ * Records that a claimed payment's entitlement was granted. Retried a few
+ * times; if it still fails, a later delivery treats the claim as stuck and
+ * fulfils again — harmless, every fulfilment is idempotent per checkout
+ * (activateSubscription, createLeaderSeats, recordPoolPayment). Never throws.
+ */
+export async function markFulfilled(checkoutId: string, record: Record<string, unknown>): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const marks = settlementOf(record) ?? { claimed_at: new Date().toISOString() };
+  const done = { ...record, medart_settlement: { ...marks, fulfilled_at: new Date().toISOString() } };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { error } = await getSupabaseAdmin()
+        .from("payments")
+        .update({ raw_payload: done, updated_at: new Date().toISOString() })
+        .eq("chargily_checkout_id", checkoutId)
+        .eq("status", "paid");
+      if (!error) return;
+      console.error(`[chargily-settlement] could not mark ${checkoutId} fulfilled (attempt ${attempt + 1}):`, error.message);
+    } catch (error) {
+      console.error(`[chargily-settlement] could not mark ${checkoutId} fulfilled (attempt ${attempt + 1}, threw):`, error instanceof Error ? error.message : error);
+    }
+    await pause(250 * (attempt + 1));
+  }
 }
 
 /** What a claimed, paid checkout buys: the payer's plan, a group leader's seats, or a share of a pooled group. Throws on a failed activation (the caller releases the claim). */
@@ -162,14 +228,36 @@ export async function fulfillPaidCheckout(checkout: ChargilyCheckout): Promise<v
       });
     }
   } else {
-    console.error("checkout.paid webhook missing userId/plan metadata", checkout.id);
+    // Money received but nothing to grant (no payer, or a plan this version doesn't know — e.g. plans
+    // changed while the checkout was open). Never swallowed: a refund request for the team, like the
+    // groups' overflow payments.
+    console.error(`[chargily-settlement] paid checkout ${checkout.id} has no usable userId/plan metadata (plan « ${plan || "?"} »)`);
+    await recordUnusablePayment({ userId, checkoutId: checkout.id, amount: checkout.amount, plan });
   }
 }
 
-/** Undoes a claim whose activation failed, so the next delivery (or reconciliation) is processed instead of skipped as a duplicate. */
+/**
+ * Undoes a claim whose activation failed, so the next delivery (or
+ * reconciliation) is processed instead of skipped as a duplicate. Retried; if
+ * it still fails, the claim is taken over once stale (claimCheckoutAsPaid).
+ * Never throws.
+ */
 export async function releasePaidClaim(checkoutId: string): Promise<void> {
   if (!isSupabaseConfigured()) return;
-  await getSupabaseAdmin().from("payments").update({ status: "pending", updated_at: new Date().toISOString() }).eq("chargily_checkout_id", checkoutId);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { error } = await getSupabaseAdmin()
+        .from("payments")
+        .update({ status: "pending", updated_at: new Date().toISOString() })
+        .eq("chargily_checkout_id", checkoutId)
+        .eq("status", "paid");
+      if (!error) return;
+      console.error(`[chargily-settlement] could not release claim of ${checkoutId} (attempt ${attempt + 1}):`, error.message);
+    } catch (error) {
+      console.error(`[chargily-settlement] could not release claim of ${checkoutId} (attempt ${attempt + 1}, threw):`, error instanceof Error ? error.message : error);
+    }
+    await pause(250 * (attempt + 1));
+  }
 }
 
 // ─── pull: reconciliation of a student's pending payments ────────────────
@@ -221,8 +309,9 @@ async function reconcileCheckout(userId: string, checkoutId: string, createdAt: 
   switch (checkout.status) {
     case "paid": {
       // Every kind (individual, group leader, pooled share) is fulfilled exactly as the webhook would.
-      const { claimed } = await claimCheckoutAsPaid(checkout, payload);
-      if (!claimed) return "closed"; // the webhook (or another reconciliation) already settled it
+      const claim = await claimCheckoutAsPaid(checkout, payload);
+      if (claim.status === "duplicate") return "closed"; // the webhook (or another reconciliation) already settled it
+      if (claim.status !== "claimed") return "pending"; // being settled right now, or the database hiccuped: ask again
       try {
         await fulfillPaidCheckout(checkout);
       } catch (error) {
@@ -230,6 +319,7 @@ async function reconcileCheckout(userId: string, checkoutId: string, createdAt: 
         await releasePaidClaim(checkout.id);
         return "pending";
       }
+      await markFulfilled(checkout.id, claim.record);
       console.log(`[chargily-settlement] checkout ${checkout.id} found paid at Chargily — activated without its webhook.`);
       // Settled by THIS call (claim + fulfilment above): thank the payer once,
       // exactly as the webhook would have. Never throws, never releases the claim.
@@ -263,19 +353,27 @@ export async function reconcileUserPayments(userId: string, origin = ""): Promis
   if (!isSupabaseConfigured()) return result;
   try {
     const supabase = getSupabaseAdmin();
+    // Pending payments, plus paid ones whose claim never reached fulfilment (a crashed delivery — see
+    // claimCheckoutAsPaid): both get settled here, the latter only once their claim is stale.
     const { data, error } = await supabase
       .from("payments")
-      .select("chargily_checkout_id, created_at")
+      .select("chargily_checkout_id, created_at, status, raw_payload")
       .eq("user_id", userId)
-      .eq("status", "pending")
+      .in("status", ["pending", "paid"])
       .gte("created_at", new Date(Date.now() - RECONCILE_WINDOW_MS).toISOString())
       .order("created_at", { ascending: false })
-      .limit(RECONCILE_MAX_CHECKOUTS);
+      .limit(RECONCILE_MAX_CHECKOUTS * 4);
     if (error) {
       console.error("[chargily-settlement] could not read pending payments:", error.message);
       return result;
     }
-    const rows = (data ?? []) as { chargily_checkout_id: string; created_at: string }[];
+    const rows = ((data ?? []) as { chargily_checkout_id: string; created_at: string; status: string; raw_payload: unknown }[])
+      .filter((row) => {
+        if (row.status === "pending") return true;
+        const marks = settlementOf(row.raw_payload);
+        return Boolean(marks && !marks.fulfilled_at);
+      })
+      .slice(0, RECONCILE_MAX_CHECKOUTS);
     const outcomes = await Promise.all(rows.map((row) => reconcileCheckout(userId, row.chargily_checkout_id, row.created_at, origin)));
     for (const outcome of outcomes) {
       if (outcome === "activated") result.activated++;

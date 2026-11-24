@@ -676,6 +676,30 @@ async function recordExtraPaymentRefund(input: {
   console.warn(`[billing-pools] automatic refund request (${input.reason}) for checkout ${input.checkoutId}`);
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A paid checkout that buys nothing this version can grant (its plan is
+ * unknown — plans changed while it was open — or its metadata is missing):
+ * a refund request, so the money is never silently kept. Without a payer id
+ * there is no one to refund through the app: it is logged for the team.
+ * Throws on a database failure (the webhook answers 500, Chargily redelivers).
+ */
+export async function recordUnusablePayment(input: { userId: string; checkoutId: string; amount: number; plan: string }): Promise<void> {
+  if (!UUID_RE.test(input.userId)) {
+    console.error(`[billing-pools] UNATTRIBUTABLE PAYMENT: checkout ${input.checkoutId} (${input.amount} DZD) has no payer id — refund it from the Chargily dashboard.`);
+    return;
+  }
+  await recordExtraPaymentRefund({
+    userId: input.userId,
+    poolId: null,
+    checkoutId: input.checkoutId,
+    amount: input.amount,
+    reason: "orphan_payment",
+    note: `Paiement reçu pour une formule inconnue (« ${input.plan || "?"} ») : rien n'a pu être activé.`,
+  });
+}
+
 /** A "duplicate" from billing_pool_mark_paid is either the same payment delivered again, or a SECOND payment of a member whose seat is already paid. */
 async function refundIfSecondPayment(poolId: string, userId: string, checkoutId: string, amount: number): Promise<void> {
   const { data, error } = await db().from("billing_pool_members").select("chargily_checkout_id").eq("pool_id", poolId).eq("user_id", userId).maybeSingle();
@@ -708,7 +732,9 @@ export async function recordPoolPayment(poolId: string, userId: string, checkout
 
 /** Webhook side of a Groupe leader's payment: activates the leader and opens the 4 seats. */
 export async function createLeaderSeats(userId: string, plan: PlanId, checkoutId: string, email?: string): Promise<void> {
-  const { data: existing } = await db().from("billing_pool_members").select("pool_id").eq("chargily_checkout_id", checkoutId).maybeSingle();
+  const { data: existing, error: existingError } = await db().from("billing_pool_members").select("pool_id").eq("chargily_checkout_id", checkoutId).maybeSingle();
+  // A failed read must not look like "not seated yet": that would open a second group for one payment.
+  if (existingError) throw new Error(`leader seat lookup failed: ${existingError.message}`);
   if (existing) return; // redelivered webhook
   // Activated once per payment, even if a retry of this webhook runs after a partial failure.
   const before = await getSubscription(userId);
@@ -737,10 +763,17 @@ export async function createLeaderSeats(userId: string, plan: PlanId, checkoutId
       .select("id")
       .single();
     if (!error && pool) {
-      await db()
+      const poolId = (pool as { id: string }).id;
+      const { error: seatError } = await db()
         .from("billing_pool_members")
-        .insert({ pool_id: (pool as { id: string }).id, user_id: userId, status: "activated", chargily_checkout_id: checkoutId, amount: PLANS[plan].priceDZD * GROUP_SIZE, paid_at: new Date().toISOString(), activated_at: new Date().toISOString() });
-      return;
+        .insert({ pool_id: poolId, user_id: userId, status: "activated", chargily_checkout_id: checkoutId, amount: PLANS[plan].priceDZD * GROUP_SIZE, paid_at: new Date().toISOString(), activated_at: new Date().toISOString() });
+      if (!seatError) return;
+      // The leader's own seat is what marks this payment as fulfilled (the redelivery check above):
+      // without it, no half-made group is left behind, and the error reaches the webhook, which
+      // answers 500 so Chargily redelivers and the whole group is created again cleanly.
+      await db().from("billing_pools").delete().eq("id", poolId);
+      if ((seatError as { code?: string }).code === "23505") return; // a concurrent delivery already seated this payment
+      throw new Error(`leader seat insert failed: ${seatError.message}`);
     }
     if ((error as { code?: string } | null)?.code !== "23505") throw new Error(`leader pool insert failed: ${error?.message}`);
   }
