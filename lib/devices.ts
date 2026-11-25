@@ -29,6 +29,16 @@ export const MAX_DEVICES = 3;
 export const DEVICE_REPLACE_COOLDOWN_HOURS = 6;
 
 /**
+ * A device unseen for this long no longer holds a slot. A registered device
+ * refreshes last_seen_at at least once a minute while in use (claim_user_device,
+ * okCache), so only browsers that are really gone — cleared site data, a
+ * private window, a reinstalled or sold phone — get this old. They used to
+ * keep their slot forever: students ended on the device-limit screen and,
+ * with two of them to replace, waited out DEVICE_REPLACE_COOLDOWN_HOURS.
+ */
+const STALE_DEVICE_DAYS = 14;
+
+/**
  * In-app browsers — MedArt opened from a link inside Instagram, Facebook,
  * Messenger, TikTok… — keep their own cookies, so each one used to take a
  * device slot: a student with a phone and a laptop who tapped one link in
@@ -160,12 +170,23 @@ export async function checkDevice(userId: string): Promise<DeviceStatus> {
       admin.from("user_devices").delete().eq("user_id", owner).lt("last_seen_at", since),
     ]).catch(() => undefined);
   }
-  const { data, error } = await admin.rpc("claim_user_device", {
-    p_user_id: owner,
-    p_device_id: deviceId,
-    p_label: currentDeviceLabel(),
-    p_max: inApp ? MAX_IN_APP_DEVICES : MAX_DEVICES,
-  });
+  const claim = () =>
+    admin.rpc("claim_user_device", {
+      p_user_id: owner,
+      p_device_id: deviceId,
+      p_label: currentDeviceLabel(),
+      p_max: inApp ? MAX_IN_APP_DEVICES : MAX_DEVICES,
+    });
+  let { data, error } = await claim();
+  if (!error && data === "limit" && !inApp) {
+    // Full: give back the slots of devices unseen for STALE_DEVICE_DAYS, then
+    // claim once more (always, even when this request deleted nothing — a
+    // parallel request of this same device may just have freed the slot and
+    // taken it). Best effort: a failed cleanup leaves "limit" as it was.
+    const staleBefore = new Date(Date.now() - STALE_DEVICE_DAYS * 86_400_000).toISOString();
+    const { error: evictError } = await admin.from("user_devices").delete().eq("user_id", owner).lt("last_seen_at", staleBefore);
+    if (!evictError) ({ data, error } = await claim());
+  }
   if (error) {
     if (!isMissingSchema(error)) console.error("[devices] claim_user_device failed (laissé passer):", error.message);
     return "ok";

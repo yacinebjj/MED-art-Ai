@@ -107,7 +107,16 @@ export async function PUT(request: NextRequest) {
     if (JSON.stringify(data).length > MAX_DOC_BYTES) return bad("Document trop volumineux.", 413);
     rows.push({ user_id: auth.userId, namespace: ns, doc_key: doc.key, data, deleted: false, updated_at: now });
   }
-  const { error } = await getSupabaseAdmin().from("user_sync_documents").upsert(rows, { onConflict: "user_id,namespace,doc_key" });
+  // A bulk PUT ({ docs }) is only reconcileList's upload of the items a device
+  // believes the server lacks (lib/user-sync.ts): insert-only, a key the server
+  // already has keeps the server's copy — above all a TOMBSTONE. Once a
+  // namespace holds more than LIST_LIMIT documents, GET no longer returns its
+  // old tombstones, so items deleted on another device were sent again and
+  // this overwrite (deleted: false) brought them back; the bumped updated_at
+  // also reshuffled which documents GET returns, on every load. A single-doc
+  // PUT is a real save and still overwrites.
+  const bulk = Array.isArray(body.docs);
+  const { error } = await getSupabaseAdmin().from("user_sync_documents").upsert(rows, { onConflict: "user_id,namespace,doc_key", ignoreDuplicates: bulk });
   if (error) {
     if (isMissingTable(error)) return NextResponse.json({ success: true, available: false });
     console.error("[user-sync] Écriture échouée:", error.message);

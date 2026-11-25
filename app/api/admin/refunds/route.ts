@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 async function guard(): Promise<{ email: string } | NextResponse> {
   const user = await getAuthenticatedUser();
   if (!user) return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
-  if (!isBillingAdmin(user.email)) return NextResponse.json({ success: false, error: "Accès réservé à l'administration." }, { status: 403 });
+  if (!isBillingAdmin(user)) return NextResponse.json({ success: false, error: "Accès réservé à l'administration." }, { status: 403 });
   if (!isSupabaseConfigured()) return NextResponse.json({ success: false, error: "Supabase n'est pas configuré." }, { status: 500 });
   return { email: user.email ?? "" };
 }

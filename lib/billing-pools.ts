@@ -333,26 +333,34 @@ async function assertNoActivePaidPlan(userId: string, context: "create" | "join"
   }
 }
 
+/** openMembershipOf / createdOpenPoolOf could not read: nothing is created or charged. */
+const OPEN_POOLS_UNREADABLE = "Impossible de vérifier tes groupes en cours pour le moment — rien n'a été créé ni payé. Réessaie dans un instant.";
+
 /**
  * The open pooled purchase this student is committed to: a paid share, or
  * a seat reservation that is still running. An EXPIRED reservation does not
  * count — clicking « Payer » on a group without paying never traps anyone.
  */
 async function openMembershipOf(userId: string): Promise<PoolRow | null> {
-  const { data } = await db().from("billing_pool_members").select("pool_id, status, hold_expires_at").eq("user_id", userId).in("status", ["holding", "paid"]);
+  const { data, error } = await db().from("billing_pool_members").select("pool_id, status, hold_expires_at").eq("user_id", userId).in("status", ["holding", "paid"]);
+  // Fail closed: a failed read used to look like "no group", and the student
+  // could then start or pay for a second group while already in one.
+  if (error) throw new PoolError(OPEN_POOLS_UNREADABLE, 503);
   const now = Date.now();
   const ids = ((data ?? []) as Pick<MemberRow, "pool_id" | "status" | "hold_expires_at">[])
     .filter((m) => m.status === "paid" || (m.hold_expires_at !== null && new Date(m.hold_expires_at).getTime() > now))
     .map((m) => m.pool_id);
   if (ids.length === 0) return null;
-  const { data: pools } = await db().from("billing_pools").select("*").in("id", ids).eq("status", "open");
+  const { data: pools, error: poolsError } = await db().from("billing_pools").select("*").in("id", ids).eq("status", "open");
+  if (poolsError) throw new PoolError(OPEN_POOLS_UNREADABLE, 503);
   const open = ((pools ?? []) as PoolRow[]).filter((p) => new Date(p.expires_at).getTime() > now);
   return open[0] ?? null;
 }
 
-/** The open pooled purchase this student started themselves (paid or not yet). */
+/** The open pooled purchase this student started themselves (paid or not yet). Fails closed, like openMembershipOf. */
 async function createdOpenPoolOf(userId: string): Promise<PoolRow | null> {
-  const { data } = await db().from("billing_pools").select("*").eq("created_by", userId).eq("mode", "pooled").eq("status", "open").order("created_at", { ascending: false });
+  const { data, error } = await db().from("billing_pools").select("*").eq("created_by", userId).eq("mode", "pooled").eq("status", "open").order("created_at", { ascending: false });
+  if (error) throw new PoolError(OPEN_POOLS_UNREADABLE, 503);
   const now = Date.now();
   return ((data ?? []) as PoolRow[]).find((p) => new Date(p.expires_at).getTime() > now) ?? null;
 }
@@ -822,9 +830,15 @@ export async function listMyPools(userId: string): Promise<PoolView[]> {
 
 // ─── Admin (refunds) ─────────────────────────────────────────────────────
 
-/** Platform admins: comma-separated emails in MEDART_ADMIN_EMAILS. */
-export function isBillingAdmin(email: string | null | undefined): boolean {
-  if (!email) return false;
+/**
+ * Platform admins: comma-separated emails in MEDART_ADMIN_EMAILS — and only
+ * with that address confirmed: an account that holds the address without
+ * having proved it owns it (a sign-up never confirmed, a provider that
+ * doesn't verify e-mails) never gets the refunds desk.
+ */
+export function isBillingAdmin(user: { email?: string | null; email_confirmed_at?: string | null }): boolean {
+  const email = user.email;
+  if (!email || !user.email_confirmed_at) return false;
   const admins = (process.env.MEDART_ADMIN_EMAILS ?? "")
     .split(",")
     .map((e) => e.trim().toLowerCase())

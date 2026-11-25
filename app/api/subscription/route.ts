@@ -80,6 +80,6 @@ export async function GET() {
     trial: { active: false, daysRemaining: 0, endsAt: null },
     freeTrial: { courses: FREE_TRIAL.courses, messages: FREE_TRIAL.messages },
     usage,
-    isAdmin: isBillingAdmin(user.email),
+    isAdmin: isBillingAdmin(user),
   });
 }

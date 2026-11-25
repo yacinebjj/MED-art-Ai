@@ -182,9 +182,20 @@ export function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-/** Plain-text preview of an HTML note body (e.g. the notes list's truncated snippet) — strips tags rather than showing raw markup. */
+/** stripHtmlToText's parsing document, created on first use (browser only). */
+let inertDocument: Document | null = null;
+
+/**
+ * Plain-text preview of an HTML note body (e.g. the notes list's truncated snippet) — strips tags rather than showing raw markup.
+ *
+ * Parsed inside an INERT document (no browsing context): an element of the
+ * live page fetches images and fires their handlers as soon as innerHTML
+ * creates them, even detached — a stored `<img src=x onerror=…>` ran its
+ * script just by being previewed. Same fragment parsing, same text out.
+ */
 export function stripHtmlToText(html: string): string {
-  const div = document.createElement("div");
+  if (!inertDocument) inertDocument = document.implementation.createHTMLDocument("");
+  const div = inertDocument.createElement("div");
   div.innerHTML = html;
   return div.textContent ?? "";
 }
