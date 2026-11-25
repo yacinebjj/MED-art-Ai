@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
+import { WRITE_CONFLICT, WRITE_CONFLICT_MESSAGE, retryOnWriteConflict, updateIfUnchanged } from "@/lib/supabase/compare-and-set";
 
 export const runtime = "nodejs";
 
@@ -78,30 +79,46 @@ export async function PATCH(request: NextRequest, { params }: { params: { course
     ownedCourse = course;
   }
 
-  const { data: profile, error: readError } = await supabase
-    .from("profiles")
-    .select("flashcard_active_module_ids, flashcard_active_course_ids")
-    .eq("id", user.id)
-    .maybeSingle<{ flashcard_active_module_ids: number[] | null; flashcard_active_course_ids: number[] | null }>();
+  // Compare-and-set (lib/supabase/compare-and-set.ts): two toggles at once (a
+  // quick double tap, two tabs) used to erase each other's course.
+  const outcome = await retryOnWriteConflict(async () => {
+    const { data: profile, error: readError } = await supabase
+      .from("profiles")
+      .select("flashcard_active_module_ids, flashcard_active_course_ids")
+      .eq("id", user.id)
+      .maybeSingle<{ flashcard_active_module_ids: number[] | null; flashcard_active_course_ids: number[] | null }>();
 
-  if (readError) {
-    console.error("[flashcards/course-picker/[courseId]:patch] Échec lecture Supabase:", readError);
-    return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+    if (readError) {
+      console.error("[flashcards/course-picker/[courseId]:patch] Échec lecture Supabase:", readError);
+      return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+    }
+
+    if (active && ownedCourse && !(profile?.flashcard_active_module_ids ?? []).includes(ownedCourse.curriculum_module_id)) {
+      return NextResponse.json({ success: false, error: "Ce cours n'appartient pas à un module actif." }, { status: 400 });
+    }
+
+    const current = profile?.flashcard_active_course_ids ?? [];
+    const nextIds = active ? Array.from(new Set([...current, courseId])) : current.filter((id) => id !== courseId);
+
+    const written = await updateIfUnchanged(
+      supabase.from("profiles").update({ flashcard_active_course_ids: nextIds }).eq("id", user.id),
+      "flashcard_active_course_ids",
+      profile?.flashcard_active_course_ids,
+      "integer[]",
+      "id"
+    );
+    if (written === WRITE_CONFLICT) return WRITE_CONFLICT;
+
+    if (written.error) {
+      console.error("[flashcards/course-picker/[courseId]:patch] Échec écriture Supabase:", written.error);
+      return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${written.error.message}` }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, active });
+  });
+
+  if (outcome === WRITE_CONFLICT) {
+    return NextResponse.json({ success: false, error: WRITE_CONFLICT_MESSAGE }, { status: 409 });
   }
-
-  if (active && ownedCourse && !(profile?.flashcard_active_module_ids ?? []).includes(ownedCourse.curriculum_module_id)) {
-    return NextResponse.json({ success: false, error: "Ce cours n'appartient pas à un module actif." }, { status: 400 });
-  }
-
-  const current = profile?.flashcard_active_course_ids ?? [];
-  const nextIds = active ? Array.from(new Set([...current, courseId])) : current.filter((id) => id !== courseId);
-
-  const { error: updateError } = await supabase.from("profiles").update({ flashcard_active_course_ids: nextIds }).eq("id", user.id);
-
-  if (updateError) {
-    console.error("[flashcards/course-picker/[courseId]:patch] Échec écriture Supabase:", updateError);
-    return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${updateError.message}` }, { status: 500 });
-  }
-
-  return NextResponse.json({ success: true, active });
+  return outcome;
 }

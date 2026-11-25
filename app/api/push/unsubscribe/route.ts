@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { errorMessage } from "@/lib/course-generation-shared";
+import { WRITE_CONFLICT, WRITE_CONFLICT_MESSAGE, retryOnWriteConflict, updateIfUnchanged } from "@/lib/supabase/compare-and-set";
 
 export const runtime = "nodejs";
 
@@ -35,24 +36,40 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabaseAdmin();
 
-  const { data: profile, error: readError } = await supabase
-    .from("profiles")
-    .select("push_subscriptions")
-    .eq("id", user.id)
-    .maybeSingle<{ push_subscriptions: PushSubscriptionRecord[] | null }>();
+  // Compare-and-set (lib/supabase/compare-and-set.ts): another device
+  // subscribing at the same moment must not lose its entry to this removal.
+  const outcome = await retryOnWriteConflict(async () => {
+    const { data: profile, error: readError } = await supabase
+      .from("profiles")
+      .select("push_subscriptions")
+      .eq("id", user.id)
+      .maybeSingle<{ push_subscriptions: PushSubscriptionRecord[] | null }>();
 
-  if (readError) {
-    return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+    if (readError) {
+      return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+    }
+
+    const current = profile?.push_subscriptions ?? [];
+    const nextSubscriptions = current.filter((sub) => sub.endpoint !== endpoint);
+
+    const written = await updateIfUnchanged(
+      supabase.from("profiles").update({ push_subscriptions: nextSubscriptions }).eq("id", user.id),
+      "push_subscriptions",
+      profile?.push_subscriptions,
+      "jsonb",
+      "id"
+    );
+    if (written === WRITE_CONFLICT) return WRITE_CONFLICT;
+
+    if (written.error) {
+      return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${written.error.message}` }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  });
+
+  if (outcome === WRITE_CONFLICT) {
+    return NextResponse.json({ success: false, error: WRITE_CONFLICT_MESSAGE }, { status: 409 });
   }
-
-  const current = profile?.push_subscriptions ?? [];
-  const nextSubscriptions = current.filter((sub) => sub.endpoint !== endpoint);
-
-  const { error: updateError } = await supabase.from("profiles").update({ push_subscriptions: nextSubscriptions }).eq("id", user.id);
-
-  if (updateError) {
-    return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${updateError.message}` }, { status: 500 });
-  }
-
-  return NextResponse.json({ success: true });
+  return outcome;
 }

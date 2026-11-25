@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
+import { WRITE_CONFLICT, WRITE_CONFLICT_MESSAGE, retryOnWriteConflict, updateIfUnchanged } from "@/lib/supabase/compare-and-set";
 
 export const runtime = "nodejs";
 
@@ -62,29 +63,43 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   const supabase = getSupabaseAdmin();
 
-  const { data: profile, error: readError } = await supabase
-    .from("profiles")
-    .select("flashcard_active_module_ids")
-    .eq("id", user.id)
-    .maybeSingle<{ flashcard_active_module_ids: number[] | null }>();
+  // Compare-and-set (lib/supabase/compare-and-set.ts): the dashboard switches a
+  // whole unit with one PATCH per module, all in parallel — each one used to
+  // write back the array it had read, erasing the other modules' changes.
+  const outcome = await retryOnWriteConflict(async () => {
+    const { data: profile, error: readError } = await supabase
+      .from("profiles")
+      .select("flashcard_active_module_ids")
+      .eq("id", user.id)
+      .maybeSingle<{ flashcard_active_module_ids: number[] | null }>();
 
-  if (readError) {
-    console.error("[modules/[id]/flashcards:patch] Échec lecture Supabase:", readError);
-    return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+    if (readError) {
+      console.error("[modules/[id]/flashcards:patch] Échec lecture Supabase:", readError);
+      return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+    }
+
+    const current = profile?.flashcard_active_module_ids ?? [];
+    const nextIds = active ? Array.from(new Set([...current, moduleId])) : current.filter((id) => id !== moduleId);
+
+    const written = await updateIfUnchanged(
+      supabase.from("profiles").update({ flashcard_active_module_ids: nextIds }).eq("id", user.id),
+      "flashcard_active_module_ids",
+      profile?.flashcard_active_module_ids,
+      "integer[]",
+      "id"
+    );
+    if (written === WRITE_CONFLICT) return WRITE_CONFLICT;
+
+    if (written.error) {
+      console.error("[modules/[id]/flashcards:patch] Échec écriture Supabase:", written.error);
+      return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${written.error.message}` }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, active });
+  });
+
+  if (outcome === WRITE_CONFLICT) {
+    return NextResponse.json({ success: false, error: WRITE_CONFLICT_MESSAGE }, { status: 409 });
   }
-
-  const current = profile?.flashcard_active_module_ids ?? [];
-  const nextIds = active ? Array.from(new Set([...current, moduleId])) : current.filter((id) => id !== moduleId);
-
-  const { error: updateError } = await supabase
-    .from("profiles")
-    .update({ flashcard_active_module_ids: nextIds })
-    .eq("id", user.id);
-
-  if (updateError) {
-    console.error("[modules/[id]/flashcards:patch] Échec écriture Supabase:", updateError);
-    return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${updateError.message}` }, { status: 500 });
-  }
-
-  return NextResponse.json({ success: true, active });
+  return outcome;
 }

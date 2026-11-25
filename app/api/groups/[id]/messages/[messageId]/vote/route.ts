@@ -5,6 +5,7 @@ import { assertAcceptedMember } from "@/lib/group-chat";
 import { applyPollVote, decodeEnvelope } from "@/lib/group-chat-envelope";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { WRITE_CONFLICT, WRITE_CONFLICT_MESSAGE, retryOnWriteConflict, updateIfUnchanged } from "@/lib/supabase/compare-and-set";
 import type { MessageReactions } from "@/types/group-chat";
 
 export const runtime = "nodejs";
@@ -14,7 +15,8 @@ export const runtime = "nodejs";
  * vote). Body: { optionId }. Votes are stored in the message's `reactions`
  * jsonb under "poll:<optionId>" keys (lib/group-chat-envelope.ts), so every
  * member's screen updates through the existing realtime UPDATE subscription.
- * Same read-modify-write tradeoff as the reactions route.
+ * Same compare-and-set as the reactions route: a whole group voting right
+ * after a poll is posted used to lose votes to each other's writes.
  */
 export async function POST(request: NextRequest, { params }: { params: { id: string; messageId: string } }) {
   const user = await getAuthenticatedUser();
@@ -54,37 +56,48 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const memberCheck = await assertAcceptedMember(supabase, groupId, user.id);
   if (!memberCheck.ok) return memberCheck.response;
 
-  const { data: existing, error: readError } = await supabase
-    .from("chat_messages")
-    .select("id, group_id, content_text, reactions")
-    .eq("id", messageId)
-    .maybeSingle();
-  if (readError) {
-    return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
-  }
-  if (!existing || existing.group_id !== groupId) {
-    return NextResponse.json({ success: false, error: "Message introuvable." }, { status: 404 });
-  }
+  const outcome = await retryOnWriteConflict(async () => {
+    const { data: existing, error: readError } = await supabase
+      .from("chat_messages")
+      .select("id, group_id, content_text, reactions")
+      .eq("id", messageId)
+      .maybeSingle();
+    if (readError) {
+      return NextResponse.json({ success: false, error: `Lecture échouée : ${readError.message}` }, { status: 500 });
+    }
+    if (!existing || existing.group_id !== groupId) {
+      return NextResponse.json({ success: false, error: "Message introuvable." }, { status: 404 });
+    }
 
-  const poll = decodeEnvelope(existing.content_text).poll;
-  if (!poll) {
-    return NextResponse.json({ success: false, error: "Ce message n'est pas un sondage." }, { status: 400 });
-  }
-  if (!poll.options.some((option) => option.id === optionId)) {
-    return NextResponse.json({ success: false, error: "Choix inconnu." }, { status: 400 });
-  }
+    const poll = decodeEnvelope(existing.content_text).poll;
+    if (!poll) {
+      return NextResponse.json({ success: false, error: "Ce message n'est pas un sondage." }, { status: 400 });
+    }
+    if (!poll.options.some((option) => option.id === optionId)) {
+      return NextResponse.json({ success: false, error: "Choix inconnu." }, { status: 400 });
+    }
 
-  const nextReactions = applyPollVote((existing.reactions as MessageReactions | null) ?? {}, poll, optionId, user.id);
+    const nextReactions = applyPollVote((existing.reactions as MessageReactions | null) ?? {}, poll, optionId, user.id);
 
-  const { data: updated, error: updateError } = await supabase
-    .from("chat_messages")
-    .update({ reactions: nextReactions })
-    .eq("id", messageId)
-    .select("reactions")
-    .single();
-  if (updateError || !updated) {
-    return NextResponse.json({ success: false, error: `Le vote a échoué : ${updateError?.message ?? "raison inconnue"}` }, { status: 500 });
+    const written = await updateIfUnchanged<{ reactions: MessageReactions | null }>(
+      supabase.from("chat_messages").update({ reactions: nextReactions }).eq("id", messageId),
+      "reactions",
+      existing.reactions,
+      "jsonb",
+      "reactions"
+    );
+    if (written === WRITE_CONFLICT) return WRITE_CONFLICT;
+
+    const updated = written.rows?.[0];
+    if (written.error || !updated) {
+      return NextResponse.json({ success: false, error: `Le vote a échoué : ${written.error?.message ?? "raison inconnue"}` }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, reactions: updated.reactions ?? {} });
+  });
+
+  if (outcome === WRITE_CONFLICT) {
+    return NextResponse.json({ success: false, error: WRITE_CONFLICT_MESSAGE }, { status: 409 });
   }
-
-  return NextResponse.json({ success: true, reactions: (updated.reactions as MessageReactions | null) ?? {} });
+  return outcome;
 }

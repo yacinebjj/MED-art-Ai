@@ -6,6 +6,7 @@ import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { runModuleSynthesis, MIN_COURSES_REQUIRED } from "@/lib/module-synthesis";
+import { WRITE_CONFLICT, retryOnWriteConflict, updateIfUnchanged } from "@/lib/supabase/compare-and-set";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -134,20 +135,42 @@ async function handlePost(request: NextRequest, { params }: { params: { id: stri
   const supabase = getSupabaseAdmin();
   // Read-modify-write: this is a jsonb MAP keyed by module id, so a plain
   // column-level `update` would clobber every OTHER module's already-saved
-  // summary if we didn't merge it in first.
-  const { data: profileRow } = await supabase
-    .from("profiles")
-    .select("module_global_summaries")
-    .eq("id", user.id)
-    .maybeSingle<ProfileGlobalSummaryRow>();
-  const existingMap = profileRow?.module_global_summaries ?? {};
-  const updatedMap = { ...existingMap, [String(moduleId)]: result };
+  // summary if we didn't merge it in first. Hence: never write after a
+  // failed read (the merge base would be an empty map — every other module's
+  // summary erased), and compare-and-set (lib/supabase/compare-and-set.ts) so
+  // two summaries finishing together don't erase each other.
+  //
+  // Fail-open on persistence throughout: the summary was generated
+  // successfully — still return it even if it won't survive a reload.
+  const saved = await retryOnWriteConflict(async () => {
+    const { data: profileRow, error: readError } = await supabase
+      .from("profiles")
+      .select("module_global_summaries")
+      .eq("id", user.id)
+      .maybeSingle<ProfileGlobalSummaryRow>();
+    if (readError || !profileRow) {
+      console.error("[modules/global-summary:post] Lecture avant sauvegarde échouée (fail-open, rien n'est écrit):", readError ?? "profil introuvable");
+      return false;
+    }
+    const existingMap = profileRow.module_global_summaries ?? {};
+    const updatedMap = { ...existingMap, [String(moduleId)]: result };
 
-  const { error: saveError } = await supabase.from("profiles").update({ module_global_summaries: updatedMap }).eq("id", user.id);
-  if (saveError) {
-    console.error("[modules/global-summary:post] Échec sauvegarde (fail-open):", saveError);
-    // Fail-open on persistence: the summary was generated successfully —
-    // still return it even if it won't survive a reload.
+    const written = await updateIfUnchanged(
+      supabase.from("profiles").update({ module_global_summaries: updatedMap }).eq("id", user.id),
+      "module_global_summaries",
+      profileRow.module_global_summaries,
+      "jsonb",
+      "id"
+    );
+    if (written === WRITE_CONFLICT) return WRITE_CONFLICT;
+    if (written.error) {
+      console.error("[modules/global-summary:post] Échec sauvegarde (fail-open):", written.error);
+      return false;
+    }
+    return true;
+  });
+  if (saved === WRITE_CONFLICT) {
+    console.error("[modules/global-summary:post] Sauvegarde abandonnée après conflits répétés (fail-open).");
   }
 
   return NextResponse.json({ success: true, summary: result });
