@@ -173,7 +173,12 @@ async function fetchWithStaleSocketRetry(input: RequestInfo | URL, init?: Reques
     }
     if (!isRetryableGatewayStatus(response.status, method) || !canRetry) return response;
     console.warn(`[supabase] HTTP ${response.status} de la passerelle — nouvel essai ${attempt + 1}`);
-    await response.body?.cancel().catch(() => {});
+    // Never awaited: Next.js dedupes GET fetches by TEEING the body
+    // (next/dist/server/lib/dedupe-fetch.js) and keeps the other branch, and
+    // cancelling one branch of a tee only settles once both are cancelled —
+    // awaiting it hung every read that met a 502/503 until the function died,
+    // instead of retrying 400 ms later.
+    void response.body?.cancel().catch(() => {});
     await sleep(RETRY_DELAYS_MS[attempt + 1]);
   }
 }
