@@ -63,6 +63,9 @@ const PDFJS_LEGACY = createRequire(createRequire(import.meta.url).resolve("react
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // No `X-Powered-By: Next.js` on every response: it only tells scanners
+  // which framework (and which advisories) to try.
+  poweredByHeader: false,
   // Security: the Image Optimization API (/_next/image) is switched off.
   // Next.js 14.x is affected by critical unauthenticated remote-code-execution
   // advisories in that endpoint's image decoding — GHSA-2464-fhr4-w9xw (SVG)
