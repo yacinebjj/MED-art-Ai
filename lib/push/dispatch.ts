@@ -2,6 +2,7 @@ import webpush from "web-push";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { isMissingColumnError } from "@/lib/group-chat";
 import { normalizeFlashcardPushInterval } from "@/lib/push/cadence";
+import { WRITE_CONFLICT, retryOnWriteConflict, updateIfUnchanged } from "@/lib/supabase/compare-and-set";
 
 let vapidConfigured = false;
 
@@ -114,24 +115,50 @@ async function sendFlashcardPushForProfile(
   const results = await Promise.allSettled(subscriptions.map((subscription) => webpush.sendNotification(subscription, payload)));
 
   let sentCount = 0;
-  const stillValid: PushSubscriptionRecord[] = [];
+  const goneEndpoints = new Set<string>();
   results.forEach((result, i) => {
     if (result.status === "fulfilled") {
       sentCount++;
-      stillValid.push(subscriptions[i]);
       return;
     }
     const statusCode = (result.reason as { statusCode?: number } | undefined)?.statusCode;
-    if (statusCode !== 404 && statusCode !== 410) {
-      stillValid.push(subscriptions[i]);
-    }
+    if (statusCode === 404 || statusCode === 410) goneEndpoints.add(subscriptions[i].endpoint);
   });
 
-  if (stillValid.length !== subscriptions.length) {
-    await supabase.from("profiles").update({ push_subscriptions: stillValid }).eq("id", userId);
-  }
+  await pruneGoneSubscriptions(supabase, userId, goneEndpoints);
 
   return sentCount;
+}
+
+/**
+ * Drops the endpoints a push service reported permanently gone (404/410)
+ * from the student's CURRENT subscription list, re-read now. Writing back
+ * the list read before the pushes went out (as this used to) erased a device
+ * that subscribed meanwhile, or brought back one that unsubscribed.
+ * Compare-and-set (lib/supabase/compare-and-set.ts), retried on a concurrent
+ * change. Fail-open, as before: a failed prune is retried at the next push.
+ */
+async function pruneGoneSubscriptions(supabase: SupabaseAdmin, userId: string, goneEndpoints: Set<string>): Promise<void> {
+  if (goneEndpoints.size === 0) return;
+  await retryOnWriteConflict(async () => {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("push_subscriptions")
+      .eq("id", userId)
+      .maybeSingle<{ push_subscriptions: PushSubscriptionRecord[] | null }>();
+    if (error || !profile) return;
+    const current = profile.push_subscriptions ?? [];
+    const remaining = current.filter((subscription) => !goneEndpoints.has(subscription.endpoint));
+    if (remaining.length === current.length) return;
+    const written = await updateIfUnchanged(
+      supabase.from("profiles").update({ push_subscriptions: remaining }).eq("id", userId),
+      "push_subscriptions",
+      profile.push_subscriptions,
+      "jsonb",
+      "id"
+    );
+    return written === WRITE_CONFLICT ? WRITE_CONFLICT : undefined;
+  });
 }
 
 /**
@@ -231,21 +258,14 @@ export async function dispatchPushToUser(userId: string, message: { title: strin
 
   const results = await Promise.allSettled(subscriptions.map((subscription) => webpush.sendNotification(subscription, payload)));
 
-  const stillValid: PushSubscriptionRecord[] = [];
+  const goneEndpoints = new Set<string>();
   results.forEach((result, i) => {
-    if (result.status === "fulfilled") {
-      stillValid.push(subscriptions[i]);
-      return;
-    }
+    if (result.status === "fulfilled") return;
     const statusCode = (result.reason as { statusCode?: number } | undefined)?.statusCode;
-    if (statusCode !== 404 && statusCode !== 410) {
-      stillValid.push(subscriptions[i]);
-    }
+    if (statusCode === 404 || statusCode === 410) goneEndpoints.add(subscriptions[i].endpoint);
   });
 
-  if (stillValid.length !== subscriptions.length) {
-    await supabase.from("profiles").update({ push_subscriptions: stillValid }).eq("id", userId);
-  }
+  await pruneGoneSubscriptions(supabase, userId, goneEndpoints);
 }
 
 /**
@@ -260,64 +280,152 @@ export async function dispatchPushToUser(userId: string, message: { title: strin
 export async function dispatchFlashcardPushToAllUsers(): Promise<{ usersNotified: number; devicesNotified: number }> {
   ensureVapidConfigured();
   const supabase = getSupabaseAdmin();
+  const deadline = Date.now() + SWEEP_TIME_BUDGET_MS;
 
   let cadenceTracked = true;
-  let { data, error } = await supabase
-    .from("profiles")
-    .select("id, flashcard_active_module_ids, push_subscriptions, flashcard_push_interval_minutes, flashcard_push_last_sent_at");
-  if (isMissingColumnError(error)) {
-    cadenceTracked = false;
-    ({ data, error } = await supabase.from("profiles").select("id, flashcard_active_module_ids, push_subscriptions"));
-  }
-
-  if (error) throw new Error(error.message);
-
-  const eligibleProfiles = (data ?? []).filter(
-    (row) =>
-      ((row.push_subscriptions as unknown[] | null)?.length ?? 0) > 0 &&
-      ((row.flashcard_active_module_ids as unknown[] | null)?.length ?? 0) > 0
-  ) as (FlashcardProfileRow & { id: string })[];
-
-  if (eligibleProfiles.length === 0) return { usersNotified: 0, devicesNotified: 0 };
-
-  // PERFORMANCE: was one unbatched studio_courses query (plus a fully
-  // redundant re-fetch of the SAME profile row already in hand above) PER
-  // eligible user — a real, confirmed N+1 on this hourly sweep. ONE batched
-  // query across every eligible user instead, grouped back per-user in
-  // memory just below (each user's own flashcard_active_module_ids only
-  // makes sense scoped to their own courses, so the module-id filter moves
-  // from SQL to this in-memory step rather than being lost).
-  const eligibleUserIds = eligibleProfiles.map((row) => row.id);
-  const { data: allCourses } = await supabase
-    .from("studio_courses")
-    .select("id, title, curriculum_module_id, flashcard_queue, user_id")
-    .in("user_id", eligibleUserIds);
-
-  const coursesByUser = new Map<string, StudioCourseFlashcardRow[]>();
-  for (const row of (allCourses ?? []) as (StudioCourseFlashcardRow & { user_id: string })[]) {
-    const list = coursesByUser.get(row.user_id);
-    if (list) list.push(row);
-    else coursesByUser.set(row.user_id, [row]);
-  }
-
-  const results = await Promise.allSettled(
-    eligibleProfiles.map((profile) => {
-      const activeModuleIds = new Set(profile.flashcard_active_module_ids ?? []);
-      const userCourses = (coursesByUser.get(profile.id) ?? []).filter((c) => activeModuleIds.has(c.curriculum_module_id));
-      return claimFlashcardSlot(supabase, profile.id, profile, cadenceTracked).then((claimed) =>
-        claimed === false ? 0 : sendFlashcardPushForProfile(profile.id, supabase, profile, userCourses)
-      );
-    })
-  );
-
   let usersNotified = 0;
   let devicesNotified = 0;
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value > 0) {
-      usersNotified++;
-      devicesNotified += result.value;
+  let afterId: string | null = null;
+
+  // Page by page (PostgREST returns at most 1000 rows per request: one read
+  // of every profile silently left out everyone past the first 1000), only
+  // the students who can get a reminder at all — a subscription and an
+  // active module, filtered in SQL as well as below.
+  for (;;) {
+    if (Date.now() >= deadline) {
+      console.warn("[push/sweep] Budget de temps atteint — les élèves restants seront traités au prochain passage.");
+      break;
     }
+    let { data, error } = await readSweepPage(supabase, cadenceTracked, afterId);
+    if (cadenceTracked && isMissingColumnError(error)) {
+      cadenceTracked = false;
+      ({ data, error } = await readSweepPage(supabase, cadenceTracked, afterId));
+    }
+    if (error) throw new Error(error.message);
+    const page = data ?? [];
+
+    const eligibleProfiles = page.filter(
+      (row) =>
+        ((row.push_subscriptions as unknown[] | null)?.length ?? 0) > 0 &&
+        ((row.flashcard_active_module_ids as unknown[] | null)?.length ?? 0) > 0
+    );
+
+    // PERFORMANCE: was one unbatched studio_courses query (plus a fully
+    // redundant re-fetch of the SAME profile row already in hand above) PER
+    // eligible user — a real, confirmed N+1 on this hourly sweep. Still
+    // batched, but SWEEP_COURSE_QUERY_USERS students per query: every
+    // eligible id in one `in.(…)` filter outgrew the request URL, and the
+    // failed query (its error was ignored) claimed everyone's slot with no
+    // course to send. Each student's own flashcard_active_module_ids only
+    // makes sense scoped to their own courses, so the module-id filter stays
+    // in memory.
+    for (let start = 0; start < eligibleProfiles.length && Date.now() < deadline; start += SWEEP_COURSE_QUERY_USERS) {
+      const group = eligibleProfiles.slice(start, start + SWEEP_COURSE_QUERY_USERS);
+      const coursesByUser = await readFlashcardCoursesByUser(supabase, group.map((profile) => profile.id));
+      if (!coursesByUser) continue; // logged; these students keep their slot for the next run
+
+      await runWithConcurrency(group, SWEEP_CONCURRENCY, deadline, async (profile) => {
+        try {
+          const activeModuleIds = new Set(profile.flashcard_active_module_ids ?? []);
+          const userCourses = (coursesByUser.get(profile.id) ?? []).filter((c) => activeModuleIds.has(c.curriculum_module_id));
+          const claimed = await claimFlashcardSlot(supabase, profile.id, profile, cadenceTracked);
+          if (claimed === false) return;
+          const sent = await sendFlashcardPushForProfile(profile.id, supabase, profile, userCourses);
+          if (sent > 0) {
+            usersNotified++;
+            devicesNotified += sent;
+          }
+        } catch (sweepError) {
+          console.error("[push/sweep] Élève ignoré après une erreur:", sweepError);
+        }
+      });
+    }
+
+    if (page.length < SWEEP_PAGE_SIZE) break;
+    afterId = page[page.length - 1].id;
   }
 
   return { usersNotified, devicesNotified };
+}
+
+/** Students read per page of the sweep (PostgREST caps a response at 1000 rows). */
+const SWEEP_PAGE_SIZE = 500;
+/** Students whose courses one studio_courses query fetches (their ids travel in the URL). */
+const SWEEP_COURSE_QUERY_USERS = 50;
+/** Courses per studio_courses page. */
+const SWEEP_COURSE_PAGE_SIZE = 500;
+/** Students handled at once — each is a claim UPDATE, then one push per device. */
+const SWEEP_CONCURRENCY = 10;
+/**
+ * No new student is started past this point — app/api/push/dispatch allows
+ * 60 s. Students not reached keep their slot and are picked up next run.
+ */
+const SWEEP_TIME_BUDGET_MS = 45_000;
+
+type SweepProfileRow = FlashcardProfileRow & { id: string };
+
+/** One page of the sweep's students, by id, after `afterId` (null: from the start). */
+async function readSweepPage(
+  supabase: SupabaseAdmin,
+  cadenceTracked: boolean,
+  afterId: string | null
+): Promise<{ data: SweepProfileRow[] | null; error: { message: string; code?: string } | null }> {
+  const columns = cadenceTracked
+    ? "id, flashcard_active_module_ids, push_subscriptions, flashcard_push_interval_minutes, flashcard_push_last_sent_at"
+    : "id, flashcard_active_module_ids, push_subscriptions";
+  let query = supabase
+    .from("profiles")
+    .select(columns)
+    .neq("push_subscriptions", "[]")
+    .neq("flashcard_active_module_ids", "{}")
+    .order("id", { ascending: true })
+    .limit(SWEEP_PAGE_SIZE);
+  if (afterId) query = query.gt("id", afterId);
+  const { data, error } = await query;
+  return { data: (data ?? null) as SweepProfileRow[] | null, error };
+}
+
+/**
+ * The courses holding flashcards of these students, grouped by student —
+ * every page of them. Null when a query fails: the caller then skips these
+ * students without claiming their slot.
+ */
+async function readFlashcardCoursesByUser(supabase: SupabaseAdmin, userIds: string[]): Promise<Map<string, StudioCourseFlashcardRow[]> | null> {
+  const coursesByUser = new Map<string, StudioCourseFlashcardRow[]>();
+  let afterCourseId: number | null = null;
+  for (;;) {
+    let query = supabase
+      .from("studio_courses")
+      .select("id, title, curriculum_module_id, flashcard_queue, user_id")
+      .in("user_id", userIds)
+      .neq("flashcard_queue", "[]")
+      .order("id", { ascending: true })
+      .limit(SWEEP_COURSE_PAGE_SIZE);
+    if (afterCourseId !== null) query = query.gt("id", afterCourseId);
+    const { data, error } = await query;
+    if (error) {
+      console.error("[push/sweep] Lecture des cours échouée — élèves reportés au prochain passage:", error.message);
+      return null;
+    }
+    const rows = (data ?? []) as (StudioCourseFlashcardRow & { user_id: string })[];
+    for (const row of rows) {
+      const list = coursesByUser.get(row.user_id);
+      if (list) list.push(row);
+      else coursesByUser.set(row.user_id, [row]);
+    }
+    if (rows.length < SWEEP_COURSE_PAGE_SIZE) return coursesByUser;
+    afterCourseId = rows[rows.length - 1].id;
+  }
+}
+
+/** Runs `worker` over `items`, `limit` at a time, starting none past `deadline`. `worker` must not throw. */
+async function runWithConcurrency<T>(items: T[], limit: number, deadline: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length && Date.now() < deadline) {
+      const item = items[next++];
+      await worker(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
 }
