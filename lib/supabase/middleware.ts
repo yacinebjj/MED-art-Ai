@@ -20,6 +20,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { EXPIRED_COOKIE, isDeadSessionError, isSessionCookieName } from "@/lib/supabase/dead-session";
 
 // ---------------------------------------------------------------------------
@@ -87,8 +88,10 @@ function hasAuthCookie(request: NextRequest): boolean {
 // Answers and checks
 
 /**
- * Redirects to /login?next=<pathname>, so the student comes back to the page
- * they asked for once signed in.
+ * Redirects to /login?next=<pathname + query>, so the student comes back to
+ * the page they asked for once signed in — with its query (?tab=…, ?course=…,
+ * ?section=…), which used to be dropped. A query that wouldn't survive
+ * sanitizeRedirectPath (lib/safe-redirect.ts) falls back to the bare path.
  *
  * `sessionResponse` carries what getSession() just wrote: when the refresh
  * token was dead it deleted the session cookie, and dropping that deletion
@@ -102,7 +105,8 @@ function hasAuthCookie(request: NextRequest): boolean {
 function redirectToLogin(request: NextRequest, pathname: string, sessionResponse?: NextResponse) {
   const redirectUrl = request.nextUrl.clone();
   redirectUrl.pathname = "/login";
-  redirectUrl.searchParams.set("next", pathname);
+  redirectUrl.search = "";
+  redirectUrl.searchParams.set("next", sanitizeRedirectPath(pathname + request.nextUrl.search, pathname));
   const redirect = NextResponse.redirect(redirectUrl);
   sessionResponse?.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
   return redirect;
