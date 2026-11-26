@@ -214,10 +214,9 @@ export async function getAuthenticatedUser(): Promise<User | null> {
  */
 export async function getSessionUser(): Promise<User | null> {
   const fingerprint = authCookieFingerprint(cookies());
-  if (!fingerprint) {
-    console.log("[auth] Aucun cookie sb- présent sur la requête — pas de session à vérifier.");
-    return null;
-  }
+  // No log here: an anonymous request is the normal case (bots, crawlers,
+  // signed-out visitors), and logging each one buried real errors.
+  if (!fingerprint) return null;
 
   const shortId = fingerprint.slice(0, 24);
   const cached = verifiedByCookieFingerprint.get(fingerprint);

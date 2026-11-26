@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -28,7 +28,11 @@ import { ExamQcmStudio } from "@/components/course/workspace/ExamQcmStudio";
 export default function DemoWorkspacePage() {
   const [activeId, setActiveId] = useState<DemoSectionId>("explication");
   const [isDark, setIsDark] = useState(true);
-  const today = new Date().toLocaleDateString("fr-FR");
+  // Read after mount: this page is prerendered at build time, so a date taken
+  // during render froze the build day into the HTML and mismatched the
+  // browser's date on every later day (React hydration errors #425/#422).
+  const [today, setToday] = useState<string | null>(null);
+  useEffect(() => setToday(new Date().toLocaleDateString("fr-FR")), []);
   const activeSection = DEMO_SECTIONS.find((s) => s.id === activeId) ?? DEMO_SECTIONS[0];
 
   const { containerRef, container, tooltipRef, selection, clearSelection } = useTextSelection();
@@ -143,7 +147,7 @@ export default function DemoWorkspacePage() {
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">Appendicite_Cours.pdf</p>
             <p className={cn("mt-0.5 text-xs", isDark ? "text-slate-500" : "text-gray-500")}>
-              {today} · 1.2 Mo
+              {today ? `${today} · ` : ""}1.2 Mo
             </p>
           </div>
         </div>
