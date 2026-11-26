@@ -19,6 +19,7 @@ import {
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { reserveGeneration, refundGeneration } from "@/lib/subscription";
 import { errorMessage, parseJsonResponse, sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { appendToFlashcardHistory } from "@/lib/flashcard-history";
 import type { FlashcardPoolItem } from "@/types/flashcard";
 
 export const runtime = "nodejs";
@@ -230,7 +231,8 @@ function parseGeneratedCards(raw: string): FlashcardQA[] {
  *     study flow endless.
  *  3. Served cards are appended to each course's flashcard_queue (with their
  *     language), which is both the student's history and what "unseen"
- *     is computed against.
+ *     is computed against — the newest 500 per language are kept
+ *     (lib/flashcard-history.ts).
  * At most one model call per request bounds latency and spend; the deck
  * only asks again once the student is close to the end of a batch.
  */
@@ -451,12 +453,30 @@ export async function POST(request: NextRequest) {
     return { id, question: card.question, answer: card.answer, courseTitle: card.course.title, moduleId: card.course.curriculum_module_id };
   });
 
+  // Each history is re-read right before it is written. This request can have
+  // run for a minute (a model call) while another batch — the next one the
+  // deck asked for after cancelling this one, another tab — recorded its own
+  // cards; writing back the copy read at the start erased them, and those
+  // cards were then served again. If the re-read fails, the copy from the
+  // start of the request is used, as before.
+  const servedCourseIds = Array.from(servedByCourse.keys());
+  const { data: freshRows, error: freshError } = await supabase
+    .from("studio_courses")
+    .select("id, flashcard_queue")
+    .eq("user_id", user.id)
+    .in("id", servedCourseIds);
+  if (freshError) console.warn("[flashcards/generate] Relecture de flashcard_queue échouée — copie du début de requête utilisée :", freshError.message);
+  const freshQueues = new Map(((freshRows ?? []) as { id: number; flashcard_queue: QueueCard[] | null }[]).map((row) => [row.id, row.flashcard_queue]));
+
   await Promise.all(
     Array.from(servedByCourse.entries()).map(async ([courseId, served]) => {
       const course = eligibleCourses.find((c) => c.id === courseId)!;
+      // Deleted while this request ran: nothing to record.
+      if (!freshError && !freshQueues.has(courseId)) return;
+      const history = freshError ? course.flashcard_queue : freshQueues.get(courseId);
       const { error } = await supabase
         .from("studio_courses")
-        .update({ flashcard_queue: [...(course.flashcard_queue ?? []), ...served] })
+        .update({ flashcard_queue: appendToFlashcardHistory(history, served) })
         .eq("id", courseId)
         .eq("user_id", user.id);
       if (error) console.error(`[flashcards/generate] Échec sauvegarde flashcard_queue (cours ${courseId}):`, error.message);
