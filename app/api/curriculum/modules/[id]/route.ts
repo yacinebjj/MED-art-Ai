@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { REFERENCE_DATA_CACHE_CONTROL } from "@/lib/reference-data-cache";
 import type { CurriculumModule } from "@/types/academic";
 
 /**
@@ -40,5 +41,5 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     displayOrder: data.module_order,
   };
 
-  return NextResponse.json({ module: module_ });
+  return NextResponse.json({ module: module_ }, { headers: { "Cache-Control": REFERENCE_DATA_CACHE_CONTROL } });
 }

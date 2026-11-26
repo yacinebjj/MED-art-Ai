@@ -47,6 +47,9 @@ const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
 ].join("; ");
 
+/** Browser cache of plain media files from public/ — see headers() below. */
+const STATIC_MEDIA_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=604800";
+
 /** Loader that strips the one regex lookbehind old iPhones can't parse (see the file). */
 const STRIP_LOOKBEHIND_LOADER = fileURLToPath(new URL("./scripts/webpack/strip-regex-lookbehind-loader.cjs", import.meta.url));
 /** Loader that rewrites class static blocks, which old iPhones can't parse either (see the file). */
@@ -123,6 +126,23 @@ const nextConfig = {
           // API (lib/studio-explication-client.ts) stays untouched.
           { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
         ],
+      },
+      // Plain media from public/ (logo, icons, illustrations, help clips,
+      // reels): served with `max-age=0, must-revalidate` by default, so every
+      // page load re-asked the server about each of them — a round trip per
+      // image, costly on a slow phone connection. Kept a day, then reused
+      // while refreshed in the background for a week. A replaced file can
+      // therefore show its old version for up to a day. Never applied to what
+      // is coupled to code — /sw.js, /manifest.json, /pdf.worker.min.mjs
+      // (versioned with react-pdf) and /atlas-zoom (its pages and plates go
+      // together) keep the default.
+      {
+        source: "/:file(logo\\.png|apple-touch-icon\\.png|favicon\\.ico|doctors\\.png|doctor-report\\.png|ai-healthcare\\.mp4|ai-robot-doctor\\.mp4)",
+        headers: [{ key: "Cache-Control", value: STATIC_MEDIA_CACHE_CONTROL }],
+      },
+      {
+        source: "/:dir(icons|illustrations|images|art|help|reels)/:path*",
+        headers: [{ key: "Cache-Control", value: STATIC_MEDIA_CACHE_CONTROL }],
       },
     ];
   },

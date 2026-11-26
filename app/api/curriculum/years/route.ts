@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { REFERENCE_DATA_CACHE_CONTROL } from "@/lib/reference-data-cache";
 import type { AcademicYear } from "@/types/academic";
 
 /**
@@ -40,5 +41,5 @@ export async function GET(request: NextRequest) {
     name: row.name,
   }));
 
-  return NextResponse.json({ years });
+  return NextResponse.json({ years }, years.length > 0 ? { headers: { "Cache-Control": REFERENCE_DATA_CACHE_CONTROL } } : undefined);
 }

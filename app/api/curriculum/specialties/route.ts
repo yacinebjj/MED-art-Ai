@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { REFERENCE_DATA_CACHE_CONTROL } from "@/lib/reference-data-cache";
 import type { Specialty } from "@/types/academic";
 
 /**
@@ -21,5 +22,6 @@ export async function GET() {
   }
 
   const specialties: Specialty[] = data.map((row) => ({ id: row.id, name: row.name }));
-  return NextResponse.json({ specialties });
+  // An empty list is what a failure looks like here too: never cached.
+  return NextResponse.json({ specialties }, specialties.length > 0 ? { headers: { "Cache-Control": REFERENCE_DATA_CACHE_CONTROL } } : undefined);
 }

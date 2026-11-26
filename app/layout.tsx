@@ -58,6 +58,20 @@ export const viewport: Viewport = {
   interactiveWidget: "resizes-content",
 };
 
+/**
+ * Supabase's origin. The browser talks to it straight away on most pages
+ * (session check, then files), and on a slow connection opening that
+ * connection — DNS, TCP, TLS — costs several round trips before the first
+ * byte; preconnecting starts it while the page itself still loads.
+ */
+const SUPABASE_ORIGIN = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").origin;
+  } catch {
+    return null;
+  }
+})();
+
 export default function RootLayout({
   children,
 }: {
@@ -65,6 +79,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="fr" suppressHydrationWarning>
+      {SUPABASE_ORIGIN && (
+        <head>
+          {/* crossOrigin "anonymous": supabase-js's requests are CORS without credentials, and use that connection pool. */}
+          <link rel="preconnect" href={SUPABASE_ORIGIN} crossOrigin="anonymous" />
+          <link rel="dns-prefetch" href={SUPABASE_ORIGIN} />
+        </head>
+      )}
       <body className={`${inter.variable} font-sans antialiased`}>
         {/* Blocked, disabled or full localStorage/sessionStorage can't crash the app (lib/storage-shim.ts). First, before any app code. */}
         <Script id="medart-storage-shim" strategy="beforeInteractive">

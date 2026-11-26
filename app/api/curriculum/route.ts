@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
+import { REFERENCE_DATA_CACHE_CONTROL } from "@/lib/reference-data-cache";
 import type { AcademicYear, CurriculumModule, CurriculumYearData, TeachingUnit } from "@/types/academic";
 
 /**
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
     // Shared reference data, identical for every student of a year: the CDN
     // and the browser serve it without reaching Supabase. It was fetched
     // fresh (3 sequential queries) on every dashboard open.
-    headers: { "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400" },
+    headers: { "Cache-Control": REFERENCE_DATA_CACHE_CONTROL },
   });
 }
 

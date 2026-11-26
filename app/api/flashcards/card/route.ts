@@ -36,11 +36,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Only the course whose history holds this card (jsonb containment, `@>`):
+    // every course's whole history used to be read to look through it here.
     const { data, error } = await getSupabaseAdmin()
       .from("studio_courses")
       .select("title, curriculum_module_id, flashcard_queue")
       .eq("user_id", user.id)
-      .not("flashcard_queue", "is", null);
+      .filter("flashcard_queue", "cs", JSON.stringify([{ id: cardId }]));
     if (error) throw new Error(error.message);
 
     for (const course of (data ?? []) as StudioCourseFlashcardRow[]) {
