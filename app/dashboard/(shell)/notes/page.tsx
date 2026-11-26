@@ -77,6 +77,8 @@ function NotesPageContent() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // A save found the note changed elsewhere: the editor is locked while that is sorted out.
+  const [isResolvingConflict, setIsResolvingConflict] = useState(false);
   // Persistent save-status pill state (a toast alone disappears).
   const [saveError, setSaveError] = useState(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
@@ -86,6 +88,12 @@ function NotesPageContent() {
   const [isRenaming, setIsRenaming] = useState(false);
   const [confirmDeleteNote, setConfirmDeleteNote] = useState<UserNote | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // The editor's latest text and note, for a save that has to merge after a 409
+  // (typing — or opening another note — goes on while a save is in flight).
+  const draftContentRef = useRef(draftContent);
+  draftContentRef.current = draftContent;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
   // On mobile the list and the editor share one view: no auto-open of the first note there.
   const isDesktopOrTablet = useMediaQuery("(min-width: 768px)");
   // The bootstrap fetch below reads this inside an async callback — a ref avoids a stale closure.
@@ -195,29 +203,118 @@ function NotesPageContent() {
     }
   }
 
+  /** PUT /api/notes/[id]; returns the response with its parsed body. */
+  async function putNote(id: string, body: { title: string; content?: string; expectedUpdatedAt?: string }) {
+    const res = await fetch(`/api/notes/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  }
+
+  /**
+   * The save hit a note changed elsewhere (another tab or device) since it was
+   * opened, and the change can't be merged: nothing is overwritten. The
+   * student's version becomes a new note — opened in place, editor
+   * untouched, if the student is still on that note — and the original
+   * keeps the other version.
+   */
+  async function keepBothVersions(original: UserNote, current: { title: string; content: string; updatedAt: string }, title: string, draft: string) {
+    const res = await fetch("/api/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: `${title.trim() || "Note sans titre"} (${tNotes("conflictCopySuffix", language)})`, content: draft }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement a échoué.");
+    const created: UserNote = data.note;
+    setNotes((prev) => [created, ...prev.map((n) => (n.id === original.id ? { ...n, title: current.title, content: current.content, updatedAt: current.updatedAt } : n))]);
+    if (selectedIdRef.current === original.id) {
+      setSelectedId(created.id);
+      setDraftTitle(created.title);
+    }
+    toast({ variant: "warning", title: tNotes("toastNoteConflictTitle", language), description: tNotes("toastNoteConflictBody", language) });
+  }
+
   async function handleSave() {
     if (!selectedNote) return;
+    const note = selectedNote;
+    let title = draftTitle;
+    let draft = draftContent;
+    // Whether the editor still shows this note when the answer comes back.
+    const stillOpen = () => selectedIdRef.current === note.id;
     setIsSaving(true);
     setSaveError(false);
     try {
-      const res = await fetch(`/api/notes/${selectedNote.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draftTitle, content: draftContent }),
-      });
-      const data = await res.json().catch(() => ({}));
+      // Saved only if the note is still the version this draft started from.
+      let saved = draft;
+      let refreshed = false;
+      let { res, data } = await putNote(note.id, { title, content: draft, expectedUpdatedAt: note.updatedAt });
+      const isConflict = () => res.status === 409 && data?.conflict === true && typeof data.note?.content === "string";
+
+      if (isConflict()) {
+        // Changed elsewhere since it was opened. The editor is locked until
+        // this is sorted out, and what was typed during the save is included.
+        setIsResolvingConflict(true);
+        if (stillOpen()) draft = draftContentRef.current;
+        const current = data.note as { title: string; content: string; updatedAt: string };
+        const editedHere = draft !== note.content;
+        // A title left untouched here keeps the one it has now (renamed elsewhere).
+        if (title === note.title) title = current.title;
+        let mergeable = true;
+        if (!editedHere) {
+          // Nothing edited here (a title change at most): the other version's text is kept.
+          saved = current.content;
+          refreshed = saved !== draft;
+        } else if (current.content.startsWith(note.content)) {
+          // Only appended to elsewhere — a selection added from a module, or nothing
+          // at all when just its title changed: kept after the draft.
+          saved = draft + current.content.slice(note.content.length);
+        } else {
+          mergeable = false;
+        }
+        if (mergeable) {
+          ({ res, data } = await putNote(note.id, { title, content: saved, expectedUpdatedAt: current.updatedAt }));
+        }
+        if (isConflict()) {
+          const latest = data.note as { title: string; content: string; updatedAt: string };
+          if (!editedHere) {
+            // Changed yet again, and nothing here to keep but a title: show the latest version.
+            setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, title: latest.title, content: latest.content, updatedAt: latest.updatedAt } : n)));
+            if (stillOpen()) setDraftContent(latest.content);
+            toast({ variant: "warning", title: tNotes("toastNoteConflictTitle", language), description: tNotes("toastNoteRefreshedBody", language) });
+            return;
+          }
+          // A real concurrent edit: keep both versions.
+          await keepBothVersions(note, latest, title, draft);
+          return;
+        }
+      }
       if (!res.ok || !data.success) throw new Error(data?.error ?? "L'enregistrement a échoué.");
 
-      const finalTitle = draftTitle.trim() || "Note sans titre";
+      const finalTitle = title.trim() || "Note sans titre";
       const updatedAt: string = data.updatedAt ?? new Date().toISOString();
-      setNotes((prev) => prev.map((n) => (n.id === selectedNote.id ? { ...n, title: finalTitle, content: draftContent, updatedAt } : n)));
-      setDraftTitle(finalTitle);
-      toast({ variant: "success", title: tNotes("toastNoteSaved", language) });
+      setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, title: finalTitle, content: saved, updatedAt } : n)));
+      if (stillOpen()) {
+        setDraftTitle(finalTitle);
+        // The editor shows the merged text too, or the next save would erase the additions again.
+        if (saved !== draft) setDraftContent(saved);
+      }
+      if (refreshed) {
+        toast({ variant: "success", title: tNotes("toastNoteSaved", language), description: tNotes("toastNoteRefreshedBody", language) });
+      } else if (saved !== draft) {
+        toast({ variant: "success", title: tNotes("toastNoteMergedTitle", language), description: tNotes("toastNoteMergedBody", language) });
+      } else {
+        toast({ variant: "success", title: tNotes("toastNoteSaved", language) });
+      }
     } catch (error) {
       setSaveError(true);
       toast({ variant: "error", title: tNotes("toastErrorTitle", language), description: error instanceof Error ? error.message : tNotes("toastErrorUnknown", language) });
     } finally {
       setIsSaving(false);
+      setIsResolvingConflict(false);
     }
   }
 
@@ -300,20 +397,23 @@ function NotesPageContent() {
 
   async function handleRenameSubmit() {
     if (!renamingNote || renameValue.trim().length === 0) return;
+    const note = renamingNote;
     const nextTitle = renameValue.trim();
     setIsRenaming(true);
     try {
-      const res = await fetch(`/api/notes/${renamingNote.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: nextTitle, content: renamingNote.content }),
-      });
-      const data = await res.json().catch(() => ({}));
+      // The title alone is sent: this used to send the page's copy of the text
+      // too, which erased anything added to the note elsewhere since it loaded.
+      let { res, data } = await putNote(note.id, { title: nextTitle, expectedUpdatedAt: note.updatedAt });
+      // Changed elsewhere meanwhile: renamed all the same, but this page's copy
+      // keeps the version its text comes from, so its next save merges instead
+      // of overwriting what was added.
+      const changedElsewhere = res.status === 409 && data?.conflict === true;
+      if (changedElsewhere) ({ res, data } = await putNote(note.id, { title: nextTitle }));
       if (!res.ok || !data.success) throw new Error(data?.error ?? "Le renommage a échoué.");
 
       const updatedAt: string = data.updatedAt ?? new Date().toISOString();
-      setNotes((prev) => prev.map((n) => (n.id === renamingNote.id ? { ...n, title: nextTitle, updatedAt } : n)));
-      if (selectedId === renamingNote.id) setDraftTitle(nextTitle);
+      setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, title: nextTitle, ...(changedElsewhere ? {} : { updatedAt }) } : n)));
+      if (selectedIdRef.current === note.id) setDraftTitle(nextTitle);
       setRenamingNote(null);
       toast({ variant: "success", title: tNotes("toastNoteRenamed", language) });
     } catch (error) {
@@ -403,7 +503,7 @@ function NotesPageContent() {
         )}
       </div>
 
-      <NoteEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing} />
+      <NoteEditor value={draftContent} onChange={setDraftContent} disabled={isOrganizing || isResolvingConflict} />
 
       {/* The shell already ends this page above the floating bottom nav (--dock-clearance). */}
       <div className="mt-4 flex shrink-0 flex-col gap-3">

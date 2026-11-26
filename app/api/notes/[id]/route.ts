@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres, stripDangerousHtml } from "@/lib/course-generation-shared";
+import { noteVersionAfter } from "@/lib/notes/note-version";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,18 @@ function parseNoteId(rawId: string): string | null {
   return id ? id : null;
 }
 
-/** Edits an existing note from the /dashboard/notes editor — title and/or content, at least one required. */
+/**
+ * Edits an existing note from the /dashboard/notes editor — title and/or
+ * content, at least one required.
+ *
+ * Optional `expectedUpdatedAt`: the note's updatedAt when the editor opened
+ * it. The save is then applied only if the note is still at that version;
+ * otherwise nothing is written and the answer is 409 with the current note
+ * (`conflict: true`), so the editor can merge instead of erasing what was
+ * added meanwhile — a selection appended from a module (POST /api/notes),
+ * the same note saved in another tab or on another device. Without it, the
+ * save overwrites, as before.
+ */
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthenticatedUser();
   if (!user) {
@@ -47,12 +59,16 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ success: false, error: `Corps de requête JSON invalide : ${errorMessage(error)}` }, { status: 400 });
   }
 
-  const { title, content } = (body ?? {}) as { title?: unknown; content?: unknown };
+  const { title, content, expectedUpdatedAt } = (body ?? {}) as { title?: unknown; content?: unknown; expectedUpdatedAt?: unknown };
   if (title === undefined && content === undefined) {
     return NextResponse.json({ success: false, error: "'title' ou 'content' est requis." }, { status: 400 });
   }
+  const expectedVersion = typeof expectedUpdatedAt === "string" && expectedUpdatedAt ? expectedUpdatedAt : null;
+  if (expectedVersion !== null && Number.isNaN(Date.parse(expectedVersion))) {
+    return NextResponse.json({ success: false, error: "Version de note invalide." }, { status: 400 });
+  }
 
-  const updatedAt = new Date().toISOString();
+  const updatedAt = noteVersionAfter(expectedVersion);
   const updates: Record<string, string> = { updated_at: updatedAt };
   if (typeof title === "string") updates.title = sanitizeForPostgres(title.trim() || "Note sans titre");
   if (typeof content === "string") updates.content = sanitizeForPostgres(stripDangerousHtml(content));
@@ -63,17 +79,43 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
   const supabase = getSupabaseAdmin();
   // .eq("user_id", ...) on the UPDATE itself (not just a prior SELECT) makes this safe against one student editing another's note by guessing an id.
-  const { error, count } = await supabase
+  let update = supabase
     .from("user_notes")
     .update(updates, { count: "exact" })
     .eq("id", id)
     .eq("user_id", user.id);
+  // Check and write in one statement: no other save can slip in between.
+  if (expectedVersion !== null) update = update.eq("updated_at", expectedVersion);
+  const { error, count } = await update;
 
   if (error) {
     console.error("[notes/[id]:update] Échec update Supabase:", error);
     return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${error.message}` }, { status: 500 });
   }
   if (count === 0) {
+    if (expectedVersion !== null) {
+      const { data: current, error: readError } = await supabase
+        .from("user_notes")
+        .select("id, title, content, updated_at")
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .maybeSingle<{ id: string; title: string; content: string; updated_at: string }>();
+      if (readError) {
+        console.error("[notes/[id]:update] Relecture après conflit échouée:", readError);
+        return NextResponse.json({ success: false, error: `Sauvegarde échouée : ${readError.message}` }, { status: 500 });
+      }
+      if (current) {
+        return NextResponse.json(
+          {
+            success: false,
+            conflict: true,
+            error: "Cette note a été modifiée ailleurs entre-temps.",
+            note: { id: current.id, title: current.title, content: current.content, updatedAt: current.updated_at },
+          },
+          { status: 409 }
+        );
+      }
+    }
     return NextResponse.json({ success: false, error: "Note introuvable." }, { status: 404 });
   }
 

@@ -3,6 +3,8 @@ import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { errorMessage, sanitizeForPostgres, stripDangerousHtml } from "@/lib/course-generation-shared";
+import { noteVersionAfter } from "@/lib/notes/note-version";
+import { WRITE_CONFLICT, WRITE_CONFLICT_MESSAGE, retryOnWriteConflict } from "@/lib/supabase/compare-and-set";
 import type { UserNote } from "@/types/user-notes";
 
 export const runtime = "nodejs";
@@ -158,38 +160,58 @@ export async function POST(request: NextRequest) {
     }
     const moduleTitle = (moduleRow as { title?: string } | null)?.title ?? null;
 
-    const { data: existingNote, error: existingError } = await supabase
-      .from("user_notes")
-      .select(NOTE_COLUMNS)
-      .eq("user_id", user.id)
-      .eq("module_id", finalModuleId)
-      .maybeSingle();
-
-    if (existingError) {
-      console.error("[notes:create] Échec lecture note de module existante:", existingError);
-      return NextResponse.json({ success: false, error: `Lecture échouée : ${existingError.message}` }, { status: 500 });
-    }
-
     const sourceLabel = typeof courseTitle === "string" && courseTitle.trim() ? escapeHtml(courseTitle.trim()) : null;
     const taggedContent = sourceLabel
       ? `<br><br><strong>[Source: ${sourceLabel}]</strong><br>${finalContent}`
       : `<br><br>${finalContent}`;
 
-    if (existingNote) {
-      const existing = existingNote as unknown as UserNoteRow;
-      const mergedContent = sanitizeForPostgres(`${existing.content}${taggedContent}`);
+    // The module's note — the oldest one, should there be two (see the insert
+    // below). A .maybeSingle() here failed on every later addition once a
+    // module had two notes, so "Add note" stayed broken for that module.
+    const findModuleNote = async () => {
       const { data, error } = await supabase
         .from("user_notes")
-        .update({ content: mergedContent, updated_at: new Date().toISOString() })
-        .eq("id", existing.id)
         .select(NOTE_COLUMNS)
-        .single();
+        .eq("user_id", user.id)
+        .eq("module_id", finalModuleId)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .limit(1);
+      return { note: ((data ?? [])[0] ?? null) as UserNoteRow | null, error };
+    };
 
-      if (error) {
-        console.error("[notes:create] Échec mise à jour note de module:", error);
-        return NextResponse.json({ success: false, error: `Mise à jour échouée : ${error.message}` }, { status: 500 });
-      }
-      return NextResponse.json({ success: true, note: toNote(data as unknown as UserNoteRow, moduleTitle) });
+    // Appends this addition to `note`, only while the note is still the
+    // version just read (updated_at): two additions at once, or an addition
+    // while the note is saved from /dashboard/notes, each wrote back the
+    // content THEY had read, and the other one was lost.
+    const appendTo = async (note: UserNoteRow) => {
+      const update = supabase
+        .from("user_notes")
+        .update({ content: sanitizeForPostgres(`${note.content}${taggedContent}`), updated_at: noteVersionAfter(note.updated_at) })
+        .eq("id", note.id)
+        .eq("user_id", user.id);
+      const { data, error } = await (note.updated_at == null ? update.is("updated_at", null) : update.eq("updated_at", note.updated_at)).select(NOTE_COLUMNS);
+      if (error) return { note: null, error };
+      const updated = ((data ?? [])[0] ?? null) as UserNoteRow | null;
+      return updated ? { note: updated, error: null } : WRITE_CONFLICT;
+    };
+
+    const appended = await retryOnWriteConflict(async () => {
+      const found = await findModuleNote();
+      if (found.error) return { note: null, error: found.error, missing: false };
+      if (!found.note) return { note: null, error: null, missing: true };
+      const result = await appendTo(found.note);
+      return result === WRITE_CONFLICT ? WRITE_CONFLICT : { ...result, missing: false };
+    });
+    if (appended === WRITE_CONFLICT) {
+      return NextResponse.json({ success: false, error: WRITE_CONFLICT_MESSAGE }, { status: 409 });
+    }
+    if (appended.error) {
+      console.error("[notes:create] Échec ajout à la note de module:", appended.error);
+      return NextResponse.json({ success: false, error: `Mise à jour échouée : ${appended.error.message}` }, { status: 500 });
+    }
+    if (appended.note) {
+      return NextResponse.json({ success: true, note: toNote(appended.note, moduleTitle) });
     }
 
     const { data, error } = await supabase
@@ -207,7 +229,30 @@ export async function POST(request: NextRequest) {
       console.error("[notes:create] Échec insertion note de module:", error);
       return NextResponse.json({ success: false, error: `Création échouée : ${error.message}` }, { status: 500 });
     }
-    return NextResponse.json({ success: true, note: toNote(data as unknown as UserNoteRow, moduleTitle) });
+    const inserted = data as unknown as UserNoteRow;
+
+    // Two first additions to a module at once both found no note and both
+    // inserted one. The one that is not the oldest folds its addition into
+    // the oldest and removes itself, so the module keeps a single note. If
+    // that fails, both notes stay (nothing is lost) and later additions go
+    // to the oldest.
+    const oldest = await findModuleNote();
+    if (!oldest.error && oldest.note && String(oldest.note.id) !== String(inserted.id)) {
+      const oldestId = oldest.note.id;
+      const folded = await retryOnWriteConflict(async () => {
+        const { data: rows, error: readError } = await supabase.from("user_notes").select(NOTE_COLUMNS).eq("id", oldestId).eq("user_id", user.id).limit(1);
+        const target = ((rows ?? [])[0] ?? null) as UserNoteRow | null;
+        if (readError || !target) return { note: null, error: readError };
+        return appendTo(target);
+      });
+      if (folded !== WRITE_CONFLICT && folded.note) {
+        const { error: deleteError } = await supabase.from("user_notes").delete().eq("id", inserted.id).eq("user_id", user.id);
+        if (deleteError) console.error("[notes:create] Doublon de note de module non supprimé:", deleteError.message);
+        return NextResponse.json({ success: true, note: toNote(folded.note, moduleTitle) });
+      }
+      console.warn(`[notes:create] Deux notes pour le module ${finalModuleId} — fusion impossible, les deux sont gardées.`);
+    }
+    return NextResponse.json({ success: true, note: toNote(inserted, moduleTitle) });
   }
 
   const { data, error } = await supabase

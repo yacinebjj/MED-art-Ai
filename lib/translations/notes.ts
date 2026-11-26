@@ -14,6 +14,21 @@ export const NOTES_TRANSLATIONS = {
   newNote: { fr: "Nouvelle note", en: "New note" },
   titlePlaceholder: { fr: "Titre de la note", en: "Note title" },
   toastNoteSaved: { fr: "Note enregistrée", en: "Note saved" },
+  toastNoteMergedTitle: { fr: "Note enregistrée avec les derniers ajouts", en: "Note saved with the latest additions" },
+  toastNoteMergedBody: {
+    fr: "Des passages ajoutés depuis un module pendant que tu écrivais ont été gardés à la fin de la note.",
+    en: "Passages added from a module while you were writing were kept at the end of the note.",
+  },
+  toastNoteRefreshedBody: {
+    fr: "Elle avait été modifiée ailleurs entre-temps : sa dernière version est affichée.",
+    en: "It had been changed elsewhere meanwhile: its latest version is shown.",
+  },
+  toastNoteConflictTitle: { fr: "Note modifiée ailleurs", en: "Note changed elsewhere" },
+  toastNoteConflictBody: {
+    fr: "Elle a été modifiée sur un autre onglet ou appareil. Ta version est enregistrée comme une nouvelle note, l'autre est conservée.",
+    en: "It was changed in another tab or on another device. Your version is saved as a new note; the other one is kept.",
+  },
+  conflictCopySuffix: { fr: "ma version", en: "my version" },
   toastNoteDeleted: { fr: "Note supprimée", en: "Note deleted" },
   toastNoteRenamed: { fr: "Note renommée", en: "Note renamed" },
   toastErrorTitle: { fr: "Échec", en: "Failed" },
