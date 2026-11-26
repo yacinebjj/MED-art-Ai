@@ -1,16 +1,27 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { AUDIO_SMART_NOTES_API, AUDIO_SMART_NOTES_ENABLED, AUDIO_SMART_NOTES_PAGE, INFOGRAPHIC_API, INFOGRAPHIC_ENABLED } from "@/lib/feature-flags";
+import { STUDY_GROUPS_ENABLED } from "@/lib/features";
 import { DEVICE_COOKIE, DEVICE_COOKIE_OPTIONS, DEVICE_ID_RE } from "@/lib/device-cookie";
 
 /** A Supabase Auth PKCE code. */
 const AUTH_CODE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Every study-group API route lives under this prefix (app/api/groups/**). */
+const STUDY_GROUPS_API = "/api/groups";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Withdrawn features (lib/feature-flags.ts). The API branch returns before
   // any Supabase call, so it never joins the refresh-token race described below.
+  // Study groups (lib/features.ts): the pages already redirect while the flag is
+  // off, and the API answers 404 too, so a hidden feature cannot be driven by
+  // hand (creating groups, uploading media, inviting members).
+  if (pathname === STUDY_GROUPS_API || pathname.startsWith(`${STUDY_GROUPS_API}/`)) {
+    if (STUDY_GROUPS_ENABLED) return NextResponse.next();
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   if (pathname.startsWith(AUDIO_SMART_NOTES_API)) {
     if (AUDIO_SMART_NOTES_ENABLED) return NextResponse.next();
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -80,5 +91,7 @@ export const config = {
     "/api/lecture-notes",
     "/api/studio/infographic/:path*",
     "/api/studio/infographic",
+    "/api/groups/:path*",
+    "/api/groups",
   ],
 };

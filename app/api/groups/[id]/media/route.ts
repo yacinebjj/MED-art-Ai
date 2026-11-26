@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
-import { assertAcceptedMember } from "@/lib/group-chat";
+import { CHAT_MEDIA_BUCKET, assertAcceptedMember } from "@/lib/group-chat";
 import { errorMessage } from "@/lib/course-generation-shared";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { MAX_UPLOAD_FILE_BYTES } from "@/lib/upload-limits";
@@ -20,7 +20,6 @@ const VAULT_HISTORY_LIMIT = 500;
 export const runtime = "nodejs";
 export const maxDuration = 60; // media upload, not an AI call — but a large video/audio blob still needs headroom beyond the platform default.
 
-const CHAT_MEDIA_BUCKET = "chat_media";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_VIDEO_BYTES = MAX_UPLOAD_FILE_BYTES;
 const MAX_AUDIO_BYTES = MAX_UPLOAD_FILE_BYTES;

@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/supabase/session-server";
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { sanitizeForPostgres } from "@/lib/course-generation-shared";
+import { CHAT_MEDIA_BUCKET } from "@/lib/group-chat";
 import { RATE_LIMITS, rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
+import { removeStorageFolder } from "@/lib/storage-cleanup";
 
 export const runtime = "nodejs";
 
@@ -173,7 +175,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   return NextResponse.json({ success: false, error: "Impossible de générer un nouveau code. Réessaie." }, { status: 500 });
 }
 
-/** DELETE — deletes the whole group (members and messages cascade). Admin-only. */
+/**
+ * DELETE — deletes the whole group (members and messages cascade), then its
+ * attachments in Storage (the public chat_media/${groupId}/ folder), which
+ * otherwise stayed reachable by URL forever. Admin-only. The row goes first:
+ * a storage failure leaves orphan files (logged), never a half-deleted group.
+ */
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthenticatedUser();
   if (!user) return NextResponse.json({ success: false, error: "Tu dois être connecté(e)." }, { status: 401 });
@@ -183,7 +190,15 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   const { supabase, response } = await requireAdmin(params.id, user.id);
   if (response) return response;
 
-  const { error } = await supabase.from("chat_groups").delete().eq("id", params.id);
+  const { data: deleted, error } = await supabase.from("chat_groups").delete().eq("id", params.id).select("id");
   if (error) return NextResponse.json({ success: false, error: `Suppression échouée : ${error.message}` }, { status: 500 });
+
+  // The stored id (canonical form), not the URL's spelling of it, names the folder.
+  for (const { id } of (deleted ?? []) as { id: string }[]) {
+    const media = await removeStorageFolder(supabase, CHAT_MEDIA_BUCKET, id, { deadlineAt: Date.now() + 8_000 });
+    if (!media.complete) {
+      console.error(`[groups] Group ${id} deleted, but some of its media could not be removed (${media.removed} removed) — orphan files remain in ${CHAT_MEDIA_BUCKET}/${id}/.`);
+    }
+  }
   return NextResponse.json({ success: true });
 }

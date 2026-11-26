@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import type { getSupabaseAdmin } from "@/lib/supabase/server";
 
+/** Storage bucket of every group attachment, stored as `${groupId}/${uuid}.${ext}`. */
+export const CHAT_MEDIA_BUCKET = "chat_media";
+
 /**
  * Shared "is this user an accepted member of this group" gate — every group
  * chat route that reads/writes chat_messages or serves group details needs
