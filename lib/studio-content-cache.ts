@@ -28,11 +28,17 @@
  * underlying SOURCE MATERIAL is the same (by content, not by uploader), so
  * this cannot leak one student's private document to another; it only
  * avoids re-paying for output that is, in substance, identical.
+ *
+ * Poisoning: a course crafted to plant a link, a contact or instructions for
+ * the model must not reach other students through this table. Nothing of
+ * the kind is stored, and a row is served (or adapted) only when it carries
+ * nothing the student's own course doesn't — lib/shared-content-screen.ts.
  */
 
 import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 import { computeMinHashSignature, estimateSimilarity, normalizeText, sha256 } from "@/lib/content-similarity";
 import { STUDIO_EXPLICATION_PROMPT_VERSION, STUDIO_QCM_PROMPT_VERSION, STUDIO_RESUME_PROMPT_VERSION } from "@/lib/ai/studio-prompts";
+import { servableContent, shareableContent } from "@/lib/shared-content-screen";
 import type { JsonSectionId } from "@/lib/demo-content";
 
 /**
@@ -61,11 +67,14 @@ function cacheSection(section: JsonSectionId): string {
   return section;
 }
 
-interface StudioCacheRow {
+/** A fuzzy-tier candidate: only its signature is read until it is chosen. */
+interface StudioCacheSignatureRow {
   id: string;
-  data: unknown;
   minhash_signature: number[];
 }
+
+/** Fuzzy matches above the threshold tried at most, best first, until one passes servableContent(). */
+const FUZZY_MATCHES_TRIED = 3;
 
 export interface StudioCacheLookupResult {
   hit: boolean;
@@ -115,6 +124,12 @@ export async function lookupStudioContentCache(
     return { hit: false };
   }
   if (exactRow) {
+    // Written before this screening existed, or by a course crafted to plant
+    // something: never served. The fresh generation then replaces the row.
+    if (!servableContent(exactRow.data, rawText)) {
+      console.warn(`[studio-content-cache:lookup] Ligne ${exactRow.id} écartée (liens/contacts ou consignes absents du cours de l'étudiant) — génération réelle.`);
+      return { hit: false };
+    }
     return { hit: true, data: exactRow.data, matchType: "exact", similarity: 1, cacheRowId: exactRow.id };
   }
   if (exactOnly) return { hit: false };
@@ -127,10 +142,13 @@ export async function lookupStudioContentCache(
   // ordering by hit_count means a genuinely popular reference course (the
   // ones actually worth matching against) is always inside the cap even
   // once the table holds far more rows than this fetches.
+  // Signatures only (64 numbers a row): the generated sections themselves —
+  // tens of KB each — were read for all 500 rows on every miss, and all but
+  // one thrown away. The chosen match's section is read on its own below.
   const FUZZY_CANDIDATE_LIMIT = 500;
   const { data: candidates, error: candidatesError } = await supabase
     .from("studio_content_cache")
-    .select("id, data, minhash_signature")
+    .select("id, minhash_signature")
     .eq("section", cacheSection(section))
     .order("hit_count", { ascending: false })
     .order("created_at", { ascending: false })
@@ -143,16 +161,22 @@ export async function lookupStudioContentCache(
   if (!candidates || candidates.length === 0) return { hit: false };
 
   const signature = computeMinHashSignature(normalized);
-  let best: { id: string; data: unknown; similarity: number } | null = null;
-  for (const candidate of candidates as StudioCacheRow[]) {
-    const similarity = estimateSimilarity(signature, candidate.minhash_signature);
-    if (similarity >= SIMILARITY_THRESHOLD && (!best || similarity > best.similarity)) {
-      best = { id: candidate.id, data: candidate.data, similarity };
-    }
-  }
+  const matches = (candidates as StudioCacheSignatureRow[])
+    .map((candidate) => ({ id: candidate.id, similarity: estimateSimilarity(signature, candidate.minhash_signature) }))
+    .filter((match) => match.similarity >= SIMILARITY_THRESHOLD)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, FUZZY_MATCHES_TRIED);
 
-  if (best) {
-    return { hit: true, data: best.data, matchType: "fuzzy", similarity: best.similarity, cacheRowId: best.id };
+  for (const match of matches) {
+    const { data: row, error: rowError } = await supabase.from("studio_content_cache").select("data").eq("id", match.id).maybeSingle();
+    if (rowError) {
+      console.error("[studio-content-cache:lookup] Échec lecture (fuzzy, contenu) — génération réelle utilisée à la place:", rowError);
+      return { hit: false };
+    }
+    // Gone meanwhile, or carrying something this student's course does not
+    // contain (it would be copied into theirs by the adaptation): next match.
+    if (!row || !servableContent(row.data, rawText)) continue;
+    return { hit: true, data: row.data, matchType: "fuzzy", similarity: match.similarity, cacheRowId: match.id };
   }
   return { hit: false };
 }
@@ -168,6 +192,13 @@ export async function lookupStudioContentCache(
  */
 export async function storeStudioContentCache(section: JsonSectionId, rawText: string, data: unknown): Promise<void> {
   if (!isSupabaseConfigured()) return;
+  // Never shared: a section carrying links / contacts, or made from a course
+  // text addressing the model (lib/shared-content-screen.ts). The student who
+  // generated it still has it; it just isn't served to anyone else.
+  if (!shareableContent(rawText, data)) {
+    console.warn(`[studio-content-cache:store] Section ${section} non partagée (liens/contacts ou consignes au modèle).`);
+    return;
+  }
   const supabase = getSupabaseAdmin();
   const normalized = normalizeText(rawText);
   const hash = sha256(normalized);

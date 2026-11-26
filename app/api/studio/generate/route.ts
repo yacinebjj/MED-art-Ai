@@ -263,17 +263,18 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: false, error: quotaGate.reason }, { status: 403 });
   }
 
-  const lookedUpCache: StudioCacheLookupResult = isPersonalizedVariant
-    ? { hit: false }
-    : await lookupStudioContentCache(actionType, truncatedContext);
   // QCM: only an exact hit holding a full current set is reused. Rows cached
   // before the 30-question pipeline (15 questions) must not be served, and a
   // fuzzy delta-adaptation of a 30-question set cannot fit its reduced token
   // ceiling — the batched generation below is the fast path for QCM anyway.
   // Résumé (since 2026-11-18): same rule, same reasons — its deep modes
   // (~10k tokens) are written by parallel calls (lib/ai/studio-resume.ts);
-  // a single delta-adaptation call would have to rewrite all of them.
+  // a single delta-adaptation call would have to rewrite all of them. So
+  // their lookup is exact-only: the fuzzy scan's result was thrown away.
   const isBatchedSection = actionType === "qcm" || actionType === "resume";
+  const lookedUpCache: StudioCacheLookupResult = isPersonalizedVariant
+    ? { hit: false }
+    : await lookupStudioContentCache(actionType, truncatedContext, isBatchedSection);
   const batchedSchema = actionType === "qcm" ? StudioQcmsSchema : StudioResumeSchema;
   const cacheResult: StudioCacheLookupResult =
     isBatchedSection && lookedUpCache.hit && (lookedUpCache.matchType !== "exact" || !batchedSchema.safeParse(lookedUpCache.data).success)
