@@ -10,8 +10,9 @@
  *    verse or dhikr (lib/azkar.ts — this device's choice, in localStorage);
  *  - Moteur IA: the real AI-content language store;
  *  - Apparence: next-themes + night mode, interface language;
- *  - Appareils: the devices actually subscribed to reminders, and Supabase
- *    sign-out (this device / every device).
+ *  - Appareils: the devices actually subscribed to reminders, Supabase
+ *    sign-out (this device / every device), and account deletion
+ *    (components/settings/DeleteAccountCard.tsx).
  *
  * Presented with the page's grouped cards (components/settings/SettingsUI.tsx).
  */
@@ -28,6 +29,7 @@ import { AiLanguageSelect } from "@/components/course/workspace/AiLanguageSelect
 import { UnifiedLanguageSwitch } from "@/components/layout/cockpit/UnifiedLanguageSwitch";
 import { useThemeMode, THEME_MODE_LABELS, type ThemeMode } from "@/components/layout/cockpit/ThemeModeSwitcher";
 import { SettingsCard, SettingsCardBody, SettingsRow, SettingsRows, SettingsSegmented } from "@/components/settings/SettingsUI";
+import { DeleteAccountCard } from "@/components/settings/DeleteAccountCard";
 import { createClient } from "@/lib/supabase/client";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { useOptionalOnboarding } from "@/lib/onboarding/onboarding-context";
@@ -624,6 +626,8 @@ export function DevicesSection() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <DeleteAccountCard />
     </div>
   );
 }
