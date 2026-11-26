@@ -86,7 +86,10 @@ export function getSupabaseAdmin(): SupabaseClient<any, any, any> {
  * was frozen (the same failure class documented on lib/ai/openrouter.ts's
  * createOpenRouterDispatcher), or a connect that never completed.
  * DNS / connect failures (EAI_AGAIN, ENOTFOUND, ETIMEDOUT) belong to the same
- * class: the request never left this instance.
+ * class: the request never left this instance. Known limit: a reset that hits
+ * a request the gateway had already forwarded looks the same and is re-sent;
+ * Supabase's gateway answers 502/504 in that case far more often than it
+ * resets the socket, and those statuses are never re-sent for writes.
  */
 const STALE_SOCKET_CODES = new Set([
   "UND_ERR_SOCKET",
@@ -116,19 +119,21 @@ function isStaleSocketError(error: unknown): boolean {
 }
 
 /**
- * Gateway answers meaning Supabase's API layer could not reach Postgres, so
- * nothing was executed: 502/503 for every method (a cold or restarting
- * project answers 503 "PGRST002 — could not query the schema cache" for a
- * few seconds). 504 only for reads — a write may have run before the
- * gateway gave up waiting.
+ * Gateway answers worth re-sending. 503 for every method: Supabase's API
+ * layer could not reach Postgres, so nothing was executed (a cold or
+ * restarting project answers 503 "PGRST002 — could not query the schema
+ * cache" for a few seconds). 502 and 504 only for reads: the gateway lost or
+ * stopped waiting for an answer, and a write — a reserve_* RPC counting a
+ * quota unit, an insert — may have run before it did, so sending it again
+ * could apply it twice.
  *
  * @param status - The HTTP status Supabase answered with.
  * @param method - The request's HTTP method, upper-cased.
  * @returns true when re-sending the request cannot apply anything twice.
  */
 function isRetryableGatewayStatus(status: number, method: string): boolean {
-  if (status === 502 || status === 503) return true;
-  return status === 504 && (method === "GET" || method === "HEAD");
+  if (status === 503) return true;
+  return (status === 502 || status === 504) && (method === "GET" || method === "HEAD");
 }
 
 /**
