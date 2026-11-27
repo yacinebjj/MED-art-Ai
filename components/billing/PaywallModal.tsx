@@ -4,7 +4,7 @@ import { useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ArrowLeft, CalendarClock, Check, GraduationCap, Info, Lock, Sparkles, User, Users, UsersRound, X } from "lucide-react";
 import type { PaywallReason, UsageSnapshot } from "@/lib/subscription";
-import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, PROMO_SIZE, formatDZD } from "@/lib/pricing";
+import { COURSES_PER_MONTH, FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, PROMO_SIZE, formatDZD } from "@/lib/pricing";
 import { Button } from "@/components/ui/Button";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 import { cn } from "@/lib/utils";
@@ -74,7 +74,7 @@ function quotaCopy(view: PaywallReason, usage: UsageSnapshot | null): QuotaCopy 
     case "quota_courses":
       return {
         title: "Limite du mois atteinte",
-        body: `Tu as importé tes ${usage?.courses.cap ?? PAID_LIMITS.coursesPerMonth} cours de ce mois-ci. Tes cours déjà importés restent disponibles.`,
+        body: `Tu as importé ${usage ? `tes ${usage.courses.cap}` : "tous tes"} cours de ce mois-ci. Tes cours déjà importés restent disponibles.`,
         rule: "Un cours supprimé ne rend pas le crédit.",
         reset: monthly,
       };
@@ -185,7 +185,7 @@ function TrialContent({ view, usage, locked, onChoosePlan, onBackToCourse }: { v
       </div>
 
       <ul className="mt-4 space-y-1.5 text-xs text-muted-foreground">
-        {[`${PAID_LIMITS.coursesPerMonth} cours/mois`, `${PAID_LIMITS.examsPerMonth} examens et ${PAID_LIMITS.synthesesPerMonth} résumés de module/mois`, "Flashcards, To-Do et Notes illimités"].map((line) => (
+        {[`${COURSES_PER_MONTH.monthly} à ${COURSES_PER_MONTH.annual} cours/mois selon la durée`, "Examens et résumés de module illimités", "Flashcards, To-Do et Notes illimités"].map((line) => (
           <li key={line} className="flex items-center gap-2">
             <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
             {line}

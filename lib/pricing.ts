@@ -22,11 +22,15 @@
  *    requested automatically if the gauge is not full after 7 days.
  *    The Cohorte plans (20 and 40 seats) are no longer sold; pools opened
  *    before v4 keep their own size and price until they complete or expire.
- *  - PAID LIMITS (every paid plan, identical): 40 courses / month (a deleted
- *    course is not given back), 10 exams / month, 5 module summaries / month
- *    (any of its 3 tools: Résumé, Mots-clés, Dictionnaire), course AI chat
- *    included (premium model up to the daily allowance, then the standard
- *    model). Flashcards, To-Do and Notes: unlimited.
+ *  - COURSES per month are set by the duration, the same for every tier
+ *    (COURSES_PER_MONTH): 1 month 40; 4 months 60 (240 in all); the 8-month
+ *    year 65 (520 in all). A deleted course is not given back.
+ *  - PAID LIMITS (every paid plan, identical): 10 exams / month, 5 module
+ *    summaries / month (any of its 3 tools: Résumé, Mots-clés, Dictionnaire),
+ *    course AI chat included (premium model up to the daily allowance, then
+ *    the standard model). Flashcards, To-Do and Notes: unlimited.
+ *    The pricing copy words exams and module summaries as « illimités »; the
+ *    two caps above are still enforced by lib/subscription.ts.
  *  - Audio → Smart Notes is withdrawn until V2 (lib/feature-flags.ts): its
  *    limits stay defined for the gated code, never shown while it is off.
  *
@@ -81,9 +85,11 @@ export const FREE_TRIAL = {
   messages: 20,
 } as const;
 
-/** Every paid plan's usage limits. */
+/** Courses a paid plan can create per month, set by its duration (every tier alike). */
+export const COURSES_PER_MONTH: Record<BillingCycle, number> = { monthly: 40, quad: 60, annual: 65 };
+
+/** Every paid plan's other usage limits. */
 export const PAID_LIMITS = {
-  coursesPerMonth: 40,
   examsPerMonth: 10,
   synthesesPerMonth: 5,
   premiumMessagesPerDay: 20,
@@ -102,7 +108,7 @@ export interface Plan {
   durationMonths: number;
   /** Still purchasable (the tier is sold at this duration). */
   purchasable: boolean;
-  /** Courses created per month (paid). The free trial uses FREE_TRIAL.courses instead. */
+  /** Courses created per month (paid: COURSES_PER_MONTH for the plan's duration). The free trial uses FREE_TRIAL.courses instead. */
   coursesPerMonth: number;
   examsPerMonth: number;
   synthesesPerMonth: number;
@@ -142,10 +148,22 @@ export const BILLING_CYCLES: { id: BillingCycle; months: number; label: Record<L
 
 const MONTHS: Record<BillingCycle, number> = { monthly: 1, quad: 4, annual: 8 };
 
+/** Courses over a paid plan's whole duration: 4 months 60 × 4 = 240, the year 65 × 8 = 520. */
+export function totalCourses(plan: Pick<Plan, "coursesPerMonth" | "durationMonths">): number {
+  return plan.coursesPerMonth * plan.durationMonths;
+}
+
+/** A paid plan's courses line, « 60 cours par mois (240 au total) »; no total on the 1-month plan. */
+export function coursesAllowanceLabel(plan: Pick<Plan, "coursesPerMonth" | "durationMonths">, language: Language): string {
+  const perMonth = plan.coursesPerMonth;
+  if (language === "fr") return plan.durationMonths > 1 ? `${perMonth} cours par mois (${totalCourses(plan)} au total)` : `${perMonth} cours par mois`;
+  return plan.durationMonths > 1 ? `${perMonth} courses a month (${totalCourses(plan)} in total)` : `${perMonth} courses a month`;
+}
+
 const PAID_FEATURES = [
-  `${PAID_LIMITS.coursesPerMonth} cours par mois, Studio complet`,
-  `${PAID_LIMITS.examsPerMonth} examens de module par mois`,
-  `${PAID_LIMITS.synthesesPerMonth} résumés de module par mois`,
+  `${COURSES_PER_MONTH.monthly} à ${COURSES_PER_MONTH.annual} cours par mois selon la durée, Studio complet`,
+  "Examens de module illimités",
+  "Résumés de module illimités",
   "Chat IA interactif avec tes cours inclus",
   // Listed again once Audio Smart Notes ships (lib/feature-flags.ts).
   ...(AUDIO_SMART_NOTES_ENABLED ? [`Audio → Smart Notes : ${PAID_LIMITS.audioPerDay}/jour (${PAID_LIMITS.audioPerMonth}/mois)`] : []),
@@ -153,7 +171,6 @@ const PAID_FEATURES = [
 ];
 
 const PAID_CAPS = {
-  coursesPerMonth: PAID_LIMITS.coursesPerMonth,
   examsPerMonth: PAID_LIMITS.examsPerMonth,
   synthesesPerMonth: PAID_LIMITS.synthesesPerMonth,
   premiumMessagesPerDay: PAID_LIMITS.premiumMessagesPerDay,
@@ -222,6 +239,7 @@ function buildPlan(tier: TierMeta, cycle: BillingCycle): Plan {
     durationMonths: MONTHS[cycle],
     purchasable: tier.cycles.includes(cycle),
     ...PAID_CAPS,
+    coursesPerMonth: COURSES_PER_MONTH[cycle],
     features: tier.features,
     tier: tier.id,
     cycle,

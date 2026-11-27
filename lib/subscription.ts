@@ -347,7 +347,8 @@ export async function refundGeneration(userId: string): Promise<void> {
 
 /**
  * One unit per course CREATED (upload, pasted text, audio → course).
- * Free trial: 1 course, once. Paid: 40 per month. Deleting a course never
+ * Free trial: 1 course, once. Paid: 40, 60 or 65 per month by the plan's
+ * duration (COURSES_PER_MONTH, lib/pricing.ts). Deleting a course never
  * gives the unit back; only a creation that fails is refunded.
  */
 export async function reserveCourseCreation(user: GateUser): Promise<GateResult> {

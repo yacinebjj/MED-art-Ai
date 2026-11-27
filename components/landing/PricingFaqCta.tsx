@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Check, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, REFUND_DELAY_LABEL, formatDZD, getPlansForCycle, type BillingCycle } from "@/lib/pricing";
+import { FREE_TRIAL, GROUP_SIZE, PAID_LIMITS, PLANS, POOL_DEADLINE_DAYS, PROMO_SIZE, REFUND_DELAY_LABEL, formatDZD, getPlansForCycle, totalCourses, type BillingCycle } from "@/lib/pricing";
 import { BillingCycleToggle } from "@/components/pricing/BillingCycleToggle";
 import { PricingTierCard } from "@/components/pricing/PricingTierCard";
 import { useLanguage } from "@/providers/LanguageProvider";
@@ -101,11 +101,11 @@ const FAQ = [
   {
     fr: {
       q: "Est-ce vraiment gratuit pour commencer ?",
-      a: `Oui. Chaque compte reçoit, une seule fois et sans carte bancaire, ${FREE_TRIAL.courses} cours avec le Studio complet + ${FREE_TRIAL.messages} messages avec l'Assistant / Copilot. Ensuite, les formules payantes donnent ${PAID_LIMITS.coursesPerMonth} cours, ${PAID_LIMITS.examsPerMonth} examens et ${PAID_LIMITS.synthesesPerMonth} résumés de module par mois, un accès complet à l'IA MedArt avec une assistance intelligente en continu${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/jour` : ""}, et Flashcards / To-Do / Notes illimités.`,
+      a: `Oui. Chaque compte reçoit, une seule fois et sans carte bancaire, ${FREE_TRIAL.courses} cours avec le Studio complet + ${FREE_TRIAL.messages} messages avec l'Assistant / Copilot. Ensuite, les formules payantes donnent ${PLANS.individual_monthly.coursesPerMonth} cours par mois (formule 1 mois), ${PLANS.individual_quad.coursesPerMonth} par mois sur ${PLANS.individual_quad.durationMonths} mois (${totalCourses(PLANS.individual_quad)} au total) ou ${PLANS.individual_annual.coursesPerMonth} par mois sur l'année de ${PLANS.individual_annual.durationMonths} mois (${totalCourses(PLANS.individual_annual)} au total), des examens et résumés de module illimités, un accès complet à l'IA MedArt avec une assistance intelligente en continu${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/jour` : ""}, et Flashcards / To-Do / Notes illimités.`,
     },
     en: {
       q: "Is it really free to start?",
-      a: `Yes. Every account gets, one time only and with no card, ${FREE_TRIAL.courses} course with the full Studio + ${FREE_TRIAL.messages} Assistant / Copilot messages. Paid plans then give ${PAID_LIMITS.coursesPerMonth} courses, ${PAID_LIMITS.examsPerMonth} exams and ${PAID_LIMITS.synthesesPerMonth} module summaries a month, full access to MedArt AI with smart assistance always on${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/day` : ""}, and unlimited Flashcards / To-Do / Notes.`,
+      a: `Yes. Every account gets, one time only and with no card, ${FREE_TRIAL.courses} course with the full Studio + ${FREE_TRIAL.messages} Assistant / Copilot messages. Paid plans then give ${PLANS.individual_monthly.coursesPerMonth} courses a month (1-month plan), ${PLANS.individual_quad.coursesPerMonth} a month over ${PLANS.individual_quad.durationMonths} months (${totalCourses(PLANS.individual_quad)} in total) or ${PLANS.individual_annual.coursesPerMonth} a month over the ${PLANS.individual_annual.durationMonths}-month year (${totalCourses(PLANS.individual_annual)} in total), unlimited module exams and summaries, full access to MedArt AI with smart assistance always on${AUDIO_SMART_NOTES_ENABLED ? `, Audio → Smart Notes ${PAID_LIMITS.audioPerDay}/day` : ""}, and unlimited Flashcards / To-Do / Notes.`,
     },
   },
   {

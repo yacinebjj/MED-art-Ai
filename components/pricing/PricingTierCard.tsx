@@ -6,22 +6,22 @@ import { Check, Sparkles, Users } from "lucide-react";
 import { MotionCard } from "@/components/ui/MotionCard";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
-import { computeSavingsPercent, formatDZD, PAID_LIMITS, poolTotalDZD, type Plan } from "@/lib/pricing";
+import { computeSavingsPercent, coursesAllowanceLabel, formatDZD, PAID_LIMITS, poolTotalDZD, type Plan } from "@/lib/pricing";
 import { useLanguage, type Language } from "@/providers/LanguageProvider";
 import { AUDIO_SMART_NOTES_ENABLED } from "@/lib/feature-flags";
 
-/** What every paid plan includes, per member — mirrors PAID_LIMITS (lib/pricing.ts). */
-export const PAID_LIMIT_LINES: { text: Record<Language, string>; hint?: Record<Language, string> }[] = [
+/** What a paid plan includes, per member — mirrors lib/pricing.ts (the courses line follows the plan's duration). */
+export const paidLimitLines = (plan: Plan): { text: Record<Language, string>; hint?: Record<Language, string> }[] => [
   {
-    text: { fr: `${PAID_LIMITS.coursesPerMonth} cours par mois, Studio complet`, en: `${PAID_LIMITS.coursesPerMonth} courses a month, full Studio` },
+    text: { fr: `${coursesAllowanceLabel(plan, "fr")}, Studio complet`, en: `${coursesAllowanceLabel(plan, "en")}, full Studio` },
     hint: { fr: "Un cours supprimé ne rend pas le crédit", en: "Deleting a course does not give the credit back" },
   },
-  { text: { fr: `${PAID_LIMITS.examsPerMonth} examens de module par mois`, en: `${PAID_LIMITS.examsPerMonth} module exams a month` } },
+  { text: { fr: "Examens de module illimités", en: "Unlimited module exams" } },
   {
-    text: { fr: `${PAID_LIMITS.synthesesPerMonth} résumés de module par mois`, en: `${PAID_LIMITS.synthesesPerMonth} module summaries a month` },
+    text: { fr: "Résumés de module illimités", en: "Unlimited module summaries" },
     hint: {
-      fr: "Résumé, Mots-clés ou Dictionnaire : 1 chacun",
-      en: "Summary, Keywords or Dictionary: 1 each",
+      fr: "Résumé, Mots-clés et Dictionnaire",
+      en: "Summary, Keywords and Dictionary",
     },
   },
   {
@@ -150,7 +150,7 @@ export function PricingTierCard({ plan, children, ctaSlot, isCurrent = false, hi
             {perPerson ? (fr ? "Inclus pour chaque membre" : "Included for each member") : fr ? "Inclus" : "Included"}
           </p>
           <ul className="mt-2 space-y-2">
-            {PAID_LIMIT_LINES.map((line) => (
+            {paidLimitLines(plan).map((line) => (
               <li key={line.text.fr} className="flex items-start gap-2 text-sm text-muted-foreground">
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <span>
