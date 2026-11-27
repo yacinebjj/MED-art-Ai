@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion, useAnimationControls } from "framer-motion";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { translateAuthError } from "@/lib/auth";
+import { AUTH_FORM_POST, translateAuthError } from "@/lib/auth";
 import {
   AUTH_SLOW,
   AuthTimeoutError,
@@ -241,7 +241,7 @@ export function LoginForm() {
   const hasPassword = password.length > 0;
 
   return (
-    <motion.form ref={formRef} method="post" onSubmit={handleSubmit} animate={shake} className="group/auth space-y-4">
+    <motion.form ref={formRef} method="post" action={AUTH_FORM_POST} onSubmit={handleSubmit} animate={shake} className="group/auth space-y-4">
       <SocialAuthButtons mode="login" />
 
       <AuthField

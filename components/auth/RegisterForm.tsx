@@ -12,7 +12,7 @@ import { AuthSubmitButton } from "./AuthSubmitButton";
 import { SocialAuthButtons } from "./SocialAuthButtons";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
-import { translateAuthError } from "@/lib/auth";
+import { AUTH_FORM_POST, translateAuthError } from "@/lib/auth";
 import { AUTH_SLOW, AuthTimeoutError, COOKIES_BLOCKED, formText, resendConfirmationEmail, sessionWasStored, withAuthTimeout } from "@/lib/auth-client";
 import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
@@ -367,7 +367,7 @@ export function RegisterForm() {
   };
 
   return (
-    <motion.form ref={formRef} method="post" onSubmit={handleSubmit} animate={shake} className="space-y-6">
+    <motion.form ref={formRef} method="post" action={AUTH_FORM_POST} onSubmit={handleSubmit} animate={shake} className="space-y-6">
       <motion.div
         className="space-y-6"
         initial={false}

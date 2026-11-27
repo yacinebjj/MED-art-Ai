@@ -5,6 +5,14 @@ function isSpecialty(value: unknown): value is Specialty {
   return value === "medicine" || value === "dentistry" || value === "pharmacy";
 }
 
+/**
+ * The `action` of every auth form (all method="post"): where the browser posts
+ * it when it submits the form itself — before React took a slow phone's page
+ * over, or with no JavaScript. Vercel answers a POST to the pre-rendered auth
+ * pages with 405; app/api/auth/form-post sends a 303 back to the page instead.
+ */
+export const AUTH_FORM_POST = "/api/auth/form-post";
+
 /** Student profile fields live in Supabase Auth's user_metadata (set at sign-up). */
 export function profileFromUser(user: User): StudentProfile {
   const meta = user.user_metadata ?? {};

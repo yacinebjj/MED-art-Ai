@@ -15,8 +15,8 @@ import { AUTH_TIMEOUT_MS } from "@/lib/auth-client";
  *
  * Still no React AUTH_TIMEOUT_MS after the tap (a script lost on a bad
  * network): the hold is released with "Connexion lente, réessaie", and the
- * next tap posts natively — a fresh load of the same page, `next` intact,
- * scripts fetched again.
+ * next tap posts natively to AUTH_FORM_POST, which answers with a 303 back to
+ * this page — a fresh load, `next` intact, scripts fetched again.
  *
  * Plain ES5. Its only traces are data attributes on the form, which React
  * never manages, so hydration is unaffected. It must be the form's LAST child

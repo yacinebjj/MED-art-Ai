@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
-import { translateAuthError } from "@/lib/auth";
+import { AUTH_FORM_POST, translateAuthError } from "@/lib/auth";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
 
@@ -135,8 +135,8 @@ export function UpdatePasswordForm() {
   const hasPassword = password.length > 0;
 
   return (
-    // method="post": a tap before React takes over must not put the new password in the URL (see EarlySubmitGuard).
-    <form method="post" onSubmit={handleSubmit} className="space-y-5">
+    // A tap before React takes over: posted (never the new password in a URL), and sent back here by AUTH_FORM_POST.
+    <form method="post" action={AUTH_FORM_POST} onSubmit={handleSubmit} className="space-y-5">
       {error && (
         <div className="animate-in fade-in-0 slide-in-from-top-1 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive duration-200">
           {error}
