@@ -15,7 +15,8 @@ const ITEM_STATS_WINDOW = 2000;
  * EXAM GENOME — scores a Blida-style practice paper (POST
  * /api/exam-genome/practice) and reveals its keys, each with its trust
  * level. A question is right when the letters given are exactly the key
- * (QCM: all and only the right propositions, as Blida grades them). The
+ * (QCM: all and only the right propositions — all-or-nothing; Blida's own
+ * partial-credit rule, if any, is not encoded yet). The
  * answers then feed each question's item analysis: when the strongest
  * students consistently reject the key, it is flagged for expert review.
  *
