@@ -47,6 +47,12 @@
 --   migrations/20261021_group_pool_hardening.sql
 --       pool sizes, refund reasons, missing subscriptions rows, deadline
 --       grace (two functions redefined)
+--   migrations/20261127_exam_genome_blida.sql
+--       Exam Genome, Faculté de Médecine de Blida 1, Médecine years 1-6 (only
+--       there): eg_exam_units (the 46 official exam units), eg_papers,
+--       eg_sources, eg_questions, eg_answer_keys, eg_practice_attempts,
+--       eg_item_stats, eg_contributions, the eg_paper_coverage view, the
+--       scope triggers and eg_ingest_paper
 --   maintenance/2026-10-13_end_of_testing_preview.sql
 --       read-only: counts what the reset below would delete
 --   maintenance/2026-10-13_end_of_testing_reset.sql
