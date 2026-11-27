@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, useAnimationControls } from "framer-motion";
@@ -13,7 +13,7 @@ import { SocialAuthButtons } from "./SocialAuthButtons";
 import { ALGERIAN_FACULTIES } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
-import { COOKIES_BLOCKED, resendConfirmationEmail, sessionWasStored } from "@/lib/auth-client";
+import { AUTH_SLOW, AuthTimeoutError, COOKIES_BLOCKED, formText, resendConfirmationEmail, sessionWasStored, withAuthTimeout } from "@/lib/auth-client";
 import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { isLockedInternYear, INTERN_YEAR_LOCKED_MESSAGE } from "@/lib/academic-year-locks";
 import type { AcademicYear, Specialty } from "@/types/academic";
@@ -81,6 +81,30 @@ export function RegisterForm() {
   const [specialtyId, setSpecialtyId] = useState<number | null>(null);
   const [academicYearId, setAcademicYearId] = useState<number | null>(null);
   const [yearsLoading, setYearsLoading] = useState(false);
+  const [loginHref, setLoginHref] = useState("/login");
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // The moment React takes the server-rendered form over (keep this effect
+  // first). On a slow phone the student may have typed for seconds already,
+  // into fields React's state never saw — and its next render (the specialty
+  // list arriving) used to wipe them. Adopt them first. An invite link's
+  // `next` also follows the student to /login (it used to be dropped there).
+  useEffect(() => {
+    const formEl = formRef.current;
+    if (formEl) {
+      const typed = { fullName: formText(formEl, "fullName"), email: formText(formEl, "email"), password: formText(formEl, "password") };
+      if (typed.fullName || typed.email || typed.password) {
+        setForm((prev) => ({
+          ...prev,
+          fullName: typed.fullName || prev.fullName,
+          email: typed.email || prev.email,
+          password: typed.password || prev.password,
+        }));
+      }
+    }
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next) setLoginHref(`/login?next=${encodeURIComponent(sanitizeRedirectPath(next))}`);
+  }, []);
 
   useEffect(() => {
     fetch("/api/curriculum/specialties")
@@ -127,14 +151,28 @@ export function RegisterForm() {
     setAcademicYearId(Number(value));
   }
 
+  /** The card's error shake — skipped when a late answer (the 20 s ceiling) comes after the student left the page (framer throws then). */
+  function shakeCard() {
+    try {
+      void shake.start({ x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.4 } });
+    } catch {
+      // Unmounted: nothing to shake.
+    }
+  }
+
   /** Errors slide in as a toast and the card gives a short shake — no inline alert block. */
   function showError(message: string) {
     toast({ variant: "error", title: language === "fr" ? "Inscription impossible" : "Couldn't sign up", description: message });
-    void shake.start({ x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.4 } });
+    shakeCard();
   }
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    // From the fields themselves (autofill, typing React's state missed); the state is the fallback.
+    const formEl = e.currentTarget;
+    const fullName = (formText(formEl, "fullName") || form.fullName).trim();
+    const email = (formText(formEl, "email") || form.email).trim();
+    const password = formText(formEl, "password") || form.password;
     if (!form.university) {
       showError("Choisis ta faculté.");
       return;
@@ -142,6 +180,9 @@ export function RegisterForm() {
     if (specialtyId == null || academicYearId == null) {
       showError("Choisis ta spécialité et ton année.");
       return;
+    }
+    if (fullName !== form.fullName || email !== form.email || password !== form.password) {
+      setForm((prev) => ({ ...prev, fullName, email, password }));
     }
 
     setIsLoading(true);
@@ -154,19 +195,36 @@ export function RegisterForm() {
     const next = sanitizeRedirectPath(new URLSearchParams(window.location.search).get("next"));
 
     const supabase = createClient();
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-        data: {
-          full_name: form.fullName,
-          university: form.university,
-          specialty: SPECIALTY_NAME_TO_ENUM[specialtyName] ?? "medicine",
-          academic_year: yearName,
-        },
-      },
-    });
+    let outcome: Awaited<ReturnType<typeof supabase.auth.signUp>>;
+    try {
+      outcome = await withAuthTimeout(
+        supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+            data: {
+              full_name: fullName,
+              university: form.university,
+              specialty: SPECIALTY_NAME_TO_ENUM[specialtyName] ?? "medicine",
+              academic_year: yearName,
+            },
+          },
+        })
+      );
+    } catch (error) {
+      // No answer within AUTH_TIMEOUT_MS, or the client itself threw: the button comes back either way.
+      setIsLoading(false);
+      if (error instanceof AuthTimeoutError) {
+        const text = AUTH_SLOW[language === "fr" ? "fr" : "en"];
+        toast({ variant: "warning", title: text.title, description: text.description });
+        shakeCard();
+      } else {
+        showError(translateAuthError(error instanceof Error ? error.message : "Failed to fetch"));
+      }
+      return;
+    }
+    const { data, error: signUpError } = outcome;
 
     if (signUpError) {
       setIsLoading(false);
@@ -200,11 +258,15 @@ export function RegisterForm() {
       // right after navigation runs its own bootstrap fetch of
       // GET /api/profile, which only sees this row if the PATCH below has
       // already landed by then.
-      await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ specialtyId, academicYearId }),
-      });
+      // Bounded, and a network error no longer leaves the button spinning: the
+      // dashboard asks for the cursus itself when this didn't land.
+      await withAuthTimeout(
+        fetch("/api/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ specialtyId, academicYearId }),
+        })
+      ).catch(() => undefined);
       // Welcome email: fire-and-forget (keepalive survives the navigation
       // below), never blocks the sign-up. Confirmation-link sign-ups are
       // welcomed by /auth/callback instead; either way, once per account.
@@ -270,7 +332,7 @@ export function RegisterForm() {
         </button>
         {resend.state === "error" && resend.message ? <p className="mt-2 text-xs text-red-300">{resend.message}</p> : null}
         <Link
-          href="/login"
+          href={loginHref}
           className="mt-6 inline-block text-sm font-semibold text-cyan-300 transition-colors hover:text-cyan-200 hover:underline"
         >
           Retour à la connexion
@@ -305,7 +367,7 @@ export function RegisterForm() {
   };
 
   return (
-    <motion.form onSubmit={handleSubmit} animate={shake} className="space-y-6">
+    <motion.form ref={formRef} method="post" onSubmit={handleSubmit} animate={shake} className="space-y-6">
       <motion.div
         className="space-y-6"
         initial={false}
@@ -420,7 +482,7 @@ export function RegisterForm() {
 
         <p className="mt-6 text-center text-sm text-slate-400">
           Déjà inscrit ?{" "}
-          <Link href="/login" className="font-semibold text-cyan-300 hover:underline">
+          <Link href={loginHref} className="font-semibold text-cyan-300 hover:underline">
             Connecte-toi
           </Link>
         </p>

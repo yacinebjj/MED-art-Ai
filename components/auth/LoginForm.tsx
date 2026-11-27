@@ -7,14 +7,27 @@ import { motion, useAnimationControls } from "framer-motion";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth";
-import { COOKIES_BLOCKED, rememberSession, resendConfirmationEmail, sessionWasStored } from "@/lib/auth-client";
+import {
+  AUTH_SLOW,
+  AuthTimeoutError,
+  COOKIES_BLOCKED,
+  formChecked,
+  formText,
+  rememberSession,
+  resendConfirmationEmail,
+  sessionWasStored,
+  withAuthTimeout,
+} from "@/lib/auth-client";
 import { sanitizeRedirectPath } from "@/lib/safe-redirect";
 import { useToast } from "@/components/ui/Toast";
 import { useLanguage } from "@/providers/LanguageProvider";
 import { tAuth } from "@/lib/translations/auth";
 import { AuthField } from "./AuthField";
 import { AuthSubmitButton } from "./AuthSubmitButton";
+import { EarlySubmitGuard, EarlySubmitStatus, claimEarlySubmit, dropHeldSubmit } from "./EarlySubmitGuard";
 import { SocialAuthButtons } from "./SocialAuthButtons";
+
+const SHAKE = { x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.4 } };
 
 /**
  * The query is read from window.location, never useSearchParams(): that hook
@@ -22,6 +35,12 @@ import { SocialAuthButtons } from "./SocialAuthButtons";
  * an empty card until the JavaScript ran — a blank second on a slow phone).
  * The form is now in the HTML; `next` is only needed on submit and for the
  * sign-up link, which picks it up right after mount.
+ *
+ * Because the form is in the HTML, a slow phone shows it seconds before React
+ * runs. Hence: method="post" + EarlySubmitGuard (a tap in that gap is held,
+ * then sent — never a GET with the password in the URL), the values read from
+ * the fields themselves (early typing and autofill never reached React's
+ * state), and a 20 s ceiling on the request (AUTH_TIMEOUT_MS).
  */
 export function LoginForm() {
   const router = useRouter();
@@ -35,6 +54,24 @@ export function LoginForm() {
   const [remember, setRemember] = useState(true);
   const [registerHref, setRegisterHref] = useState("/register");
   const checkedQuery = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const submitting = useRef(false);
+
+  // The moment React takes the server-rendered form over. On a slow phone the
+  // student may have typed (or the browser autofilled) for seconds already:
+  // adopt what the fields hold — React's state never saw it — then send the
+  // tap EarlySubmitGuard held in the meantime, if there was one.
+  useEffect(() => {
+    const formEl = formRef.current;
+    if (!formEl) return;
+    const typedEmail = formText(formEl, "email");
+    const typedPassword = formText(formEl, "password");
+    if (typedEmail) setEmail(typedEmail);
+    if (typedPassword) setPassword(typedPassword);
+    setRemember(formChecked(formEl, "remember", true));
+    if (claimEarlySubmit(formEl)) void signIn(formEl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once: the hand-over from the server HTML to React
+  }, []);
 
   useEffect(() => {
     if (checkedQuery.current) return;
@@ -83,19 +120,72 @@ export function LoginForm() {
     }
   }, [language, toast]);
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setIsLoading(true);
+    dropHeldSubmit(e.currentTarget);
+    void signIn(e.currentTarget);
+  }
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+  /** The card's error shake. A late answer (the 20 s ceiling) can come after the student left the page: framer then refuses to animate (it throws), and there is nothing to shake anyway. */
+  function shakeCard() {
+    try {
+      void shake.start(SHAKE);
+    } catch {
+      // Unmounted.
+    }
+  }
+
+  async function signIn(formEl: HTMLFormElement) {
+    if (submitting.current) return;
     const fr = language === "fr";
+    // From the fields, not from React's state: autofill and early typing live there.
+    const emailValue = formText(formEl, "email").trim();
+    const passwordValue = formText(formEl, "password");
+    const keepSession = formChecked(formEl, "remember", remember);
+    if (!emailValue || !passwordValue) {
+      toast({
+        variant: "error",
+        title: fr ? "Connexion impossible" : "Couldn't sign in",
+        description: translateAuthError(emailValue ? "missing password" : "missing email or phone"),
+      });
+      shakeCard();
+      return;
+    }
 
+    submitting.current = true;
+    setIsLoading(true);
+    try {
+      let signInError: { message: string } | null = null;
+      try {
+        ({ error: signInError } = await withAuthTimeout(createClient().auth.signInWithPassword({ email: emailValue, password: passwordValue })));
+      } catch (error) {
+        // No answer within AUTH_TIMEOUT_MS, or the client itself threw: the button comes back either way.
+        setIsLoading(false);
+        if (error instanceof AuthTimeoutError) {
+          const text = AUTH_SLOW[fr ? "fr" : "en"];
+          toast({ variant: "warning", title: text.title, description: text.description });
+        } else {
+          toast({
+            variant: "error",
+            title: fr ? "Connexion impossible" : "Couldn't sign in",
+            description: translateAuthError(error instanceof Error ? error.message : "Failed to fetch"),
+          });
+        }
+        shakeCard();
+        return;
+      }
+      await finishSignIn(signInError, emailValue, keepSession, fr);
+    } finally {
+      submitting.current = false;
+    }
+  }
+
+  async function finishSignIn(signInError: { message: string } | null, emailValue: string, keepSession: boolean, fr: boolean) {
     if (signInError) {
       setIsLoading(false);
       if (/email not confirmed/i.test(signInError.message)) {
         // The confirmation e-mail was lost or filed as spam: one tap sends it again.
-        const target = email;
+        const target = emailValue;
         toast({
           variant: "warning",
           title: fr ? "Adresse e-mail pas encore confirmée" : "E-mail not confirmed yet",
@@ -122,7 +212,7 @@ export function LoginForm() {
       } else {
         toast({ variant: "error", title: fr ? "Connexion impossible" : "Couldn't sign in", description: translateAuthError(signInError.message) });
       }
-      void shake.start({ x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.4 } });
+      shakeCard();
       return;
     }
 
@@ -134,7 +224,7 @@ export function LoginForm() {
       return;
     }
     // "Se souvenir de moi" unticked (a shared computer): the session ends when the browser closes.
-    await rememberSession(remember);
+    await rememberSession(keepSession);
     setIsLoading(false);
 
     // SECURITY: sanitizeRedirectPath forces this to a same-origin relative
@@ -151,7 +241,7 @@ export function LoginForm() {
   const hasPassword = password.length > 0;
 
   return (
-    <motion.form onSubmit={handleSubmit} animate={shake} className="space-y-4">
+    <motion.form ref={formRef} method="post" onSubmit={handleSubmit} animate={shake} className="group/auth space-y-4">
       <SocialAuthButtons mode="login" />
 
       <AuthField
@@ -191,7 +281,7 @@ export function LoginForm() {
 
       <div className="flex items-center justify-between gap-3 pt-1 text-sm">
         <label className="flex cursor-pointer select-none items-center gap-2.5 text-slate-300">
-          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="peer sr-only" />
+          <input type="checkbox" name="remember" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="peer sr-only" />
           <span className="flex h-5 w-5 items-center justify-center rounded-md border border-white/20 bg-slate-900 transition-colors peer-checked:border-cyan-400 peer-checked:bg-cyan-400 peer-focus-visible:ring-2 peer-focus-visible:ring-cyan-400/50">
             <svg viewBox="0 0 12 10" className={remember ? "h-3 w-3 text-slate-950" : "hidden"} aria-hidden>
               <path d="M1 5l3.5 3.5L11 1" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -205,9 +295,16 @@ export function LoginForm() {
       </div>
 
       <div className="pt-2">
-        <AuthSubmitButton isLoading={isLoading} loadingLabel={language === "fr" ? "Connexion en cours…" : "Signing in…"}>
-          Se connecter
-        </AuthSubmitButton>
+        {/* A tap held by EarlySubmitGuard: the button pulses until React sends it. */}
+        <div className="group-data-[early]/auth:pointer-events-none group-data-[early]/auth:animate-pulse">
+          <AuthSubmitButton isLoading={isLoading} loadingLabel={language === "fr" ? "Connexion en cours…" : "Signing in…"}>
+            Se connecter
+          </AuthSubmitButton>
+        </div>
+        <EarlySubmitStatus
+          busyLabel={language === "fr" ? "Connexion en cours…" : "Signing in…"}
+          slowLabel={language === "fr" ? "Connexion lente, réessaie." : "Slow connection, try again."}
+        />
       </div>
 
       <p className="pt-2 text-center text-sm text-slate-400">
@@ -216,6 +313,8 @@ export function LoginForm() {
           Inscris-toi
         </Link>
       </p>
+      {/* Last child on purpose: the guard finds the form as its parent. */}
+      <EarlySubmitGuard />
     </motion.form>
   );
 }

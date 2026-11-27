@@ -18,6 +18,12 @@ import { useLanguage } from "@/providers/LanguageProvider";
  * Public pricing page (anonymous visitors). Renders the real lib/pricing.ts
  * plans; every CTA routes to /register — the actual Chargily checkout and the
  * Groupe de 5 / Groupe de 10 pooled purchases live on app/dashboard/(shell)/billing.
+ *
+ * The first screen (hero, period toggle, plan cards) is plain markup, painted
+ * with the HTML: it used to sit in RevealSection, whose server HTML is
+ * `opacity:0` until JavaScript runs — a blank page for ~13 s on a budget phone
+ * (measured live 2026-11-27), and for good if a script failed. Only the trust
+ * row further down keeps the scroll reveal.
  */
 export default function PricingPage() {
   const { language } = useLanguage();
@@ -34,7 +40,7 @@ export default function PricingPage() {
         <section className="relative overflow-hidden bg-slate-50 py-16 dark:bg-slate-900/40 sm:py-24">
           <div aria-hidden className="pointer-events-none absolute left-1/2 top-0 h-96 w-[48rem] -translate-x-1/2 rounded-full bg-primary-400/10 blur-3xl" />
           <div className="relative mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
-            <RevealSection>
+            <div>
               <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-4 py-1.5 text-xs font-medium text-primary-700 dark:border-primary-800 dark:bg-primary-900/30 dark:text-primary-300 sm:text-sm">
                 <Sparkles className="h-4 w-4 shrink-0" />
                 {fr ? "Des tarifs pensés pour l'Algérie" : "Pricing designed for Algeria"}
@@ -53,19 +59,19 @@ export default function PricingPage() {
                   ? `${FREE_TRIAL.courses} cours + ${FREE_TRIAL.messages} messages offerts, une seule fois`
                   : `${FREE_TRIAL.courses} course + ${FREE_TRIAL.messages} messages free, one time only`}
               </p>
-            </RevealSection>
+            </div>
 
-            <RevealSection delay={0.1} className="mt-10 flex justify-center">
+            <div className="mt-10 flex justify-center">
               <BillingCycleToggle value={cycle} onChange={setCycle} />
-            </RevealSection>
+            </div>
           </div>
         </section>
 
         {/* --- Pricing grid --- */}
         <section className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
-            {plans.map((plan, index) => (
-              <RevealSection key={plan.id} delay={index * 0.1} className="h-full">
+            {plans.map((plan) => (
+              <div key={plan.id} className="h-full">
                 <PricingTierCard
                   plan={plan}
                   ctaSlot={
@@ -86,7 +92,7 @@ export default function PricingPage() {
                   {plan.tier === "group" && <GroupInviteFlow cycle={cycle} href={null} />}
                   {plan.tier === "promo" && <CohortVerificationFlow href={null} />}
                 </PricingTierCard>
-              </RevealSection>
+              </div>
             ))}
           </div>
           <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted-foreground">

@@ -30,6 +30,12 @@ const SIZE_CLASSES: Record<NonNullable<LogoProps["size"]>, string> = {
  * No cropping: `object-contain` inside a fixed-size box shows the full
  * source image (including the "MedArt.ai" wordmark) with no clipping,
  * letterboxing on whichever axis the 332x431 source doesn't fill exactly.
+ *
+ * The file is public/images/brand/logo-240.webp (185x240, 14 KB), not the
+ * 197 KB logo.png: the mark is drawn at most 80 px tall (size "lg"), so 240
+ * device pixels is exact on a 3x phone screen. `priority` preloads it at high
+ * priority on every page, where the PNG competed with the stylesheet for a
+ * slow phone's first paint. logo.png itself stays (e-mails, icon sources).
  */
 export function Logo({ className, variant = "default", size = "md", markClassName }: LogoProps) {
   const isLight = variant === "light";
@@ -43,7 +49,7 @@ export function Logo({ className, variant = "default", size = "md", markClassNam
           isLight && "rounded-xl bg-white/10 p-1.5 backdrop-blur-sm"
         )}
       >
-        <Image src="/logo.png" alt="Med Art AI" fill sizes="144px" className="object-contain" priority />
+        <Image src="/images/brand/logo-240.webp" alt="Med Art AI" fill sizes="80px" className="object-contain" priority />
       </div>
     </div>
   );

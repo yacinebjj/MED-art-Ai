@@ -33,7 +33,8 @@ export function BrandLoader({ className, label }: BrandLoaderProps) {
           className="absolute inset-0 rounded-full bg-gradient-to-br from-primary-500/40 to-secondary-500/40 blur-xl animate-ring-pulse"
           style={{ animationDelay: "1.2s" }}
         />
-        <Image src="/logo.png" alt="Chargement" fill sizes="128px" className="relative object-contain" />
+        {/* logo-431.webp: logo.png at full resolution in 30 KB instead of 197 KB (see Logo.tsx). */}
+        <Image src="/images/brand/logo-431.webp" alt="Chargement" fill sizes="128px" className="relative object-contain" />
       </div>
       {label && <p className="text-sm text-muted-foreground">{label}</p>}
     </div>

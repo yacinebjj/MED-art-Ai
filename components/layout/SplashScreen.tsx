@@ -81,7 +81,8 @@ export function SplashScreen() {
   return (
     <div id="medart-splash" data-leaving={phase === "leaving"} role="status" aria-live="polite" aria-label="Chargement de MedArt AI">
       <style dangerouslySetInnerHTML={{ __html: SPLASH_CSS }} />
-      <Image src="/logo.png" alt="MedArt AI" width={120} height={156} sizes="120px" priority className="medart-splash-logo" />
+      {/* Full-resolution WebP (332x431, 30 KB) of logo.png (197 KB): sharp at 156 px tall on a 3x screen. */}
+      <Image src="/images/brand/logo-431.webp" alt="MedArt AI" width={120} height={156} sizes="120px" priority className="medart-splash-logo" />
       <div className="medart-splash-track" aria-hidden="true">
         <div className="medart-splash-bar" />
       </div>

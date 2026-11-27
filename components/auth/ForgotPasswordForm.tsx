@@ -96,7 +96,8 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    // method="post": a tap before React takes over must not put the address in the URL (see EarlySubmitGuard).
+    <form method="post" onSubmit={handleSubmit} className="space-y-5">
       {error && (
         <div className="animate-in fade-in-0 slide-in-from-top-1 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive duration-200">
           {error}

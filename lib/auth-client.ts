@@ -19,6 +19,65 @@ export async function sessionWasStored(): Promise<boolean> {
   }
 }
 
+/**
+ * Slow networks: a sign-in or sign-up call still unanswered after this long is
+ * reported as slow and the button comes back, instead of spinning until the
+ * student reloads. The request itself may still land afterwards (a session
+ * quietly stored, an account created): a second tap then simply finds it.
+ */
+export const AUTH_TIMEOUT_MS = 20_000;
+
+export class AuthTimeoutError extends Error {
+  constructor() {
+    super("Auth request timed out");
+    this.name = "AuthTimeoutError";
+  }
+}
+
+/** Settles like `promise`, or rejects with an AuthTimeoutError once `ms` have passed. */
+export function withAuthTimeout<T>(promise: Promise<T>, ms: number = AUTH_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new AuthTimeoutError()), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+export const AUTH_SLOW = {
+  fr: {
+    title: "Connexion lente, réessaie",
+    description: "Le serveur n'a pas répondu à temps. Vérifie ton réseau, puis appuie de nouveau sur le bouton.",
+  },
+  en: {
+    title: "Slow connection, try again",
+    description: "The server didn't answer in time. Check your network, then tap the button again.",
+  },
+} as const;
+
+/**
+ * A field's value read from the form itself. The browser's value is the truth:
+ * autofill, or typing before React took the page over on a slow phone, never
+ * reached React's state.
+ */
+export function formText(form: HTMLFormElement, name: string): string {
+  const field = form.elements.namedItem(name);
+  return field instanceof HTMLInputElement ? field.value : "";
+}
+
+/** A checkbox's state read from the form itself (`fallback` when the form has no such box). */
+export function formChecked(form: HTMLFormElement, name: string, fallback: boolean): boolean {
+  const field = form.elements.namedItem(name);
+  return field instanceof HTMLInputElement ? field.checked : fallback;
+}
+
 export const COOKIES_BLOCKED = {
   fr: {
     title: "Cookies bloqués",

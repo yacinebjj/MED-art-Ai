@@ -45,6 +45,9 @@ const AUTH_ERRORS: ReadonlyArray<[RegExp, string | ((m: RegExpMatchArray) => str
   [/same_password|same password/i, "Le nouveau mot de passe doit être différent de l'ancien."],
   [/captcha/i, "La vérification anti-robot a échoué — réessaie."],
   [/session.*missing|auth session missing|session_not_found/i, "Ta session a expiré : reconnecte-toi."],
+  [/missing email or phone|missing email|email (?:address )?(?:is )?required/i, "Adresse e-mail manquante : saisis ton adresse e-mail, puis réessaie."],
+  [/missing password|password (?:is )?required|signup requires a valid password/i, "Mot de passe manquant : saisis ton mot de passe, puis réessaie."],
+  [/timed? ?out|timeout/i, "Connexion lente, réessaie."],
 ];
 
 export function translateAuthError(message: string): string {
