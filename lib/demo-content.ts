@@ -69,6 +69,24 @@ export function buildDemoTranslatePrompt(selectedText: string): string {
 }
 
 /**
+ * What "Ask MedArt" asks about the passage when the student typed no question
+ * of their own. INTERNAL: the model reads it, the student never does — their
+ * bubble, its Copier/Modifier menu and the exported conversation show the
+ * passage alone (chatBubbleText below). It still travels inside the message
+ * itself, not only in the server's Ask MedArt prompt
+ * (lib/chat-system-prompt.ts's ASK_MEDART_SYSTEM_PROMPT_*): « Régénérer »
+ * re-sends a message exactly as it was sent, through the normal chat path,
+ * without the selection — this sentence is then the whole request.
+ */
+const ASK_MEDART_INSTRUCTION =
+  "Explique-moi ce passage pour que je le comprenne vraiment, même sans aucune notion de médecine : pars d'une image de la vie de tous les jours, puis déroule le raisonnement étape par étape, chaque étape découlant de la précédente, en paragraphes fluides et sans liste à puces. Reste fidèle au passage, garde ses termes médicaux exacts en les rendant concrets, et termine par ce qu'il faut en retenir.";
+
+/** Earlier wordings of ASK_MEDART_INSTRUCTION, still inside saved conversations (course_chat_history) — hidden the same way. */
+const PAST_ASK_MEDART_INSTRUCTIONS: readonly string[] = [
+  "Agis comme un professeur de médecine expert. L'étudiant n'a pas compris cette partie du cours. Explique ce passage en détail, de manière pédagogique, très précise et professionnelle, en te basant strictement sur le passage sélectionné ci-dessus.",
+];
+
+/**
  * Builds the final chat message for the composer's citation flow ("Ask
  * MedArt" quotes a passage above the input, the student types their own
  * question and sends). If the student sends without typing anything — a
@@ -88,10 +106,28 @@ export function buildDemoTranslatePrompt(selectedText: string): string {
 export function buildQuotedChatMessage(quotedText: string | null, typedText: string): string {
   const text = typedText.trim();
   if (!quotedText) return text;
-  const question =
-    text ||
-    "Agis comme un professeur de médecine expert. L'étudiant n'a pas compris cette partie du cours. Explique ce passage en détail, de manière pédagogique, très précise et professionnelle, en te basant strictement sur le passage sélectionné ci-dessus.";
+  const question = text || ASK_MEDART_INSTRUCTION;
   return `> ${quotedText}\n\n${question}`;
+}
+
+/**
+ * The text a student's own chat bubble shows for a message's `content`. An
+ * "Ask MedArt" message sent without a typed question is the quoted passage
+ * plus the internal instruction above: the bubble shows only the passage, as
+ * the student selected it. Every other message — a typed question (quoted or
+ * not), a « Traduire » request — is returned exactly as sent. Display only:
+ * the message itself (what is sent, saved, re-sent by « Régénérer » and
+ * recognized by isQuotedChatMessage) never changes.
+ */
+export function chatBubbleText(content: string): string {
+  if (!content.startsWith("> ")) return content;
+  for (const instruction of [ASK_MEDART_INSTRUCTION, ...PAST_ASK_MEDART_INSTRUCTIONS]) {
+    const tail = `\n\n${instruction}`;
+    if (!content.endsWith(tail)) continue;
+    const passage = content.slice(2, content.length - tail.length).trim();
+    return passage || content;
+  }
+  return content;
 }
 
 /** Whether `content` is a composer citation built by buildQuotedChatMessage above — used to recognize & re-exclude an "Ask MedArt" exchange loaded back from persisted history (course_chat_history has no separate flag column for this), since a fresh page load otherwise loses the live session's exclusion and reintroduces the same leak on the next message. */

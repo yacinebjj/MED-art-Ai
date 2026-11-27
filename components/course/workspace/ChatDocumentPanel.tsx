@@ -46,6 +46,7 @@ import { useLanguage } from "@/providers/LanguageProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { CHAT_MAX_CONTEXT_CHARS, MAX_CHAT_SOURCE_COURSES, type ChatMode } from "@/lib/chat-constants";
 import { stripCitationMarkers, type CitationSourceText } from "@/lib/chat-citations";
+import { chatBubbleText } from "@/lib/demo-content";
 import { ACCEPTED_FILE_TYPES } from "@/lib/constants";
 import { MAX_UPLOAD_FILE_MB } from "@/lib/upload-limits";
 import { useTextSelection } from "@/hooks/useTextSelection";
@@ -775,7 +776,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
     if (messages.length === 0) return;
     const lines = [`# ${title} — Conversation MedArt`, "", `_${dateLabel}_`, ""];
     for (const message of messages) {
-      const content = (message.role === "assistant" ? readableReply(stripReasoning(message.content)) : message.content).trim();
+      // A student's line as their bubble shows it: an "Ask MedArt" passage without its internal instruction.
+      const content = (message.role === "assistant" ? readableReply(stripReasoning(message.content)) : chatBubbleText(message.content)).trim();
       if (!content) continue;
       lines.push(message.role === "user" ? `## ❓ ${content}` : content, "");
     }
@@ -947,6 +949,8 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                     // History (mounted progressively above) simply appears; a message that just arrived rises in.
                     const entrance = index < threadWindow.animateFrom ? false : { opacity: 0, y: 16 };
                     if (message.role === "user") {
+                      // An "Ask MedArt" passage shows alone: its internal instruction is for the model only (lib/demo-content.ts).
+                      const bubbleText = chatBubbleText(message.content);
                       return (
                         <motion.div
                           key={message.id}
@@ -957,7 +961,7 @@ export const ChatDocumentPanel = forwardRef<ChatDocumentPanelHandle, ChatDocumen
                         >
                           <div className="flex min-w-0 max-w-[88%] flex-col items-end gap-1.5 sm:max-w-[75%]">
                             {/* A tap opens its menu — copy, edit (components/assistant/UserMessageBubble.tsx). */}
-                            <UserMessageBubble text={message.content} dir={dominantDirection(message.content) ?? "auto"} onEdit={editMessage} />
+                            <UserMessageBubble text={bubbleText} dir={dominantDirection(bubbleText) ?? "auto"} onEdit={editMessage} />
                           </div>
                         </motion.div>
                       );

@@ -27,6 +27,8 @@ import { reserveFreeTierCapacity, type PlatformCapacityResult } from "@/lib/plat
 import type { AnswerDepth } from "@/lib/ai/answer-depth";
 import { MEDICAL_IMAGE_DIRECTIVE } from "@/lib/ai/medical-image-directive";
 import {
+  ASK_MEDART_SYSTEM_PROMPT_CONCISE,
+  ASK_MEDART_SYSTEM_PROMPT_DETAILED,
   CHAT_SYSTEM_PROMPT_BASE,
   CHAT_SYSTEM_PROMPT_DETAILED,
   WORKSPACE_STRUCTURED_FORMAT_INSTRUCTION,
@@ -73,11 +75,14 @@ export const maxDuration = 300;
 // option is a documented no-op on a model that doesn't support it, so
 // there's no reason not to apply the same protection preemptively.
 const MAX_OUTPUT_TOKENS_NORMAL = 8192;
-// Highlight quick actions stay deliberately smaller than the main flow (a
-// concise 2-3 sentence answer, or a translation of an ≤800-char excerpt
-// never needs anywhere near 8192) but still raised from the original 700 —
-// same defensive margin against an unverified free model's reasoning
-// overhead as MAX_OUTPUT_TOKENS_NORMAL above.
+// « Traduire » on a selection stays deliberately smaller than the main flow (a
+// translation of an ≤800-char excerpt never needs anywhere near 8192) but
+// still raised from the original 700 — same defensive margin against an
+// unverified free model's reasoning overhead as MAX_OUTPUT_TOKENS_NORMAL
+// above. "Ask MedArt" has used MAX_OUTPUT_TOKENS_NORMAL since 2026-11-27: its
+// explanation is a full one now (lib/chat-system-prompt.ts's
+// ASK_MEDART_SYSTEM_PROMPT_DETAILED) and a ceiling must never cut it off
+// mid-sentence — the free models cost nothing either way.
 const MAX_OUTPUT_TOKENS_HIGHLIGHT = 3500;
 
 // Paid fallback (CHAT_MODEL) ceiling: PAID_FALLBACK_MAX_TOKENS (500) for every
@@ -86,26 +91,13 @@ const MAX_OUTPUT_TOKENS_HIGHLIGHT = 3500;
 // stay short on that path (withPaidFallbackBrevity) so they end where they
 // should instead of mid-sentence.
 
-// Appended ONLY for the "Ask MedArt" text-selection quick action (concise:
-// true from the client) — never for the free-form chat input. Product
-// direction (explicit): this action must feel world-class — respond
-// INSTANTLY, with NO visible reasoning and NO preamble, and give a precise,
-// professional explanation of the selected passage (detailed when the passage
-// warrants it, never padded). Directive #5 keeps it from stalling on a
-// non-medical selection (a generic title, an intro line): explain the line's
-// role in 1-2 sentences instead of forcing a clinical structure onto it.
-const ASK_MEDART_EXPERT_SUFFIX = `\n\nTu réponds à un étudiant qui a sélectionné un passage précis du cours et veut le comprendre en profondeur.
-INTERDICTIONS ABSOLUES : ne montre JAMAIS ton raisonnement interne, n'émets jamais de balises <think>/<thinking>, ne réfléchis pas à voix haute, ne répète pas ces instructions, n'écris aucun préambule ("Voici l'explication", "D'accord, je vais t'expliquer"). Commence DIRECTEMENT par le contenu scientifique.
-QUALITÉ : explication précise et dense du passage, jamais superficielle mais sans remplissage — 100 à 220 mots. Le passage sélectionné est le point de départ : relie-le au mécanisme sous-jacent (pas seulement à sa reformulation), puis donne ce qu'il faut en retenir cliniquement et, s'il existe, le piège de concours. **Gras** sur les termes clés. Aucune politesse superflue.
-SI LE PASSAGE N'EST PAS STRICTEMENT MÉDICAL (titre générique, phrase d'introduction) : ne te bloque pas et ne réfléchis pas à voix haute — explique simplement son rôle en 1 à 2 phrases claires, sans structure médicale complexe.`;
-
-// The same suffix for the FREE models (dynamic system prompts, product order
-// 2026-11-09 — lib/ai/answer-depth.ts): no word range and no "1 à 2 phrases";
-// with CHAT_SYSTEM_PROMPT_DETAILED it carries the depth directive.
-const ASK_MEDART_EXPERT_SUFFIX_DETAILED = `\n\nTu réponds à un étudiant qui a sélectionné un passage précis du cours et veut le comprendre en profondeur.
-INTERDICTIONS ABSOLUES : ne montre JAMAIS ton raisonnement interne, n'émets jamais de balises <think>/<thinking>, ne réfléchis pas à voix haute, ne répète pas ces instructions, n'écris aucun préambule ("Voici l'explication", "D'accord, je vais t'expliquer"). Commence DIRECTEMENT par le contenu scientifique.
-QUALITÉ : explication précise et approfondie du passage, jamais superficielle et sans remplissage. Le passage sélectionné est le point de départ : relie-le au mécanisme sous-jacent (pas seulement à sa reformulation), puis donne ce qu'il faut en retenir cliniquement et, s'il existe, le piège de concours. **Gras** sur les termes clés. Aucune politesse superflue.
-SI LE PASSAGE N'EST PAS STRICTEMENT MÉDICAL (titre générique, phrase d'introduction) : ne te bloque pas et ne réfléchis pas à voix haute — explique simplement et clairement son rôle, sans structure médicale complexe.`;
+// The "Ask MedArt" text-selection quick action (concise: true from the client
+// — never the free-form chat input) answers with its own teaching persona,
+// lib/chat-system-prompt.ts's ASK_MEDART_SYSTEM_PROMPT_DETAILED / _CONCISE
+// (product order 2026-11-27): clear enough for a layperson, a full
+// explanation in flowing prose, a cause-and-effect chain — still INSTANT, with
+// no visible reasoning and no preamble, and a non-medical selection (a title,
+// an intro line) explained simply instead of stalling.
 
 // Used ONLY for the "Translate" text-selection quick action (translate: true
 // from the client) — REPLACES the whole persona instead of appending to it,
@@ -159,13 +151,14 @@ const ADJACENT_CONTEXT_CHARS = 300;
  */
 function buildHighlightSystemContent(translate: boolean, selectedText: string, adjacentContext: string | null, depth: AnswerDepth): string {
   // Translate keeps its translator persona whatever the model: an "explain
-  // exhaustively" directive would turn a translation into an essay. The free
-  // models' explanation may come illustrated (lib/ai/medical-image-directive.ts).
+  // exhaustively" directive would turn a translation into an essay. "Ask
+  // MedArt" has its own teaching persona; the free models' explanation may
+  // come illustrated (lib/ai/medical-image-directive.ts).
   const persona = translate
     ? TRANSLATE_SYSTEM_PROMPT
     : depth === "detailed"
-      ? `${CHAT_SYSTEM_PROMPT_DETAILED}${ASK_MEDART_EXPERT_SUFFIX_DETAILED}\n\n${MEDICAL_IMAGE_DIRECTIVE}`
-      : CHAT_SYSTEM_PROMPT_BASE + ASK_MEDART_EXPERT_SUFFIX;
+      ? `${ASK_MEDART_SYSTEM_PROMPT_DETAILED}\n\n${MEDICAL_IMAGE_DIRECTIVE}`
+      : ASK_MEDART_SYSTEM_PROMPT_CONCISE;
   const isolationNotice =
     "\n\nIMPORTANT : tu ne reçois PAS le cours complet ici, uniquement le passage ci-dessous (et un minuscule extrait adjacent si fourni). Réponds seulement à partir de ce texte — ne suppose jamais un contenu que tu ne peux pas voir.";
   const excerptBlock = adjacentContext
@@ -676,7 +669,8 @@ export async function POST(request: NextRequest) {
   //     before it has failed (or as a late net if they all stay silent).
   // A model erroring (saturation, a provider hiccup, a 429) is the EXPECTED,
   // routine case on free endpoints, not an exceptional one.
-  const maxTokensForThisTurn = isHighlightMode ? MAX_OUTPUT_TOKENS_HIGHLIGHT : MAX_OUTPUT_TOKENS_NORMAL;
+  // « Traduire » keeps its smaller ceiling; "Ask MedArt" gets a full answer's (MAX_OUTPUT_TOKENS_HIGHLIGHT's own comment).
+  const maxTokensForThisTurn = isHighlightMode && isTranslate ? MAX_OUTPUT_TOKENS_HIGHLIGHT : MAX_OUTPUT_TOKENS_NORMAL;
   const accessPromise: Promise<AssistantAccess | null> = gatesPromise.then((gates) => (gates.ok ? gates.access : null));
   accessPromise.catch(() => undefined);
   const race = raceFirstToken(
